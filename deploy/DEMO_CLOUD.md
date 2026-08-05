@@ -71,11 +71,12 @@ A API converte automaticamente para `postgresql+psycopg://` no startup.
 | Campo | Valor |
 |-------|--------|
 | Root Directory | `backend` |
-| Runtime | Python 3.12 |
+| Runtime | Python 3 |
 | Build Command | `pip install -r requirements.txt` |
 | Start Command | `bash scripts/start_cloud.sh` |
 | Plan | Free |
 | Health Check Path | `/api/v1/health` |
+| Env `PYTHON_VERSION` | `3.12.10` (obrigatório — 3.14 quebra o build do pydantic) |
 
 3. Cole as variáveis de `deploy/env.cloud.example` (seção Render).
 4. Deploy.
