@@ -1,0 +1,1 @@
+"""LETTER backend application."""

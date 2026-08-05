@@ -1,0 +1,34 @@
+"use client";
+
+import { Activity, Bell, BrainCircuit, ChevronDown, LayoutDashboard, LogOut, Menu, Search, Settings, ShieldCheck, X } from "lucide-react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
+import { api, logout, Module, User } from "@/lib/api";
+
+export function Shell({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname(); const [modules, setModules] = useState<Module[]>([]); const [user, setUser] = useState<User | null>(null); const [open, setOpen] = useState(false);
+  useEffect(() => {
+    Promise.all([api<Module[]>("/modules"), api<User>("/auth/me")]).then(([m,u]) => {setModules(m);setUser(u)}).catch(() => logout());
+  }, []);
+  return <div className="app-shell">
+    <aside className={open ? "sidebar open" : "sidebar"}>
+      <div className="side-logo"><span>L</span><b>LETTER</b><button onClick={()=>setOpen(false)}><X/></button></div>
+      <div className="side-context"><small>AMBIENTE</small><strong>LETTER Matriz</strong><ChevronDown size={14}/></div>
+      <nav>
+        <Link className={pathname==="/dashboard"?"active":""} href="/dashboard"><LayoutDashboard/>Visão geral</Link>
+        <div className="nav-label">ECOSSISTEMA</div>
+        {modules.slice(0,15).map(m=><Link className={pathname===`/modules/${m.key}`?"active":""} href={`/modules/${m.key}`} key={m.key}><ModuleIcon keyName={m.key}/>{m.name}</Link>)}
+        <div className="nav-label">GESTÃO</div>
+        {modules.slice(15).map(m=><Link className={pathname===`/modules/${m.key}`?"active":""} href={`/modules/${m.key}`} key={m.key}><ModuleIcon keyName={m.key}/>{m.name}</Link>)}
+      </nav>
+      <button className="logout" onClick={logout}><LogOut/>Sair</button>
+    </aside>
+    <section className="workspace">
+      <header className="topbar"><button className="menu-button" onClick={()=>setOpen(true)}><Menu/></button><div className="search"><Search/><input placeholder="Buscar operação, cliente ou cota..."/></div><div className="top-actions"><button><Bell/></button><div className="user-chip"><span>{user?.name?.slice(0,2).toUpperCase()??"LP"}</span><div><strong>{user?.name??"Carregando..."}</strong><small>{user?.role?.replaceAll("_"," ")}</small></div></div></div></header>
+      <div className="content">{children}</div>
+    </section>
+  </div>
+}
+
+function ModuleIcon({keyName}:{keyName:string}) { return keyName==="nina"?<BrainCircuit/>:keyName==="rbac"?<ShieldCheck/>:keyName==="admin"?<Settings/>:<Activity/> }

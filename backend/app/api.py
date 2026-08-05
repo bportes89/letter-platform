@@ -1,0 +1,1216 @@
+import json
+from datetime import UTC, date, datetime
+from decimal import Decimal
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi.responses import Response
+from sqlalchemy import or_, select
+from sqlalchemy.orm import Session
+
+from app.core.security import create_token, verify_password
+from app.core.config import settings
+from app.db import get_db
+from app.dependencies import get_current_user, require_scope
+from app.models import (
+    Administrator, AuctionBid, AuctionLot, AuctionQualification, AuctionSettlement,
+    AuthSession, Branch, CalculationMemory, CommunicationConsent, CommunicationDelivery,
+    CommunicationTemplate, Contract, Document,
+    CollectionAction, CommissionEntry, CommissionRule, DelinquencyCase,
+    EscrowAccount, FundingOpportunity, Invoice, RecoveredAsset,
+    InvestmentPosition, InvestmentReservation, KycCase, Lead, LedgerEntry,
+    LedgerTransaction, NetworkNode, PayoutApproval, PayoutRequest, Proposal,
+    Quota, QuotaReservation, SignatureEnvelope, User, UserInvitation,
+    ReconciliationBatch, ReconciliationItem, TaxClosing, TaxDocument, TaxException,
+    UnderwritingAssessment, UnderwritingDecision, UnderwritingPolicy, OperationalJob, SecurityEvent, TenantQuota,
+    AdapterCertificationRun, AdapterExecution, HomologationEvidence, IntegrationMTLSConfig, ProviderGoLiveApproval, ProviderGoLiveDecision, ProviderIncident, ProviderIntegration,
+    ProviderOnboardingProfile, ProviderReconciliationItem, ProviderReconciliationRun,
+    ProviderRequestLog, SecretReference, WebhookDelivery, WebhookEndpoint,
+)
+from app.schemas import (
+    AccountBalanceView, AuctionBidCreate, AuctionBidView, AuctionLotCreate, AuctionLotView, BISummaryView,
+    AuctionQualificationRequest, AuctionQualificationView, AuctionSettlementView,
+    BranchCreate, BranchView, CalculationRequest, CommunicationConsentRequest,
+    CommunicationConsentView, CommunicationDeliveryView, CommunicationSendRequest,
+    CommunicationTemplateCreate, CommunicationTemplateView,
+    CalculationView, ContractAccept, ContractCreate, ContractView, DashboardSummary,
+    BillingGenerateRequest, CollectionActionView, CommissionAllocate, CommissionEntryView, CommissionRuleCreate,
+    CommissionRuleView, DocumentView, EscrowCreate, EscrowView, EscrowWebhook,
+    DelinquencyView, FiscalReleaseRequest, FundingOpportunityCreate, FundingOpportunityView, InvitationView,
+    InviteAccept, InviteCreate, KycCreate, KycDecision, KycView, LeadCreate,
+    InvestmentPositionView, InvestmentReservationView, InvestmentReserveRequest, InvoicePaymentWebhook, InvoiceView,
+    LeadUpdate, LeadView, LedgerPostRequest, LedgerTransactionView, LoginRequest,
+    FlashCreditCalculationRequest, MfaSetupView, MfaVerify, ModuleView, PasswordResetConfirm, PasswordResetRequest,
+    NetworkNodeCreate, NetworkNodeView, PayoutApprove, PayoutCreate, PayoutView, ProposalCreate, ProposalUpdate,
+    ReconciliationBatchView, ReconciliationItemView, ReconciliationResolveRequest,
+    ProposalView, QuotaCreate, QuotaUpdate, QuotaView, RecoveredAssetCreate, RecoveredAssetView, RefreshRequest,
+    ReservationCreate, ReservationView, SdcCalculationRequest, SessionView, SignatureComplete,
+    SignatureCreate, SignatureView, StepUpRequest, TaxClosingRequest, TaxClosingView,
+    TaxDocumentCreate, TaxDocumentView, TaxExceptionResolve, TaxExceptionView,
+    TokenPair, UnderwritingAssessmentCreate, UnderwritingAssessmentView, OperationalJobCreate, OperationalJobView, JobProcessRequest, TenantQuotaUpdate, TenantQuotaView, SecurityEventView,
+    UnderwritingDecisionCreate, UnderwritingDecisionView, UnderwritingPolicyCreate,
+    UnderwritingPolicyView, UserUpdate, UserView, QuotaRankingView,
+    ProviderIntegrationCreate, ProviderIntegrationView, IntegrationProbeRequest,
+    WebhookEndpointCreate, WebhookEndpointView, WebhookDispatchRequest, WebhookRetryRequest,
+    WebhookDeliveryView, WebhookVerifyRequest,
+    CredentialRotateRequest, DeadLetterBulkRequest, IncidentActionRequest,
+    ProviderIncidentView, ProviderRequest, ProviderRequestLogView,
+    HomologationEvidenceView, MTLSConfigCreate, MTLSConfigView, OnboardingProfileCreate,
+    OnboardingProfileView, ProviderReconciliationItemView, ReconciliationRunView, SecretCreate, SecretReferenceView,
+    AdapterCatalogItem, AdapterCertificationView, AdapterExecuteRequest, AdapterExecutionView,
+    GoLiveApprovalRequest, GoLiveApprovalView, GoLiveDecisionView,
+)
+from app.services import (
+    MODULES, audit, calculate_marketplace, create_contract, dashboard_summary,
+    financial_guard, post_double_entry, release_expired_reservations,
+    release_reservation, reserve_quota, validate_quota_combination,
+)
+from app.document_service import contract_pdf, persist_upload
+from app.financial_service import account_balances, approve_payout, create_mock_escrow, create_payout, process_escrow_event
+from app.identity_service import (
+    accept_invitation, confirm_password_reset, create_invitation, create_kyc_case,
+    create_password_reset, create_session_tokens, rotate_refresh, setup_mfa,
+    token_hash, verify_mfa,
+)
+from app.core.security import decode_token, hash_password, verify_password
+from app.dependencies import require_step_up
+from app.product_service import calculate_flash_credit, calculate_sdc
+from app.network_service import (
+    allocate_commissions, confirm_investment, create_network_node, create_rule,
+    downline_summary, release_fiscal_hold, reserve_investment,
+)
+from app.billing_service import (
+    apply_payment, generate_billing_schedule, import_reconciliation_csv,
+    refresh_delinquency, resolve_reconciliation,
+)
+from app.auction_service import (
+    activate_lot, create_asset, create_lot, gated_asset_details, place_bid,
+    qualify, settle_lot,
+)
+from app.tax_communication_service import (
+    close_tax_month, create_template, issue_tax_document, mock_deliver,
+    queue_delivery, resolve_tax_exception, update_consent,
+)
+from app.nina_bi_service import assess, bi_summary, create_policy, decide, rank_quota_combinations
+from app.operations_service import enqueue_job, homologation_status, operational_metrics, process_job, system_readiness
+from app.security_service import check_job_quota, get_or_create_quota, rate_limiter, record_security_event
+from app.integration_service import (
+    attempt_delivery, configure_integration, create_endpoint, dispatch_webhook,
+    execute_provider_request, probe_integration, reprocess_dead_letters, rotate_credential, verify_webhook,
+)
+from app.provider_onboarding_service import (
+    configure_mtls, configure_profile, create_secret, generate_evidence,
+    import_reconciliation_csv as import_provider_reconciliation_csv,
+)
+from app.provider_adapters import adapter_catalog, execute_adapter
+from app.provider_certification import certify_adapter, decide_approval, evaluate_go_live
+
+router = APIRouter(prefix="/api/v1")
+
+
+@router.get("/health")
+def health():
+    return {"status": "ok", "service": "letter-api"}
+
+
+@router.post("/auth/login", response_model=TokenPair)
+def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)):
+    ip=request.client.host if request.client else "unknown";allowed,retry=rate_limiter.allow(f"login:{ip}:{payload.email.lower()}",settings.login_rate_limit_per_minute)
+    if not allowed:
+        record_security_event(db,"AUTH_RATE_LIMITED","HIGH",ip,payload.email.lower());db.commit()
+        raise HTTPException(status_code=429,detail="Muitas tentativas de login",headers={"Retry-After":str(retry)})
+    user = db.scalar(select(User).where(User.email == payload.email.lower()))
+    if not user or not verify_password(payload.password, user.password_hash) or not user.active:
+        record_security_event(db,"LOGIN_FAILED","MEDIUM",ip,payload.email.lower(),user.organization_id if user else None);db.commit()
+        raise HTTPException(status_code=401, detail="E-mail ou senha inválidos")
+    if user.mfa_enabled and (not payload.otp or not verify_mfa(user,payload.otp)):
+        raise HTTPException(status_code=428,detail="Código MFA obrigatório ou inválido")
+    access,refresh,_=create_session_tokens(db,user,request.headers.get("user-agent"),request.client.host if request.client else None)
+    db.commit();return TokenPair(access_token=access,refresh_token=refresh)
+
+
+@router.post("/auth/refresh",response_model=TokenPair)
+def refresh(payload:RefreshRequest,db:Session=Depends(get_db)):
+    access,refresh_token=rotate_refresh(db,payload.refresh_token);db.commit();return TokenPair(access_token=access,refresh_token=refresh_token)
+
+
+@router.get("/auth/me", response_model=UserView)
+def me(user: User = Depends(get_current_user)):
+    return user
+
+
+@router.get("/auth/sessions",response_model=list[SessionView])
+def sessions(user:User=Depends(get_current_user),db:Session=Depends(get_db)):
+    return list(db.scalars(select(AuthSession).where(AuthSession.user_id==user.id).order_by(AuthSession.created_at.desc())))
+
+
+@router.delete("/auth/sessions/{session_id}",status_code=204)
+def revoke_session(session_id:str,user:User=Depends(get_current_user),db:Session=Depends(get_db)):
+    session=db.scalar(select(AuthSession).where(AuthSession.id==session_id,AuthSession.user_id==user.id))
+    if not session: raise HTTPException(status_code=404,detail="Sessão não encontrada")
+    session.active=False;session.revoked_at=datetime.now(UTC);db.commit()
+
+
+@router.post("/auth/mfa/setup",response_model=MfaSetupView)
+def mfa_setup(user:User=Depends(get_current_user),db:Session=Depends(get_db)):
+    secret,uri=setup_mfa(user);db.commit();return MfaSetupView(secret=secret,provisioning_uri=uri)
+
+
+@router.post("/auth/mfa/enable")
+def mfa_enable(payload:MfaVerify,user:User=Depends(get_current_user),db:Session=Depends(get_db)):
+    if not verify_mfa(user,payload.otp): raise HTTPException(status_code=422,detail="Código MFA inválido")
+    user.mfa_enabled=True;db.commit();return {"enabled":True}
+
+
+@router.post("/auth/mfa/disable")
+def mfa_disable(payload:MfaVerify,user:User=Depends(get_current_user),db:Session=Depends(get_db)):
+    if not verify_mfa(user,payload.otp): raise HTTPException(status_code=422,detail="Código MFA inválido")
+    user.mfa_enabled=False;user.mfa_secret=None;db.commit();return {"enabled":False}
+
+
+@router.post("/auth/step-up")
+def step_up(payload:StepUpRequest,request:Request,user:User=Depends(get_current_user),db:Session=Depends(get_db)):
+    if not verify_password(payload.password,user.password_hash): raise HTTPException(status_code=401,detail="Senha inválida")
+    if user.mfa_enabled and (not payload.otp or not verify_mfa(user,payload.otp)): raise HTTPException(status_code=422,detail="Código MFA inválido")
+    raw=request.headers.get("authorization","").removeprefix("Bearer ");claims=decode_token(raw);session=db.get(AuthSession,claims.get("sid"));session.step_up_until=datetime.now(UTC)+__import__('datetime').timedelta(minutes=10);db.commit();return {"step_up_until":session.step_up_until}
+
+
+@router.post("/auth/password-reset/request")
+def password_reset_request(payload:PasswordResetRequest,db:Session=Depends(get_db)):
+    user=db.scalar(select(User).where(User.email==str(payload.email).lower()));raw=None
+    if user: raw=create_password_reset(db,user);db.commit()
+    return {"status":"accepted","development_token":raw}
+
+
+@router.post("/auth/password-reset/confirm")
+def password_reset_confirm(payload:PasswordResetConfirm,db:Session=Depends(get_db)):
+    confirm_password_reset(db,payload.token,payload.new_password);db.commit();return {"status":"password_updated"}
+
+
+@router.get("/admin/users",response_model=list[UserView])
+def admin_users(user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    return list(db.scalars(select(User).where(User.organization_id==user.organization_id).order_by(User.created_at.desc())))
+
+
+@router.patch("/admin/users/{user_id}",response_model=UserView)
+def admin_update_user(user_id:str,payload:UserUpdate,user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    target=db.scalar(select(User).where(User.id==user_id,User.organization_id==user.organization_id))
+    if not target: raise HTTPException(status_code=404,detail="Usuário não encontrado")
+    for field,value in payload.model_dump(exclude_unset=True).items():setattr(target,field,value)
+    audit(db,user,"user.updated","user",target.id,payload.model_dump(exclude_unset=True,mode="json"));db.commit();db.refresh(target);return target
+
+
+@router.get("/admin/branches",response_model=list[BranchView])
+def branches(user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    return list(db.scalars(select(Branch).where(Branch.organization_id==user.organization_id).order_by(Branch.name)))
+
+
+@router.post("/admin/branches",response_model=BranchView,status_code=201)
+def create_branch(payload:BranchCreate,user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    item=Branch(organization_id=user.organization_id,**payload.model_dump());db.add(item);db.flush();audit(db,user,"branch.created","branch",item.id);db.commit();db.refresh(item);return item
+
+
+@router.post("/admin/invitations",response_model=InvitationView,status_code=201)
+def invite(payload:InviteCreate,user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    item,raw=create_invitation(db,user,str(payload.email),payload.role,payload.branch_id);db.flush();audit(db,user,"invitation.created","invitation",item.id);db.commit();db.refresh(item)
+    return InvitationView.model_validate(item).model_copy(update={"token":raw})
+
+
+@router.post("/auth/invitations/accept",response_model=UserView)
+def accept_invite(payload:InviteAccept,db:Session=Depends(get_db)):
+    user=accept_invitation(db,payload.token,payload.name,payload.document,payload.password);db.commit();db.refresh(user);return user
+
+
+@router.get("/admin/invitations",response_model=list[InvitationView])
+def invitations(user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    return list(db.scalars(select(UserInvitation).where(UserInvitation.organization_id==user.organization_id).order_by(UserInvitation.created_at.desc())))
+
+
+@router.post("/kyc/cases",response_model=KycView,status_code=201)
+def start_kyc(payload:KycCreate,user:User=Depends(get_current_user),db:Session=Depends(get_db)):
+    item=create_kyc_case(user,payload.subject_type,payload.subject_id);db.add(item);db.flush();audit(db,user,"kyc.started","kyc_case",item.id);db.commit();db.refresh(item);return item
+
+
+@router.get("/kyc/cases",response_model=list[KycView])
+def kyc_cases(user:User=Depends(get_current_user),db:Session=Depends(get_db)):
+    return list(db.scalars(select(KycCase).where(KycCase.organization_id==user.organization_id).order_by(KycCase.created_at.desc())))
+
+
+@router.post("/kyc/cases/{case_id}/mock-decision",response_model=KycView)
+def decide_kyc(case_id:str,payload:KycDecision,user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    item=db.scalar(select(KycCase).where(KycCase.id==case_id,KycCase.organization_id==user.organization_id))
+    if not item: raise HTTPException(status_code=404,detail="Caso KYC não encontrado")
+    if payload.status not in {"APPROVED","REJECTED","REVIEW"}: raise HTTPException(status_code=422,detail="Status inválido")
+    item.status=payload.status;item.risk_level=payload.risk_level;item.result_json=json.dumps(payload.model_dump());item.reviewed_by_id=user.id;item.reviewed_at=datetime.now(UTC);audit(db,user,"kyc.decided","kyc_case",item.id,payload.model_dump());db.commit();db.refresh(item);return item
+
+
+@router.post("/network/nodes", response_model=NetworkNodeView, status_code=201)
+def network_node_create(payload: NetworkNodeCreate, user: User = Depends(require_scope("admin:users")), db: Session = Depends(get_db)):
+    target = db.scalar(select(User).where(User.id == payload.user_id, User.organization_id == user.organization_id))
+    if not target: raise HTTPException(status_code=404, detail="Usuário não encontrado")
+    item = create_network_node(db, user, target, payload.tree_type, payload.sponsor_user_id)
+    audit(db,user,"network.node_created","network_node",item.id,payload.model_dump());db.commit();db.refresh(item);return item
+
+
+@router.get("/network/nodes", response_model=list[NetworkNodeView])
+def network_nodes(tree_type: str = "SALES", user: User = Depends(require_scope("admin:users")), db: Session = Depends(get_db)):
+    return list(db.scalars(select(NetworkNode).where(NetworkNode.organization_id == user.organization_id, NetworkNode.tree_type == tree_type).order_by(NetworkNode.created_at)))
+
+
+@router.get("/network/me/summary")
+def network_my_summary(tree_type: str = "SALES", user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return downline_summary(db, user, tree_type)
+
+
+@router.post("/commission-rules", response_model=CommissionRuleView, status_code=201)
+def commission_rule_create(payload: CommissionRuleCreate, user: User = Depends(require_scope("admin:users")), db: Session = Depends(get_db)):
+    item=create_rule(db,user,payload.product,payload.commission_type,payload.pool_rate_percent,payload.base_type)
+    db.flush();audit(db,user,"commission.rule_created","commission_rule",item.id,payload.model_dump(mode="json"));db.commit();db.refresh(item);return item
+
+
+@router.get("/commission-rules", response_model=list[CommissionRuleView])
+def commission_rules(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return list(db.scalars(select(CommissionRule).where(CommissionRule.organization_id==user.organization_id).order_by(CommissionRule.created_at.desc())))
+
+
+@router.post("/commissions/allocate", response_model=list[CommissionEntryView], status_code=201)
+def commission_allocate(payload: CommissionAllocate, user: User = Depends(require_scope("admin:users")), db: Session = Depends(get_db)):
+    entries=allocate_commissions(db,user,payload.originator_id,payload.proposal_id,payload.reference,payload.product,payload.commission_type,payload.calculation_base)
+    audit(db,user,"commission.allocated","commission_entry",entries[0].id if entries else None,payload.model_dump(mode="json"));db.commit()
+    for item in entries: db.refresh(item)
+    return entries
+
+
+@router.get("/wallet/commissions", response_model=list[CommissionEntryView])
+def commission_wallet(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return list(db.scalars(select(CommissionEntry).where(CommissionEntry.organization_id==user.organization_id,CommissionEntry.beneficiary_id==user.id).order_by(CommissionEntry.created_at.desc())))
+
+
+@router.post("/wallet/commissions/release-fiscal")
+def commission_fiscal_release(payload: FiscalReleaseRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    evidence=release_fiscal_hold(db,user,payload.reference_month,payload.document_content)
+    audit(db,user,"fiscal.evidence_validated","fiscal_evidence",evidence.id,{"reference_month":payload.reference_month});db.commit()
+    available=db.scalar(select(__import__('sqlalchemy').func.coalesce(__import__('sqlalchemy').func.sum(CommissionEntry.amount),0)).where(CommissionEntry.beneficiary_id==user.id,CommissionEntry.status=="AVAILABLE"))
+    return {"status":"VALID","available_balance":str(Decimal(str(available)).quantize(Decimal('0.01')))}
+
+
+@router.post("/funding/opportunities", response_model=FundingOpportunityView, status_code=201)
+def funding_opportunity_create(payload: FundingOpportunityCreate, user: User = Depends(require_scope("admin:users")), db: Session = Depends(get_db)):
+    if payload.capital_source not in {"RETAIL","INSTITUTIONAL"}: raise HTTPException(status_code=422,detail="Fonte de capital inválida")
+    if payload.proposal_id and not db.scalar(select(Proposal).where(Proposal.id==payload.proposal_id,Proposal.organization_id==user.organization_id)): raise HTTPException(status_code=404,detail="Proposta não encontrada")
+    item=FundingOpportunity(organization_id=user.organization_id,**payload.model_dump());db.add(item);db.flush();audit(db,user,"funding.opportunity_created","funding_opportunity",item.id);db.commit();db.refresh(item);return item
+
+
+@router.get("/funding/opportunities", response_model=list[FundingOpportunityView])
+def funding_opportunities(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return list(db.scalars(select(FundingOpportunity).where(FundingOpportunity.organization_id==user.organization_id).order_by(FundingOpportunity.created_at.desc())))
+
+
+@router.post("/funding/opportunities/{opportunity_id}/reserve", response_model=InvestmentReservationView, status_code=201)
+def investment_reserve(opportunity_id: str, payload: InvestmentReserveRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    opportunity=db.scalar(select(FundingOpportunity).where(FundingOpportunity.id==opportunity_id,FundingOpportunity.organization_id==user.organization_id))
+    if not opportunity: raise HTTPException(status_code=404,detail="Oportunidade não encontrada")
+    item=reserve_investment(db,user,opportunity,payload.amount);audit(db,user,"investment.reserved","investment_reservation",item.id,{"amount":str(payload.amount)});db.commit();db.refresh(item);return item
+
+
+@router.post("/funding/reservations/{reservation_id}/mock-confirm", response_model=InvestmentPositionView)
+def investment_confirm(reservation_id: str, user: User = Depends(require_scope("admin:users")), db: Session = Depends(get_db)):
+    reservation=db.scalar(select(InvestmentReservation).where(InvestmentReservation.id==reservation_id,InvestmentReservation.organization_id==user.organization_id))
+    if not reservation: raise HTTPException(status_code=404,detail="Reserva não encontrada")
+    position=confirm_investment(db,reservation);audit(db,user,"investment.confirmed","investment_position",position.id);db.commit();db.refresh(position);return position
+
+
+@router.get("/funding/reservations", response_model=list[InvestmentReservationView])
+def investment_reservations(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    query=select(InvestmentReservation).where(InvestmentReservation.organization_id==user.organization_id)
+    if user.role.value not in {"PLATFORM_ADMIN","INTERNAL_STAFF"}: query=query.where(InvestmentReservation.investor_id==user.id)
+    return list(db.scalars(query.order_by(InvestmentReservation.created_at.desc())))
+
+
+@router.get("/funding/positions", response_model=list[InvestmentPositionView])
+def investment_positions(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    query=select(InvestmentPosition).where(InvestmentPosition.organization_id==user.organization_id)
+    if user.role.value not in {"PLATFORM_ADMIN","INTERNAL_STAFF"}: query=query.where(InvestmentPosition.investor_id==user.id)
+    return list(db.scalars(query.order_by(InvestmentPosition.created_at.desc())))
+
+
+@router.post("/contracts/{contract_id}/billing", response_model=list[InvoiceView], status_code=201)
+def billing_generate(contract_id: str, payload: BillingGenerateRequest, user: User = Depends(require_scope("proposals:write")), db: Session = Depends(get_db)):
+    contract=db.scalar(select(Contract).where(Contract.id==contract_id,Contract.organization_id==user.organization_id))
+    if not contract: raise HTTPException(status_code=404,detail="Contrato não encontrado")
+    proposal=db.get(Proposal,contract.proposal_id);calculation=db.get(CalculationMemory,contract.calculation_memory_id)
+    rows=generate_billing_schedule(db,contract,proposal,calculation,payload.start_date)
+    audit(db,user,"billing.schedule_generated","contract",contract.id,{"invoice_count":len(rows)});db.commit()
+    for row in rows: db.refresh(row)
+    return rows
+
+
+@router.get("/invoices", response_model=list[InvoiceView])
+def invoices(status_filter: str | None = Query(default=None,alias="status"), contract_id: str | None = None, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    query=select(Invoice).where(Invoice.organization_id==user.organization_id)
+    if status_filter: query=query.where(Invoice.status==status_filter)
+    if contract_id: query=query.where(Invoice.contract_id==contract_id)
+    return list(db.scalars(query.order_by(Invoice.due_date,Invoice.installment_number)))
+
+
+@router.post("/invoices/{invoice_id}/mock-payment-webhook")
+def invoice_payment_webhook(invoice_id: str, payload: InvoicePaymentWebhook, user: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
+    invoice=db.scalar(select(Invoice).where(Invoice.id==invoice_id,Invoice.organization_id==user.organization_id))
+    if not invoice: raise HTTPException(status_code=404,detail="Fatura não encontrada")
+    event,processed=apply_payment(db,user,invoice,payload.event_id,payload.amount,payload.metadata)
+    if processed:audit(db,user,"invoice.payment_processed","invoice",invoice.id,{"event_id":payload.event_id,"status":event.status})
+    db.commit();db.refresh(invoice);return {"event_id":event.provider_event_id,"processed":processed,"match_status":event.status,"invoice_status":invoice.status,"paid_amount":str(invoice.paid_amount)}
+
+
+@router.post("/reconciliation/import", response_model=ReconciliationBatchView, status_code=201)
+async def reconciliation_import(file: UploadFile = File(...), user: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
+    if file.content_type not in {"text/csv","application/vnd.ms-excel","application/octet-stream"}: raise HTTPException(status_code=415,detail="Envie um arquivo CSV")
+    data=await file.read(5*1024*1024+1)
+    if len(data)>5*1024*1024: raise HTTPException(status_code=413,detail="CSV excede 5 MB")
+    batch=import_reconciliation_csv(db,user,data);db.flush();audit(db,user,"reconciliation.imported","reconciliation_batch",batch.id,{"records":batch.total_records});db.commit();db.refresh(batch);return batch
+
+
+@router.get("/reconciliation/batches", response_model=list[ReconciliationBatchView])
+def reconciliation_batches(user: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
+    return list(db.scalars(select(ReconciliationBatch).where(ReconciliationBatch.organization_id==user.organization_id).order_by(ReconciliationBatch.created_at.desc())))
+
+
+@router.get("/reconciliation/items", response_model=list[ReconciliationItemView])
+def reconciliation_items(status_filter: str | None = Query(default=None,alias="status"), user: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
+    query=select(ReconciliationItem).where(ReconciliationItem.organization_id==user.organization_id)
+    if status_filter:query=query.where(ReconciliationItem.status==status_filter)
+    return list(db.scalars(query.order_by(ReconciliationItem.created_at.desc())))
+
+
+@router.post("/reconciliation/items/{item_id}/resolve", response_model=ReconciliationItemView)
+def reconciliation_resolve(item_id: str, payload: ReconciliationResolveRequest, user: User = Depends(require_step_up), _: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
+    item=db.scalar(select(ReconciliationItem).where(ReconciliationItem.id==item_id,ReconciliationItem.organization_id==user.organization_id))
+    if not item:raise HTTPException(status_code=404,detail="Divergência não encontrada")
+    resolve_reconciliation(db,user,item,payload.decision,payload.note);audit(db,user,"reconciliation.resolved","reconciliation_item",item.id,payload.model_dump());db.commit();db.refresh(item);return item
+
+
+@router.post("/collections/refresh", response_model=list[DelinquencyView])
+def collections_refresh(as_of: date | None = None, user: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
+    rows=refresh_delinquency(db,user,as_of or date.today());audit(db,user,"collections.refreshed","delinquency_case",None,{"cases":len(rows),"as_of":str(as_of or date.today())});db.commit()
+    for row in rows:db.refresh(row)
+    return rows
+
+
+@router.get("/collections/cases", response_model=list[DelinquencyView])
+def collection_cases(user: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
+    return list(db.scalars(select(DelinquencyCase).where(DelinquencyCase.organization_id==user.organization_id).order_by(DelinquencyCase.days_overdue.desc())))
+
+
+@router.get("/collections/actions", response_model=list[CollectionActionView])
+def collection_actions(user: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
+    return list(db.scalars(select(CollectionAction).where(CollectionAction.organization_id==user.organization_id).order_by(CollectionAction.scheduled_at.desc())))
+
+
+@router.post("/collections/actions/{action_id}/mock-execute", response_model=CollectionActionView)
+def collection_action_execute(action_id: str, user: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
+    action=db.scalar(select(CollectionAction).where(CollectionAction.id==action_id,CollectionAction.organization_id==user.organization_id))
+    if not action:raise HTTPException(status_code=404,detail="Ação não encontrada")
+    if action.status!="SCHEDULED":raise HTTPException(status_code=409,detail="Ação já executada")
+    action.status="EXECUTED";action.executed_at=datetime.now(UTC);audit(db,user,"collection.action_executed","collection_action",action.id,{"channel":action.channel});db.commit();db.refresh(action);return action
+
+
+@router.get("/modules", response_model=list[ModuleView])
+def modules(_: User = Depends(get_current_user)):
+    return [ModuleView(key=k, name=n, description=d, status=s, route=r, critical=c) for k,n,d,s,r,c in MODULES]
+
+
+@router.get("/dashboard", response_model=DashboardSummary)
+def dashboard(user: User = Depends(require_scope("dashboard:read")), db: Session = Depends(get_db)):
+    return dashboard_summary(db, user)
+
+
+@router.get("/leads", response_model=list[LeadView])
+def list_leads(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return list(db.scalars(select(Lead).where(Lead.organization_id == user.organization_id).order_by(Lead.created_at.desc())))
+
+
+@router.post("/leads", response_model=LeadView, status_code=201)
+def create_lead(payload: LeadCreate, user: User = Depends(require_scope("leads:write")), db: Session = Depends(get_db)):
+    lead = Lead(organization_id=user.organization_id, owner_id=user.id, **payload.model_dump())
+    db.add(lead); db.flush(); audit(db, user, "lead.created", "lead", lead.id); db.commit(); db.refresh(lead)
+    return lead
+
+
+@router.patch("/leads/{lead_id}", response_model=LeadView)
+def update_lead(lead_id: str, payload: LeadUpdate, user: User = Depends(require_scope("leads:write")), db: Session = Depends(get_db)):
+    lead = db.scalar(select(Lead).where(Lead.id == lead_id, Lead.organization_id == user.organization_id))
+    if not lead: raise HTTPException(status_code=404, detail="Lead não encontrado")
+    for field, value in payload.model_dump(exclude_unset=True).items(): setattr(lead, field, value)
+    audit(db, user, "lead.updated", "lead", lead.id, payload.model_dump(exclude_unset=True)); db.commit(); db.refresh(lead)
+    return lead
+
+
+@router.delete("/leads/{lead_id}", status_code=204)
+def delete_lead(lead_id: str, user: User = Depends(require_scope("leads:write")), db: Session = Depends(get_db)):
+    lead = db.scalar(select(Lead).where(Lead.id == lead_id, Lead.organization_id == user.organization_id))
+    if not lead: raise HTTPException(status_code=404, detail="Lead não encontrado")
+    if db.scalar(select(Proposal).where(Proposal.lead_id == lead.id)):
+        raise HTTPException(status_code=409, detail="Lead possui propostas e não pode ser excluído")
+    audit(db, user, "lead.deleted", "lead", lead.id); db.delete(lead); db.commit()
+
+
+@router.get("/administrators")
+def list_administrators(_: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return [{"id": a.id, "name": a.name, "document": a.document, "authorization_status": a.authorization_status} for a in db.scalars(select(Administrator))]
+
+
+@router.get("/quotas", response_model=list[QuotaView])
+def list_quotas(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return list(db.scalars(select(Quota).where(Quota.organization_id == user.organization_id).order_by(Quota.created_at.desc())))
+
+
+@router.post("/quotas", response_model=QuotaView, status_code=201)
+def create_quota(payload: QuotaCreate, user: User = Depends(require_scope("inventory:write")), db: Session = Depends(get_db)):
+    if payload.category not in {"VEHICLE", "REAL_ESTATE"}:
+        raise HTTPException(status_code=422, detail="Categoria deve ser VEHICLE ou REAL_ESTATE")
+    if not db.get(Administrator, payload.administrator_id):
+        raise HTTPException(status_code=404, detail="Administradora não encontrada")
+    quota = Quota(organization_id=user.organization_id, seller_id=user.id, **payload.model_dump())
+    db.add(quota); db.flush(); audit(db, user, "quota.created", "quota", quota.id); db.commit(); db.refresh(quota)
+    return quota
+
+
+@router.patch("/quotas/{quota_id}", response_model=QuotaView)
+def update_quota(quota_id: str, payload: QuotaUpdate, user: User = Depends(require_scope("inventory:write")), db: Session = Depends(get_db)):
+    quota = db.scalar(select(Quota).where(Quota.id == quota_id, Quota.organization_id == user.organization_id))
+    if not quota: raise HTTPException(status_code=404, detail="Cota não encontrada")
+    if quota.status in {"RESERVED", "SOLD"} and payload.status not in {None, quota.status}:
+        raise HTTPException(status_code=409, detail="Status protegido por workflow de reserva/venda")
+    for field, value in payload.model_dump(exclude_unset=True).items(): setattr(quota, field, value)
+    audit(db, user, "quota.updated", "quota", quota.id, payload.model_dump(exclude_unset=True, mode="json")); db.commit(); db.refresh(quota)
+    return quota
+
+
+@router.post("/reservations", response_model=ReservationView, status_code=201)
+def create_reservation(payload: ReservationCreate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    quota = db.scalar(select(Quota).where(Quota.id == payload.quota_id, Quota.organization_id == user.organization_id))
+    if not quota: raise HTTPException(status_code=404, detail="Cota não encontrada")
+    reservation = reserve_quota(db, user, quota, payload.proposal_id, payload.ttl_minutes)
+    db.flush(); audit(db, user, "quota.reserved", "reservation", reservation.id, {"quota_id": quota.id}); db.commit(); db.refresh(reservation)
+    return reservation
+
+
+@router.get("/reservations", response_model=list[ReservationView])
+def list_reservations(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    release_expired_reservations(db, user.organization_id); db.commit()
+    return list(db.scalars(select(QuotaReservation).where(QuotaReservation.organization_id == user.organization_id).order_by(QuotaReservation.created_at.desc())))
+
+
+@router.post("/reservations/{reservation_id}/release", response_model=ReservationView)
+def release_reservation_route(reservation_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    reservation = db.scalar(select(QuotaReservation).where(QuotaReservation.id == reservation_id, QuotaReservation.organization_id == user.organization_id))
+    if not reservation: raise HTTPException(status_code=404, detail="Reserva não encontrada")
+    release_reservation(db, user, reservation); audit(db, user, "quota.released", "reservation", reservation.id); db.commit(); db.refresh(reservation)
+    return reservation
+
+
+@router.post("/nina/validate-combination")
+def nina_validate_combination(
+    quota_ids: list[str], target_amount: Decimal = Query(gt=0),
+    user: User = Depends(get_current_user), db: Session = Depends(get_db),
+):
+    quotas = list(db.scalars(select(Quota).where(Quota.id.in_(quota_ids), Quota.organization_id == user.organization_id)))
+    if len(quotas) != len(set(quota_ids)):
+        raise HTTPException(status_code=404, detail="Uma ou mais cotas não foram encontradas")
+    return validate_quota_combination(quotas, float(target_amount))
+
+
+@router.get("/proposals", response_model=list[ProposalView])
+def list_proposals(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return list(db.scalars(select(Proposal).where(Proposal.organization_id == user.organization_id).order_by(Proposal.created_at.desc())))
+
+
+@router.post("/proposals", response_model=ProposalView, status_code=201)
+def create_proposal(payload: ProposalCreate, user: User = Depends(require_scope("proposals:write")), db: Session = Depends(get_db)):
+    lead = db.scalar(select(Lead).where(Lead.id == payload.lead_id, Lead.organization_id == user.organization_id))
+    if not lead: raise HTTPException(status_code=404, detail="Lead não encontrado")
+    proposal = Proposal(
+        organization_id=user.organization_id, lead_id=payload.lead_id, product=payload.product,
+        requested_amount=payload.requested_amount, terms_json=json.dumps(payload.terms, ensure_ascii=False),
+    )
+    db.add(proposal); db.flush(); audit(db, user, "proposal.created", "proposal", proposal.id); db.commit(); db.refresh(proposal)
+    return proposal
+
+
+@router.patch("/proposals/{proposal_id}", response_model=ProposalView)
+def update_proposal(proposal_id: str, payload: ProposalUpdate, user: User = Depends(require_scope("proposals:write")), db: Session = Depends(get_db)):
+    proposal = db.scalar(select(Proposal).where(Proposal.id == proposal_id, Proposal.organization_id == user.organization_id))
+    if not proposal: raise HTTPException(status_code=404, detail="Proposta não encontrada")
+    changes = payload.model_dump(exclude_unset=True)
+    if "terms" in changes: changes["terms_json"] = json.dumps(changes.pop("terms"), ensure_ascii=False)
+    for field, value in changes.items(): setattr(proposal, field, value)
+    audit(db, user, "proposal.updated", "proposal", proposal.id, payload.model_dump(exclude_unset=True, mode="json")); db.commit(); db.refresh(proposal)
+    return proposal
+
+
+@router.post("/proposals/{proposal_id}/calculate", response_model=CalculationView, status_code=201)
+def calculate_proposal(proposal_id: str, payload: CalculationRequest, user: User = Depends(require_scope("proposals:write")), db: Session = Depends(get_db)):
+    proposal = db.scalar(select(Proposal).where(Proposal.id == proposal_id, Proposal.organization_id == user.organization_id))
+    if not proposal: raise HTTPException(status_code=404, detail="Proposta não encontrada")
+    quotas = list(db.scalars(select(Quota).where(Quota.id.in_(payload.quota_ids), Quota.organization_id == user.organization_id)))
+    if len(quotas) != len(set(payload.quota_ids)): raise HTTPException(status_code=404, detail="Uma ou mais cotas não foram encontradas")
+    calculation = calculate_marketplace(db, user, proposal, quotas, payload.fee_percent, payload.start_fee)
+    db.flush(); audit(db, user, "proposal.calculated", "calculation", calculation.id); db.commit(); db.refresh(calculation)
+    return CalculationView(id=calculation.id, proposal_id=calculation.proposal_id, version=calculation.version, formula_version=calculation.formula_version, input=json.loads(calculation.input_json), output=json.loads(calculation.output_json), approved_at=calculation.approved_at)
+
+
+def calculation_view(calculation: CalculationMemory) -> CalculationView:
+    return CalculationView(
+        id=calculation.id, proposal_id=calculation.proposal_id, version=calculation.version,
+        formula_version=calculation.formula_version, input=json.loads(calculation.input_json),
+        output=json.loads(calculation.output_json), approved_at=calculation.approved_at,
+    )
+
+
+@router.post("/proposals/{proposal_id}/calculate-sdc", response_model=CalculationView, status_code=201)
+def calculate_sdc_proposal(proposal_id: str, payload: SdcCalculationRequest, user: User = Depends(require_scope("proposals:write")), db: Session = Depends(get_db)):
+    proposal = db.scalar(select(Proposal).where(Proposal.id == proposal_id, Proposal.organization_id == user.organization_id))
+    if not proposal: raise HTTPException(status_code=404, detail="Proposta não encontrada")
+    quotas = list(db.scalars(select(Quota).where(Quota.id.in_(payload.quota_ids), Quota.organization_id == user.organization_id)))
+    if len(quotas) != len(set(payload.quota_ids)): raise HTTPException(status_code=404, detail="Uma ou mais cotas não foram encontradas")
+    calculation = calculate_sdc(db, user, proposal, quotas, payload.duration_months)
+    db.flush(); audit(db, user, "proposal.sdc_calculated", "calculation", calculation.id); db.commit(); db.refresh(calculation)
+    return calculation_view(calculation)
+
+
+@router.post("/proposals/{proposal_id}/calculate-flash-credit", response_model=CalculationView, status_code=201)
+def calculate_flash_credit_proposal(proposal_id: str, payload: FlashCreditCalculationRequest, user: User = Depends(require_scope("proposals:write")), db: Session = Depends(get_db)):
+    proposal = db.scalar(select(Proposal).where(Proposal.id == proposal_id, Proposal.organization_id == user.organization_id))
+    if not proposal: raise HTTPException(status_code=404, detail="Proposta não encontrada")
+    calculation = calculate_flash_credit(db, user, proposal, payload.asset_value, payload.capital_source, payload.term_months, payload.ipca_annual_percent)
+    db.flush(); audit(db, user, "proposal.flash_credit_calculated", "calculation", calculation.id); db.commit(); db.refresh(calculation)
+    return calculation_view(calculation)
+
+
+@router.get("/proposals/{proposal_id}/calculations", response_model=list[CalculationView])
+def list_calculations(proposal_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    proposal = db.scalar(select(Proposal).where(Proposal.id == proposal_id, Proposal.organization_id == user.organization_id))
+    if not proposal: raise HTTPException(status_code=404, detail="Proposta não encontrada")
+    rows = db.scalars(select(CalculationMemory).where(CalculationMemory.proposal_id == proposal.id).order_by(CalculationMemory.version.desc()))
+    return [CalculationView(id=x.id, proposal_id=x.proposal_id, version=x.version, formula_version=x.formula_version, input=json.loads(x.input_json), output=json.loads(x.output_json), approved_at=x.approved_at) for x in rows]
+
+
+@router.post("/proposals/{proposal_id}/contracts", response_model=ContractView, status_code=201)
+def create_contract_route(proposal_id: str, payload: ContractCreate, user: User = Depends(require_scope("proposals:write")), db: Session = Depends(get_db)):
+    proposal = db.scalar(select(Proposal).where(Proposal.id == proposal_id, Proposal.organization_id == user.organization_id))
+    calculation = db.scalar(select(CalculationMemory).where(CalculationMemory.id == payload.calculation_memory_id, CalculationMemory.organization_id == user.organization_id))
+    if not proposal or not calculation: raise HTTPException(status_code=404, detail="Proposta ou memória de cálculo não encontrada")
+    contract = create_contract(db, user, proposal, calculation); db.flush(); audit(db, user, "contract.created", "contract", contract.id); db.commit(); db.refresh(contract)
+    return contract
+
+
+@router.get("/contracts", response_model=list[ContractView])
+def list_contracts(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return list(db.scalars(select(Contract).where(Contract.organization_id == user.organization_id).order_by(Contract.created_at.desc())))
+
+
+@router.post("/contracts/{contract_id}/accept", response_model=ContractView)
+def accept_contract(contract_id: str, payload: ContractAccept, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    contract = db.scalar(select(Contract).where(Contract.id == contract_id, Contract.organization_id == user.organization_id))
+    if not contract: raise HTTPException(status_code=404, detail="Contrato não encontrado")
+    if not payload.confirmation: raise HTTPException(status_code=422, detail="Confirmação expressa obrigatória")
+    if contract.status != "DRAFT": raise HTTPException(status_code=409, detail="Contrato não está disponível para aceite")
+    contract.status = "ACCEPTED"; contract.accepted_at = datetime.now(UTC); contract.accepted_by_id = user.id
+    contract.evidence_json = json.dumps(payload.model_dump(), ensure_ascii=False)
+    audit(db, user, "contract.accepted", "contract", contract.id, payload.model_dump()); db.commit(); db.refresh(contract)
+    return contract
+
+
+@router.get("/contracts/{contract_id}/pdf")
+def download_contract_pdf(contract_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    contract = db.scalar(select(Contract).where(Contract.id == contract_id, Contract.organization_id == user.organization_id))
+    if not contract: raise HTTPException(status_code=404, detail="Contrato não encontrado")
+    proposal = db.get(Proposal, contract.proposal_id); calculation = db.get(CalculationMemory, contract.calculation_memory_id)
+    data = contract_pdf(contract, proposal, calculation)
+    return Response(content=data, media_type="application/pdf", headers={"Content-Disposition":f'attachment; filename="{contract.contract_number}.pdf"'})
+
+
+@router.post("/documents", response_model=DocumentView, status_code=201)
+async def upload_document(
+    entity_type: str = Form(...), entity_id: str = Form(...), kind: str = Form(...),
+    file: UploadFile = File(...), user: User = Depends(get_current_user), db: Session = Depends(get_db),
+):
+    document = await persist_upload(file, user, entity_type, entity_id, kind)
+    db.add(document); db.flush(); audit(db,user,"document.uploaded","document",document.id,{"sha256":document.sha256,"status":"QUARANTINED"}); db.commit(); db.refresh(document)
+    return document
+
+
+@router.get("/documents", response_model=list[DocumentView])
+def list_documents(entity_type: str | None = None, entity_id: str | None = None, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    query=select(Document).where(Document.organization_id==user.organization_id)
+    if entity_type: query=query.where(Document.entity_type==entity_type)
+    if entity_id: query=query.where(Document.entity_id==entity_id)
+    return list(db.scalars(query.order_by(Document.created_at.desc())))
+
+
+@router.post("/documents/{document_id}/mock-scan", response_model=DocumentView)
+def mock_scan_document(document_id: str, user: User = Depends(require_scope("documents:write")), db: Session = Depends(get_db)):
+    document=db.scalar(select(Document).where(Document.id==document_id,Document.organization_id==user.organization_id))
+    if not document: raise HTTPException(status_code=404,detail="Documento não encontrado")
+    document.status="CLEAN";audit(db,user,"document.scan_completed","document",document.id,{"engine":"MOCK"});db.commit();db.refresh(document);return document
+
+
+@router.post("/contracts/{contract_id}/signature", response_model=SignatureView, status_code=201)
+def create_signature(contract_id: str, payload: SignatureCreate, user: User = Depends(require_scope("documents:write")), db: Session = Depends(get_db)):
+    contract=db.scalar(select(Contract).where(Contract.id==contract_id,Contract.organization_id==user.organization_id))
+    if not contract: raise HTTPException(status_code=404,detail="Contrato não encontrado")
+    if db.scalar(select(SignatureEnvelope).where(SignatureEnvelope.contract_id==contract.id)): raise HTTPException(status_code=409,detail="Envelope já criado")
+    envelope=SignatureEnvelope(organization_id=user.organization_id,contract_id=contract.id,provider="MOCK",external_id=f"mock_sign_{__import__('uuid').uuid4().hex}",signer_email=str(payload.signer_email),status="SENT",sent_at=datetime.now(UTC))
+    db.add(envelope);db.flush();audit(db,user,"signature.sent","signature_envelope",envelope.id);db.commit();db.refresh(envelope);return envelope
+
+
+@router.post("/signatures/{envelope_id}/mock-complete", response_model=SignatureView)
+def complete_signature(envelope_id: str, payload: SignatureComplete, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    envelope=db.scalar(select(SignatureEnvelope).where(SignatureEnvelope.id==envelope_id,SignatureEnvelope.organization_id==user.organization_id))
+    if not envelope: raise HTTPException(status_code=404,detail="Envelope não encontrado")
+    if not payload.confirmation: raise HTTPException(status_code=422,detail="Confirmação obrigatória")
+    if envelope.status!="SENT": raise HTTPException(status_code=409,detail="Envelope não está pendente")
+    envelope.status="SIGNED";envelope.signed_at=datetime.now(UTC);envelope.evidence_json=json.dumps(payload.model_dump())
+    contract=db.get(Contract,envelope.contract_id);contract.status="SIGNED"
+    audit(db,user,"signature.completed","signature_envelope",envelope.id,payload.model_dump());db.commit();db.refresh(envelope);return envelope
+
+
+@router.post("/ledger/transactions", response_model=LedgerTransactionView, status_code=201)
+def post_ledger(payload: LedgerPostRequest, user: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
+    transaction = post_double_entry(db, user, **payload.model_dump()); db.flush(); audit(db, user, "ledger.posted", "ledger_transaction", transaction.id); db.commit(); db.refresh(transaction)
+    entries = list(db.scalars(select(LedgerEntry).where(LedgerEntry.transaction_id == transaction.id)))
+    debit = next(x for x in entries if x.direction == "DEBIT"); credit = next(x for x in entries if x.direction == "CREDIT")
+    return LedgerTransactionView(id=transaction.id, reference=transaction.reference, event_type=transaction.event_type, description=transaction.description, amount=Decimal(str(debit.amount)), debit_account=debit.account, credit_account=credit.account, created_at=transaction.created_at)
+
+
+@router.get("/ledger/transactions", response_model=list[LedgerTransactionView])
+def list_ledger(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    txs = list(db.scalars(select(LedgerTransaction).where(LedgerTransaction.organization_id == user.organization_id).order_by(LedgerTransaction.created_at.desc())))
+    result = []
+    for transaction in txs:
+        entries = list(db.scalars(select(LedgerEntry).where(LedgerEntry.transaction_id == transaction.id)))
+        debit = next(x for x in entries if x.direction == "DEBIT"); credit = next(x for x in entries if x.direction == "CREDIT")
+        result.append(LedgerTransactionView(id=transaction.id, reference=transaction.reference, event_type=transaction.event_type, description=transaction.description, amount=Decimal(str(debit.amount)), debit_account=debit.account, credit_account=credit.account, created_at=transaction.created_at))
+    return result
+
+
+@router.get("/ledger/balances", response_model=list[AccountBalanceView])
+def balances(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    result=account_balances(db,user);db.commit();return result
+
+
+@router.post("/escrow/accounts", response_model=EscrowView, status_code=201)
+def create_escrow(payload: EscrowCreate, user: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
+    account=create_mock_escrow(db,user,payload.operation_id);db.flush();audit(db,user,"escrow.created","escrow_account",account.id);db.commit();db.refresh(account);return account
+
+
+@router.get("/escrow/accounts", response_model=list[EscrowView])
+def list_escrow(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return list(db.scalars(select(EscrowAccount).where(EscrowAccount.organization_id==user.organization_id).order_by(EscrowAccount.created_at.desc())))
+
+
+@router.post("/escrow/accounts/{account_id}/mock-webhook")
+def escrow_webhook(account_id: str, payload: EscrowWebhook, user: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
+    account=db.scalar(select(EscrowAccount).where(EscrowAccount.id==account_id,EscrowAccount.organization_id==user.organization_id))
+    if not account: raise HTTPException(status_code=404,detail="Conta escrow não encontrada")
+    event,processed=process_escrow_event(db,user,account,payload.event_id,payload.event_type,payload.amount,payload.metadata)
+    if processed: audit(db,user,"escrow.webhook_processed","escrow_event",event.id,{"event_id":payload.event_id})
+    db.commit();return {"event_id":event.provider_event_id,"processed":processed,"status":"ok"}
+
+
+def payout_view(db: Session, item: PayoutRequest) -> PayoutView:
+    count=db.scalar(select(__import__('sqlalchemy').func.count()).select_from(PayoutApproval).where(PayoutApproval.payout_request_id==item.id,PayoutApproval.decision=="APPROVE")) or 0
+    return PayoutView.model_validate(item,from_attributes=True).model_copy(update={"approval_count":count})
+
+
+@router.post("/payouts", response_model=PayoutView, status_code=201)
+def request_payout(payload: PayoutCreate, user: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
+    account=db.scalar(select(EscrowAccount).where(EscrowAccount.id==payload.escrow_account_id,EscrowAccount.organization_id==user.organization_id))
+    if not account: raise HTTPException(status_code=404,detail="Conta escrow não encontrada")
+    item=create_payout(db,user,account,beneficiary_name=payload.beneficiary_name,beneficiary_document=payload.beneficiary_document,pix_key=payload.pix_key,amount=payload.amount,condition_evidence=payload.condition_evidence)
+    db.flush();audit(db,user,"payout.requested","payout",item.id);db.commit();db.refresh(item);return payout_view(db,item)
+
+
+@router.get("/payouts", response_model=list[PayoutView])
+def list_payouts(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return [payout_view(db,x) for x in db.scalars(select(PayoutRequest).where(PayoutRequest.organization_id==user.organization_id).order_by(PayoutRequest.created_at.desc()))]
+
+
+@router.post("/payouts/{payout_id}/approve", response_model=PayoutView)
+def approve_payout_route(payout_id: str, payload: PayoutApprove, user: User = Depends(require_step_up), _: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
+    item=db.scalar(select(PayoutRequest).where(PayoutRequest.id==payout_id,PayoutRequest.organization_id==user.organization_id))
+    if not item: raise HTTPException(status_code=404,detail="Payout não encontrado")
+    item=approve_payout(db,user,item,payload.decision,payload.comment);audit(db,user,f"payout.{payload.decision.lower()}","payout",item.id);db.commit();db.refresh(item);return payout_view(db,item)
+
+
+@router.post("/payments/payout")
+def payout(_: User = Depends(require_scope("payments:review"))):
+    financial_guard()
+    return {"status": "accepted"}
+
+
+@router.post("/recovered-assets", response_model=RecoveredAssetView, status_code=201)
+def recovered_asset_create(payload: RecoveredAssetCreate, user: User = Depends(require_scope("admin:users")), db: Session = Depends(get_db)):
+    data = payload.model_dump(exclude={"gated_details"})
+    data["gated_details_json"] = json.dumps(payload.gated_details, ensure_ascii=False)
+    item = create_asset(db, user, **data)
+    db.flush(); audit(db,user,"auction.asset_created","recovered_asset",item.id); db.commit(); db.refresh(item); return item
+
+
+@router.get("/recovered-assets", response_model=list[RecoveredAssetView])
+def recovered_assets(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return list(db.scalars(select(RecoveredAsset).where(RecoveredAsset.organization_id==user.organization_id).order_by(RecoveredAsset.created_at.desc())))
+
+
+@router.post("/auction-lots", response_model=AuctionLotView, status_code=201)
+def auction_lot_create(payload: AuctionLotCreate, user: User = Depends(require_scope("admin:users")), db: Session = Depends(get_db)):
+    asset=db.scalar(select(RecoveredAsset).where(RecoveredAsset.id==payload.asset_id,RecoveredAsset.organization_id==user.organization_id))
+    if not asset: raise HTTPException(status_code=404,detail="Ativo recuperado não encontrado")
+    item=create_lot(db,user,asset,**payload.model_dump(exclude={"asset_id"}))
+    db.flush();audit(db,user,"auction.lot_created","auction_lot",item.id);db.commit();db.refresh(item);return item
+
+
+@router.get("/auction-lots", response_model=list[AuctionLotView])
+def auction_lots(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return list(db.scalars(select(AuctionLot).where(AuctionLot.organization_id==user.organization_id).order_by(AuctionLot.created_at.desc())))
+
+
+@router.post("/auction-lots/{lot_id}/activate", response_model=AuctionLotView)
+def auction_lot_activate(lot_id:str,user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    lot=db.scalar(select(AuctionLot).where(AuctionLot.id==lot_id,AuctionLot.organization_id==user.organization_id))
+    if not lot: raise HTTPException(status_code=404,detail="Lote não encontrado")
+    activate_lot(lot);audit(db,user,"auction.lot_activated","auction_lot",lot.id);db.commit();db.refresh(lot);return lot
+
+
+@router.post("/auction-lots/{lot_id}/qualify", response_model=AuctionQualificationView, status_code=201)
+def auction_qualify(lot_id:str,payload:AuctionQualificationRequest,user:User=Depends(get_current_user),db:Session=Depends(get_db)):
+    lot=db.scalar(select(AuctionLot).where(AuctionLot.id==lot_id,AuctionLot.organization_id==user.organization_id))
+    if not lot: raise HTTPException(status_code=404,detail="Lote não encontrado")
+    item=qualify(db,user,lot,payload.confirmation);db.flush();audit(db,user,"auction.qualified","auction_qualification",item.id);db.commit();db.refresh(item);return item
+
+
+@router.get("/auction-lots/{lot_id}/gated-details")
+def auction_gated_details(lot_id:str,user:User=Depends(get_current_user),db:Session=Depends(get_db)):
+    lot=db.scalar(select(AuctionLot).where(AuctionLot.id==lot_id,AuctionLot.organization_id==user.organization_id))
+    if not lot: raise HTTPException(status_code=404,detail="Lote não encontrado")
+    return gated_asset_details(db,user,lot)
+
+
+@router.post("/auction-lots/{lot_id}/bids", response_model=AuctionBidView, status_code=201)
+def auction_bid_create(lot_id:str,payload:AuctionBidCreate,user:User=Depends(get_current_user),db:Session=Depends(get_db)):
+    lot=db.scalar(select(AuctionLot).where(AuctionLot.id==lot_id,AuctionLot.organization_id==user.organization_id))
+    if not lot: raise HTTPException(status_code=404,detail="Lote não encontrado")
+    item,created=place_bid(db,user,lot,payload.amount,payload.idempotency_key)
+    if created: db.flush();audit(db,user,"auction.bid_placed","auction_bid",item.id,{"amount":str(payload.amount)})
+    db.commit();db.refresh(item);return item
+
+
+@router.get("/auction-lots/{lot_id}/bids", response_model=list[AuctionBidView])
+def auction_bids(lot_id:str,user:User=Depends(get_current_user),db:Session=Depends(get_db)):
+    lot=db.scalar(select(AuctionLot).where(AuctionLot.id==lot_id,AuctionLot.organization_id==user.organization_id))
+    if not lot: raise HTTPException(status_code=404,detail="Lote não encontrado")
+    return list(db.scalars(select(AuctionBid).where(AuctionBid.lot_id==lot.id).order_by(AuctionBid.amount.desc(),AuctionBid.placed_at)))
+
+
+@router.post("/auction-lots/{lot_id}/mock-settle", response_model=AuctionSettlementView)
+def auction_mock_settle(lot_id:str,user:User=Depends(require_step_up),_:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    lot=db.scalar(select(AuctionLot).where(AuctionLot.id==lot_id,AuctionLot.organization_id==user.organization_id))
+    if not lot: raise HTTPException(status_code=404,detail="Lote não encontrado")
+    item=settle_lot(db,user,lot);db.flush();audit(db,user,"auction.settled","auction_settlement",item.id);db.commit();db.refresh(item);return item
+
+
+@router.get("/auction-settlements", response_model=list[AuctionSettlementView])
+def auction_settlements(user:User=Depends(get_current_user),db:Session=Depends(get_db)):
+    return list(db.scalars(select(AuctionSettlement).where(AuctionSettlement.organization_id==user.organization_id).order_by(AuctionSettlement.created_at.desc())))
+
+
+@router.post("/tax/documents",response_model=TaxDocumentView,status_code=201)
+def tax_document_create(payload:TaxDocumentCreate,user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    target=db.scalar(select(User).where(User.id==payload.user_id,User.organization_id==user.organization_id))
+    if not target: raise HTTPException(status_code=404,detail="Usuário não encontrado")
+    item=issue_tax_document(db,user,target,payload.reference_month,payload.gross_amount,payload.tax_amount,payload.content);db.flush();audit(db,user,"tax.document_issued","tax_document",item.id);db.commit();db.refresh(item);return item
+
+@router.get("/tax/documents",response_model=list[TaxDocumentView])
+def tax_documents(user:User=Depends(get_current_user),db:Session=Depends(get_db)):
+    return list(db.scalars(select(TaxDocument).where(TaxDocument.organization_id==user.organization_id).order_by(TaxDocument.created_at.desc())))
+
+@router.post("/tax/closings",response_model=TaxClosingView,status_code=201)
+def tax_closing_create(payload:TaxClosingRequest,user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    item=close_tax_month(db,user,payload.reference_month);db.flush();audit(db,user,"tax.month_closed","tax_closing",item.id);db.commit();db.refresh(item);return item
+
+@router.get("/tax/closings",response_model=list[TaxClosingView])
+def tax_closings(user:User=Depends(get_current_user),db:Session=Depends(get_db)):
+    return list(db.scalars(select(TaxClosing).where(TaxClosing.organization_id==user.organization_id).order_by(TaxClosing.reference_month.desc())))
+
+@router.get("/tax/exceptions",response_model=list[TaxExceptionView])
+def tax_exceptions(user:User=Depends(get_current_user),db:Session=Depends(get_db)):
+    return list(db.scalars(select(TaxException).where(TaxException.organization_id==user.organization_id).order_by(TaxException.created_at.desc())))
+
+@router.post("/tax/exceptions/{exception_id}/resolve",response_model=TaxExceptionView)
+def tax_exception_resolve(exception_id:str,payload:TaxExceptionResolve,user:User=Depends(require_step_up),_:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    item=db.scalar(select(TaxException).where(TaxException.id==exception_id,TaxException.organization_id==user.organization_id))
+    if not item: raise HTTPException(status_code=404,detail="Exceção fiscal não encontrada")
+    resolve_tax_exception(item,user,payload.note);audit(db,user,"tax.exception_resolved","tax_exception",item.id);db.commit();db.refresh(item);return item
+
+@router.post("/communications/templates",response_model=CommunicationTemplateView,status_code=201)
+def communication_template_create(payload:CommunicationTemplateCreate,user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    if payload.channel not in {"WHATSAPP","EMAIL","IN_APP"}: raise HTTPException(status_code=422,detail="Canal inválido")
+    if payload.purpose not in {"TRANSACTIONAL","MARKETING"}: raise HTTPException(status_code=422,detail="Finalidade inválida")
+    item=create_template(db,user,**payload.model_dump());db.flush();audit(db,user,"communication.template_created","communication_template",item.id);db.commit();db.refresh(item);return item
+
+@router.get("/communications/templates",response_model=list[CommunicationTemplateView])
+def communication_templates(user:User=Depends(get_current_user),db:Session=Depends(get_db)):
+    return list(db.scalars(select(CommunicationTemplate).where(CommunicationTemplate.organization_id==user.organization_id).order_by(CommunicationTemplate.created_at.desc())))
+
+@router.post("/communications/consents",response_model=CommunicationConsentView)
+def communication_consent(payload:CommunicationConsentRequest,user:User=Depends(get_current_user),db:Session=Depends(get_db)):
+    if payload.status not in {"OPT_IN","OPT_OUT"}: raise HTTPException(status_code=422,detail="Status de consentimento inválido")
+    item=update_consent(db,user,**payload.model_dump());db.flush();audit(db,user,"communication.consent_changed","communication_consent",item.id,{"status":payload.status});db.commit();db.refresh(item);return item
+
+@router.get("/communications/consents",response_model=list[CommunicationConsentView])
+def communication_consents(user:User=Depends(get_current_user),db:Session=Depends(get_db)):
+    return list(db.scalars(select(CommunicationConsent).where(CommunicationConsent.organization_id==user.organization_id).order_by(CommunicationConsent.changed_at.desc())))
+
+@router.post("/communications/send",response_model=CommunicationDeliveryView,status_code=201)
+def communication_send(payload:CommunicationSendRequest,user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    template=db.scalar(select(CommunicationTemplate).where(CommunicationTemplate.id==payload.template_id,CommunicationTemplate.organization_id==user.organization_id,CommunicationTemplate.active.is_(True)))
+    if not template: raise HTTPException(status_code=404,detail="Template ativo não encontrado")
+    item,created=queue_delivery(db,user,template,payload.subject_type,payload.subject_id,payload.destination,payload.idempotency_key,payload.variables)
+    if created: db.flush();audit(db,user,"communication.queued","communication_delivery",item.id)
+    db.commit();db.refresh(item);return item
+
+@router.post("/communications/deliveries/{delivery_id}/mock-deliver",response_model=CommunicationDeliveryView)
+def communication_mock_deliver(delivery_id:str,user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    item=db.scalar(select(CommunicationDelivery).where(CommunicationDelivery.id==delivery_id,CommunicationDelivery.organization_id==user.organization_id))
+    if not item: raise HTTPException(status_code=404,detail="Entrega não encontrada")
+    mock_deliver(item);audit(db,user,"communication.delivered","communication_delivery",item.id);db.commit();db.refresh(item);return item
+
+@router.get("/communications/deliveries",response_model=list[CommunicationDeliveryView])
+def communication_deliveries(user:User=Depends(get_current_user),db:Session=Depends(get_db)):
+    return list(db.scalars(select(CommunicationDelivery).where(CommunicationDelivery.organization_id==user.organization_id).order_by(CommunicationDelivery.created_at.desc())))
+
+
+@router.post("/nina/policies",response_model=UnderwritingPolicyView,status_code=201)
+def nina_policy_create(payload:UnderwritingPolicyCreate,user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    item=create_policy(db,user,payload.product,**payload.model_dump(exclude={"product"}));db.flush();audit(db,user,"nina.policy_created","underwriting_policy",item.id);db.commit();db.refresh(item);return item
+
+@router.get("/nina/policies",response_model=list[UnderwritingPolicyView])
+def nina_policies(user:User=Depends(get_current_user),db:Session=Depends(get_db)):
+    return list(db.scalars(select(UnderwritingPolicy).where(UnderwritingPolicy.organization_id==user.organization_id).order_by(UnderwritingPolicy.created_at.desc())))
+
+def assessment_view(item:UnderwritingAssessment)->UnderwritingAssessmentView:
+    return UnderwritingAssessmentView.model_validate(item).model_copy(update={"explanation":json.loads(item.explanation_json)})
+
+@router.post("/nina/proposals/{proposal_id}/assess",response_model=UnderwritingAssessmentView,status_code=201)
+def nina_assess(proposal_id:str,payload:UnderwritingAssessmentCreate,user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    proposal=db.scalar(select(Proposal).where(Proposal.id==proposal_id,Proposal.organization_id==user.organization_id));policy=db.scalar(select(UnderwritingPolicy).where(UnderwritingPolicy.id==payload.policy_id,UnderwritingPolicy.organization_id==user.organization_id,UnderwritingPolicy.active.is_(True)))
+    if not proposal or not policy: raise HTTPException(status_code=404,detail="Proposta ou política ativa não encontrada")
+    inputs=payload.model_dump(exclude={"policy_id"},mode="json");item=assess(db,user,proposal,policy,inputs);db.flush();audit(db,user,"nina.assessed","underwriting_assessment",item.id,{"score":item.score});db.commit();db.refresh(item);return assessment_view(item)
+
+@router.get("/nina/assessments",response_model=list[UnderwritingAssessmentView])
+def nina_assessments(user:User=Depends(get_current_user),db:Session=Depends(get_db)):
+    return [assessment_view(x) for x in db.scalars(select(UnderwritingAssessment).where(UnderwritingAssessment.organization_id==user.organization_id).order_by(UnderwritingAssessment.created_at.desc()))]
+
+@router.post("/nina/assessments/{assessment_id}/decide",response_model=UnderwritingDecisionView)
+def nina_decide(assessment_id:str,payload:UnderwritingDecisionCreate,user:User=Depends(require_step_up),_:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    if payload.decision not in {"APPROVE","REJECT"}: raise HTTPException(status_code=422,detail="Decisão inválida")
+    assessment=db.scalar(select(UnderwritingAssessment).where(UnderwritingAssessment.id==assessment_id,UnderwritingAssessment.organization_id==user.organization_id))
+    if not assessment: raise HTTPException(status_code=404,detail="Avaliação não encontrada")
+    item=decide(db,user,assessment,payload.decision,payload.reason);db.flush();audit(db,user,"nina.decision","underwriting_decision",item.id,{"decision":payload.decision});db.commit();db.refresh(item);return item
+
+@router.get("/nina/quota-ranking",response_model=list[QuotaRankingView])
+def nina_quota_ranking(target_amount:Decimal=Query(gt=0),category:str="REAL_ESTATE",limit:int=Query(default=10,ge=1,le=50),user:User=Depends(get_current_user),db:Session=Depends(get_db)):
+    return rank_quota_combinations(db,user,target_amount,category,limit)
+
+@router.get("/bi/summary",response_model=BISummaryView)
+def business_intelligence_summary(user:User=Depends(get_current_user),db:Session=Depends(get_db)):
+    return bi_summary(db,user)
+
+@router.get("/bi/executive-report.csv")
+def business_intelligence_csv(user:User=Depends(get_current_user),db:Session=Depends(get_db)):
+    summary=bi_summary(db,user);lines=["section,metric,value"]
+    for section,metrics in summary.items():
+        for metric,value in metrics.items():lines.append(f"{section},{metric},{value}")
+    data=("\ufeff"+"\n".join(lines)).encode("utf-8")
+    return Response(content=data,media_type="text/csv; charset=utf-8",headers={"Content-Disposition":"attachment; filename=letter-executive-report.csv"})
+
+@router.get("/system/readiness")
+def readiness(db:Session=Depends(get_db)): return system_readiness(db)
+
+@router.post("/system/jobs",response_model=OperationalJobView,status_code=201)
+def job_create(payload:OperationalJobCreate,user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    check_job_quota(db,user)
+    item,created=enqueue_job(db,user,**payload.model_dump())
+    if created: db.flush();audit(db,user,"system.job_enqueued","operational_job",item.id,{"job_type":item.job_type})
+    db.commit();db.refresh(item);return item
+
+@router.get("/system/jobs",response_model=list[OperationalJobView])
+def jobs(user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    return list(db.scalars(select(OperationalJob).where(OperationalJob.organization_id==user.organization_id).order_by(OperationalJob.created_at.desc())))
+
+@router.post("/system/jobs/{job_id}/process",response_model=OperationalJobView)
+def job_process(job_id:str,payload:JobProcessRequest,user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    item=db.scalar(select(OperationalJob).where(OperationalJob.id==job_id,OperationalJob.organization_id==user.organization_id))
+    if not item: raise HTTPException(status_code=404,detail="Job não encontrado")
+    process_job(item,payload.simulate_failure);audit(db,user,"system.job_processed","operational_job",item.id,{"status":item.status,"attempts":item.attempts});db.commit();db.refresh(item);return item
+
+@router.get("/system/metrics")
+def metrics(user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)): return operational_metrics(db,user)
+
+@router.get("/system/homologation")
+def homologation(user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)): return homologation_status(db,user.organization_id)
+
+@router.get("/system/quota",response_model=TenantQuotaView)
+def tenant_quota(user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    item=get_or_create_quota(db,user);db.commit();db.refresh(item);return item
+
+@router.patch("/system/quota",response_model=TenantQuotaView)
+def tenant_quota_update(payload:TenantQuotaUpdate,user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    item=get_or_create_quota(db,user)
+    for key,value in payload.model_dump(exclude_unset=True).items():setattr(item,key,value)
+    audit(db,user,"security.quota_updated","tenant_quota",item.id,payload.model_dump(exclude_unset=True));db.commit();db.refresh(item);return item
+
+@router.get("/system/security-events",response_model=list[SecurityEventView])
+def security_events(user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    return list(db.scalars(select(SecurityEvent).where(or_(SecurityEvent.organization_id==user.organization_id,SecurityEvent.organization_id.is_(None))).order_by(SecurityEvent.created_at.desc()).limit(200)))
+
+
+@router.post("/system/integrations",response_model=ProviderIntegrationView,status_code=201)
+def integration_create(payload:ProviderIntegrationCreate,user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    item=configure_integration(db,user,**payload.model_dump());db.flush();audit(db,user,"integration.configured","provider_integration",item.id,{"provider":item.provider,"environment":item.environment});db.commit();db.refresh(item);return integration_view(item)
+
+
+def integration_view(item:ProviderIntegration)->ProviderIntegrationView:
+    uptime=round((item.successful_checks/item.total_checks*100) if item.total_checks else 0,2)
+    return ProviderIntegrationView.model_validate(item).model_copy(update={"allowed_hosts":json.loads(item.allowed_hosts_json),"uptime_percent":uptime})
+
+
+@router.get("/system/integrations",response_model=list[ProviderIntegrationView])
+def integrations(user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    return [integration_view(x) for x in db.scalars(select(ProviderIntegration).where(ProviderIntegration.organization_id==user.organization_id).order_by(ProviderIntegration.category,ProviderIntegration.provider))]
+
+
+@router.post("/system/integrations/{integration_id}/probe",response_model=ProviderIntegrationView)
+def integration_probe(integration_id:str,payload:IntegrationProbeRequest,user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    item=db.scalar(select(ProviderIntegration).where(ProviderIntegration.id==integration_id,ProviderIntegration.organization_id==user.organization_id))
+    if not item: raise HTTPException(status_code=404,detail="Integração não encontrada")
+    probe_integration(db,item,payload.simulate_status,payload.latency_ms);audit(db,user,"integration.probed","provider_integration",item.id,{"health":item.health_status,"circuit":item.circuit_status});db.commit();db.refresh(item);return integration_view(item)
+
+
+@router.post("/system/integrations/{integration_id}/rotate-credential",response_model=ProviderIntegrationView)
+def integration_rotate(integration_id:str,payload:CredentialRotateRequest,user:User=Depends(require_step_up),_:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    item=db.scalar(select(ProviderIntegration).where(ProviderIntegration.id==integration_id,ProviderIntegration.organization_id==user.organization_id))
+    if not item:raise HTTPException(status_code=404,detail="Integração não encontrada")
+    rotate_credential(item,payload.credential);audit(db,user,"integration.credential_rotated","provider_integration",item.id,{"credential_version":item.credential_version});db.commit();db.refresh(item);return integration_view(item)
+
+
+@router.post("/system/integrations/{integration_id}/request",response_model=ProviderRequestLogView)
+def integration_request(integration_id:str,payload:ProviderRequest,user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    item=db.scalar(select(ProviderIntegration).where(ProviderIntegration.id==integration_id,ProviderIntegration.organization_id==user.organization_id,ProviderIntegration.active.is_(True)))
+    if not item:raise HTTPException(status_code=404,detail="Integração ativa não encontrada")
+    log=execute_provider_request(db,item,payload.method,payload.path,payload.payload);db.flush();audit(db,user,"integration.request","provider_request_log",log.id,{"success":log.success,"response_code":log.response_code});db.commit();db.refresh(log);return log
+
+
+@router.get("/system/provider-requests",response_model=list[ProviderRequestLogView])
+def provider_requests(user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    return list(db.scalars(select(ProviderRequestLog).where(ProviderRequestLog.organization_id==user.organization_id).order_by(ProviderRequestLog.created_at.desc()).limit(200)))
+
+
+@router.post("/system/secrets",response_model=SecretReferenceView,status_code=201)
+def secret_create(payload:SecretCreate,user:User=Depends(require_step_up),_:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    item=create_secret(db,user,**payload.model_dump());db.flush();audit(db,user,"secret.configured","secret_reference",item.id,{"backend":item.backend,"version":item.version});db.commit();db.refresh(item);return item
+
+
+@router.get("/system/secrets",response_model=list[SecretReferenceView])
+def secrets(user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    return list(db.scalars(select(SecretReference).where(SecretReference.organization_id==user.organization_id,SecretReference.active.is_(True)).order_by(SecretReference.name)))
+
+
+@router.put("/system/integrations/{integration_id}/mtls",response_model=MTLSConfigView)
+def mtls_configure(integration_id:str,payload:MTLSConfigCreate,user:User=Depends(require_step_up),_:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    integration=db.scalar(select(ProviderIntegration).where(ProviderIntegration.id==integration_id,ProviderIntegration.organization_id==user.organization_id))
+    refs={x.id:x for x in db.scalars(select(SecretReference).where(SecretReference.organization_id==user.organization_id,SecretReference.id.in_([payload.certificate_secret_id,payload.private_key_secret_id]+([payload.ca_secret_id] if payload.ca_secret_id else []))))}
+    if not integration or payload.certificate_secret_id not in refs or payload.private_key_secret_id not in refs:raise HTTPException(status_code=404,detail="Integração ou segredo não encontrado")
+    item=configure_mtls(db,user,integration,refs[payload.certificate_secret_id],refs[payload.private_key_secret_id],refs.get(payload.ca_secret_id),payload.verify_peer,payload.enabled);db.flush();audit(db,user,"integration.mtls_configured","integration_mtls_config",item.id,{"enabled":item.enabled});db.commit();db.refresh(item);return item
+
+
+def onboarding_view(item:ProviderOnboardingProfile)->OnboardingProfileView:
+    return OnboardingProfileView.model_validate(item).model_copy(update={"checklist":json.loads(item.checklist_json)})
+
+
+@router.put("/system/integrations/{integration_id}/onboarding",response_model=OnboardingProfileView)
+def onboarding_configure(integration_id:str,payload:OnboardingProfileCreate,user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    integration=db.scalar(select(ProviderIntegration).where(ProviderIntegration.id==integration_id,ProviderIntegration.organization_id==user.organization_id))
+    if not integration:raise HTTPException(status_code=404,detail="Integração não encontrada")
+    item=configure_profile(db,user,integration,**payload.model_dump());db.flush();audit(db,user,"integration.onboarding_configured","provider_onboarding_profile",item.id);db.commit();db.refresh(item);return onboarding_view(item)
+
+
+@router.get("/system/onboarding-profiles",response_model=list[OnboardingProfileView])
+def onboarding_profiles(user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    return [onboarding_view(x) for x in db.scalars(select(ProviderOnboardingProfile).where(ProviderOnboardingProfile.organization_id==user.organization_id).order_by(ProviderOnboardingProfile.created_at.desc()))]
+
+
+@router.post("/system/integrations/{integration_id}/reconciliation/import",response_model=ReconciliationRunView,status_code=201)
+async def provider_reconciliation_import(integration_id:str,file:UploadFile=File(...),user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    integration=db.scalar(select(ProviderIntegration).where(ProviderIntegration.id==integration_id,ProviderIntegration.organization_id==user.organization_id))
+    if not integration:raise HTTPException(status_code=404,detail="Integração não encontrada")
+    content=await file.read()
+    if len(content)>settings.max_upload_mb*1024*1024:raise HTTPException(status_code=413,detail="Arquivo excede o limite")
+    item,created=import_provider_reconciliation_csv(db,user,integration,file.filename or "reconciliation.csv",content)
+    if created:db.flush();audit(db,user,"integration.reconciliation_imported","provider_reconciliation_run",item.id,{"status":item.status,"divergences":item.divergent_items})
+    db.commit();db.refresh(item);return item
+
+
+@router.get("/system/reconciliation-runs",response_model=list[ReconciliationRunView])
+def provider_reconciliation_runs(user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    return list(db.scalars(select(ProviderReconciliationRun).where(ProviderReconciliationRun.organization_id==user.organization_id).order_by(ProviderReconciliationRun.created_at.desc())))
+
+
+@router.get("/system/reconciliation-runs/{run_id}/items",response_model=list[ProviderReconciliationItemView])
+def provider_reconciliation_items(run_id:str,user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    run=db.scalar(select(ProviderReconciliationRun).where(ProviderReconciliationRun.id==run_id,ProviderReconciliationRun.organization_id==user.organization_id))
+    if not run:raise HTTPException(status_code=404,detail="Conciliação não encontrada")
+    return list(db.scalars(select(ProviderReconciliationItem).where(ProviderReconciliationItem.run_id==run.id).order_by(ProviderReconciliationItem.external_id)))
+
+
+@router.post("/system/integrations/{integration_id}/evidence",response_model=list[HomologationEvidenceView],status_code=201)
+def evidence_generate(integration_id:str,user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    integration=db.scalar(select(ProviderIntegration).where(ProviderIntegration.id==integration_id,ProviderIntegration.organization_id==user.organization_id))
+    if not integration:raise HTTPException(status_code=404,detail="Integração não encontrada")
+    items=generate_evidence(db,user,integration);db.flush();audit(db,user,"integration.evidence_generated","homologation_evidence",integration.id,{"pass":sum(x.result=="PASS" for x in items)});db.commit();return items
+
+
+@router.get("/system/homologation-evidences",response_model=list[HomologationEvidenceView])
+def homologation_evidences(user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    return list(db.scalars(select(HomologationEvidence).where(HomologationEvidence.organization_id==user.organization_id).order_by(HomologationEvidence.executed_at.desc()).limit(500)))
+
+
+@router.get("/system/adapter-catalog",response_model=list[AdapterCatalogItem])
+def adapters_catalog(user:User=Depends(require_scope("admin:users"))):return adapter_catalog()
+
+
+def adapter_execution_view(item:AdapterExecution)->AdapterExecutionView:
+    return AdapterExecutionView.model_validate(item).model_copy(update={"output":json.loads(item.output_json)})
+
+
+@router.post("/system/integrations/{integration_id}/adapter/execute",response_model=AdapterExecutionView,status_code=201)
+def adapter_execute(integration_id:str,payload:AdapterExecuteRequest,user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    integration=db.scalar(select(ProviderIntegration).where(ProviderIntegration.id==integration_id,ProviderIntegration.organization_id==user.organization_id,ProviderIntegration.active.is_(True)))
+    if not integration:raise HTTPException(status_code=404,detail="Integração ativa não encontrada")
+    item,created=execute_adapter(db,user,integration,payload.operation,payload.payload,payload.idempotency_key)
+    if created:db.flush();audit(db,user,"adapter.executed","adapter_execution",item.id,{"category":item.category,"operation":item.operation,"status":item.status})
+    db.commit();db.refresh(item);return adapter_execution_view(item)
+
+
+@router.get("/system/adapter-executions",response_model=list[AdapterExecutionView])
+def adapter_executions(user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    return [adapter_execution_view(x) for x in db.scalars(select(AdapterExecution).where(AdapterExecution.organization_id==user.organization_id).order_by(AdapterExecution.created_at.desc()).limit(300))]
+
+
+def certification_view(item:AdapterCertificationRun)->AdapterCertificationView:
+    return AdapterCertificationView.model_validate(item).model_copy(update={"report":json.loads(item.report_json)})
+
+
+def go_live_decision_view(item:ProviderGoLiveDecision)->GoLiveDecisionView:
+    return GoLiveDecisionView.model_validate(item).model_copy(update={"blockers":json.loads(item.blockers_json)})
+
+
+@router.post("/system/integrations/{integration_id}/certify",response_model=AdapterCertificationView,status_code=201)
+def adapter_certify(integration_id:str,user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    integration=db.scalar(select(ProviderIntegration).where(ProviderIntegration.id==integration_id,ProviderIntegration.organization_id==user.organization_id))
+    if not integration:raise HTTPException(status_code=404,detail="Integração não encontrada")
+    item=certify_adapter(db,user,integration);db.flush();audit(db,user,"adapter.certified","adapter_certification",item.id,{"status":item.status,"passed":item.passed_checks});db.commit();db.refresh(item);return certification_view(item)
+
+
+@router.get("/system/adapter-certifications",response_model=list[AdapterCertificationView])
+def adapter_certifications(user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    return [certification_view(x) for x in db.scalars(select(AdapterCertificationRun).where(AdapterCertificationRun.organization_id==user.organization_id).order_by(AdapterCertificationRun.executed_at.desc()).limit(300))]
+
+
+@router.put("/system/integrations/{integration_id}/go-live-approval",response_model=GoLiveApprovalView)
+def go_live_approval(integration_id:str,payload:GoLiveApprovalRequest,user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    integration=db.scalar(select(ProviderIntegration).where(ProviderIntegration.id==integration_id,ProviderIntegration.organization_id==user.organization_id))
+    if not integration:raise HTTPException(status_code=404,detail="Integração não encontrada")
+    item=decide_approval(db,user,integration,payload.area,payload.decision,payload.notes);db.flush();audit(db,user,"provider.go_live_approval","provider_integration",integration.id,{"area":item.area,"decision":item.decision});db.commit();db.refresh(item);return item
+
+
+@router.get("/system/go-live-approvals",response_model=list[GoLiveApprovalView])
+def go_live_approvals(user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    return list(db.scalars(select(ProviderGoLiveApproval).where(ProviderGoLiveApproval.organization_id==user.organization_id).order_by(ProviderGoLiveApproval.decided_at.desc())))
+
+
+@router.post("/system/integrations/{integration_id}/go-live/evaluate",response_model=GoLiveDecisionView,status_code=201)
+def go_live_evaluate(integration_id:str,user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    integration=db.scalar(select(ProviderIntegration).where(ProviderIntegration.id==integration_id,ProviderIntegration.organization_id==user.organization_id))
+    if not integration:raise HTTPException(status_code=404,detail="Integração não encontrada")
+    item=evaluate_go_live(db,user,integration);db.flush();audit(db,user,"provider.go_live_evaluated","provider_go_live_decision",item.id,{"status":item.status,"blockers":json.loads(item.blockers_json)});db.commit();db.refresh(item);return go_live_decision_view(item)
+
+
+@router.get("/system/go-live-decisions",response_model=list[GoLiveDecisionView])
+def go_live_decisions(user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    return [go_live_decision_view(x) for x in db.scalars(select(ProviderGoLiveDecision).where(ProviderGoLiveDecision.organization_id==user.organization_id).order_by(ProviderGoLiveDecision.decided_at.desc()).limit(300))]
+
+
+@router.get("/system/provider-incidents",response_model=list[ProviderIncidentView])
+def provider_incidents(user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    return list(db.scalars(select(ProviderIncident).where(ProviderIncident.organization_id==user.organization_id).order_by(ProviderIncident.created_at.desc()).limit(200)))
+
+
+@router.post("/system/provider-incidents/{incident_id}/action",response_model=ProviderIncidentView)
+def provider_incident_action(incident_id:str,payload:IncidentActionRequest,user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    item=db.scalar(select(ProviderIncident).where(ProviderIncident.id==incident_id,ProviderIncident.organization_id==user.organization_id))
+    if not item:raise HTTPException(status_code=404,detail="Incidente não encontrado")
+    now=datetime.now(UTC);action=payload.action.upper()
+    if action=="ACKNOWLEDGE":item.status="ACKNOWLEDGED";item.acknowledged_by_id=user.id;item.acknowledged_at=now
+    elif action=="RESOLVE":item.status="RESOLVED";item.resolved_by_id=user.id;item.resolved_at=now
+    else:raise HTTPException(status_code=422,detail="Ação inválida")
+    audit(db,user,"integration.incident_action","provider_incident",item.id,{"action":action});db.commit();db.refresh(item);return item
+
+
+def endpoint_view(item:WebhookEndpoint)->WebhookEndpointView:
+    return WebhookEndpointView.model_validate(item).model_copy(update={"subscribed_events":json.loads(item.subscribed_events_json)})
+
+
+@router.post("/system/webhook-endpoints",response_model=WebhookEndpointView,status_code=201)
+def webhook_endpoint_create(payload:WebhookEndpointCreate,user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    integration=db.scalar(select(ProviderIntegration).where(ProviderIntegration.id==payload.integration_id,ProviderIntegration.organization_id==user.organization_id,ProviderIntegration.active.is_(True)))
+    if not integration: raise HTTPException(status_code=404,detail="Integração ativa não encontrada")
+    item=create_endpoint(db,user,integration,payload.name,payload.target_url,payload.secret,payload.subscribed_events,payload.max_attempts);db.flush();audit(db,user,"webhook.endpoint_created","webhook_endpoint",item.id);db.commit();db.refresh(item);return endpoint_view(item)
+
+
+@router.get("/system/webhook-endpoints",response_model=list[WebhookEndpointView])
+def webhook_endpoints(user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    return [endpoint_view(x) for x in db.scalars(select(WebhookEndpoint).where(WebhookEndpoint.organization_id==user.organization_id).order_by(WebhookEndpoint.created_at.desc()))]
+
+
+@router.post("/system/webhook-endpoints/{endpoint_id}/dispatch",response_model=WebhookDeliveryView,status_code=201)
+def webhook_dispatch(endpoint_id:str,payload:WebhookDispatchRequest,user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    endpoint=db.scalar(select(WebhookEndpoint).where(WebhookEndpoint.id==endpoint_id,WebhookEndpoint.organization_id==user.organization_id,WebhookEndpoint.active.is_(True)))
+    if not endpoint: raise HTTPException(status_code=404,detail="Endpoint ativo não encontrado")
+    integration=db.scalar(select(ProviderIntegration).where(ProviderIntegration.id==endpoint.integration_id,ProviderIntegration.organization_id==user.organization_id))
+    item,created=dispatch_webhook(db,user,endpoint,integration,**payload.model_dump())
+    if created:audit(db,user,"webhook.dispatched","webhook_delivery",item.id,{"event_id":item.event_id,"status":item.status})
+    db.commit();db.refresh(item);return item
+
+
+@router.post("/system/webhook-deliveries/{delivery_id}/retry",response_model=WebhookDeliveryView)
+def webhook_retry(delivery_id:str,payload:WebhookRetryRequest,user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    item=db.scalar(select(WebhookDelivery).where(WebhookDelivery.id==delivery_id,WebhookDelivery.organization_id==user.organization_id))
+    if not item: raise HTTPException(status_code=404,detail="Entrega não encontrada")
+    if item.status in {"DELIVERED","DEAD_LETTER"}: raise HTTPException(status_code=409,detail="Entrega não aceita nova tentativa")
+    endpoint=db.get(WebhookEndpoint,item.endpoint_id);integration=db.get(ProviderIntegration,endpoint.integration_id)
+    attempt_delivery(item,integration,payload.simulate_failure,db,endpoint);audit(db,user,"webhook.retried","webhook_delivery",item.id,{"status":item.status,"attempts":item.attempts});db.commit();db.refresh(item);return item
+
+
+@router.get("/system/webhook-deliveries",response_model=list[WebhookDeliveryView])
+def webhook_deliveries(user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    return list(db.scalars(select(WebhookDelivery).where(WebhookDelivery.organization_id==user.organization_id).order_by(WebhookDelivery.created_at.desc()).limit(200)))
+
+
+@router.post("/system/webhook-deliveries/reprocess-dead-letter")
+def webhook_dead_letter_bulk(payload:DeadLetterBulkRequest,user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    result=reprocess_dead_letters(db,user,payload.delivery_ids);audit(db,user,"webhook.dead_letter_requeued","webhook_delivery","bulk",result);db.commit();return result
+
+
+@router.post("/system/webhooks/verify")
+def webhook_verify(payload:WebhookVerifyRequest,user:User=Depends(require_scope("admin:users"))):
+    return {"valid":verify_webhook(payload.secret,payload.signature,payload.payload)}

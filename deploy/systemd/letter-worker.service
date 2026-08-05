@@ -1,0 +1,18 @@
+[Unit]
+Description=LETTER Durable Job Worker
+After=network.target letter-api.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/letter-platform/backend
+EnvironmentFile=/etc/letter-platform/api.env
+ExecStart=/opt/letter-platform/backend/.venv/bin/python -m app.worker
+Restart=always
+RestartSec=5
+User=letter
+Group=letter
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

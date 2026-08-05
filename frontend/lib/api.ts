@@ -1,0 +1,97 @@
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api/v1";
+
+export type Module = { key: string; name: string; description: string; status: string; route: string; critical: boolean };
+export type Summary = { leads: number; available_quotas: number; active_proposals: number; active_operations: number; modules: number; financial_transactions_enabled: boolean };
+export type User = { id: string; name: string; email: string; role: string; organization_id: string; branch_id: string | null; active: boolean; mfa_enabled: boolean; last_login_at: string | null };
+export type Branch = { id: string; name: string; code: string; region: string | null; active: boolean };
+export type Invitation = { id: string; email: string; role: string; branch_id: string | null; status: string; expires_at: string; token?: string | null };
+export type AuthSession = { id: string; user_agent: string | null; ip_address: string | null; active: boolean; created_at: string; expires_at: string; last_seen_at: string; step_up_until: string | null };
+export type KycCase = { id: string; subject_type: string; subject_id: string; provider: string; status: string; risk_level: string | null; created_at: string; reviewed_at: string | null };
+export type NetworkNode = { id:string; user_id:string; sponsor_user_id:string|null; tree_type:string; referral_code:string; status:string };
+export type CommissionRule = { id:string; product:string; commission_type:string; version:number; base_type:string; pool_rate_percent:string; levels_json:string; active:boolean };
+export type CommissionEntry = { id:string; beneficiary_id:string; reference:string; product:string; level:number; amount:string; status:string };
+export type FundingOpportunity = { id:string; title:string; product:string; capital_source:string; target_amount:string; funded_amount:string; min_investment:string; annual_return_reference:string|null; status:string; created_at:string };
+export type InvestmentReservation = { id:string; opportunity_id:string; investor_id:string; amount:string; status:string; confirmed_at:string|null };
+export type InvestmentPosition = { id:string; opportunity_id:string; investor_id:string; principal:string; accrued_return:string; status:string };
+export type Invoice = { id:string; contract_id:string; invoice_number:string; installment_number:number; kind:string; due_date:string; principal_amount:string; interest_amount:string; fee_amount:string; total_amount:string; paid_amount:string; status:string };
+export type DelinquencyCase = { id:string; invoice_id:string; days_overdue:number; penalty_amount:string; late_interest_amount:string; status:string; caducity_eligible:boolean };
+export type ReconciliationBatch = { id:string; source:string; status:string; total_records:number; matched_records:number; divergent_records:number; created_at:string };
+export type ReconciliationItem = { id:string; invoice_id:string|null; external_reference:string; expected_amount:string; received_amount:string; status:string; reason:string|null };
+export type CollectionAction = { id:string; invoice_id:string; action_type:string; channel:string; status:string; scheduled_at:string; executed_at:string|null };
+export type RecoveredAsset = { id:string; delinquency_case_id:string|null; title:string; asset_type:string; public_description:string; appraisal_value:string; debt_balance:string; recovery_costs:string; custody_reference:string; status:string; created_at:string };
+export type AuctionLot = { id:string; asset_id:string; lot_number:string; opening_price:string; reserve_price:string; min_increment:string; platform_fee_percent:string; starts_at:string; ends_at:string; extension_minutes:number; status:string; winning_bid_id:string|null; created_at:string };
+export type AuctionBid = { id:string; lot_id:string; bidder_id:string; amount:string; status:string; placed_at:string };
+export type AuctionSettlement = { id:string; lot_id:string; winning_bid_id:string; gross_amount:string; recovery_costs:string; debt_paid:string; platform_fee:string; owner_surplus:string; status:string; settled_at:string };
+export type TaxDocument = { id:string; user_id:string; reference_month:string; document_number:string; provider:string; gross_amount:string; tax_amount:string; status:string; issued_at:string };
+export type TaxClosing = { id:string; reference_month:string; gross_commissions:string; documented_amount:string; eligible_payout:string; exception_count:number; status:string; closed_at:string|null };
+export type TaxException = { id:string; closing_id:string; user_id:string; reason:string; amount:string; status:string; resolved_at:string|null; resolution_note:string|null };
+export type CommunicationTemplate = { id:string; key:string; channel:string; version:number; subject:string|null; body:string; purpose:string; active:boolean };
+export type CommunicationConsent = { id:string; subject_type:string; subject_id:string; channel:string; status:string; source:string; changed_at:string };
+export type CommunicationDelivery = { id:string; template_id:string; subject_type:string; subject_id:string; destination_masked:string; status:string; rendered_body:string; provider_message_id:string|null; delivered_at:string|null; created_at:string };
+export type ProviderIntegration = { id:string; provider:string; category:string; environment:string; base_url:string|null; active:boolean; health_status:string; latency_ms:number|null; last_health_at:string|null; consecutive_failures:number; circuit_status:string; allowed_hosts:string[]; credential_version:number; credential_rotated_at:string|null; sla_latency_ms:number; total_checks:number; successful_checks:number; uptime_percent:number; created_at:string };
+export type WebhookEndpoint = { id:string; integration_id:string; name:string; target_url:string; subscribed_events:string[]; max_attempts:number; active:boolean; created_at:string };
+export type WebhookDelivery = { id:string; endpoint_id:string; event_id:string; event_type:string; signature:string; status:string; attempts:number; max_attempts:number; response_code:number|null; response_body:string|null; last_error:string|null; next_attempt_at:string|null; delivered_at:string|null; created_at:string };
+export type ProviderIncident = { id:string; integration_id:string; incident_type:string; severity:string; status:string; title:string; details:string; acknowledged_at:string|null; resolved_at:string|null; created_at:string };
+export type OnboardingProfile = { id:string; integration_id:string; api_version:string; authentication_type:string; health_path:string; reconciliation_mode:string; status:string; homologated_at:string|null; checklist:Record<string,boolean>; created_at:string };
+export type ProviderReconciliationRun = { id:string; integration_id:string; source_type:string; source_reference:string; content_hash:string; total_items:number; matched_items:number; divergent_items:number; status:string; processed_at:string|null; created_at:string };
+export type HomologationEvidence = { id:string; integration_id:string; control_key:string; result:string; evidence_hash:string; executed_at:string };
+export type AdapterCatalogItem = { category:string; adapter:string; version:string; capabilities:string[]; mode:string };
+export type AdapterExecution = { id:string; integration_id:string; category:string; operation:string; idempotency_key:string; input_hash:string; external_id:string; status:string; adapter_name:string; adapter_version:string; output:Record<string,unknown>; created_at:string };
+export type AdapterCertification = { id:string; integration_id:string; status:string; passed_checks:number; total_checks:number; report_hash:string; report:{checks:Record<string,boolean>}; executed_at:string };
+export type GoLiveApproval = { id:string; integration_id:string; area:string; decision:string; notes:string; decided_by_id:string; decided_at:string };
+export type GoLiveDecision = { id:string; integration_id:string; status:string; snapshot_hash:string; blockers:string[]; decided_at:string };
+export type UnderwritingPolicy = { id:string; product:string; version:number; minimum_score:number; maximum_ltv_percent:string; maximum_commitment_percent:string; manual_review_score:number; active:boolean; created_at:string };
+export type UnderwritingAssessment = { id:string; proposal_id:string; policy_id:string; version:number; score:number; risk_band:string; recommendation:string; status:string; created_at:string; explanation:Record<string,unknown> };
+export type BISummary = { funnel:{leads:number;proposals:number;approved:number}; portfolio:{invoiced:string;paid:string;open:string;delinquency_charges:string}; risk:{assessments:number;high_risk:number;pending_decisions:number}; funding:{target:string;funded:string}; recovery:{settled:string} };
+export type OperationalJob = { id:string; job_type:string; idempotency_key:string; status:string; attempts:number; max_attempts:number; scheduled_at:string; completed_at:string|null; last_error:string|null; created_at:string };
+export type Lead = { id: string; name: string; phone: string; product_interest: string; status: string; source: string; created_at: string };
+export type Administrator = { id: string; name: string; document: string; authorization_status: string };
+export type Quota = { id: string; administrator_id: string; group_code: string; quota_code: string; category: string; credit_value: string; outstanding_balance: string; premium_value: string; status: string; created_at: string };
+export type Proposal = { id: string; lead_id: string; product: string; requested_amount: string; status: string; calculation_version: string; created_at: string };
+export type Calculation = { id: string; proposal_id: string; version: number; formula_version: string; input: Record<string,unknown>; output: Record<string,string|number|null>; approved_at: string|null };
+export type Reservation = { id: string; quota_id: string; proposal_id: string | null; status: string; expires_at: string; created_at: string };
+export type Contract = { id: string; proposal_id: string; contract_number: string; status: string; template_version: string; content_hash: string; accepted_at: string | null };
+export type AccountBalance = { code: string; name: string; account_type: string; balance: string };
+export type LedgerTransaction = { id: string; reference: string; event_type: string; description: string; amount: string; debit_account: string; credit_account: string; created_at: string };
+export type EscrowAccount = { id: string; operation_id: string | null; provider: string; external_account_id: string; status: string; available_balance: string; locked_balance: string };
+export type Payout = { id: string; escrow_account_id: string; beneficiary_name: string; beneficiary_document: string; pix_key_masked: string; amount: string; status: string; provider_transaction_id: string | null; approval_count: number; created_at: string };
+
+export function getToken() {
+  return typeof window === "undefined" ? null : localStorage.getItem("letter_access_token");
+}
+
+export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const token = getToken();
+  const response = await fetch(`${API_URL}${path}`, {
+    ...options,
+    headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}), ...options.headers },
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body.detail ?? "Não foi possível concluir a solicitação");
+  }
+  return response.json();
+}
+
+export async function apiForm<T>(path:string, body:FormData):Promise<T>{
+  const token=getToken();const response=await fetch(`${API_URL}${path}`,{method:"POST",body,headers:{...(token?{Authorization:`Bearer ${token}`}:{})}});
+  if(!response.ok){const payload=await response.json().catch(()=>({}));throw new Error(payload.detail??"Não foi possível enviar o arquivo")}
+  return response.json();
+}
+
+export async function downloadApi(path:string,filename:string){const token=getToken();const response=await fetch(`${API_URL}${path}`,{headers:{...(token?{Authorization:`Bearer ${token}`}:{})}});if(!response.ok)throw new Error("Não foi possível exportar o relatório");const url=URL.createObjectURL(await response.blob());const link=document.createElement("a");link.href=url;link.download=filename;link.click();URL.revokeObjectURL(url)}
+
+export async function login(email: string, password: string, otp?: string) {
+  const result = await api<{ access_token: string; refresh_token: string }>("/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ email, password, otp: otp || undefined }),
+  });
+  localStorage.setItem("letter_access_token", result.access_token);
+  localStorage.setItem("letter_refresh_token", result.refresh_token);
+}
+
+export function logout() {
+  localStorage.removeItem("letter_access_token");
+  localStorage.removeItem("letter_refresh_token");
+  window.location.href = "/";
+}
