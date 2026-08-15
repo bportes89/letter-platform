@@ -1,0 +1,15 @@
+.env
+.env.local
+.venv/
+__pycache__/
+*.py[cod]
+*.db
+.pytest_cache/
+node_modules/
+.next/
+coverage/
+dist/
+*.log
+backend/storage/
+storage/
+.DS_Store
