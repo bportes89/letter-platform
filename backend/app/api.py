@@ -21,7 +21,7 @@ from app.models import (
     CollectionAction, CommissionEntry, CommissionRule, DelinquencyCase,
     EscrowAccount, FundingOpportunity, Invoice, RecoveredAsset,
     InvestmentPosition, InvestmentReservation, KycCase, Lead, LedgerEntry,
-    LedgerTransaction, NetworkNode, PaymentReceipt, PayoutApproval, PayoutRequest, Proposal,
+    LedgerTransaction, NetworkNode, PaymentReceipt, PayoutApproval, PayoutRequest, PreAnalysisPauta, Proposal,
     Quota, QuotaReservation, SignatureEnvelope, User, UserInvitation,
     ReconciliationBatch, ReconciliationItem, TaxClosing, TaxDocument, TaxException,
     UnderwritingAssessment, UnderwritingDecision, UnderwritingPolicy, OperationalJob, SecurityEvent, TenantQuota,
@@ -54,7 +54,8 @@ from app.schemas import (
     NinaDistressEventView, NinaDocumentCreate, NinaGateApplyRequest, NinaLegalDocumentView, NinaTimelineEvaluateRequest,
     InviteAccept, InviteCreate, KycCreate, KycDecision, KycView, LeadCreate,
     InvestmentPositionView, InvestmentReservationView, InvestmentReserveRequest, InvoicePaymentWebhook, InvoiceProcessorRequest, InvoiceView,
-    PaymentReceiptView,
+    PaymentReceiptView, PreAnalysisEngineRequest, PreAnalysisPautaView, PreAnalysisProposalRequest,
+    PreAnalysisTapafCheckoutAcceptRequest, PreAnalysisTapafPaymentWebhook, PreAnalysisValidateDocumentsRequest,
     LeadUpdate, LeadView, LedgerPostRequest, LedgerTransactionView, LoginRequest,
     FlashCreditCalculationRequest, MfaSetupView, MfaVerify, ModuleView, PasswordResetConfirm, PasswordResetRequest,
     NetworkNodeCreate, NetworkNodeView, PayoutApprove, PayoutCreate, PayoutView, ProposalCreate, ProposalUpdate,
@@ -104,6 +105,10 @@ from app.dependencies import require_step_up
 from app.product_service import calculate_flash_credit, calculate_sdc
 from app.valid_stamp_requirements import valid_stamp_requirements
 from app.invoice_processor_service import process_invoice_settlement, receipt_processor_response, receipt_view
+from app.pre_analysis_service import (
+    accept_tapaf_checkout, confirm_tapaf_payment, generate_tapaf_checkout, pauta_view,
+    run_engine_phase3, validate_documents_phase1,
+)
 from app.storage_service import get_storage
 from app.vehicle_registry_service import query_vehicle_registry
 from app.finops_engine import create_contract_quote, four_scenarios, ingest_event, settlement_curve, sdc_bullet_and_split
@@ -777,6 +782,93 @@ def finops_invoice_processor(payload: InvoiceProcessorRequest, user: User = Depe
     audit(db, user, "finops.invoice_processor", "payment_receipt", receipt.id)
     db.commit()
     return receipt_processor_response(receipt)
+
+
+def _load_proposal(db: Session, user: User, proposal_id: str) -> Proposal:
+    proposal = db.scalar(select(Proposal).where(Proposal.id == proposal_id, Proposal.organization_id == user.organization_id))
+    if not proposal:
+        raise HTTPException(status_code=404, detail="Proposta não encontrada")
+    return proposal
+
+
+@router.post("/finops/pre-analysis/validate-documents", response_model=PreAnalysisPautaView)
+def pre_analysis_validate_documents(payload: PreAnalysisValidateDocumentsRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    proposal = _load_proposal(db, user, payload.proposal_id)
+    pauta = validate_documents_phase1(db, user, proposal, [d.model_dump() for d in payload.documents])
+    audit(db, user, "finops.pre_analysis.validate_documents", "pre_analysis_pauta", pauta.id)
+    db.commit()
+    return PreAnalysisPautaView(**pauta_view(pauta))
+
+
+@router.post("/finops/pre-analysis/generate-tapaf")
+def pre_analysis_generate_tapaf(payload: PreAnalysisProposalRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    proposal = _load_proposal(db, user, payload.proposal_id)
+    pauta = db.scalar(select(PreAnalysisPauta).where(PreAnalysisPauta.proposal_id == proposal.id, PreAnalysisPauta.organization_id == user.organization_id))
+    if not pauta:
+        raise HTTPException(status_code=409, detail="Valide a documentação na Fase 1 antes de gerar TAPAF")
+    return generate_tapaf_checkout(pauta)
+
+
+@router.post("/finops/pre-analysis/tapaf-checkout-accept", response_model=PreAnalysisPautaView)
+def pre_analysis_tapaf_checkout_accept(payload: PreAnalysisTapafCheckoutAcceptRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    proposal = _load_proposal(db, user, payload.proposal_id)
+    pauta = db.scalar(select(PreAnalysisPauta).where(PreAnalysisPauta.proposal_id == proposal.id, PreAnalysisPauta.organization_id == user.organization_id))
+    if not pauta:
+        raise HTTPException(status_code=404, detail="Pauta de pré-análise não encontrada")
+    accept_tapaf_checkout(db, pauta, scroll_completed=payload.scroll_completed, checkbox_1=payload.checkbox_1, checkbox_2=payload.checkbox_2)
+    audit(db, user, "finops.pre_analysis.tapaf_checkout", "pre_analysis_pauta", pauta.id)
+    db.commit()
+    return PreAnalysisPautaView(**pauta_view(pauta))
+
+
+@router.post("/finops/pre-analysis/tapaf-payment-webhook", response_model=PreAnalysisPautaView)
+def pre_analysis_tapaf_payment_webhook(payload: PreAnalysisTapafPaymentWebhook, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    proposal = _load_proposal(db, user, payload.proposal_id)
+    pauta = db.scalar(select(PreAnalysisPauta).where(PreAnalysisPauta.proposal_id == proposal.id, PreAnalysisPauta.organization_id == user.organization_id))
+    if not pauta:
+        raise HTTPException(status_code=404, detail="Pauta de pré-análise não encontrada")
+    confirm_tapaf_payment(db, user, pauta, payload.event_id, payload.amount)
+    audit(db, user, "finops.pre_analysis.tapaf_payment", "pre_analysis_pauta", pauta.id, {"event_id": payload.event_id})
+    db.commit()
+    return PreAnalysisPautaView(**pauta_view(pauta))
+
+
+@router.post("/finops/pre-analysis/run-engine")
+def pre_analysis_run_engine(payload: PreAnalysisEngineRequest, user: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
+    proposal = _load_proposal(db, user, payload.proposal_id)
+    pauta = db.scalar(select(PreAnalysisPauta).where(PreAnalysisPauta.proposal_id == proposal.id, PreAnalysisPauta.organization_id == user.organization_id))
+    if not pauta:
+        raise HTTPException(status_code=404, detail="Pauta de pré-análise não encontrada")
+    result = run_engine_phase3(db, user, pauta, proposal, payload.model_dump())
+    audit(db, user, "finops.pre_analysis.run_engine", "pre_analysis_pauta", pauta.id, {"status_core": result.get("status_core")})
+    db.commit()
+    return {"pauta_id": pauta.pauta_code, "status": pauta.status, "result": result}
+
+
+@router.get("/finops/pre-analysis/{proposal_id}", response_model=PreAnalysisPautaView)
+def pre_analysis_get_pauta(proposal_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    proposal = _load_proposal(db, user, proposal_id)
+    pauta = db.scalar(select(PreAnalysisPauta).where(PreAnalysisPauta.proposal_id == proposal.id, PreAnalysisPauta.organization_id == user.organization_id))
+    if not pauta:
+        raise HTTPException(status_code=404, detail="Pauta de pré-análise não encontrada")
+    return PreAnalysisPautaView(**pauta_view(pauta))
+
+
+@router.get("/help/what-is-flash-capital")
+def help_what_is_flash_capital():
+    return {
+        "title": "Flash Capital",
+        "summary": (
+            "Esteira alternativa de crédito estruturado com compra e pacto de retrovenda imobiliária B2B, "
+            "sem exigência de score Bacen tradicional nem comprovação de faturamento PJ no formato SDC."
+        ),
+        "rate": "14% a.a. + IPCA (fundos) ou 2,5% a.m. (pool)",
+        "use_when": [
+            "Restrição cadastral identificada na Fase 3",
+            "Bem com idade superior a 10 anos",
+            "Parcela acima de 30% da renda com migração voluntária",
+        ],
+    }
 
 
 @router.get("/contracts/{contract_id}/receipts", response_model=list[PaymentReceiptView])

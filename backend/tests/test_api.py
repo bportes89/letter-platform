@@ -1074,3 +1074,120 @@ def test_sdc_vehicle_routing_registry_at_tapaf(client, auth_headers):
     assert blocked.status_code == 201
     assert blocked.json()["status"] == "BLOCKED"
     assert "VEHICLE_REGISTRY_RESTRICTION" in blocked.json()["blockers"]
+
+
+def _valid_pre_analysis_documents(**overrides):
+    base = [
+        {"code": "EXTRATO_BANCARIO_6M", "filename": "extrato.pdf", "dpi": 300, "present": True},
+        {"code": "PGDAS_DRE", "filename": "pgdas.pdf", "dpi": 300, "present": True},
+        {"code": "DECORE_CRC", "filename": "decore.pdf", "dpi": 300, "present": True},
+        {"code": "MATRICULA_OU_CRLV", "filename": "matricula.pdf", "dpi": 300, "present": True},
+        {"code": "LAUDO_AVM", "filename": "avm.pdf", "dpi": 300, "present": True},
+    ]
+    if overrides:
+        by_code = {d["code"]: d for d in base}
+        for code, patch in overrides.items():
+            by_code[code] = {**by_code[code], **patch}
+        return list(by_code.values())
+    return base
+
+
+def _sample_extratos(monthly_credit=50000):
+    return {f"2026-{m:02d}": [{"valor": monthly_credit, "tipo_credito": "PIX_RECEBIDO", "mesmo_titular_TED_bool": False}] for m in range(1, 7)}
+
+
+def test_pre_analysis_v6_documents_tapaf_and_engine(client, auth_headers):
+    lead = client.get("/api/v1/leads", headers=auth_headers).json()[0]
+    proposal = client.post("/api/v1/proposals", headers=auth_headers, json={
+        "lead_id": lead["id"], "product": "SDC", "requested_amount": "150000", "terms": {},
+    }).json()
+
+    pending = client.post("/api/v1/finops/pre-analysis/validate-documents", headers=auth_headers, json={
+        "proposal_id": proposal["id"],
+        "documents": _valid_pre_analysis_documents(LAUDO_AVM={"present": False}),
+    })
+    assert pending.status_code == 200
+    assert pending.json()["status"] == "PENDING_DOCUMENTS"
+    assert any(e["code"] == "LAUDO_AVM" for e in pending.json()["documents"]["errors"])
+
+    validated = client.post("/api/v1/finops/pre-analysis/validate-documents", headers=auth_headers, json={
+        "proposal_id": proposal["id"], "documents": _valid_pre_analysis_documents(),
+    })
+    assert validated.status_code == 200 and validated.json()["status"] == "DOCUMENTS_OK"
+
+    tapaf = client.post("/api/v1/finops/pre-analysis/generate-tapaf", headers=auth_headers, json={"proposal_id": proposal["id"]})
+    assert tapaf.status_code == 200
+    ui = tapaf.json()["interface_checkout_tapaf"]
+    assert ui["valor_nominal_taxa"] == "1500.00"
+    assert ui["botao_habilitado"] is False
+    assert "TAPAF" in ui["texto_explicativo_tooltip_interrogacao"]
+    assert "manifesto_html" in ui
+
+    blocked = client.post("/api/v1/finops/pre-analysis/tapaf-checkout-accept", headers=auth_headers, json={
+        "proposal_id": proposal["id"], "scroll_completed": False, "checkbox_1": True, "checkbox_2": True,
+    })
+    assert blocked.status_code == 422
+
+    accepted = client.post("/api/v1/finops/pre-analysis/tapaf-checkout-accept", headers=auth_headers, json={
+        "proposal_id": proposal["id"], "scroll_completed": True, "checkbox_1": True, "checkbox_2": True,
+    })
+    assert accepted.status_code == 200 and accepted.json()["status"] == "TAPAF_CHECKOUT_ACCEPTED"
+
+    paid = client.post("/api/v1/finops/pre-analysis/tapaf-payment-webhook", headers=auth_headers, json={
+        "proposal_id": proposal["id"], "event_id": "tapaf-webhook-001", "amount": "1500.00",
+    })
+    assert paid.status_code == 200 and paid.json()["status"] == "TAPAF_PAID"
+
+    engine = client.post("/api/v1/finops/pre-analysis/run-engine", headers=auth_headers, json={
+        "proposal_id": proposal["id"],
+        "adm_nome": "ANCORA",
+        "extratos_6_meses_data": _sample_extratos(50000),
+        "parcela_simulada": "8000",
+        "valor_avaliacao_bem": "200000",
+        "saldo_devedor_cotas": "150000",
+        "ano_fabricacao_bem": 2020,
+    })
+    assert engine.status_code == 200
+    assert engine.json()["result"]["status_core"] == "APROVADO_COMPLIANCE_NINA"
+    assert engine.json()["status"] == "APPROVED_VALID_STAMP"
+    assert "resumo_fiduciario_interno_oculto_para_o_fundo" not in engine.json()["result"]
+
+    pauta = client.get(f"/api/v1/finops/pre-analysis/{proposal['id']}", headers=auth_headers)
+    assert pauta.status_code == 200
+    assert pauta.json()["valid_stamp_hash"]
+    assert "resumo_fiduciario_interno_oculto_para_o_fundo" not in (pauta.json()["client_result"] or {})
+
+    help_flash = client.get("/api/v1/help/what-is-flash-capital")
+    assert help_flash.status_code == 200 and "Flash Capital" in help_flash.json()["title"]
+
+
+def test_pre_analysis_v6_income_margin_bifurcation(client, auth_headers):
+    lead = client.get("/api/v1/leads", headers=auth_headers).json()[0]
+    proposal = client.post("/api/v1/proposals", headers=auth_headers, json={
+        "lead_id": lead["id"], "product": "SDC", "requested_amount": "300000", "terms": {},
+    }).json()
+    client.post("/api/v1/finops/pre-analysis/validate-documents", headers=auth_headers, json={
+        "proposal_id": proposal["id"], "documents": _valid_pre_analysis_documents(),
+    })
+    client.post("/api/v1/finops/pre-analysis/tapaf-checkout-accept", headers=auth_headers, json={
+        "proposal_id": proposal["id"], "scroll_completed": True, "checkbox_1": True, "checkbox_2": True,
+    })
+    client.post("/api/v1/finops/pre-analysis/tapaf-payment-webhook", headers=auth_headers, json={
+        "proposal_id": proposal["id"], "event_id": "tapaf-webhook-002", "amount": "1500.00",
+    })
+    engine = client.post("/api/v1/finops/pre-analysis/run-engine", headers=auth_headers, json={
+        "proposal_id": proposal["id"],
+        "adm_nome": "ANCORA",
+        "extratos_6_meses_data": _sample_extratos(10000),
+        "parcela_simulada": "5000",
+        "valor_avaliacao_bem": "400000",
+        "saldo_devedor_cotas": "300000",
+        "ano_fabricacao_bem": 2022,
+    })
+    assert engine.status_code == 200
+    result = engine.json()["result"]
+    assert result["status_core"] == "REPROVADO_POR_PARCELA_MAIOR_QUE_30_PERCENT_DA_RENDA"
+    assert "bifurcacao_opcoes_interface_cliente" in result
+    assert "resumo_fiduciario_interno_oculto_para_o_fundo" not in result
+    assert engine.json()["status"] == "REPROVED"
+

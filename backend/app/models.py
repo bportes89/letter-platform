@@ -805,6 +805,26 @@ class PaymentEvent(Base):
     processed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
 
 
+class PreAnalysisPauta(TimestampMixin, Base):
+    __tablename__ = "pre_analysis_pautas"
+    __table_args__ = (UniqueConstraint("organization_id", "proposal_id"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    proposal_id: Mapped[str] = mapped_column(ForeignKey("proposals.id"), index=True)
+    pauta_code: Mapped[str] = mapped_column(String(80), index=True)
+    status: Mapped[str] = mapped_column(String(50), default="PENDING_DOCUMENTS", index=True)
+    documents_json: Mapped[str] = mapped_column(Text, default="[]")
+    tapaf_scroll_completed: Mapped[bool] = mapped_column(Boolean, default=False)
+    tapaf_checkbox_1: Mapped[bool] = mapped_column(Boolean, default=False)
+    tapaf_checkbox_2: Mapped[bool] = mapped_column(Boolean, default=False)
+    tapaf_payment_reference: Mapped[str | None] = mapped_column(String(120))
+    tapaf_paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    engine_result_json: Mapped[str | None] = mapped_column(Text)
+    client_result_json: Mapped[str | None] = mapped_column(Text)
+    valid_stamp_hash: Mapped[str | None] = mapped_column(String(128))
+    vault_s3_uri: Mapped[str | None] = mapped_column(String(500))
+
+
 class PaymentReceipt(TimestampMixin, Base):
     __tablename__ = "payment_receipts"
     __table_args__ = (UniqueConstraint("invoice_id", "payment_event_id"),)

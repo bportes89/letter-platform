@@ -1449,3 +1449,63 @@ class TenantQuotaView(ORMModel):
 class SecurityEventView(ORMModel):
     id: str; organization_id: str | None; event_type: str; severity: str
     ip_address: str | None; subject: str | None; created_at: datetime
+
+
+class PreAnalysisDocumentItem(BaseModel):
+    code: str
+    filename: str | None = None
+    dpi: int | None = None
+    present: bool = True
+    illegible: bool = False
+    rasurado: bool = False
+
+
+class PreAnalysisValidateDocumentsRequest(BaseModel):
+    proposal_id: str
+    documents: list[PreAnalysisDocumentItem]
+
+
+class PreAnalysisProposalRequest(BaseModel):
+    proposal_id: str
+
+
+class PreAnalysisTapafCheckoutAcceptRequest(BaseModel):
+    proposal_id: str
+    scroll_completed: bool
+    checkbox_1: bool
+    checkbox_2: bool
+
+
+class PreAnalysisTapafPaymentWebhook(BaseModel):
+    proposal_id: str
+    event_id: str
+    amount: Decimal = Field(gt=0)
+
+
+class PreAnalysisEngineRequest(BaseModel):
+    proposal_id: str
+    adm_nome: str = "ANCORA"
+    extratos_6_meses_data: dict = Field(default_factory=dict)
+    parcela_simulada: Decimal | None = None
+    valor_avaliacao_bem: Decimal = Field(default=Decimal("0"))
+    saldo_devedor_cotas: Decimal | None = None
+    ano_fabricacao_bem: int | None = None
+    restricoes_cadastrais_bool: bool = False
+    possui_gravame_bool: bool = False
+    valor_gravame_anterior: Decimal = Field(default=Decimal("0"))
+
+
+class PreAnalysisPautaView(BaseModel):
+    id: str
+    proposal_id: str
+    pauta_code: str
+    status: str
+    documents: dict | list
+    tapaf_scroll_completed: bool
+    tapaf_checkbox_1: bool
+    tapaf_checkbox_2: bool
+    tapaf_payment_reference: str | None
+    tapaf_paid_at: datetime | None
+    client_result: dict | None
+    valid_stamp_hash: str | None
+    created_at: datetime

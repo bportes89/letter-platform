@@ -16,6 +16,7 @@ import { OperationsModule } from "@/components/operations-module";
 import { StructuredPropertiesModule } from "@/components/structured-properties-module";
 import { LSSModule } from "@/components/lss-module";
 import { FinOpsModule } from "@/components/finops-module";
+import { PreAnalysisModule } from "@/components/pre-analysis-module";
 
 export default function ModulePage() {
   const {key}=useParams<{key:string}>(); const [module,setModule]=useState<Module|null>(null);
@@ -41,7 +42,7 @@ export default function ModulePage() {
   if(key==="reports")return <BIModule/>;
   if(key==="operations")return <OperationsModule/>;
   if(key==="lss")return <LSSModule/>;
-  if(key==="finops")return <FinOpsModule/>;
+  if(key==="finops")return <><FinOpsModule/><PreAnalysisModule/></>;
   return <>
     <div className="page-heading"><div><span className="eyebrow dark">MÓDULO LETTER</span><h1>{module.name}</h1><p>{module.description}</p></div><Status status={module.status}/></div>
     <div className="module-hero"><div><Construction/><h2>Fundação do módulo criada</h2><p>Este módulo já está integrado à navegação, identidade, organização, RBAC e auditoria da plataforma. As jornadas específicas serão ativadas conforme o roadmap.</p><button className="primary-button">Consultar roadmap <ArrowRight/></button></div><div className="module-checklist"><h3>Controles herdados</h3>{['Isolamento por organização','Permissões por escopo','Trilha de auditoria','Integrações por adaptadores','Testes e observabilidade'].map(x=><span key={x}><CheckCircle2/>{x}</span>)}</div></div>
