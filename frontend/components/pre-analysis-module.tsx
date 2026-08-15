@@ -50,8 +50,47 @@ export function PreAnalysisModule() {
   const [cb2, setCb2] = useState(false);
   const [showTooltip, setShowTooltip] = useState(false);
   const manifestRef = useRef<HTMLDivElement>(null);
+  const manifestEndRef = useRef<HTMLDivElement>(null);
 
   const [apiReady, setApiReady] = useState<boolean | null>(null);
+
+  const evaluateManifestScroll = useCallback(() => {
+    const el = manifestRef.current;
+    if (!el) return;
+    const remaining = el.scrollHeight - el.scrollTop - el.clientHeight;
+    if (remaining <= 24 || el.scrollHeight <= el.clientHeight + 1) setScrollDone(true);
+  }, []);
+
+  useEffect(() => {
+    if (!checkout) return;
+    setScrollDone(Boolean(pauta?.tapaf_scroll_completed));
+    if (pauta?.tapaf_scroll_completed) {
+      setCb1(Boolean(pauta.tapaf_checkbox_1));
+      setCb2(Boolean(pauta.tapaf_checkbox_2));
+    }
+
+    const el = manifestRef.current;
+    const end = manifestEndRef.current;
+    if (!el) return;
+
+    const raf = requestAnimationFrame(evaluateManifestScroll);
+
+    let observer: IntersectionObserver | undefined;
+    if (end) {
+      observer = new IntersectionObserver(
+        (entries) => {
+          if (entries.some((entry) => entry.isIntersecting)) setScrollDone(true);
+        },
+        { root: el, threshold: 0.25 },
+      );
+      observer.observe(end);
+    }
+
+    return () => {
+      cancelAnimationFrame(raf);
+      observer?.disconnect();
+    };
+  }, [checkout, pauta?.tapaf_scroll_completed, pauta?.tapaf_checkbox_1, pauta?.tapaf_checkbox_2, evaluateManifestScroll]);
 
   const loadProposals = useCallback(() => api<Proposal[]>("/proposals").then(setProposals), []);
   useEffect(() => { void loadProposals(); }, [loadProposals]);
@@ -73,11 +112,7 @@ export function PreAnalysisModule() {
 
   useEffect(() => { void loadPauta(proposalId); }, [proposalId]);
 
-  const onManifestScroll = () => {
-    const el = manifestRef.current;
-    if (!el) return;
-    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 8) setScrollDone(true);
-  };
+  const onManifestScroll = () => evaluateManifestScroll();
 
   async function validateDocs(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -246,8 +281,10 @@ export function PreAnalysisModule() {
                 <div ref={manifestRef} className="manifest-scroll" onScroll={onManifestScroll}>
                   <ScrollText size={18} />
                   <div className="manifest-body" dangerouslySetInnerHTML={{ __html: checkout.manifesto_html }} />
+                  <div ref={manifestEndRef} className="manifest-end-sentinel" aria-hidden="true" />
                 </div>
                 {!scrollDone && <small className="form-help">Role o manifesto até o final para habilitar as declarações abaixo.</small>}
+                {scrollDone && <small className="form-help">Manifesto lido — marque as duas declarações abaixo.</small>}
               </div>
 
               <div className="tapaf-acceptance">
