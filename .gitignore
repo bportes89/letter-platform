@@ -12,4 +12,5 @@ dist/
 *.log
 backend/storage/
 storage/
+frontend/.vercel
 .DS_Store

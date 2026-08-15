@@ -1,0 +1,34 @@
+# Blueprint opcional do Render.
+# Painel: New > Blueprint > conectar este repositório.
+# Depois cole LETTER_DATABASE_URL (Neon) e LETTER_CORS_ORIGINS (URL da Vercel).
+
+services:
+  - type: web
+    name: letter-api
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: bash scripts/start_cloud.sh
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.10"
+      - key: LETTER_ENV
+        value: staging
+      - key: LETTER_FINANCIAL_TRANSACTIONS_ENABLED
+        value: "false"
+      - key: LETTER_STORAGE_BACKEND
+        value: LOCAL
+      - key: LETTER_STORAGE_PATH
+        value: ./storage
+      - key: LETTER_LOG_LEVEL
+        value: INFO
+      - key: LETTER_SECRET_KEY
+        generateValue: true
+      - key: LETTER_DEMO_PASSWORD
+        sync: false
+      - key: LETTER_DATABASE_URL
+        sync: false
+      - key: LETTER_CORS_ORIGINS
+        sync: false
