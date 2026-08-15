@@ -48,7 +48,7 @@ class Settings(BaseSettings):
                         return [str(item).strip() for item in parsed if str(item).strip()]
                 except json.JSONDecodeError:
                     pass
-            return [item.strip() for item in value.split(",") if item.strip()]
+            return [item.strip().strip("\r\n") for item in value.replace("\r\n", "\n").split(",") if item.strip()]
         return value
 
     def production_issues(self) -> list[str]:

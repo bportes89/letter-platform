@@ -5,6 +5,7 @@ cd "$(dirname "$0")/.."
 
 echo "[letter] running migrations..."
 python -m alembic upgrade head
+echo "[letter] migrations complete"
 
 echo "[letter] seeding demo data (idempotent)..."
 python -m app.seed

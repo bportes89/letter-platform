@@ -13,6 +13,10 @@ depends_on = None
 
 
 def upgrade():
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    if "pre_analysis_pautas" in inspector.get_table_names():
+        return
     op.create_table(
         "pre_analysis_pautas",
         sa.Column("id", sa.String(36), primary_key=True),
