@@ -17,7 +17,9 @@ As regras abaixo reproduzem as premissas recebidas na documentação da LETTER. 
 
 - Taxa total travada: **4,5% a.m.** (juros simples).
 - Repasse padrão investidores: **2,5%**; spread plataforma: **2,0%**.
-- **Campanha:** `pool_investor_rate_percent` permite aumentar repasse aos investidores (até 4,5%); spread plataforma reduz proporcionalmente.
+- **Faixa automática** (`pool_investment_amount`): até R$ 100.000 → **1,6% a.m.**; a partir de R$ 100.000 → **2,0% a.m.** (spread plataforma ajusta automaticamente).
+- **Campanha:** `pool_investor_rate_percent` sobrescreve a faixa automática (até 4,5%).
+- **Fiscal:** rentabilidade do investidor pool registrada como `EXEMPT_NOT_WITHHELD` (livre de retenção na origem, política LETTER).
 
 ### Origem `FUND`
 
@@ -40,7 +42,9 @@ Regras comuns:
 
 - Taxa Price travada: **2,5% ao mês**.
 - Repasse padrão investidores: **1,6%**; spread plataforma: **0,9%**.
-- **Campanha:** `pool_investor_rate_percent` permite aumentar repasse pool (até 2,5%); spread plataforma reduz proporcionalmente.
+- **Faixa automática** (`pool_investment_amount`): até R$ 100.000 → **1,6% a.m.**; a partir de R$ 100.000 → **2,0% a.m.** (spread plataforma ajusta automaticamente).
+- **Campanha:** `pool_investor_rate_percent` sobrescreve a faixa automática (até 2,5%).
+- **Fiscal:** rentabilidade do investidor pool registrada como `EXEMPT_NOT_WITHHELD` (livre de retenção na origem, política LETTER).
 - Amortização (fundo comum) reduz saldo devedor e é segregada em conta de investimento da plataforma para ressarcimento ao investidor no encerramento.
 - Prazo de 60 meses: parcelas Price e saldo liquidado como Balloon Payment no mês 36.
 

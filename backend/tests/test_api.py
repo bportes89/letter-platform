@@ -1028,6 +1028,60 @@ def test_flash_pool_investor_rate_campaign_override(client, auth_headers):
     assert output["investor_rate_percent"] == "2.00"
     assert output["platform_spread_rate_percent"] == "0.50"
     assert output["monthly_rate_percent"] == "2.50"
+    assert output["pool_investor_rate_source"] == "MANUAL_CAMPAIGN_OVERRIDE"
+
+
+def test_flash_pool_investor_tier_up_to_100k(client, auth_headers):
+    lead = client.get("/api/v1/leads", headers=auth_headers).json()[0]
+    proposal = client.post("/api/v1/proposals", headers=auth_headers, json={
+        "lead_id": lead["id"], "product": "FLASH_CREDIT", "requested_amount": "200000", "terms": {}
+    }).json()
+    calculated = client.post(f"/api/v1/proposals/{proposal['id']}/calculate-flash-credit", headers=auth_headers, json={
+        "asset_value": "500000", "capital_source": "RETAIL", "term_months": 36,
+        "ipca_annual_percent": "0", "pool_investment_amount": "80000",
+    })
+    assert calculated.status_code == 201
+    output = calculated.json()["output"]
+    assert output["investor_rate_percent"] == "1.60"
+    assert output["platform_spread_rate_percent"] == "0.90"
+    assert output["pool_investor_tier"] == "UP_TO_100K"
+    assert output["pool_investor_tax_status"] == "EXEMPT_NOT_WITHHELD"
+
+
+def test_flash_pool_investor_tier_above_100k(client, auth_headers):
+    lead = client.get("/api/v1/leads", headers=auth_headers).json()[0]
+    proposal = client.post("/api/v1/proposals", headers=auth_headers, json={
+        "lead_id": lead["id"], "product": "FLASH_CREDIT", "requested_amount": "200000", "terms": {}
+    }).json()
+    calculated = client.post(f"/api/v1/proposals/{proposal['id']}/calculate-flash-credit", headers=auth_headers, json={
+        "asset_value": "500000", "capital_source": "RETAIL", "term_months": 36,
+        "ipca_annual_percent": "0", "pool_investment_amount": "150000",
+    })
+    assert calculated.status_code == 201
+    output = calculated.json()["output"]
+    assert output["investor_rate_percent"] == "2.00"
+    assert output["platform_spread_rate_percent"] == "0.50"
+    assert output["pool_investor_tier"] == "ABOVE_100K"
+    assert output["pool_investor_tax_status"] == "EXEMPT_NOT_WITHHELD"
+
+
+def test_sdc_pool_investor_tier_auto(client, auth_headers):
+    lead = client.get("/api/v1/leads", headers=auth_headers).json()[0]
+    proposal = client.post("/api/v1/proposals", headers=auth_headers, json={
+        "lead_id": lead["id"], "product": "SDC", "requested_amount": "800000", "terms": {}
+    }).json()
+    quotas = [q for q in client.get("/api/v1/quotas", headers=auth_headers).json() if q["category"] == "REAL_ESTATE"][:2]
+    calculated = client.post(f"/api/v1/proposals/{proposal['id']}/calculate-sdc", headers=auth_headers, json={
+        "quota_ids": [q["id"] for q in quotas], "duration_months": 12, "capital_source": "POOL",
+        "pool_investment_amount": "120000",
+    })
+    assert calculated.status_code == 201
+    output = calculated.json()["output"]
+    assert output["pool_investor_rate_percent"] == "2.0"
+    assert output["pool_investor_tier"] == "ABOVE_100K"
+    assert output["pool_investor_tax_status"] == "EXEMPT_NOT_WITHHELD"
+    assert output["investor_interest"] == "192000.00"
+    assert output["platform_spread"] == "240000.00"
 
 
 def test_sdc_vehicle_registry_blocks_valid_stamp(client, auth_headers):

@@ -671,9 +671,13 @@ class SdcCalculationRequest(BaseModel):
     quota_ids: list[str] = Field(min_length=1)
     duration_months: int = Field(default=12, ge=1, le=60)
     capital_source: str = Field(default="POOL")
+    pool_investment_amount: Decimal | None = Field(
+        default=None, gt=0,
+        description="Valor aplicado pelo investidor no pool. Até R$ 100 mil: 1,6% a.m.; acima: 2,0% a.m.",
+    )
     pool_investor_rate_percent: Decimal | None = Field(
         default=None, ge=0, le=4.5,
-        description="Repasse manual aos investidores do pool (campanha). Taxa total 4,5% permanece travada.",
+        description="Repasse manual aos investidores do pool (campanha). Sobrescreve faixa automática.",
     )
 
 
@@ -682,9 +686,13 @@ class FlashCreditCalculationRequest(BaseModel):
     capital_source: str
     term_months: int = Field(default=36)
     ipca_annual_percent: Decimal = Field(default=Decimal("0"), ge=0, le=100)
+    pool_investment_amount: Decimal | None = Field(
+        default=None, gt=0,
+        description="Valor aplicado pelo investidor no pool. Até R$ 100 mil: 1,6% a.m.; acima: 2,0% a.m.",
+    )
     pool_investor_rate_percent: Decimal | None = Field(
         default=None, ge=0, le=2.5,
-        description="Repasse manual aos investidores do pool (campanha). Taxa Price 2,5% permanece travada.",
+        description="Repasse manual aos investidores do pool (campanha). Sobrescreve faixa automática.",
     )
 
 

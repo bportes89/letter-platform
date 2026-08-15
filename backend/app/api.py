@@ -712,7 +712,7 @@ def calculate_sdc_proposal(proposal_id: str, payload: SdcCalculationRequest, use
     if len(quotas) != len(set(payload.quota_ids)): raise HTTPException(status_code=404, detail="Uma ou mais cotas não foram encontradas")
     calculation = calculate_sdc(
         db, user, proposal, quotas, payload.duration_months, payload.capital_source,
-        payload.pool_investor_rate_percent,
+        payload.pool_investor_rate_percent, payload.pool_investment_amount,
     )
     db.flush(); audit(db, user, "proposal.sdc_calculated", "calculation", calculation.id); db.commit(); db.refresh(calculation)
     return calculation_view(calculation)
@@ -724,7 +724,8 @@ def calculate_flash_credit_proposal(proposal_id: str, payload: FlashCreditCalcul
     if not proposal: raise HTTPException(status_code=404, detail="Proposta não encontrada")
     calculation = calculate_flash_credit(
         db, user, proposal, payload.asset_value, payload.capital_source,
-        payload.term_months, payload.ipca_annual_percent, payload.pool_investor_rate_percent,
+        payload.term_months, payload.ipca_annual_percent,
+        payload.pool_investor_rate_percent, payload.pool_investment_amount,
     )
     db.flush(); audit(db, user, "proposal.flash_credit_calculated", "calculation", calculation.id); db.commit(); db.refresh(calculation)
     return calculation_view(calculation)
