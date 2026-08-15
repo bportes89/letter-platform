@@ -39,6 +39,8 @@ const DOC_CODES = [
   { code: "LAUDO_AVM", label: "Laudo AVM" },
 ];
 
+const TAPAF_UI_STATUSES = new Set(["DOCUMENTS_OK", "TAPAF_CHECKOUT_ACCEPTED", "TAPAF_PAID"]);
+
 export function PreAnalysisModule() {
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [proposalId, setProposalId] = useState("");
@@ -138,21 +140,35 @@ export function PreAnalysisModule() {
     }
   }
 
-  async function openTapaf() {
+  async function loadTapafCheckout(preserveAcceptance = false) {
     try {
       const res = await api<{ interface_checkout_tapaf: TapafCheckout }>("/finops/pre-analysis/generate-tapaf", {
         method: "POST",
         body: JSON.stringify({ proposal_id: proposalId }),
       });
       setCheckout(res.interface_checkout_tapaf);
-      setScrollDone(false);
-      setCb1(false);
-      setCb2(false);
-      setMessage("Checkout TAPAF carregado. Role o manifesto e marque as duas declarações.");
+      if (!preserveAcceptance) {
+        setScrollDone(false);
+        setCb1(false);
+        setCb2(false);
+      }
     } catch (x) {
-      setMessage(x instanceof Error ? x.message : "Falha ao gerar TAPAF");
+      setMessage(x instanceof Error ? x.message : "Falha ao carregar checkout TAPAF");
     }
   }
+
+  async function openTapaf() {
+    await loadTapafCheckout(false);
+    setMessage("Checkout TAPAF carregado. Role o manifesto e marque as duas declarações.");
+  }
+
+  useEffect(() => {
+    if (!proposalId || !pauta || !TAPAF_UI_STATUSES.has(pauta.status) || checkout) return;
+    setScrollDone(Boolean(pauta.tapaf_scroll_completed));
+    setCb1(Boolean(pauta.tapaf_checkbox_1));
+    setCb2(Boolean(pauta.tapaf_checkbox_2));
+    void loadTapafCheckout(true);
+  }, [proposalId, pauta?.status, pauta?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function acceptCheckout() {
     try {
@@ -207,9 +223,11 @@ export function PreAnalysisModule() {
     }
   }
 
+  const showTapafPhase = Boolean(pauta && TAPAF_UI_STATUSES.has(pauta.status));
   const canPay = pauta?.status === "TAPAF_CHECKOUT_ACCEPTED";
-  const canRunEngine = pauta?.status === "TAPAF_PAID";
+  const tapafPaid = pauta?.status === "TAPAF_PAID";
   const gateOpen = scrollDone && cb1 && cb2;
+  const canRunEngine = tapafPaid;
 
   return (
     <>
@@ -258,13 +276,19 @@ export function PreAnalysisModule() {
         )}
       </section>
 
-      {pauta?.status === "DOCUMENTS_OK" && (
+      {showTapafPhase && (
         <section className="panel">
           <h2>Fase 2 — Checkout TAPAF</h2>
           {!checkout ? (
             <button type="button" onClick={() => void openTapaf()}>Abrir painel TAPAF</button>
           ) : (
             <div className="tapaf-checkout">
+              {canPay && (
+                <div className="notice"><CheckCircle2 />Aceite registrado. Clique em <b>{checkout.botao_label}</b> abaixo para confirmar o pagamento sandbox.</div>
+              )}
+              {tapafPaid && (
+                <div className="notice"><CheckCircle2 />TAPAF paga — prossiga para a Fase 3 abaixo.</div>
+              )}
               <div className="finops-summary tapaf-price">
                 <article>
                   <small>Taxa nominal</small>
@@ -300,9 +324,11 @@ export function PreAnalysisModule() {
               </div>
 
               <div className="tapaf-actions">
-                <button type="button" className="tapaf-btn-secondary" disabled={!gateOpen} onClick={() => void acceptCheckout()}>
-                  Registrar aceite do manifesto
-                </button>
+                {!canPay && !tapafPaid && (
+                  <button type="button" className="tapaf-btn-secondary" disabled={!gateOpen} onClick={() => void acceptCheckout()}>
+                    Registrar aceite do manifesto
+                  </button>
+                )}
                 <button type="button" className="tapaf-btn-primary" disabled={!canPay} onClick={() => void payTapaf()}>
                   {checkout.botao_label}
                 </button>

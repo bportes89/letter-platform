@@ -218,7 +218,7 @@ def validate_documents_phase1(db: Session, user: User, proposal: Proposal, docum
 
 
 def generate_tapaf_checkout(pauta: PreAnalysisPauta) -> dict:
-    if pauta.status != "DOCUMENTS_OK":
+    if pauta.status not in {"DOCUMENTS_OK", "TAPAF_CHECKOUT_ACCEPTED", "TAPAF_PAID"}:
         raise HTTPException(status_code=409, detail="Documentação deve estar validada na Fase 1 antes da TAPAF")
     return {
         "endpoint": "/api/v1/finops/pre-analysis/generate-tapaf",
