@@ -805,6 +805,31 @@ class PaymentEvent(Base):
     processed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
 
 
+class PaymentReceipt(TimestampMixin, Base):
+    __tablename__ = "payment_receipts"
+    __table_args__ = (UniqueConstraint("invoice_id", "payment_event_id"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    invoice_id: Mapped[str] = mapped_column(ForeignKey("invoices.id"), index=True)
+    contract_id: Mapped[str] = mapped_column(ForeignKey("contracts.id"), index=True)
+    payment_event_id: Mapped[str | None] = mapped_column(ForeignKey("payment_events.id"))
+    partner_id: Mapped[str] = mapped_column(String(80))
+    reference_month: Mapped[int] = mapped_column()
+    filename: Mapped[str] = mapped_column(String(120))
+    total_paid: Mapped[float] = mapped_column(Numeric(15, 2))
+    fruicao_amount: Mapped[float] = mapped_column(Numeric(15, 2))
+    amortizacao_amount: Mapped[float] = mapped_column(Numeric(15, 2))
+    tax_withheld: Mapped[float] = mapped_column(Numeric(15, 2))
+    authenticity_hash: Mapped[str] = mapped_column(String(64), index=True)
+    customer_route: Mapped[str] = mapped_column(String(500))
+    vault_s3_uri: Mapped[str] = mapped_column(String(500))
+    document_id: Mapped[str | None] = mapped_column(ForeignKey("documents.id"))
+    payload_json: Mapped[str] = mapped_column(Text)
+    email_status: Mapped[str] = mapped_column(String(30), default="SENT_D+0")
+    push_status: Mapped[str] = mapped_column(String(30), default="ACTIVE")
+    issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class ReconciliationBatch(TimestampMixin, Base):
     __tablename__ = "reconciliation_batches"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)

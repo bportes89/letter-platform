@@ -73,9 +73,14 @@ def generate_billing_schedule(db: Session, contract: Contract, proposal: Proposa
     db.flush(); return rows
 
 
-def apply_payment(db: Session, user: User, invoice: Invoice, event_id: str, amount: Decimal, metadata: dict) -> tuple[PaymentEvent,bool]:
+def apply_payment(db: Session, user: User, invoice: Invoice, event_id: str, amount: Decimal, metadata: dict) -> tuple[PaymentEvent,bool,dict|None]:
     existing=db.scalar(select(PaymentEvent).where(PaymentEvent.provider_event_id==event_id))
-    if existing: return existing,False
+    if existing:
+        from app.invoice_processor_service import receipt_processor_response
+        from app.models import PaymentReceipt
+        receipt=db.scalar(select(PaymentReceipt).where(PaymentReceipt.payment_event_id==existing.id))
+        payload=receipt_processor_response(receipt,transacao_id=event_id) if receipt else None
+        return existing,False,payload
     value=money(amount);outstanding=money(Decimal(str(invoice.total_amount))-Decimal(str(invoice.paid_amount)))
     new_paid=money(Decimal(str(invoice.paid_amount))+value)
     invoice.paid_amount=new_paid
@@ -88,7 +93,12 @@ def apply_payment(db: Session, user: User, invoice: Invoice, event_id: str, amou
     event=PaymentEvent(organization_id=user.organization_id,invoice_id=invoice.id,provider_event_id=event_id,amount=value,status=status,payload_json=json.dumps(metadata))
     db.add(event);db.flush()
     if status=="DIVERGENT": create_webhook_divergence(db,user,invoice,event,outstanding,value)
-    return event,True
+    receipt_payload=None
+    if status=="MATCHED":
+        from app.invoice_processor_service import process_invoice_settlement, receipt_processor_response
+        receipt=process_invoice_settlement(db,user,invoice,event)
+        receipt_payload=receipt_processor_response(receipt,transacao_id=event_id)
+    return event,True,receipt_payload
 
 
 def create_webhook_divergence(db:Session,user:User,invoice:Invoice,event:PaymentEvent,expected:Decimal,received:Decimal):
@@ -112,7 +122,7 @@ def import_reconciliation_csv(db:Session,user:User,data:bytes)->ReconciliationBa
         if not invoice: status="DIVERGENT";reason="INVOICE_NOT_FOUND";divergent+=1
         elif received!=expected: status="DIVERGENT";reason="AMOUNT_MISMATCH";divergent+=1
         else:
-            event,processed=apply_payment(db,user,invoice,row["external_id"],received,{"source":"CSV"});status="MATCHED";reason=None;matched+=1
+            event,processed,receipt_payload=apply_payment(db,user,invoice,row["external_id"],received,{"source":"CSV"});status="MATCHED";reason=None;matched+=1
         db.add(ReconciliationItem(organization_id=user.organization_id,batch_id=batch.id,invoice_id=invoice.id if invoice else None,external_reference=row["invoice_number"],external_event_id=row["external_id"],expected_amount=expected,received_amount=received,payment_date=date.fromisoformat(row["payment_date"]),status=status,reason=reason))
     batch.matched_records=matched;batch.divergent_records=divergent;batch.status="RECONCILED" if divergent==0 else "DIVERGENT";return batch
 

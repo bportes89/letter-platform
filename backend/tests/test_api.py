@@ -350,6 +350,10 @@ def test_sdc_billing_schedule_and_idempotent_payment(client, auth_headers):
     first = client.post(f"/api/v1/invoices/{invoice['id']}/mock-payment-webhook", headers=auth_headers, json=payload)
     replay = client.post(f"/api/v1/invoices/{invoice['id']}/mock-payment-webhook", headers=auth_headers, json=payload)
     assert first.status_code == 200 and first.json()["processed"] is True and first.json()["invoice_status"] == "PAID"
+    assert "invoice_processor" in first.json()
+    assert first.json()["invoice_processor"]["status"] == "SUCCESS"
+    receipts = client.get(f"/api/v1/contracts/{contract['id']}/receipts", headers=auth_headers)
+    assert receipts.status_code == 200 and len(receipts.json()) >= 1
     assert replay.status_code == 200 and replay.json()["processed"] is False
 
 

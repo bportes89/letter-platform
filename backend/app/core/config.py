@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     integration_circuit_failure_threshold: int = 3
     integration_circuit_cooldown_seconds: int = 60
     integration_http_timeout_seconds: float = 10.0
+    vault_bucket: str = "letter-vault-private"
+    vault_prefix: str = "company-vault"
 
     @field_validator("cors_origins", mode="before")
     @classmethod

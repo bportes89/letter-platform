@@ -446,6 +446,29 @@ class InvoicePaymentWebhook(BaseModel):
     metadata: dict = Field(default_factory=dict)
 
 
+class InvoiceProcessorRequest(BaseModel):
+    invoice_id: str
+
+
+class PaymentReceiptView(BaseModel):
+    id: str
+    contract_id: str
+    invoice_id: str
+    partner_id: str
+    reference_month: int
+    filename: str
+    total_paid: Decimal
+    fruicao_amount: Decimal
+    amortizacao_amount: Decimal
+    tax_withheld: Decimal
+    authenticity_hash: str
+    customer_route: str
+    vault_s3_uri: str
+    email_status: str
+    push_status: str
+    issued_at: datetime
+
+
 class ReconciliationBatchView(ORMModel):
     id: str
     source: str

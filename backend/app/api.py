@@ -2,7 +2,7 @@ import json
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import Response
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
@@ -21,7 +21,7 @@ from app.models import (
     CollectionAction, CommissionEntry, CommissionRule, DelinquencyCase,
     EscrowAccount, FundingOpportunity, Invoice, RecoveredAsset,
     InvestmentPosition, InvestmentReservation, KycCase, Lead, LedgerEntry,
-    LedgerTransaction, NetworkNode, PayoutApproval, PayoutRequest, Proposal,
+    LedgerTransaction, NetworkNode, PaymentReceipt, PayoutApproval, PayoutRequest, Proposal,
     Quota, QuotaReservation, SignatureEnvelope, User, UserInvitation,
     ReconciliationBatch, ReconciliationItem, TaxClosing, TaxDocument, TaxException,
     UnderwritingAssessment, UnderwritingDecision, UnderwritingPolicy, OperationalJob, SecurityEvent, TenantQuota,
@@ -53,7 +53,8 @@ from app.schemas import (
     NinaApprovalRequest, NinaCriticalApprovalView, NinaDistressCaseCreate, NinaDistressCaseView,
     NinaDistressEventView, NinaDocumentCreate, NinaGateApplyRequest, NinaLegalDocumentView, NinaTimelineEvaluateRequest,
     InviteAccept, InviteCreate, KycCreate, KycDecision, KycView, LeadCreate,
-    InvestmentPositionView, InvestmentReservationView, InvestmentReserveRequest, InvoicePaymentWebhook, InvoiceView,
+    InvestmentPositionView, InvestmentReservationView, InvestmentReserveRequest, InvoicePaymentWebhook, InvoiceProcessorRequest, InvoiceView,
+    PaymentReceiptView,
     LeadUpdate, LeadView, LedgerPostRequest, LedgerTransactionView, LoginRequest,
     FlashCreditCalculationRequest, MfaSetupView, MfaVerify, ModuleView, PasswordResetConfirm, PasswordResetRequest,
     NetworkNodeCreate, NetworkNodeView, PayoutApprove, PayoutCreate, PayoutView, ProposalCreate, ProposalUpdate,
@@ -102,6 +103,8 @@ from app.core.security import decode_token, hash_password, verify_password
 from app.dependencies import require_step_up
 from app.product_service import calculate_flash_credit, calculate_sdc
 from app.valid_stamp_requirements import valid_stamp_requirements
+from app.invoice_processor_service import process_invoice_settlement, receipt_processor_response, receipt_view
+from app.storage_service import get_storage
 from app.vehicle_registry_service import query_vehicle_registry
 from app.finops_engine import create_contract_quote, four_scenarios, ingest_event, settlement_curve, sdc_bullet_and_split
 from app.network_service import (
@@ -388,9 +391,12 @@ def invoices(status_filter: str | None = Query(default=None,alias="status"), con
 def invoice_payment_webhook(invoice_id: str, payload: InvoicePaymentWebhook, user: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
     invoice=db.scalar(select(Invoice).where(Invoice.id==invoice_id,Invoice.organization_id==user.organization_id))
     if not invoice: raise HTTPException(status_code=404,detail="Fatura não encontrada")
-    event,processed=apply_payment(db,user,invoice,payload.event_id,payload.amount,payload.metadata)
+    event,processed,receipt_payload=apply_payment(db,user,invoice,payload.event_id,payload.amount,payload.metadata)
     if processed:audit(db,user,"invoice.payment_processed","invoice",invoice.id,{"event_id":payload.event_id,"status":event.status})
-    db.commit();db.refresh(invoice);return {"event_id":event.provider_event_id,"processed":processed,"match_status":event.status,"invoice_status":invoice.status,"paid_amount":str(invoice.paid_amount)}
+    db.commit();db.refresh(invoice)
+    response={"event_id":event.provider_event_id,"processed":processed,"match_status":event.status,"invoice_status":invoice.status,"paid_amount":str(invoice.paid_amount)}
+    if receipt_payload: response["invoice_processor"]=receipt_payload
+    return response
 
 
 @router.post("/reconciliation/import", response_model=ReconciliationBatchView, status_code=201)
@@ -758,6 +764,64 @@ def finops_events(user:User=Depends(require_scope("admin:users")),db:Session=Dep
 @router.post("/finops/sdc/bullet-split-preview")
 def sdc_bullet_split_preview(payload:SdcBulletPreviewRequest,user:User=Depends(require_scope("payments:review"))):
     return sdc_bullet_and_split(payload.capital,payload.turnover_days,payload.commission_pool,payload.level3_available)
+
+
+@router.post("/finops/billing/invoice-processor")
+def finops_invoice_processor(payload: InvoiceProcessorRequest, user: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
+    invoice = db.scalar(select(Invoice).where(Invoice.id == payload.invoice_id, Invoice.organization_id == user.organization_id))
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Fatura não encontrada")
+    if invoice.status != "PAID":
+        raise HTTPException(status_code=409, detail="Fatura deve estar PAID para emitir recibo FinOps")
+    receipt = process_invoice_settlement(db, user, invoice)
+    audit(db, user, "finops.invoice_processor", "payment_receipt", receipt.id)
+    db.commit()
+    return receipt_processor_response(receipt)
+
+
+@router.get("/contracts/{contract_id}/receipts", response_model=list[PaymentReceiptView])
+def contract_receipts(contract_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    contract = db.scalar(select(Contract).where(Contract.id == contract_id, Contract.organization_id == user.organization_id))
+    if not contract:
+        raise HTTPException(status_code=404, detail="Contrato não encontrado")
+    rows = db.scalars(select(PaymentReceipt).where(PaymentReceipt.contract_id == contract_id).order_by(PaymentReceipt.reference_month))
+    return [PaymentReceiptView(**receipt_view(x)) for x in rows]
+
+
+@router.get("/customer/dashboard/contracts/{contract_id}/receipts", response_model=list[PaymentReceiptView])
+def customer_contract_receipts(contract_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return contract_receipts(contract_id, user, db)
+
+
+@router.get("/contracts/{contract_id}/receipts/{receipt_id}/pdf")
+def receipt_pdf_by_id(contract_id: str, receipt_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return _receipt_pdf_response(contract_id, user, db, receipt_id=receipt_id)
+
+
+@router.get("/customer/dashboard/contracts/{contract_id}/receipts/{filename}")
+def customer_receipt_pdf(contract_id: str, filename: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return _receipt_pdf_response(contract_id, user, db, filename=filename)
+
+
+def _receipt_pdf_response(contract_id: str, user: User, db: Session, *, receipt_id: str | None = None, filename: str | None = None):
+    contract = db.scalar(select(Contract).where(Contract.id == contract_id, Contract.organization_id == user.organization_id))
+    if not contract:
+        raise HTTPException(status_code=404, detail="Contrato não encontrado")
+    query = select(PaymentReceipt).where(PaymentReceipt.contract_id == contract_id)
+    if receipt_id:
+        query = query.where(PaymentReceipt.id == receipt_id)
+    else:
+        query = query.where(PaymentReceipt.filename == filename)
+    receipt = db.scalar(query)
+    if not receipt:
+        raise HTTPException(status_code=404, detail="Recibo não encontrado")
+    doc = db.get(Document, receipt.document_id) if receipt.document_id else None
+    key = doc.storage_key if doc else f"customer-vault/contracts/{contract_id}/receipts/{receipt.filename}"
+    try:
+        pdf = get_storage().get(key)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Arquivo PDF não encontrado no acervo")
+    return Response(content=pdf, media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="{receipt.filename}"'})
 
 
 @router.post("/flash-credit/policies",response_model=FlashCreditPolicyView,status_code=201)
