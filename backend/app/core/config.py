@@ -1,7 +1,8 @@
 from functools import lru_cache
+from typing import Annotated
 
 from pydantic import field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -13,7 +14,7 @@ class Settings(BaseSettings):
     secret_key: str = "development-only-secret-key-change-me"
     access_token_minutes: int = 30
     refresh_token_days: int = 7
-    cors_origins: list[str] = ["http://localhost:3000"]
+    cors_origins: Annotated[list[str], NoDecode] = ["http://localhost:3000"]
     financial_transactions_enabled: bool = False
     storage_path: str = "./storage"
     storage_backend: str = "LOCAL"
@@ -36,6 +37,17 @@ class Settings(BaseSettings):
     @classmethod
     def parse_origins(cls, value):
         if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return []
+            if stripped.startswith("["):
+                import json
+                try:
+                    parsed = json.loads(stripped)
+                    if isinstance(parsed, list):
+                        return [str(item).strip() for item in parsed if str(item).strip()]
+                except json.JSONDecodeError:
+                    pass
             return [item.strip() for item in value.split(",") if item.strip()]
         return value
 
