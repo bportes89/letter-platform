@@ -9,7 +9,14 @@ import { api, logout, Module, User } from "@/lib/api";
 export function Shell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname(); const [modules, setModules] = useState<Module[]>([]); const [user, setUser] = useState<User | null>(null); const [open, setOpen] = useState(false);
   useEffect(() => {
-    Promise.all([api<Module[]>("/modules"), api<User>("/auth/me")]).then(([m,u]) => {setModules(m);setUser(u)}).catch(() => logout());
+    Promise.all([api<Module[]>("/modules"), api<User>("/auth/me")]).then(([m,u]) => {
+      const nav = m.some(x => x.key === "finops") ? m : [
+        ...m.slice(0, 9),
+        { key: "finops", name: "FinOps e quitação", description: "Simulador, quitação e pré-análise TAPAF", status: "ACTIVE", route: "/finops", critical: true },
+        ...m.slice(9),
+      ];
+      setModules(nav); setUser(u);
+    }).catch(() => logout());
   }, []);
   return <div className="app-shell">
     <aside className={open ? "sidebar open" : "sidebar"}>

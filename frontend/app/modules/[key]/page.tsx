@@ -19,9 +19,14 @@ import { FinOpsModule } from "@/components/finops-module";
 import { PreAnalysisModule } from "@/components/pre-analysis-module";
 
 export default function ModulePage() {
-  const {key}=useParams<{key:string}>(); const [module,setModule]=useState<Module|null>(null);
-  useEffect(()=>{api<Module[]>("/modules").then(items=>setModule(items.find(i=>i.key===key)??null))},[key]);
-  if(!module)return <div className="loading">Carregando módulo...</div>;
+  const {key}=useParams<{key:string}>(); const [module,setModule]=useState<Module|null>(null); const [loading,setLoading]=useState(true);
+  useEffect(()=>{
+    api<Module[]>("/modules")
+      .then(items=>setModule(items.find(i=>i.key===key)??null))
+      .catch(()=>setModule(null))
+      .finally(()=>setLoading(false));
+  },[key]);
+
   if(key==="crm")return <LeadsModule/>;
   if(key==="inventory")return <InventoryModule/>;
   if(key==="proposals")return <ProposalsModule/>;
@@ -43,6 +48,9 @@ export default function ModulePage() {
   if(key==="operations")return <OperationsModule/>;
   if(key==="lss")return <LSSModule/>;
   if(key==="finops")return <><FinOpsModule/><PreAnalysisModule/></>;
+
+  if(loading)return <div className="loading">Carregando módulo...</div>;
+  if(!module)return <div className="error">Módulo &quot;{key}&quot; não encontrado ou indisponível neste ambiente.</div>;
   return <>
     <div className="page-heading"><div><span className="eyebrow dark">MÓDULO LETTER</span><h1>{module.name}</h1><p>{module.description}</p></div><Status status={module.status}/></div>
     <div className="module-hero"><div><Construction/><h2>Fundação do módulo criada</h2><p>Este módulo já está integrado à navegação, identidade, organização, RBAC e auditoria da plataforma. As jornadas específicas serão ativadas conforme o roadmap.</p><button className="primary-button">Consultar roadmap <ArrowRight/></button></div><div className="module-checklist"><h3>Controles herdados</h3>{['Isolamento por organização','Permissões por escopo','Trilha de auditoria','Integrações por adaptadores','Testes e observabilidade'].map(x=><span key={x}><CheckCircle2/>{x}</span>)}</div></div>
