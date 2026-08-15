@@ -2,6 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { BrainCircuit, CheckCircle2, Download, Gauge, ShieldCheck, Sparkles } from "lucide-react";
+import { api, BISummary, downloadApi, NinaRoutingAssessment, NinaRoutingPolicy, Proposal, UnderwritingAssessment, UnderwritingPolicy } from "@/lib/api";
 import { VEHICLE_CLASSES } from "@/lib/products";
 
 const brl=new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"});
