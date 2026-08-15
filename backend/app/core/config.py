@@ -33,6 +33,18 @@ class Settings(BaseSettings):
     vault_bucket: str = "letter-vault-private"
     vault_prefix: str = "company-vault"
 
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def normalize_database_url(cls, value):
+        if not isinstance(value, str):
+            return value
+        url = value.strip()
+        if url.startswith("postgres://"):
+            return "postgresql+psycopg://" + url.removeprefix("postgres://")
+        if url.startswith("postgresql://") and "+psycopg" not in url:
+            return "postgresql+psycopg://" + url.removeprefix("postgresql://")
+        return url
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def parse_origins(cls, value):
