@@ -202,14 +202,16 @@ export function PreAnalysisModule() {
         {pauta && (
           <p className="form-help">Pauta <b>{pauta.pauta_code}</b> · status <span className="pill">{pauta.status}</span></p>
         )}
-        <form className="stack-form" onSubmit={validateDocs}>
+        <form className="stack-form doc-check-grid" onSubmit={validateDocs}>
           {DOC_CODES.map(({ code, label }) => (
-            <fieldset key={code} className="selection-box">
+            <fieldset key={code} className="doc-check-card">
               <legend>{label}</legend>
-              <label><input type="checkbox" name={`${code}_present`} defaultChecked /> Documento presente</label>
-              <input name={`${code}_dpi`} type="number" min="72" defaultValue="300" placeholder="DPI" />
-              <label><input type="checkbox" name={`${code}_illegible`} /> Ilegível</label>
-              <label><input type="checkbox" name={`${code}_rasurado`} /> Rasurado</label>
+              <div className="doc-check-row">
+                <label><input type="checkbox" name={`${code}_present`} defaultChecked /> Documento presente</label>
+                <label>DPI <input name={`${code}_dpi`} type="number" min="72" defaultValue="300" /></label>
+                <label><input type="checkbox" name={`${code}_illegible`} /> Ilegível</label>
+                <label><input type="checkbox" name={`${code}_rasurado`} /> Rasurado</label>
+              </div>
             </fieldset>
           ))}
           <button disabled={!proposalId}>Validar documentação (OCR sandbox)</button>
@@ -227,8 +229,8 @@ export function PreAnalysisModule() {
           {!checkout ? (
             <button type="button" onClick={() => void openTapaf()}>Abrir painel TAPAF</button>
           ) : (
-            <>
-              <div className="finops-summary">
+            <div className="tapaf-checkout">
+              <div className="finops-summary tapaf-price">
                 <article>
                   <small>Taxa nominal</small>
                   <strong>{brl.format(Number(checkout.valor_nominal_taxa))}</strong>
@@ -238,17 +240,38 @@ export function PreAnalysisModule() {
                   {showTooltip && <div className="tooltip-pop">{checkout.texto_explicativo_tooltip_interrogacao}</div>}
                 </article>
               </div>
-              <div ref={manifestRef} className="manifest-scroll" onScroll={onManifestScroll}>
-                <ScrollText size={18} />
-                <div dangerouslySetInnerHTML={{ __html: checkout.manifesto_html }} />
+
+              <div>
+                <h3 className="tapaf-section-title">Manifesto regulatório</h3>
+                <div ref={manifestRef} className="manifest-scroll" onScroll={onManifestScroll}>
+                  <ScrollText size={18} />
+                  <div className="manifest-body" dangerouslySetInnerHTML={{ __html: checkout.manifesto_html }} />
+                </div>
+                {!scrollDone && <small className="form-help">Role o manifesto até o final para habilitar as declarações abaixo.</small>}
               </div>
-              {!scrollDone && <small className="form-help">Role o manifesto até o final para habilitar as declarações.</small>}
-              <label><input type="checkbox" checked={cb1} disabled={!scrollDone} onChange={(e) => setCb1(e.target.checked)} /> {checkout.checkbox_obrigatorio_01}</label>
-              <label><input type="checkbox" checked={cb2} disabled={!scrollDone} onChange={(e) => setCb2(e.target.checked)} /> {checkout.checkbox_obrigatorio_02}</label>
-              <button type="button" disabled={!gateOpen} onClick={() => void acceptCheckout()}>Registrar aceite do manifesto</button>
-              <button type="button" disabled={!canPay} onClick={() => void payTapaf()}>{checkout.botao_label}</button>
+
+              <div className="tapaf-acceptance">
+                <h4>Declarações obrigatórias</h4>
+                <label className="tapaf-check">
+                  <input type="checkbox" checked={cb1} disabled={!scrollDone} onChange={(e) => setCb1(e.target.checked)} />
+                  <span>{checkout.checkbox_obrigatorio_01}</span>
+                </label>
+                <label className="tapaf-check">
+                  <input type="checkbox" checked={cb2} disabled={!scrollDone} onChange={(e) => setCb2(e.target.checked)} />
+                  <span>{checkout.checkbox_obrigatorio_02}</span>
+                </label>
+              </div>
+
+              <div className="tapaf-actions">
+                <button type="button" className="tapaf-btn-secondary" disabled={!gateOpen} onClick={() => void acceptCheckout()}>
+                  Registrar aceite do manifesto
+                </button>
+                <button type="button" className="tapaf-btn-primary" disabled={!canPay} onClick={() => void payTapaf()}>
+                  {checkout.botao_label}
+                </button>
+              </div>
               {canPay && <small className="form-help">Pix sandbox: {checkout.gateway_baas_pix_qrcode.slice(0, 48)}…</small>}
-            </>
+            </div>
           )}
         </section>
       )}
