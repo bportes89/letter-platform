@@ -152,6 +152,22 @@ def health():
     return {"status": "ok", "service": "letter-api"}
 
 
+@router.get("/platform/capabilities")
+def platform_capabilities():
+    return {
+        "version": "0.24.0",
+        "features": {
+            "finops_pre_analysis_v6": True,
+            "finops_invoice_processor_v3": True,
+            "finops_events": True,
+            "nina_routing": True,
+            "valid_stamp": True,
+            "lss": True,
+            "structured_properties": True,
+        },
+    }
+
+
 @router.post("/auth/login", response_model=TokenPair)
 def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)):
     ip=request.client.host if request.client else "unknown";allowed,retry=rate_limiter.allow(f"login:{ip}:{payload.email.lower()}",settings.login_rate_limit_per_minute)

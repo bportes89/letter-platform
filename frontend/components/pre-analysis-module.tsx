@@ -51,8 +51,16 @@ export function PreAnalysisModule() {
   const [showTooltip, setShowTooltip] = useState(false);
   const manifestRef = useRef<HTMLDivElement>(null);
 
+  const [apiReady, setApiReady] = useState<boolean | null>(null);
+
   const loadProposals = useCallback(() => api<Proposal[]>("/proposals").then(setProposals), []);
   useEffect(() => { void loadProposals(); }, [loadProposals]);
+
+  useEffect(() => {
+    api<{ features: { finops_pre_analysis_v6?: boolean } }>("/platform/capabilities")
+      .then((caps) => setApiReady(Boolean(caps.features?.finops_pre_analysis_v6)))
+      .catch(() => setApiReady(false));
+  }, []);
 
   async function loadPauta(id: string) {
     if (!id) { setPauta(null); return; }
@@ -179,6 +187,11 @@ export function PreAnalysisModule() {
         <div className="operational-icon"><FileSearch /></div>
       </div>
       {message && <div className="notice"><CheckCircle2 />{message}</div>}
+      {apiReady === false && (
+        <div className="notice warning"><AlertCircle />
+          A API no Render ainda não foi atualizada com a pré-análise V6. No painel Render, abra o serviço <b>letter-api</b> → <b>Manual Deploy</b> → <b>Deploy latest commit</b> e aguarde 3–5 minutos.
+        </div>
+      )}
 
       <section className="panel">
         <h2>Fase 1 — Upload e triagem OCR</h2>

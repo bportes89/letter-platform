@@ -1,4 +1,4 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL?.trim() || "http://localhost:8000/api/v1";
+const API_URL = (process.env.NEXT_PUBLIC_API_URL?.trim() || "http://localhost:8000/api/v1").replace(/\s+/g, "");
 
 export type Module = { key: string; name: string; description: string; status: string; route: string; critical: boolean };
 export type Summary = { leads: number; available_quotas: number; active_proposals: number; active_operations: number; modules: number; financial_transactions_enabled: boolean };
@@ -88,6 +88,9 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
   });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
+    if (response.status === 404) {
+      throw new Error("Endpoint não encontrado na API de produção. Faça redeploy do serviço letter-api no Render.");
+    }
     throw new Error(body.detail ?? "Não foi possível concluir a solicitação");
   }
   return response.json();
