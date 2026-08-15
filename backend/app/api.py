@@ -102,6 +102,7 @@ from app.core.security import decode_token, hash_password, verify_password
 from app.dependencies import require_step_up
 from app.product_service import calculate_flash_credit, calculate_sdc
 from app.valid_stamp_requirements import valid_stamp_requirements
+from app.vehicle_registry_service import query_vehicle_registry
 from app.finops_engine import create_contract_quote, four_scenarios, ingest_event, settlement_curve, sdc_bullet_and_split
 from app.network_service import (
     allocate_commissions, confirm_investment, create_network_node, create_rule,
@@ -682,7 +683,10 @@ def calculate_sdc_proposal(proposal_id: str, payload: SdcCalculationRequest, use
     if not proposal: raise HTTPException(status_code=404, detail="Proposta não encontrada")
     quotas = list(db.scalars(select(Quota).where(Quota.id.in_(payload.quota_ids), Quota.organization_id == user.organization_id)))
     if len(quotas) != len(set(payload.quota_ids)): raise HTTPException(status_code=404, detail="Uma ou mais cotas não foram encontradas")
-    calculation = calculate_sdc(db, user, proposal, quotas, payload.duration_months, payload.capital_source)
+    calculation = calculate_sdc(
+        db, user, proposal, quotas, payload.duration_months, payload.capital_source,
+        payload.pool_investor_rate_percent,
+    )
     db.flush(); audit(db, user, "proposal.sdc_calculated", "calculation", calculation.id); db.commit(); db.refresh(calculation)
     return calculation_view(calculation)
 
@@ -691,7 +695,10 @@ def calculate_sdc_proposal(proposal_id: str, payload: SdcCalculationRequest, use
 def calculate_flash_credit_proposal(proposal_id: str, payload: FlashCreditCalculationRequest, user: User = Depends(require_scope("proposals:write")), db: Session = Depends(get_db)):
     proposal = db.scalar(select(Proposal).where(Proposal.id == proposal_id, Proposal.organization_id == user.organization_id))
     if not proposal: raise HTTPException(status_code=404, detail="Proposta não encontrada")
-    calculation = calculate_flash_credit(db, user, proposal, payload.asset_value, payload.capital_source, payload.term_months, payload.ipca_annual_percent)
+    calculation = calculate_flash_credit(
+        db, user, proposal, payload.asset_value, payload.capital_source,
+        payload.term_months, payload.ipca_annual_percent, payload.pool_investor_rate_percent,
+    )
     db.flush(); audit(db, user, "proposal.flash_credit_calculated", "calculation", calculation.id); db.commit(); db.refresh(calculation)
     return calculation_view(calculation)
 
@@ -819,8 +826,21 @@ def nina_routing_source_policy(_:User=Depends(get_current_user)):return nina_sou
 
 
 @router.get("/valid-stamps/requirements")
-def valid_stamp_requirements_list(asset_type: str, _: User = Depends(get_current_user)):
-    return valid_stamp_requirements(asset_type)
+def valid_stamp_requirements_list(asset_type: str, product: str = "FLASH_CAPITAL", _: User = Depends(get_current_user)):
+    return valid_stamp_requirements(asset_type, product)
+
+
+@router.post("/vehicles/registry-check")
+def vehicle_registry_check(
+    payload: dict,
+    user: User = Depends(require_scope("proposals:write")),
+):
+    return query_vehicle_registry(
+        plate=str(payload.get("plate", "")),
+        uf=str(payload.get("uf", "")),
+        vehicle_class=str(payload.get("vehicle_class", "")),
+        renavam=str(payload.get("renavam")) if payload.get("renavam") else None,
+    )
 
 
 @router.post("/valid-stamps",response_model=ValidStampView,status_code=201)

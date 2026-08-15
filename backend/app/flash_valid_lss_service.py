@@ -16,7 +16,9 @@ from app.models import (
 )
 from app.valid_stamp_requirements import (
     FLASH_CAPITAL_STAMP_PURPOSES,
+    SDC_VEHICLE_STAMP_PURPOSES,
     validate_flash_capital_stamp_payload,
+    validate_sdc_vehicle_stamp_payload,
 )
 
 
@@ -75,6 +77,8 @@ def configure_flash_parties(db:Session,user:User,proposal:Proposal,*,borrower_cn
 def issue_stamp(db:Session,user:User,*,entity_type:str,entity_id:str,purpose:str,payload:dict)->ValidStamp:
     if purpose in FLASH_CAPITAL_STAMP_PURPOSES:
         validate_flash_capital_stamp_payload(payload)
+    elif purpose in SDC_VEHICLE_STAMP_PURPOSES:
+        validate_sdc_vehicle_stamp_payload(payload)
     existing=db.scalar(select(ValidStamp).where(ValidStamp.organization_id==user.organization_id,ValidStamp.entity_type==entity_type,ValidStamp.entity_id==entity_id,ValidStamp.purpose==purpose))
     if existing:return existing
     previous=db.scalar(select(ValidStamp).where(ValidStamp.organization_id==user.organization_id).order_by(ValidStamp.issued_at.desc()))

@@ -14,5 +14,6 @@ backend/storage/
 storage/
 frontend/.vercel
 .vercel
+.env.vercel.production
 .DS_Store
 .vercel

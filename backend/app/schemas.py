@@ -648,6 +648,10 @@ class SdcCalculationRequest(BaseModel):
     quota_ids: list[str] = Field(min_length=1)
     duration_months: int = Field(default=12, ge=1, le=60)
     capital_source: str = Field(default="POOL")
+    pool_investor_rate_percent: Decimal | None = Field(
+        default=None, ge=0, le=4.5,
+        description="Repasse manual aos investidores do pool (campanha). Taxa total 4,5% permanece travada.",
+    )
 
 
 class FlashCreditCalculationRequest(BaseModel):
@@ -655,6 +659,10 @@ class FlashCreditCalculationRequest(BaseModel):
     capital_source: str
     term_months: int = Field(default=36)
     ipca_annual_percent: Decimal = Field(default=Decimal("0"), ge=0, le=100)
+    pool_investor_rate_percent: Decimal | None = Field(
+        default=None, ge=0, le=2.5,
+        description="Repasse manual aos investidores do pool (campanha). Taxa Price 2,5% permanece travada.",
+    )
 
 
 class FlashSimulatorRequest(BaseModel):
@@ -774,6 +782,10 @@ class NinaRoutingAssessmentCreate(BaseModel):
     encumbrances: list[str] = Field(default_factory=list)
     risk_flags: list[str] = Field(default_factory=list)
     tapaf_evidence_reference: str | None = Field(default=None,max_length=200)
+    vehicle_plate: str | None = Field(default=None, max_length=10)
+    vehicle_renavam: str | None = Field(default=None, max_length=20)
+    vehicle_uf: str | None = Field(default=None, min_length=2, max_length=2)
+    vehicle_class: str | None = Field(default=None, description="LIGHT, HEAVY ou MACHINE")
 
 
 class NinaRoutingAssessmentView(BaseModel):

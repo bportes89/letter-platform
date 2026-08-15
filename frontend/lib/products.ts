@@ -9,13 +9,19 @@ export function productLabel(code: string): string {
 }
 
 export const SDC_CAPITAL_SOURCES = [
-  { value: "POOL", label: "Pool — 2,5% investidores + 2% plataforma" },
+  { value: "POOL", label: "Pool — 4,5% total (repasse investidor ajustável)" },
   { value: "FUND", label: "Fundo — 4,5% integral ao fundo" },
 ] as const;
 
 export const FLASH_CAPITAL_SOURCES = [
-  { value: "RETAIL", label: "Pool — 2,5% a.m. (1,6% pool + 0,9% plataforma)" },
+  { value: "RETAIL", label: "Pool — 2,5% a.m. total (repasse investidor ajustável)" },
   { value: "INSTITUTIONAL", label: "Fundo — 14% a.a. + IPCA (reajuste anual)" },
+] as const;
+
+export const VEHICLE_CLASSES = [
+  { value: "LIGHT", label: "Leve" },
+  { value: "HEAVY", label: "Pesado" },
+  { value: "MACHINE", label: "Máquina" },
 ] as const;
 
 export const VALID_STAMP_DOCUMENTS = {

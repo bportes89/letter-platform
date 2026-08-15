@@ -991,3 +991,82 @@ def test_nina_routing_real_estate_prenotations_demography_and_committee_stamp(cl
     assert any(x["entity_id"]==routed.json()["id"] and x["purpose"]=="COMMITTEE_ROUTING_APPROVAL" for x in stamps)
     sources=client.get("/api/v1/nina-routing/source-policy",headers=auth_headers).json()
     assert "MASS_PJE_SCRAPING" in sources["blocked"] and sources["execution"]=="POLICY_ONLY_NO_SCRAPING"
+
+
+def test_sdc_pool_investor_rate_campaign_override(client, auth_headers):
+    lead = client.get("/api/v1/leads", headers=auth_headers).json()[0]
+    proposal = client.post("/api/v1/proposals", headers=auth_headers, json={
+        "lead_id": lead["id"], "product": "SDC", "requested_amount": "800000", "terms": {}
+    }).json()
+    quotas = [q for q in client.get("/api/v1/quotas", headers=auth_headers).json() if q["category"] == "REAL_ESTATE"][:2]
+    calculated = client.post(f"/api/v1/proposals/{proposal['id']}/calculate-sdc", headers=auth_headers, json={
+        "quota_ids": [q["id"] for q in quotas], "duration_months": 12, "capital_source": "POOL",
+        "pool_investor_rate_percent": "3.5",
+    })
+    assert calculated.status_code == 201
+    output = calculated.json()["output"]
+    assert output["investor_interest"] == "336000.00"
+    assert output["platform_spread"] == "96000.00"
+    assert output["total_interest"] == "432000.00"
+
+
+def test_flash_pool_investor_rate_campaign_override(client, auth_headers):
+    lead = client.get("/api/v1/leads", headers=auth_headers).json()[0]
+    proposal = client.post("/api/v1/proposals", headers=auth_headers, json={
+        "lead_id": lead["id"], "product": "FLASH_CREDIT", "requested_amount": "200000", "terms": {}
+    }).json()
+    calculated = client.post(f"/api/v1/proposals/{proposal['id']}/calculate-flash-credit", headers=auth_headers, json={
+        "asset_value": "500000", "capital_source": "RETAIL", "term_months": 36,
+        "ipca_annual_percent": "0", "pool_investor_rate_percent": "2.0",
+    })
+    assert calculated.status_code == 201
+    output = calculated.json()["output"]
+    assert output["investor_rate_percent"] == "2.00"
+    assert output["platform_spread_rate_percent"] == "0.50"
+    assert output["monthly_rate_percent"] == "2.50"
+
+
+def test_sdc_vehicle_registry_blocks_valid_stamp(client, auth_headers):
+    lead = client.get("/api/v1/leads", headers=auth_headers).json()[0]
+    proposal = client.post("/api/v1/proposals", headers=auth_headers, json={
+        "lead_id": lead["id"], "product": "SDC", "requested_amount": "200000", "terms": {}
+    }).json()
+    assert client.post("/api/v1/auth/step-up", headers=auth_headers, json={"password": "Letter@123"}).status_code == 200
+    payload = {
+        "asset_type": "VEHICLE",
+        "tapaf_evidence_reference": "tapaf-pay-001",
+        "vehicle": {"plate": "ABC1D2B", "uf": "MG", "vehicle_class": "LIGHT"},
+        "documents": {
+            "CRLV": "hash-crlv", "FIPE_MOLICAR": "hash-fipe", "LAUDO_AVALIACAO": "hash-laudo",
+            "SERASA": "hash-serasa", "BACEN": "hash-bacen",
+        },
+    }
+    blocked = client.post("/api/v1/valid-stamps", headers=auth_headers, json={
+        "entity_type": "proposal", "entity_id": proposal["id"],
+        "purpose": "SDC_VEHICLE_COLLATERAL", "payload": payload,
+    })
+    assert blocked.status_code == 409 and "restrição" in blocked.json()["detail"].lower()
+    cleared = client.post("/api/v1/vehicles/registry-check", headers=auth_headers, json={
+        "plate": "ABC1234", "uf": "MG", "vehicle_class": "LIGHT",
+    })
+    assert cleared.status_code == 200 and cleared.json()["cleared"] is True
+
+
+def test_sdc_vehicle_routing_registry_at_tapaf(client, auth_headers):
+    policy = client.post("/api/v1/nina-routing/policies", headers=auth_headers, json={
+        "version": 2, "population_threshold": 100000, "income_per_capita_threshold": "30000", "tapaf_amount": "1500",
+    })
+    client.post("/api/v1/auth/step-up", headers=auth_headers, json={"password": "Letter@123"})
+    client.post(f"/api/v1/nina-routing/policies/{policy.json()['id']}/approve", headers=auth_headers)
+    lead = client.get("/api/v1/leads", headers=auth_headers).json()[0]
+    proposal = client.post("/api/v1/proposals", headers=auth_headers, json={
+        "lead_id": lead["id"], "product": "SDC", "requested_amount": "300000", "terms": {},
+    }).json()
+    blocked = client.post(f"/api/v1/nina-routing/proposals/{proposal['id']}/assess", headers=auth_headers, json={
+        "asset_type": "VEHICLE", "municipality_code": "3100000", "population": 500000,
+        "income_per_capita": "50000", "tapaf_evidence_reference": "tapaf-veh-1",
+        "vehicle_plate": "XYZ1D2A", "vehicle_uf": "SP", "vehicle_class": "HEAVY",
+    })
+    assert blocked.status_code == 201
+    assert blocked.json()["status"] == "BLOCKED"
+    assert "VEHICLE_REGISTRY_RESTRICTION" in blocked.json()["blockers"]

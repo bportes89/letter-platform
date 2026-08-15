@@ -15,8 +15,9 @@ As regras abaixo reproduzem as premissas recebidas na documentação da LETTER. 
 
 ### Origem `POOL`
 
-- Investidores: `principal × 2,5% × meses`.
-- Spread LETTER: `principal × 2,0% × meses`.
+- Taxa total travada: **4,5% a.m.** (juros simples).
+- Repasse padrão investidores: **2,5%**; spread plataforma: **2,0%**.
+- **Campanha:** `pool_investor_rate_percent` permite aumentar repasse aos investidores (até 4,5%); spread plataforma reduz proporcionalmente.
 
 ### Origem `FUND`
 
@@ -37,8 +38,9 @@ Regras comuns:
 
 ### Origem `RETAIL` (pool)
 
-- Taxa Price: 2,5% ao mês.
-- Split mensal sobre juros: 1,6% para investidores do pool e 0,9% para a plataforma.
+- Taxa Price travada: **2,5% ao mês**.
+- Repasse padrão investidores: **1,6%**; spread plataforma: **0,9%**.
+- **Campanha:** `pool_investor_rate_percent` permite aumentar repasse pool (até 2,5%); spread plataforma reduz proporcionalmente.
 - Amortização (fundo comum) reduz saldo devedor e é segregada em conta de investimento da plataforma para ressarcimento ao investidor no encerramento.
 - Prazo de 60 meses: parcelas Price e saldo liquidado como Balloon Payment no mês 36.
 
@@ -65,6 +67,17 @@ Antes de emitir selo para partes/evidência Flash Capital, o payload deve inclui
 - Laudo de avaliação
 - Consulta Serasa
 - Consulta Bacen
+- CRLV (referência; **consulta DETRAN prevalece**)
+
+## SDC veículo — restrições impeditivas
+
+No pagamento TAPAF / emissão Valid-Stamp (`SDC_VEHICLE_COLLATERAL`), consulta obrigatória ao DETRAN (ou provedor homologado):
+
+- Bloqueio judicial
+- Alienação fiduciária ativa (CRLV pode estar desatualizado)
+- Restrição de transferência por incentivo fiscal (prazo no CRLV)
+
+Veículos leve, pesado ou máquina com restrição **não seguem** a operação.
 
 ## Gates de produção
 

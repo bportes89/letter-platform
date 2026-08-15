@@ -49,6 +49,7 @@ def persist_calculation(
 def calculate_sdc(
     db: Session, user: User, proposal: Proposal, quotas: list[Quota], duration_months: int,
     capital_source: str = "POOL",
+    pool_investor_rate_percent: Decimal | None = None,
 ) -> CalculationMemory:
     if proposal.product != "SDC":
         raise HTTPException(status_code=422, detail="A proposta deve ser do produto SDC")
@@ -71,8 +72,14 @@ def calculate_sdc(
         investor_interest = total_interest
         platform_spread = money(Decimal("0"))
     else:
-        investor_rate = Decimal("2.5")
-        platform_rate = Decimal("2.0")
+        default_investor = Decimal("2.5")
+        investor_rate = pool_investor_rate_percent if pool_investor_rate_percent is not None else default_investor
+        if investor_rate < Decimal("0") or investor_rate > monthly_interest_rate:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Repasse pool SDC deve estar entre 0% e {monthly_interest_rate}% (taxa total travada)",
+            )
+        platform_rate = money(monthly_interest_rate - investor_rate)
         investor_interest = money(principal * investor_rate / HUNDRED * duration_months)
         platform_spread = money(principal * platform_rate / HUNDRED * duration_months)
     start_fee_total = money(principal * start_rate / HUNDRED)
@@ -88,6 +95,7 @@ def calculate_sdc(
         "interest_rate_monthly": str(monthly_interest_rate),
         "investor_rate_monthly": str(investor_rate),
         "platform_spread_rate_monthly": str(platform_rate),
+        "pool_investor_rate_override": str(pool_investor_rate_percent) if pool_investor_rate_percent is not None else None,
         "start_fee_rate": str(start_rate),
     }
     output_data = {
@@ -173,6 +181,7 @@ def fund_monthly_schedule(
 def calculate_flash_credit(
     db: Session, user: User, proposal: Proposal, asset_value: Decimal, capital_source: str,
     term_months: int, ipca_annual: Decimal,
+    pool_investor_rate_percent: Decimal | None = None,
 ) -> CalculationMemory:
     if proposal.product != FLASH_CAPITAL_PRODUCT:
         raise HTTPException(status_code=422, detail="A proposta deve ser do produto Flash Capital")
@@ -187,6 +196,14 @@ def calculate_flash_credit(
     retail_rate = Decimal(str(policy.retail_rate_monthly)) if policy else Decimal("2.5")
     investor_rate = Decimal(str(policy.investor_rate_monthly)) if policy else Decimal("1.6")
     treasury_spread = Decimal(str(policy.treasury_spread_monthly)) if policy else Decimal("0.9")
+    if pool_investor_rate_percent is not None:
+        investor_rate = pool_investor_rate_percent
+        if investor_rate < Decimal("0") or investor_rate > retail_rate:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Repasse pool Flash Capital deve estar entre 0% e {retail_rate}% (taxa Price travada)",
+            )
+        treasury_spread = money(retail_rate - investor_rate)
     principal = money(Decimal(str(proposal.requested_amount)))
     asset = money(asset_value)
     ltv = money(principal / asset * HUNDRED)
@@ -229,7 +246,8 @@ def calculate_flash_credit(
             "investor_rate_percent": decimal_string(investor_rate),
             "platform_spread_rate_percent": decimal_string(treasury_spread),
             "monthly_schedule": schedule,
-            "split_basis": "POOL_MONTHLY: investor 1,6% + platform 0,9% sobre juros; fundo comum amortiza saldo",
+            "split_basis": f"POOL_MONTHLY: investidor {investor_rate}% + plataforma {treasury_spread}% sobre juros; fundo comum amortiza saldo",
+            "pool_investor_rate_override": str(pool_investor_rate_percent) if pool_investor_rate_percent is not None else None,
         })
     else:
         payment, management_fee, schedule = fund_monthly_schedule(
@@ -252,6 +270,7 @@ def calculate_flash_credit(
     input_data = {
         "asset_value": decimal_string(asset), "capital_source": capital_source,
         "term_months": term_months, "ipca_annual_percent": decimal_string(ipca_annual),
+        "pool_investor_rate_override": str(pool_investor_rate_percent) if pool_investor_rate_percent is not None else None,
     }
     output["policy_version"] = policy.version if policy else 1
     output["borrower_eligibility"] = "PJ_ONLY"
