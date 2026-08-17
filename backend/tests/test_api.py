@@ -354,7 +354,41 @@ def test_sdc_billing_schedule_and_idempotent_payment(client, auth_headers):
     assert first.json()["invoice_processor"]["status"] == "SUCCESS"
     receipts = client.get(f"/api/v1/contracts/{contract['id']}/receipts", headers=auth_headers)
     assert receipts.status_code == 200 and len(receipts.json()) >= 1
+    receipt = receipts.json()[0]
+    assert receipt["vault_s3_uri"].startswith("s3://letter-vault-private/partners/")
+    assert receipt["email_status"] == "SENT_D+0"
+    processor = first.json()["invoice_processor"]
+    assert processor["endpoint"] == "/api/v1/finops/billing/invoice-processor"
+    assert processor["data"]["demonstrativo_contabil_legal"]["indexacao_ipca_anual"] is False
     assert replay.status_code == 200 and replay.json()["processed"] is False
+
+
+def test_finops_invoice_processor_v3_canonical_payload():
+    from app.invoice_processor_service import MotorFaturamentoEFiscalLETTERV3
+
+    engine = MotorFaturamentoEFiscalLETTERV3()
+    payload = engine.calcular_e_disparar_recibo_automatico(
+        id_contrato="FLASH_CAPITAL_POOL_091",
+        id_parceiro="PARTNER_LIVRE_0922",
+        volume_total_pago=Decimal("21334.80"),
+        mes_referencia=13,
+        base_fruicao_juros=Decimal("10543.20"),
+        base_amortizacao_recompra=Decimal("10791.60"),
+    )
+    demo = payload["demonstrativo_contabil_legal"]
+    assert demo["valor_total_liquidado_baas"] == "21334.80"
+    assert demo["fração_taxa_de_fruição_tributavel"] == "10543.20"
+    assert demo["fração_amortização_da_recompra_isenta"] == "10791.60"
+    assert demo["imposto_retido_spe_lucro_presumido"] == "1194.54"
+    assert demo["indexacao_ipca_anual"] is True
+    storage = payload["mapeamento_armazenamento_nuvem"]
+    assert storage["rota_area_logada_cliente_db"] == (
+        "/api/v1/customer/dashboard/contracts/FLASH_CAPITAL_POOL_091/receipts/recibo_fruicao_mes_13.pdf"
+    )
+    assert storage["rota_interna_bucket_s3_admin"] == (
+        "s3://letter-vault-private/partners/PARTNER_LIVRE_0922/contracts/FLASH_CAPITAL_POOL_091/receipts/recibo_fruicao_mes_13.pdf"
+    )
+    assert payload["disparo_transacional_workflow"]["trigger_email_automatico"] == "SENT_D+0"
 
 
 def test_csv_reconciliation_creates_resolvable_divergence(client, auth_headers):

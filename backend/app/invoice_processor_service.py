@@ -13,7 +13,9 @@ from app.receipt_service import (
     compute_authenticity_hash,
     receipt_filename,
     receipt_pdf,
+    resolve_receipt_context,
 )
+from app.receipt_notification_service import dispatch_receipt_notifications
 from app.storage_service import get_storage
 
 
@@ -58,6 +60,7 @@ class MotorFaturamentoEFiscalLETTERV3:
                 "fração_taxa_de_fruição_tributavel": str(v_fruicao),
                 "fração_amortização_da_recompra_isenta": str(v_amortizacao),
                 "imposto_retido_spe_lucro_presumido": str(money(v_fruicao * self.imposto_lucro_presumido_fruicao)),
+                "indexacao_ipca_anual": mes in {13, 25},
             },
             "mapeamento_armazenamento_nuvem": {
                 "rota_area_logada_cliente_db": customer_route,
@@ -109,6 +112,7 @@ def process_invoice_settlement(
     total_paid = money(Decimal(str(invoice.total_amount)))
     reference_month = max(1, int(invoice.installment_number or 1))
     partner_id = resolve_partner_id(db, proposal)
+    ctx = resolve_receipt_context(db, proposal, reference_month)
 
     engine = MotorFaturamentoEFiscalLETTERV3()
     payload = engine.calcular_e_disparar_recibo_automatico(
@@ -135,6 +139,11 @@ def process_invoice_settlement(
         tax_withheld=tax_withheld,
         authenticity_hash=payload["hash_autenticidade_documental"],
         reference_month=reference_month,
+        client_name=ctx["client_name"],
+        client_cnpj=ctx["client_cnpj"],
+        property_registry=ctx["property_registry"],
+        registry_office=ctx["registry_office"],
+        ipca_adjusted=ctx["ipca_adjusted"],
     )
     storage = get_storage()
     storage.put(customer_key, pdf_bytes, "application/pdf")
@@ -176,6 +185,14 @@ def process_invoice_settlement(
         issued_at=datetime.now(UTC),
     )
     db.add(receipt)
+    db.flush()
+    lead = db.get(Lead, proposal.lead_id) if proposal.lead_id else None
+    dispatch = dispatch_receipt_notifications(db, user, receipt, lead)
+    payload["disparo_transacional_workflow"] = {
+        "trigger_email_automatico": dispatch["trigger_email_automatico"],
+        "trigger_push_notificacao": dispatch["trigger_push_notificacao"],
+    }
+    receipt.payload_json = json.dumps(payload, ensure_ascii=False)
     db.flush()
     return receipt
 

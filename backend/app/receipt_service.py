@@ -18,12 +18,39 @@ def receipt_filename(reference_month: int) -> str:
 
 
 def build_storage_paths(partner_id: str, contract_id: str, filename: str) -> tuple[str, str, str, str]:
-    vault_key = f"company-vault/partners/{partner_id}/contracts/{contract_id}/receipts/{filename}"
+    admin_key = f"partners/{partner_id}/contracts/{contract_id}/receipts/{filename}"
     customer_key = f"customer-vault/contracts/{contract_id}/receipts/{filename}"
     bucket = settings.vault_bucket or settings.s3_bucket or "letter-vault-private"
-    vault_uri = f"s3://{bucket}/{vault_key}"
+    vault_uri = f"s3://{bucket}/{admin_key}"
     customer_route = f"/api/v1/customer/dashboard/contracts/{contract_id}/receipts/{filename}"
-    return customer_key, vault_key, customer_route, vault_uri
+    return customer_key, admin_key, customer_route, vault_uri
+
+
+def resolve_receipt_context(db, proposal: Proposal, reference_month: int) -> dict:
+    import json as json_lib
+    from sqlalchemy import select
+    from app.models import Lead, PreAnalysisPauta
+
+    lead = db.get(Lead, proposal.lead_id) if proposal.lead_id else None
+    terms = json_lib.loads(proposal.terms_json or "{}")
+    pauta = db.scalar(select(PreAnalysisPauta).where(PreAnalysisPauta.proposal_id == proposal.id))
+    engine = json_lib.loads(pauta.engine_result_json) if pauta and pauta.engine_result_json else {}
+    client_name = terms.get("company_name") or (lead.name if lead else "Cliente")
+    client_cnpj = terms.get("company_cnpj") or (lead.document if lead else "—")
+    property_registry = (
+        terms.get("property_registry")
+        or engine.get("matricula_imovel")
+        or engine.get("numero_matricula")
+        or "Matrícula vinculada ao contrato"
+    )
+    registry_office = terms.get("registry_office") or engine.get("cartorio") or "Ofício de Registro de Imóveis competente"
+    return {
+        "client_name": client_name,
+        "client_cnpj": client_cnpj,
+        "property_registry": property_registry,
+        "registry_office": registry_office,
+        "ipca_adjusted": reference_month in {13, 25},
+    }
 
 
 def receipt_pdf(
@@ -37,6 +64,11 @@ def receipt_pdf(
     tax_withheld: Decimal,
     authenticity_hash: str,
     reference_month: int,
+    client_name: str = "Cliente",
+    client_cnpj: str = "—",
+    property_registry: str = "Matrícula vinculada ao contrato",
+    registry_office: str = "Ofício de Registro de Imóveis competente",
+    ipca_adjusted: bool = False,
 ) -> bytes:
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -61,10 +93,15 @@ def receipt_pdf(
     ]
     story = [
         Paragraph("LETTER ATIVOS IMOBILIÁRIOS SPE LTDA", styles["ReceiptTitle"]),
+        Paragraph(
+            f"CNPJ/ME nº {settings.spe_cnpj} — Inscrição Municipal nº {settings.spe_municipal_registration}",
+            styles["ReceiptBody"],
+        ),
         Paragraph("Módulo Central FinOps — Recibo de Quitação Mensal de Fruição e Amortização", styles["ReceiptBody"]),
         Paragraph(
             f"Contrato <b>{contract.contract_number}</b> · Fatura <b>{invoice.invoice_number}</b> · "
-            f"Competência mês <b>{reference_month}</b>",
+            f"Competência mês <b>{reference_month}</b>"
+            + (" · <b>Parcela com reajuste IPCA anual</b>" if ipca_adjusted else ""),
             styles["ReceiptBody"],
         ),
         Spacer(1, 4 * mm),
@@ -81,19 +118,27 @@ def receipt_pdf(
         Spacer(1, 6 * mm),
         Paragraph(
             "Declaramos para os devidos fins de direito, regularidade contábil e quitação de parcelas que recebemos "
+            f"da pessoa jurídica <b>{client_name}</b>, inscrita no CNPJ/ME sob o nº <b>{client_cnpj}</b>, "
             f"o valor total de <b>{brl(total_paid)}</b>, correspondente à liquidação da parcela "
-            f"<b>{invoice.invoice_number}</b> do produto <b>{proposal.product}</b>.",
+            f"<b>{invoice.invoice_number}</b> do Contrato de Compra e Venda com Pacto Expresso de Retrovenda "
+            f"do imóvel colateralizado sob a matrícula nº <b>{property_registry}</b> do "
+            f"<b>{registry_office}</b>.",
             styles["ReceiptBody"],
         ),
         Paragraph(
-            "O valor discriminado no Item I (Taxa de Fruição) constitui base de incidência dos tributos federais "
-            "sob o regime do Lucro Presumido (CNAE 68.10-2-02). O montante do Item II (Amortização da Recompra) "
-            "reduz o ativo imobiliário circulante para fins de exercício futuro do direito de retrovenda.",
+            "O valor discriminado no Item I (Taxa de Fruição) foi auferido pela emitente sob a rubrica estrita de "
+            "receita de fruição patrimonial precária de imóvel próprio (CNAE 68.10-2-02), constituindo a base de "
+            "incidência dos tributos federais sob o regime do Lucro Presumido. O montante discriminado no Item II "
+            "(Amortização da Recompra) foi lançado de forma direta na escrituração como redução do ativo imobiliário "
+            "circulante, abatendo de pleno direito o saldo devedor residual para fins de exercício futuro do direito "
+            "de retrovenda e resgate do bem.",
             styles["ReceiptBody"],
         ),
         Paragraph(
-            "Transação ISENTA DE ISS por força da Súmula Vinculante nº 31 do STF, amparada pelos Arts. 505 e 506 "
-            "do Código Civil Brasileiro.",
+            "A presente transação financeira é ISENTA DE ISS (Imposto Sobre Serviços de Qualquer Natureza) por força "
+            "da Súmula Vinculante nº 31 do Supremo Tribunal Federal (STF) e amparada pelos Arts. 505 e 506 do "
+            "Código Civil Brasileiro, conferindo validade fiscal e contábil plena para dedução de despesas "
+            "operacionais líquidas da tomadora perante a Secretaria da Receita Federal do Brasil.",
             styles["ReceiptBody"],
         ),
         Paragraph(
@@ -101,7 +146,7 @@ def receipt_pdf(
             styles["ReceiptBody"],
         ),
         Paragraph(
-            f"Salvador - BA, {datetime.now(UTC).strftime('%d/%m/%Y')}.",
+            f"{settings.spe_city}, {datetime.now(UTC).strftime('%d/%m/%Y')}.",
             styles["ReceiptBody"],
         ),
         Paragraph("LETTER ATIVOS IMOBILIÁRIOS SPE LTDA — SISTEMA AUTOMATIZADO FINOPS", styles["ReceiptBody"]),

@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     integration_http_timeout_seconds: float = 10.0
     vault_bucket: str = "letter-vault-private"
     vault_prefix: str = "company-vault"
+    spe_cnpj: str = "00.000.000/0001-00"
+    spe_municipal_registration: str = "0000000-0"
+    spe_city: str = "Salvador - BA"
 
     @field_validator("database_url", mode="before")
     @classmethod

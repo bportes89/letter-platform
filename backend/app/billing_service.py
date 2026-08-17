@@ -60,8 +60,13 @@ def generate_billing_schedule(db: Session, contract: Contract, proposal: Proposa
         months=36 if source=="RETAIL" and term==60 else term
         balance=Decimal(output["principal"])
         total_interest=Decimal(output.get("total_interest","0"));linear_interest=money(total_interest/term) if term else Decimal("0")
+        schedule_rows=output.get("monthly_schedule") or []
         for number in range(1,months+1):
-            if source=="RETAIL":
+            if schedule_rows and number <= len(schedule_rows):
+                row=schedule_rows[number-1]
+                interest=money(Decimal(str(row.get("interest","0"))))
+                principal=money(Decimal(str(row.get("common_fund_amortization") or row.get("principal_amortization") or "0")))
+            elif source=="RETAIL":
                 interest=money(balance*Decimal("0.025"));principal=max(Decimal("0"),money(payment-interest));balance=max(Decimal("0"),money(balance-principal))
             else:
                 interest=linear_interest;principal=money(payment-interest)

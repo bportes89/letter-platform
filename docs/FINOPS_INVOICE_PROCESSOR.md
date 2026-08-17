@@ -11,8 +11,8 @@ Motor lógico: `LETTER_FINOPS_INVOICE_AUTOMATION_ENGINE_2026_V3`
    - **Amortização da recompra** — isenta
 4. PDF salvo em duas rotas:
    - Área logada: `customer-vault/contracts/{id}/receipts/`
-   - Vault SPE: `company-vault/partners/{partner}/contracts/{id}/receipts/`
-5. E-mail/push transacional: `SENT_D+0` / `ACTIVE` (sandbox)
+   - Vault SPE (S3): `s3://letter-vault-private/partners/{partner}/contracts/{id}/receipts/`
+5. E-mail/push transacional D+0 via `receipt_notification_service` (sandbox: `mock_deliver`)
 
 ## Endpoints
 
@@ -26,4 +26,6 @@ Motor lógico: `LETTER_FINOPS_INVOICE_AUTOMATION_ENGINE_2026_V3`
 ## Variáveis de ambiente
 
 - `LETTER_VAULT_BUCKET` — bucket privado (default: `letter-vault-private`)
-- `LETTER_VAULT_PREFIX` — prefixo corporativo (default: `company-vault`)
+- `LETTER_SPE_CNPJ` — CNPJ da SPE no PDF (default sandbox)
+- `LETTER_SPE_MUNICIPAL_REGISTRATION` — inscrição municipal no PDF
+- `LETTER_SPE_CITY` — cidade/data no rodapé do recibo
