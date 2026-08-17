@@ -825,6 +825,47 @@ class PreAnalysisPauta(TimestampMixin, Base):
     vault_s3_uri: Mapped[str | None] = mapped_column(String(500))
 
 
+class LeaseEquityPauta(TimestampMixin, Base):
+    __tablename__ = "lease_equity_pautas"
+    __table_args__ = (UniqueConstraint("organization_id", "proposal_id"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    proposal_id: Mapped[str] = mapped_column(ForeignKey("proposals.id"), index=True)
+    owner_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    pauta_code: Mapped[str] = mapped_column(String(80), index=True)
+    status: Mapped[str] = mapped_column(String(50), default="AGUARDANDO_TAPAF", index=True)
+    property_type: Mapped[str] = mapped_column(String(40))
+    appraisal_value: Mapped[float] = mapped_column(Numeric(15, 2))
+    registry_number: Mapped[str] = mapped_column(String(80))
+    registry_office: Mapped[str] = mapped_column(String(180))
+    tapaf_payment_reference: Mapped[str | None] = mapped_column(String(120))
+    tapaf_paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    compliance_dossier_uri: Mapped[str | None] = mapped_column(String(500))
+    compliance_blockers_json: Mapped[str | None] = mapped_column(Text)
+    inspection_photos_count: Mapped[int] = mapped_column(default=0)
+    inspection_metadata_json: Mapped[str | None] = mapped_column(Text)
+    gravame_certificate_uri: Mapped[str | None] = mapped_column(String(500))
+    funding_target_amount: Mapped[float] = mapped_column(Numeric(15, 2))
+    funding_captured_amount: Mapped[float] = mapped_column(Numeric(15, 2), default=0)
+    activation_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    activated_manually: Mapped[bool] = mapped_column(Boolean, default=False)
+    months_in_force: Mapped[int] = mapped_column(default=0)
+    anticipation_unlock_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    tokenization_json: Mapped[str | None] = mapped_column(Text)
+
+
+class LeaseEquityStatusLog(Base):
+    __tablename__ = "lease_equity_status_logs"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    pauta_id: Mapped[str] = mapped_column(ForeignKey("lease_equity_pautas.id"), index=True)
+    from_status: Mapped[str] = mapped_column(String(50))
+    to_status: Mapped[str] = mapped_column(String(50), index=True)
+    actor_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
+    note: Mapped[str] = mapped_column(String(500), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True)
+
+
 class PaymentReceipt(TimestampMixin, Base):
     __tablename__ = "payment_receipts"
     __table_args__ = (UniqueConstraint("invoice_id", "payment_event_id"),)

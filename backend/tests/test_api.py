@@ -1310,3 +1310,100 @@ def test_pre_analysis_v6_income_margin_bifurcation(client, auth_headers):
     assert "resumo_fiduciario_interno_oculto_para_o_fundo" not in result
     assert engine.json()["status"] == "REPROVED"
 
+
+def test_lease_equity_engine_canonical_doc251():
+    from app.lease_equity_engine import EngineLeaseEquityLetter
+
+    engine = EngineLeaseEquityLetter()
+    credit = engine.processar_matriz_credito_ltv("URBANO_RESIDENCIAL", Decimal("1000000"))
+    assert credit["limite_teto_ltv_captacao"] == "600000.00"
+    assert credit["base_calculo_recompensa_dono"] == "400000.00"
+    assert credit["aluguel_mensal_recorrente_bruto_dono"] == "1600.00"
+    assert credit["custo_mensal_remuneracao_pool_investidores"] == "9600.00"
+    rwa = engine.gerar_fracionamento_securitizado_rwa(Decimal("600000"), "LETTER_LEASE_EQ_0044_2026")
+    assert rwa["total_supply_tokens_mint"] == 6000
+    assert rwa["rendimento_mensal_unitario_smart_contract"] == "1.60"
+    blocked = engine.calcular_antecipacao_recebiveis_price(Decimal("1600"), 36, 5)
+    assert blocked["status_antecipacao"] == "ANTECIPACAO_BLOQUEADA_CARENCIA_MINIMA"
+    assert blocked["meses_faltantes_para_liberacao"] == 1
+    released = engine.calcular_antecipacao_recebiveis_price(Decimal("1600"), 36, 6)
+    assert released["status_antecipacao"] == "LIBERADO_PARA_SAQUE_VISTA"
+    assert Decimal(released["valor_liquido_payout_vista"]) > Decimal("0")
+
+
+def test_lease_equity_full_pipeline_and_tokenization(client, auth_headers):
+    lead = client.get("/api/v1/leads", headers=auth_headers).json()[0]
+    proposal = client.post("/api/v1/proposals", headers=auth_headers, json={
+        "lead_id": lead["id"], "product": "SDC", "requested_amount": "600000", "terms": {},
+    }).json()
+    created = client.post("/api/v1/finops/lease-equity/pautas", headers=auth_headers, json={
+        "proposal_id": proposal["id"],
+        "property_type": "URBANO_RESIDENCIAL",
+        "appraisal_value": "1000000",
+        "registry_number": "44901",
+        "registry_office": "Teixeira de Freitas - BA",
+    })
+    assert created.status_code == 201
+    pauta = created.json()
+    assert pauta["status"] == "AGUARDANDO_TAPAF"
+    assert pauta["credit_matrix"]["aluguel_mensal_recorrente_bruto_dono"] == "1600.00"
+
+    paid = client.post("/api/v1/finops/lease-equity/tapaf-payment-webhook", headers=auth_headers, json={
+        "pauta_id": pauta["id"], "event_id": "tapaf-le-001", "amount": "750.00",
+    })
+    assert paid.status_code == 200 and paid.json()["status"] == "TAPAF_LIQUIDADA"
+    assert paid.json()["compliance_dossier_uri"]
+
+    gallery_blocked = client.post("/api/v1/finops/lease-equity/inspection-photos", headers=auth_headers, json={
+        "pauta_id": pauta["id"],
+        "photos": [{"filename": "x.jpg", "source": "GALLERY", "exif_timestamp_unix": 1, "gps_latitude": 0, "gps_longitude": 0}],
+    })
+    assert gallery_blocked.status_code == 422
+
+    photos = [
+        {"filename": f"foto{i}.jpg", "source": "CAMERA_NATIVE", "exif_timestamp_unix": 1700000000 + i,
+         "gps_latitude": -17.5, "gps_longitude": -39.7}
+        for i in range(3)
+    ]
+    inspection = client.post("/api/v1/finops/lease-equity/inspection-photos", headers=auth_headers, json={
+        "pauta_id": pauta["id"], "photos": photos,
+    })
+    assert inspection.status_code == 200 and inspection.json()["status"] == "EM_AUDITORIA_RISCO"
+
+    compliance = client.post("/api/v1/finops/lease-equity/compliance-review", headers=auth_headers, json={
+        "pauta_id": pauta["id"], "approved": True,
+    })
+    assert compliance.json()["status"] == "AGUARDANDO_ASSINATURA"
+
+    client.post(f"/api/v1/finops/lease-equity/sign-contract?pauta_id={pauta['id']}", headers=auth_headers)
+    client.post(f"/api/v1/finops/lease-equity/submit-registry?pauta_id={pauta['id']}", headers=auth_headers)
+    gravame = client.post(f"/api/v1/finops/lease-equity/complete-gravame?pauta_id={pauta['id']}", headers=auth_headers)
+    assert gravame.json()["status"] == "GRAVAME_CONCLUIDO"
+
+    funding = client.post("/api/v1/finops/lease-equity/funding-capture", headers=auth_headers, json={
+        "pauta_id": pauta["id"], "amount": "180000.00",
+    })
+    assert funding.status_code == 200 and funding.json()["status"] == "ATIVO_OK_EM_PRODUCAO"
+
+    token = client.post("/api/v1/finops/lease-equity/tokenization-processor", headers=auth_headers, json={
+        "pauta_id": pauta["id"], "owner_uid": "USER_PF_88219_BA",
+    })
+    assert token.status_code == 200
+    body = token.json()
+    assert body["endpoint"] == "/api/v1/finops/lease-equity/tokenization-processor"
+    assert body["status"] == "SUCCESS"
+    data = body["data"]
+    assert data["contrato_id"] == pauta["pauta_code"]
+    assert data["colateral_imobiliario"]["matricula_numero"] == "44901"
+    assert data["parametrizacao_finops_mesa"]["faturamento_mensal_bruto_recorrente_dono"] == 1600.0
+    assert data["parametrizacao_finops_mesa"]["custo_mensal_pool_investment_1_6_porcento"] == 9600.0
+    meta = data["workflow_securitizacao_rwa"]["tokenizacao_blockchain_metadata"]
+    assert meta["total_supply_tokens_emitidos"] == 6000
+    assert meta["distribuicao_rendimento_token_mensal"] == 1.60
+    assert data["trava_seguranca_antecipacao_futura"]["carecia_meses_minima"] == 6
+
+    unlocked = client.post("/api/v1/finops/lease-equity/refresh-anticipation", headers=auth_headers, json={
+        "pauta_id": pauta["id"], "months_in_force": 6,
+    })
+    assert unlocked.json()["status"] == "LIBERADO_PARA_ANTECIPACAO"
+

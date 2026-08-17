@@ -21,7 +21,7 @@ from app.models import (
     CollectionAction, CommissionEntry, CommissionRule, DelinquencyCase,
     EscrowAccount, FundingOpportunity, Invoice, RecoveredAsset,
     InvestmentPosition, InvestmentReservation, KycCase, Lead, LedgerEntry,
-    LedgerTransaction, NetworkNode, PaymentReceipt, PayoutApproval, PayoutRequest, PreAnalysisPauta, Proposal,
+    LedgerTransaction, NetworkNode, PaymentReceipt, PayoutApproval, PayoutRequest, PreAnalysisPauta, Proposal, LeaseEquityPauta,
     Quota, QuotaReservation, SignatureEnvelope, User, UserInvitation,
     ReconciliationBatch, ReconciliationItem, TaxClosing, TaxDocument, TaxException,
     UnderwritingAssessment, UnderwritingDecision, UnderwritingPolicy, OperationalJob, SecurityEvent, TenantQuota,
@@ -56,6 +56,10 @@ from app.schemas import (
     InvestmentPositionView, InvestmentReservationView, InvestmentReserveRequest, InvoicePaymentWebhook, InvoiceProcessorRequest, InvoiceView,
     PaymentReceiptView, PreAnalysisEngineRequest, PreAnalysisPautaView, PreAnalysisProposalRequest,
     PreAnalysisTapafCheckoutAcceptRequest, PreAnalysisTapafPaymentWebhook, PreAnalysisValidateDocumentsRequest,
+    LeaseEquityPautaCreate, LeaseEquityPautaView, LeaseEquityTapafWebhook, LeaseEquityInspectionRequest,
+    LeaseEquityComplianceReview, LeaseEquityFundingCapture, LeaseEquityActivateRequest,
+    LeaseEquityAnticipationRequest, LeaseEquityMonthsRequest, LeaseEquityLtvSimulateRequest,
+    LeaseEquityTokenizationRequest,
     LeadUpdate, LeadView, LedgerPostRequest, LedgerTransactionView, LoginRequest,
     FlashCreditCalculationRequest, MfaSetupView, MfaVerify, ModuleView, PasswordResetConfirm, PasswordResetRequest,
     NetworkNodeCreate, NetworkNodeView, PayoutApprove, PayoutCreate, PayoutView, ProposalCreate, ProposalUpdate,
@@ -108,6 +112,14 @@ from app.invoice_processor_service import process_invoice_settlement, receipt_pr
 from app.pre_analysis_service import (
     accept_tapaf_checkout, confirm_tapaf_payment, generate_tapaf_checkout, pauta_view,
     run_engine_phase3, validate_documents_phase1,
+)
+from app.lease_equity_engine import EngineLeaseEquityLetter
+from app.lease_equity_service import (
+    activate_ok, complete_gravame, confirm_tapaf_payment as confirm_lease_tapaf,
+    create_pauta, generate_tapaf_checkout as generate_lease_tapaf, pauta_view as lease_pauta_view,
+    process_tokenization, record_funding_capture, refresh_anticipation_eligibility,
+    register_inspection_photos, run_compliance_review, sign_contract, simulate_anticipation,
+    submit_registry_protocol,
 )
 from app.storage_service import get_storage
 from app.vehicle_registry_service import query_vehicle_registry
@@ -869,6 +881,146 @@ def pre_analysis_get_pauta(proposal_id: str, user: User = Depends(get_current_us
     if not pauta:
         raise HTTPException(status_code=404, detail="Pauta de pré-análise não encontrada")
     return PreAnalysisPautaView(**pauta_view(pauta))
+
+
+def _load_lease_pauta(db: Session, user: User, pauta_id: str) -> LeaseEquityPauta:
+    pauta = db.scalar(select(LeaseEquityPauta).where(LeaseEquityPauta.id == pauta_id, LeaseEquityPauta.organization_id == user.organization_id))
+    if not pauta:
+        raise HTTPException(status_code=404, detail="Pauta Lease Equity não encontrada")
+    return pauta
+
+
+@router.post("/finops/lease-equity/pautas", response_model=LeaseEquityPautaView, status_code=201)
+def lease_equity_create_pauta(payload: LeaseEquityPautaCreate, user: User = Depends(require_scope("proposals:write")), db: Session = Depends(get_db)):
+    proposal = _load_proposal(db, user, payload.proposal_id)
+    pauta = create_pauta(db, user, proposal, property_type=payload.property_type, appraisal_value=payload.appraisal_value, registry_number=payload.registry_number, registry_office=payload.registry_office, owner_user_id=payload.owner_user_id)
+    audit(db, user, "finops.lease_equity.create", "lease_equity_pauta", pauta.id)
+    db.commit()
+    db.refresh(pauta)
+    return LeaseEquityPautaView(**lease_pauta_view(pauta))
+
+
+@router.get("/finops/lease-equity/pautas", response_model=list[LeaseEquityPautaView])
+def lease_equity_list_pautas(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    items = list(db.scalars(select(LeaseEquityPauta).where(LeaseEquityPauta.organization_id == user.organization_id).order_by(LeaseEquityPauta.created_at.desc())))
+    return [LeaseEquityPautaView(**lease_pauta_view(x)) for x in items]
+
+
+@router.get("/finops/lease-equity/pautas/{pauta_id}", response_model=LeaseEquityPautaView)
+def lease_equity_get_pauta(pauta_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return LeaseEquityPautaView(**lease_pauta_view(_load_lease_pauta(db, user, pauta_id)))
+
+
+@router.post("/finops/lease-equity/tapaf-checkout")
+def lease_equity_tapaf_checkout(pauta_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    pauta = _load_lease_pauta(db, user, pauta_id)
+    return generate_lease_tapaf(pauta)
+
+
+@router.post("/finops/lease-equity/tapaf-payment-webhook", response_model=LeaseEquityPautaView)
+def lease_equity_tapaf_webhook(payload: LeaseEquityTapafWebhook, user: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
+    pauta = _load_lease_pauta(db, user, payload.pauta_id)
+    confirm_lease_tapaf(db, user, pauta, payload.event_id, payload.amount)
+    audit(db, user, "finops.lease_equity.tapaf_paid", "lease_equity_pauta", pauta.id)
+    db.commit()
+    db.refresh(pauta)
+    return LeaseEquityPautaView(**lease_pauta_view(pauta))
+
+
+@router.post("/finops/lease-equity/inspection-photos", response_model=LeaseEquityPautaView)
+def lease_equity_inspection(payload: LeaseEquityInspectionRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    pauta = _load_lease_pauta(db, user, payload.pauta_id)
+    register_inspection_photos(db, user, pauta, [x.model_dump() for x in payload.photos])
+    audit(db, user, "finops.lease_equity.inspection", "lease_equity_pauta", pauta.id)
+    db.commit()
+    db.refresh(pauta)
+    return LeaseEquityPautaView(**lease_pauta_view(pauta))
+
+
+@router.post("/finops/lease-equity/compliance-review", response_model=LeaseEquityPautaView)
+def lease_equity_compliance(payload: LeaseEquityComplianceReview, user: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
+    pauta = _load_lease_pauta(db, user, payload.pauta_id)
+    run_compliance_review(db, user, pauta, approved=payload.approved, blockers=payload.blockers)
+    audit(db, user, "finops.lease_equity.compliance", "lease_equity_pauta", pauta.id, {"approved": payload.approved})
+    db.commit()
+    db.refresh(pauta)
+    return LeaseEquityPautaView(**lease_pauta_view(pauta))
+
+
+@router.post("/finops/lease-equity/sign-contract", response_model=LeaseEquityPautaView)
+def lease_equity_sign(pauta_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    pauta = _load_lease_pauta(db, user, pauta_id)
+    sign_contract(db, user, pauta)
+    db.commit()
+    db.refresh(pauta)
+    return LeaseEquityPautaView(**lease_pauta_view(pauta))
+
+
+@router.post("/finops/lease-equity/submit-registry", response_model=LeaseEquityPautaView)
+def lease_equity_registry(pauta_id: str, user: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
+    pauta = _load_lease_pauta(db, user, pauta_id)
+    submit_registry_protocol(db, user, pauta)
+    db.commit()
+    db.refresh(pauta)
+    return LeaseEquityPautaView(**lease_pauta_view(pauta))
+
+
+@router.post("/finops/lease-equity/complete-gravame", response_model=LeaseEquityPautaView)
+def lease_equity_gravame(pauta_id: str, user: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
+    pauta = _load_lease_pauta(db, user, pauta_id)
+    complete_gravame(db, user, pauta)
+    db.commit()
+    db.refresh(pauta)
+    return LeaseEquityPautaView(**lease_pauta_view(pauta))
+
+
+@router.post("/finops/lease-equity/funding-capture", response_model=LeaseEquityPautaView)
+def lease_equity_funding(payload: LeaseEquityFundingCapture, user: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
+    pauta = _load_lease_pauta(db, user, payload.pauta_id)
+    record_funding_capture(db, user, pauta, payload.amount)
+    db.commit()
+    db.refresh(pauta)
+    return LeaseEquityPautaView(**lease_pauta_view(pauta))
+
+
+@router.post("/finops/lease-equity/activate", response_model=LeaseEquityPautaView)
+def lease_equity_activate(payload: LeaseEquityActivateRequest, user: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
+    pauta = _load_lease_pauta(db, user, payload.pauta_id)
+    activate_ok(db, user, pauta, manual=payload.manual)
+    audit(db, user, "finops.lease_equity.activate", "lease_equity_pauta", pauta.id, {"manual": payload.manual})
+    db.commit()
+    db.refresh(pauta)
+    return LeaseEquityPautaView(**lease_pauta_view(pauta))
+
+
+@router.post("/finops/lease-equity/refresh-anticipation")
+def lease_equity_refresh_anticipation(payload: LeaseEquityMonthsRequest, user: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
+    pauta = _load_lease_pauta(db, user, payload.pauta_id)
+    refresh_anticipation_eligibility(db, user, pauta, payload.months_in_force)
+    db.commit()
+    db.refresh(pauta)
+    return LeaseEquityPautaView(**lease_pauta_view(pauta))
+
+
+@router.post("/finops/lease-equity/simulate-ltv")
+def lease_equity_simulate_ltv(payload: LeaseEquityLtvSimulateRequest, user: User = Depends(get_current_user)):
+    engine = EngineLeaseEquityLetter()
+    return engine.processar_matriz_credito_ltv(payload.property_type, payload.appraisal_value)
+
+
+@router.post("/finops/lease-equity/simulate-anticipation")
+def lease_equity_simulate_anticipation(payload: LeaseEquityAnticipationRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    pauta = _load_lease_pauta(db, user, payload.pauta_id)
+    return simulate_anticipation(pauta, payload.parcelas_restantes)
+
+
+@router.post("/finops/lease-equity/tokenization-processor")
+def lease_equity_tokenization(payload: LeaseEquityTokenizationRequest, user: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
+    pauta = _load_lease_pauta(db, user, payload.pauta_id)
+    result = process_tokenization(pauta, payload.owner_uid)
+    audit(db, user, "finops.lease_equity.tokenization", "lease_equity_pauta", pauta.id)
+    db.commit()
+    return result
 
 
 @router.get("/help/what-is-flash-capital")

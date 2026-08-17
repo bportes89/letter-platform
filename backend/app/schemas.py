@@ -1517,3 +1517,95 @@ class PreAnalysisPautaView(BaseModel):
     client_result: dict | None
     valid_stamp_hash: str | None
     created_at: datetime
+
+
+class LeaseEquityPautaCreate(BaseModel):
+    proposal_id: str
+    property_type: str = Field(description="URBANO_RESIDENCIAL | URBANO_COMERCIAL | LOTE_URBANO | GALPAO | RURAL")
+    appraisal_value: Decimal = Field(gt=0)
+    registry_number: str = Field(min_length=1, max_length=80)
+    registry_office: str = Field(min_length=1, max_length=180)
+    owner_user_id: str | None = None
+
+
+class LeaseEquityTapafWebhook(BaseModel):
+    pauta_id: str
+    event_id: str = Field(min_length=4, max_length=120)
+    amount: Decimal = Field(gt=0)
+
+
+class LeaseEquityInspectionPhoto(BaseModel):
+    filename: str
+    source: str = Field(default="CAMERA_NATIVE")
+    exif_timestamp_unix: int
+    gps_latitude: float
+    gps_longitude: float
+
+
+class LeaseEquityInspectionRequest(BaseModel):
+    pauta_id: str
+    photos: list[LeaseEquityInspectionPhoto] = Field(min_length=3)
+
+
+class LeaseEquityComplianceReview(BaseModel):
+    pauta_id: str
+    approved: bool
+    blockers: list[str] | None = None
+
+
+class LeaseEquityFundingCapture(BaseModel):
+    pauta_id: str
+    amount: Decimal = Field(gt=0)
+
+
+class LeaseEquityActivateRequest(BaseModel):
+    pauta_id: str
+    manual: bool = False
+
+
+class LeaseEquityAnticipationRequest(BaseModel):
+    pauta_id: str
+    parcelas_restantes: int = Field(default=36, ge=1, le=36)
+
+
+class LeaseEquityMonthsRequest(BaseModel):
+    pauta_id: str
+    months_in_force: int = Field(ge=0, le=36)
+
+
+class LeaseEquityLtvSimulateRequest(BaseModel):
+    property_type: str
+    appraisal_value: Decimal = Field(gt=0)
+
+
+class LeaseEquityTokenizationRequest(BaseModel):
+    pauta_id: str
+    owner_uid: str | None = None
+
+
+class LeaseEquityPautaView(BaseModel):
+    id: str
+    proposal_id: str
+    pauta_code: str
+    status: str
+    property_type: str
+    appraisal_value: str
+    registry_number: str
+    registry_office: str
+    tapaf_payment_reference: str | None
+    tapaf_paid_at: datetime | None
+    compliance_dossier_uri: str | None
+    inspection_photos_count: int
+    funding_captured_amount: str
+    funding_target_amount: str
+    funding_capture_percent: str
+    activation_at: datetime | None
+    activated_manually: bool
+    months_in_force: int
+    anticipation_unlock_at: datetime | None
+    credit_matrix: dict
+    anticipation_preview: dict
+    tokenization_json: dict | None
+    created_at: datetime
+    updated_at: datetime
+

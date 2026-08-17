@@ -53,6 +53,19 @@ export type Lead = { id: string; name: string; phone: string; product_interest: 
 export type Administrator = { id: string; name: string; document: string; authorization_status: string };
 export type Quota = { id: string; administrator_id: string; group_code: string; quota_code: string; category: string; credit_value: string; outstanding_balance: string; premium_value: string; status: string; created_at: string };
 export type Proposal = { id: string; lead_id: string; product: string; requested_amount: string; status: string; calculation_version: string; created_at: string };
+export type LeaseEquityPauta = {
+  id: string; proposal_id: string; pauta_code: string; status: string; property_type: string;
+  appraisal_value: string; registry_number: string; registry_office: string;
+  tapaf_payment_reference: string | null; tapaf_paid_at: string | null;
+  compliance_dossier_uri: string | null; inspection_photos_count: number;
+  funding_captured_amount: string; funding_target_amount: string; funding_capture_percent: string;
+  activation_at: string | null; activated_manually: boolean; months_in_force: number;
+  anticipation_unlock_at: string | null;
+  credit_matrix: Record<string, string>;
+  anticipation_preview: Record<string, string | number>;
+  tokenization_json: Record<string, unknown> | null;
+  created_at: string; updated_at: string;
+};
 export type Calculation = { id: string; proposal_id: string; version: number; formula_version: string; input: Record<string,unknown>; output: Record<string,string|number|null>; approved_at: string|null };
 export type Reservation = { id: string; quota_id: string; proposal_id: string | null; status: string; expires_at: string; created_at: string };
 export type Contract = { id: string; proposal_id: string; contract_number: string; status: string; template_version: string; content_hash: string; accepted_at: string | null };
