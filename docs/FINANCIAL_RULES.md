@@ -27,16 +27,27 @@ As regras abaixo reproduzem as premissas recebidas na documentação da LETTER. 
 
 Exemplo canônico pool: R$ 800.000 por 12 meses gera R$ 432.000 de juros, sendo R$ 240.000 para investidores e R$ 192.000 de spread LETTER.
 
-## Flash Capital — `flash-capital-v1` / `flash-capital-v2`
+## Flash Capital — `flash-capital-v1` / `flash-capital-v2` / `flash-capital-v3`
 
 > Nomenclatura comercial **Flash Capital** (identificador interno preservado: `FLASH_CREDIT`).
 
-Regras comuns:
+Regras comuns (v3):
 
 - LTV máximo: 40% do valor do bem.
-- Provisão de ITBI e emolumentos: 3% do principal.
-- Fee de estruturação: 7% do principal.
-- Payout líquido simulado: principal menos provisão e fee.
+- **Valor nominal (principal):** montante alavancado sobre o bem (ex.: imóvel R$ 1M → principal R$ 400.000).
+- **Fee da plataforma:** 10% do principal (configurável via política `intermediation_fee_percent`).
+- **Provisão ITBI e emolumentos:** 3% do principal.
+- **Payout líquido ao cliente:** `principal − fee plataforma − ITBI`.
+- **Juros (Price / fundo):** calculados sobre o **valor nominal (principal)**, não sobre o líquido.
+- **Comissão da rede (MMN):** base de cálculo = **payout líquido** (`partner_commission_base`).
+
+Exemplo canônico (imóvel R$ 1.000.000, LTV 40%):
+
+```
+400.000 − 40.000 (fee 10%) − 12.000 (ITBI 3%) = 348.000 líquido ao cliente
+Comissão parceiros: sobre R$ 348.000
+Juros: sobre R$ 400.000 (nominal)
+```
 
 ### Origem `RETAIL` (pool)
 

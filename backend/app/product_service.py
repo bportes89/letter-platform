@@ -203,6 +203,8 @@ def calculate_flash_credit(
     retail_rate = Decimal(str(policy.retail_rate_monthly)) if policy else Decimal("2.5")
     default_investor = Decimal(str(policy.investor_rate_monthly)) if policy else Decimal("1.6")
     treasury_spread = Decimal(str(policy.treasury_spread_monthly)) if policy else Decimal("0.9")
+    platform_fee_percent = Decimal(str(policy.intermediation_fee_percent)) if policy else Decimal("10")
+    itbi_percent = Decimal("3")
     pool_meta: dict = {}
     if capital_source == "RETAIL":
         investor_rate, pool_meta = resolve_pool_investor_rate(
@@ -222,16 +224,25 @@ def calculate_flash_credit(
     if capital_source not in {"RETAIL", "INSTITUTIONAL"}:
         raise HTTPException(status_code=422, detail="Fonte deve ser RETAIL (pool) ou INSTITUTIONAL (fundo)")
 
-    itbi_provision = money(principal * Decimal("3") / HUNDRED)
-    structuring_fee = money(principal * Decimal("7") / HUNDRED)
-    net_payout = money(principal - itbi_provision - structuring_fee)
+    platform_fee = money(principal * platform_fee_percent / HUNDRED)
+    itbi_provision = money(principal * itbi_percent / HUNDRED)
+    net_payout = money(principal - platform_fee - itbi_provision)
+    partner_commission_base = net_payout
     balloon_month = 36 if term_months == 60 else None
     output: dict = {
         "principal": decimal_string(principal), "asset_value": decimal_string(asset),
         "ltv_percent": decimal_string(ltv), "term_months": term_months,
         "capital_source": capital_source, "product_label": "Flash Capital",
+        "platform_fee_percent": decimal_string(platform_fee_percent),
+        "platform_fee": decimal_string(platform_fee),
+        "structuring_fee": decimal_string(platform_fee),
+        "itbi_percent": decimal_string(itbi_percent),
         "itbi_provision": decimal_string(itbi_provision),
-        "structuring_fee": decimal_string(structuring_fee), "net_payout": decimal_string(net_payout),
+        "net_payout": decimal_string(net_payout),
+        "partner_commission_base": decimal_string(partner_commission_base),
+        "interest_basis": "NOMINAL_PRINCIPAL",
+        "interest_basis_note": "Juros e amortização Price calculados sobre o valor nominal alavancado (principal).",
+        "partner_commission_basis_note": "Comissão da rede (MMN) calculada sobre o líquido remanescente ao cliente após fee da plataforma e ITBI.",
         "balloon_month": balloon_month,
     }
     if capital_source == "RETAIL":
@@ -279,11 +290,13 @@ def calculate_flash_credit(
     input_data = {
         "asset_value": decimal_string(asset), "capital_source": capital_source,
         "term_months": term_months, "ipca_annual_percent": decimal_string(ipca_annual),
+        "platform_fee_percent": decimal_string(platform_fee_percent),
+        "itbi_percent": decimal_string(itbi_percent),
         "pool_investor_rate_override": str(pool_investor_rate_percent) if pool_investor_rate_percent is not None else None,
         "pool_investment_amount": pool_meta.get("pool_investment_amount"),
         **pool_meta,
     }
     output["policy_version"] = policy.version if policy else 1
     output["borrower_eligibility"] = "PJ_ONLY"
-    formula_version = "flash-capital-v2" if policy else "flash-capital-v1"
+    formula_version = "flash-capital-v3"
     return persist_calculation(db, user, proposal, formula_version, input_data, output)

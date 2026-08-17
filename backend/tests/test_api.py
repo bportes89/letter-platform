@@ -911,7 +911,7 @@ def test_flash_credit_pj_route_policy_and_valid_stamp(client,auth_headers):
     assert client.post("/api/v1/auth/step-up",headers=auth_headers,json={"password":"Letter@123"}).status_code==200
     assert client.post(f"/api/v1/flash-credit/policies/{policy['id']}/approve",headers=auth_headers).json()["status"]=="ACTIVE"
     calc=client.post(f"/api/v1/proposals/{proposal['id']}/calculate-flash-credit",headers=auth_headers,json={"asset_value":"600000","capital_source":"RETAIL","term_months":36,"ipca_annual_percent":"4.5"})
-    assert calc.status_code==201 and calc.json()["formula_version"]=="flash-capital-v2" and calc.json()["output"]["borrower_eligibility"]=="PJ_ONLY"
+    assert calc.status_code==201 and calc.json()["formula_version"]=="flash-capital-v3" and calc.json()["output"]["borrower_eligibility"]=="PJ_ONLY"
     stamp_payload={**route.json(),"asset_type":"REAL_ESTATE","documents":{"MATRICULA_ENOTARIADO":"hash-matricula","LAUDO_AVALIACAO":"hash-laudo","SERASA":"hash-serasa","BACEN":"hash-bacen"}}
     stamp=client.post("/api/v1/valid-stamps",headers=auth_headers,json={"entity_type":"proposal","entity_id":proposal["id"],"purpose":"FLASH_CREDIT_PARTIES","payload":stamp_payload})
     assert stamp.status_code==201 and len(stamp.json()["chain_hash"])==64
@@ -940,6 +940,8 @@ def test_flash_simulator_four_scenarios_and_settlement_quote(client,auth_headers
     simulation=client.post("/api/v1/public/flash-credit/simulate",json={"asset_value":"1000000","ipca_projected_percent":"4.5"})
     assert simulation.status_code==200
     body=simulation.json();assert body["principal"]=="400000.00" and body["ltv_percent"]=="40.00" and len(body["scenarios"])==4
+    assert body["platform_fee"]=="40000.00" and body["itbi_provision"]=="12000.00" and body["net_payout"]=="348000.00"
+    assert body["partner_commission_base"]=="348000.00" and body["interest_basis"]=="NOMINAL_PRINCIPAL"
     for rows in body["scenarios"].values():
         assert len(rows)==36 and rows[12]["ipca_adjusted"] is True and rows[24]["ipca_adjusted"] is True and rows[-1]["settlement_balance"]=="0.00"
     assert client.post("/api/v1/public/flash-credit/simulate",json={"asset_value":"1000000","requested_amount":"400000.01"}).status_code==422
@@ -1082,6 +1084,35 @@ def test_sdc_pool_investor_tier_auto(client, auth_headers):
     assert output["pool_investor_tax_status"] == "EXEMPT_NOT_WITHHELD"
     assert output["investor_interest"] == "192000.00"
     assert output["platform_spread"] == "240000.00"
+
+
+def test_flash_capital_canonical_fee_and_commission_base(client, auth_headers):
+    lead = client.get("/api/v1/leads", headers=auth_headers).json()[0]
+    proposal = client.post("/api/v1/proposals", headers=auth_headers, json={
+        "lead_id": lead["id"], "product": "FLASH_CREDIT", "requested_amount": "400000", "terms": {}
+    }).json()
+    calculated = client.post(f"/api/v1/proposals/{proposal['id']}/calculate-flash-credit", headers=auth_headers, json={
+        "asset_value": "1000000", "capital_source": "RETAIL", "term_months": 36, "ipca_annual_percent": "0",
+    })
+    assert calculated.status_code == 201
+    output = calculated.json()["output"]
+    assert calculated.json()["formula_version"] == "flash-capital-v3"
+    assert output["principal"] == "400000.00"
+    assert output["platform_fee"] == "40000.00"
+    assert output["itbi_provision"] == "12000.00"
+    assert output["net_payout"] == "348000.00"
+    assert output["partner_commission_base"] == "348000.00"
+    assert output["interest_basis"] == "NOMINAL_PRINCIPAL"
+    assert output["monthly_payment"] == price_payment_check("400000", "2.5", 36)
+
+
+def price_payment_check(principal: str, rate_percent: str, months: int) -> str:
+    from decimal import Decimal, ROUND_HALF_UP
+    p = Decimal(principal)
+    rate = Decimal(rate_percent) / Decimal("100")
+    factor = (Decimal("1") + rate) ** months
+    payment = (p * rate * factor / (factor - Decimal("1"))).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return str(payment)
 
 
 def test_sdc_vehicle_registry_blocks_valid_stamp(client, auth_headers):

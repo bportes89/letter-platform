@@ -44,11 +44,15 @@ def price_schedule(principal:Decimal,rate:Decimal,ipca:Decimal,balloon:bool=Fals
 def four_scenarios(asset_value:Decimal,requested_amount:Decimal|None,ipca:Decimal,institutional_annual:Decimal=Decimal("14"),retail_monthly:Decimal=Decimal("2.5"))->dict:
     limit=money(asset_value*Decimal("0.40"));principal=money(requested_amount or limit)
     if principal>limit:raise HTTPException(422,f"LTV máximo de 40% excedido; limite {limit}")
+    platform_fee_percent=Decimal("10");itbi_percent=Decimal("3")
+    platform_fee=money(principal*platform_fee_percent/HUNDRED)
+    itbi_provision=money(principal*itbi_percent/HUNDRED)
+    net_payout=money(principal-platform_fee-itbi_provision)
     scenarios={}
     for track in ("FUNDS","POOL"):
         rate=monthly_rate(track,institutional_annual,retail_monthly)
         for balloon in (False,True):scenarios[f"{track.lower()}_{'balloon' if balloon else 'linear'}"]=price_schedule(principal,rate,ipca,balloon)
-    return {"asset_value":str(money(asset_value)),"principal":str(principal),"ltv_percent":str(money(principal/asset_value*HUNDRED)),"coverage_factor":"2.5x","ipca_projected_percent":str(ipca),"execution":"SIMULATION_ONLY","scenarios":scenarios}
+    return {"asset_value":str(money(asset_value)),"principal":str(principal),"ltv_percent":str(money(principal/asset_value*HUNDRED)),"coverage_factor":"2.5x","ipca_projected_percent":str(ipca),"platform_fee_percent":str(platform_fee_percent),"platform_fee":str(platform_fee),"itbi_percent":str(itbi_percent),"itbi_provision":str(itbi_provision),"net_payout":str(net_payout),"partner_commission_base":str(net_payout),"interest_basis":"NOMINAL_PRINCIPAL","execution":"SIMULATION_ONLY","scenarios":scenarios}
 
 def settlement_curve(principal:Decimal,track:str,ipca:Decimal,balloon:bool)->dict:
     rows=price_schedule(principal,monthly_rate(track),ipca,balloon)

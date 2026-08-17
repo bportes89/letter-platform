@@ -53,7 +53,7 @@ O projeto completo será evoluído dentro desta mesma pasta.
 - Flash Credit Retail com Tabela Price de 36 ou 60 meses.
 - Parcela Balloon obrigatória no mês 36 para o plano de 60 meses.
 - Flash Credit institucional a 14% a.a. + IPCA informado na simulação.
-- Taxa de gestão de 0,5% a.a., fee de 7% e provisão de ITBI de 3%.
+- Taxa de gestão de 0,5% a.a., fee da plataforma de 10% e provisão de ITBI de 3%.
 - Trava de LTV máximo de 40% e tela operacional para os dois produtos.
 
 ## MMN e funding simulado — entregue na v0.6.0

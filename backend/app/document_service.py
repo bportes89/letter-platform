@@ -69,8 +69,10 @@ def contract_pdf(contract: Contract, proposal: Proposal, calculation: Calculatio
         "start_fee_milestone_2": "Taxa de Start — Marco 2", "intermediation_fee": "Fee de intermediação",
         "asset_value": "Valor do bem", "ltv_percent": "LTV (%)", "monthly_payment": "Parcela",
         "balloon_payment": "Parcela Balloon", "management_fee_total": "Taxa de gestão",
-        "itbi_provision": "Provisão ITBI", "structuring_fee": "Fee de estruturação",
-        "net_payout": "Payout líquido", "total_contract": "Total do contrato",
+        "itbi_provision": "Provisão ITBI", "structuring_fee": "Fee da plataforma",
+        "platform_fee_percent": "Fee plataforma (%)",
+        "partner_commission_base": "Base comissão rede", "net_payout": "Payout líquido",
+        "total_contract": "Total do contrato",
     }
     for field, label in field_labels.items():
         if field in output:

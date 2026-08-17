@@ -55,7 +55,7 @@ def generate_billing_schedule(db: Session, contract: Contract, proposal: Proposa
         if milestone_one>0: rows.append(add_invoice(db,contract,0,"START_1",start_date,Decimal("0"),Decimal("0"),milestone_one))
         if milestone_two>0: rows.append(add_invoice(db,contract,0,"START_2",start_date+timedelta(days=30),Decimal("0"),Decimal("0"),milestone_two))
         rows.append(add_invoice(db,contract,int(output["duration_months"]),"BULLET",add_months(start_date,int(output["duration_months"])),Decimal(output["principal"]),Decimal(output["total_interest"]),Decimal("0")))
-    elif calculation.formula_version in {"flash-credit-v1", "flash-capital-v1", "flash-credit-v2", "flash-capital-v2"}:
+    elif calculation.formula_version in {"flash-credit-v1", "flash-capital-v1", "flash-credit-v2", "flash-capital-v2", "flash-capital-v3"}:
         term=int(output["term_months"]);payment=Decimal(output["monthly_payment"]);source=output["capital_source"]
         months=36 if source=="RETAIL" and term==60 else term
         balance=Decimal(output["principal"])
