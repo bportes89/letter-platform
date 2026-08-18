@@ -1312,16 +1312,38 @@ def test_pre_analysis_v6_income_margin_bifurcation(client, auth_headers):
 
 
 def test_lease_equity_engine_canonical_doc251():
-    from app.lease_equity_engine import EngineLeaseEquityLetter
+    from app.lease_equity_engine import EngineLeaseEquityLetter, money
 
     engine = EngineLeaseEquityLetter()
     credit = engine.processar_matriz_credito_ltv("URBANO_RESIDENCIAL", Decimal("1000000"))
-    assert credit["limite_teto_ltv_captacao"] == "600000.00"
+    assert credit["ltv_percent"] == "40.00"
+    assert credit["limite_teto_ltv_captacao"] == "400000.00"
     assert credit["base_calculo_recompensa_dono"] == "400000.00"
     assert credit["aluguel_mensal_recorrente_bruto_dono"] == "1600.00"
-    assert credit["custo_mensal_remuneracao_pool_investidores"] == "9600.00"
-    rwa = engine.gerar_fracionamento_securitizado_rwa(Decimal("600000"), "LETTER_LEASE_EQ_0044_2026")
-    assert rwa["total_supply_tokens_mint"] == 6000
+    assert credit["ganho_total_proprietario_prazo"] == "57600.00"
+    assert credit["custo_mensal_remuneracao_pool_investidores"] == "6400.00"
+    assert credit["comissao_parceiro_percent"] == "2"
+    assert Decimal(credit["comissao_parceiro_pool"]) == money(
+        Decimal(credit["saque_total_antecipado_vp"]) * Decimal("0.02")
+    )
+
+    sim_600k = engine.processar_matriz_credito_ltv("URBANO_RESIDENCIAL", Decimal("600000"))
+    assert sim_600k["limite_teto_ltv_captacao"] == "240000.00"
+    assert sim_600k["aluguel_mensal_recorrente_bruto_dono"] == "960.00"
+    assert sim_600k["ganho_total_proprietario_prazo"] == "34560.00"
+
+    lote = engine.processar_matriz_credito_ltv("LOTE_URBANO", Decimal("600000"))
+    assert lote["limite_teto_ltv_captacao"] == "150000.00"
+    assert lote["aluguel_mensal_recorrente_bruto_dono"] == "600.00"
+    assert lote["ganho_total_proprietario_prazo"] == "21600.00"
+
+    rural = engine.processar_matriz_credito_ltv("RURAL", Decimal("600000"))
+    assert rural["limite_teto_ltv_captacao"] == "120000.00"
+    assert rural["aluguel_mensal_recorrente_bruto_dono"] == "480.00"
+    assert rural["ganho_total_proprietario_prazo"] == "17280.00"
+
+    rwa = engine.gerar_fracionamento_securitizado_rwa(Decimal("400000"), "LETTER_LEASE_EQ_0044_2026")
+    assert rwa["total_supply_tokens_mint"] == 4000
     assert rwa["rendimento_mensal_unitario_smart_contract"] == "1.60"
     blocked = engine.calcular_antecipacao_recebiveis_price(Decimal("1600"), 36, 5)
     assert blocked["status_antecipacao"] == "ANTECIPACAO_BLOQUEADA_CARENCIA_MINIMA"
@@ -1329,6 +1351,9 @@ def test_lease_equity_engine_canonical_doc251():
     released = engine.calcular_antecipacao_recebiveis_price(Decimal("1600"), 36, 6)
     assert released["status_antecipacao"] == "LIBERADO_PARA_SAQUE_VISTA"
     assert Decimal(released["valor_liquido_payout_vista"]) > Decimal("0")
+    assert Decimal(released["comissao_parceiro_pool"]) == money(
+        Decimal(released["valor_liquido_payout_vista"]) * Decimal("0.02")
+    )
 
 
 def test_lease_equity_full_pipeline_and_tokenization(client, auth_headers):
@@ -1381,7 +1406,7 @@ def test_lease_equity_full_pipeline_and_tokenization(client, auth_headers):
     assert gravame.json()["status"] == "GRAVAME_CONCLUIDO"
 
     funding = client.post("/api/v1/finops/lease-equity/funding-capture", headers=auth_headers, json={
-        "pauta_id": pauta["id"], "amount": "180000.00",
+        "pauta_id": pauta["id"], "amount": "120000.00",
     })
     assert funding.status_code == 200 and funding.json()["status"] == "ATIVO_OK_EM_PRODUCAO"
 
@@ -1395,10 +1420,12 @@ def test_lease_equity_full_pipeline_and_tokenization(client, auth_headers):
     data = body["data"]
     assert data["contrato_id"] == pauta["pauta_code"]
     assert data["colateral_imobiliario"]["matricula_numero"] == "44901"
+    assert data["parametrizacao_finops_mesa"]["ltv_alavancagem_teto"] == 400000.0
     assert data["parametrizacao_finops_mesa"]["faturamento_mensal_bruto_recorrente_dono"] == 1600.0
-    assert data["parametrizacao_finops_mesa"]["custo_mensal_pool_investment_1_6_porcento"] == 9600.0
+    assert data["parametrizacao_finops_mesa"]["custo_mensal_pool_investment_1_6_porcento"] == 6400.0
+    assert data["parametrizacao_finops_mesa"]["comissao_parceiro_pool_percent"] == 2.0
     meta = data["workflow_securitizacao_rwa"]["tokenizacao_blockchain_metadata"]
-    assert meta["total_supply_tokens_emitidos"] == 6000
+    assert meta["total_supply_tokens_emitidos"] == 4000
     assert meta["distribuicao_rendimento_token_mensal"] == 1.60
     assert data["trava_seguranca_antecipacao_futura"]["carecia_meses_minima"] == 6
 

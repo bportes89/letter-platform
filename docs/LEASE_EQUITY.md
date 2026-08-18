@@ -2,15 +2,28 @@
 
 Motor: `EngineLeaseEquityLetter`
 
-## Matriz LTV assimétrica
+## Matriz LTV (simulador cliente)
 
-| Tipologia | LTV máx. | Base recompensa dono | Aluguel dono (0,4% a.m.) |
-|-----------|----------|----------------------|--------------------------|
-| Urbano residencial/comercial | 60% | 40% AVM | base × 0,4% |
-| Lote / Galpão | 40% | 25% AVM | base × 0,4% |
-| Rural | 30% | 20% AVM | base × 0,4% |
+| Tipologia | LTV captação | Remuneração proprietário |
+|-----------|--------------|--------------------------|
+| Urbano (exceto lote e galpão) | **40%** do AVM | **0,4% a.m.** sobre o valor captado (LTV) |
+| Urbano (lote e galpão) | **25%** do AVM | **0,4% a.m.** sobre o valor captado |
+| Rural | **20%** do AVM | **0,4% a.m.** sobre o valor captado |
 
-Pool investidor: **1,6% a.m.** sobre valor alavancado.
+Exemplo (imóvel R$ 600.000, prazo 36 meses):
+
+| Tipologia | LTV | Saque mensal dono | Ganho total 36m |
+|-----------|-----|-------------------|-----------------|
+| Urbano | R$ 240.000 | R$ 960 | R$ 34.560 |
+| Lote/galpão | R$ 150.000 | R$ 600 | R$ 21.600 |
+| Rural | R$ 120.000 | R$ 480 | R$ 17.280 |
+
+Pool investidor: **1,6% a.m.** sobre valor alavancado (LTV).
+
+## Comissão parceiro (MMN)
+
+- **Pool total:** 2% sobre o valor presente da antecipação (Price 2,5% a.m., 36 parcelas).
+- Base MMN = `saque_total_antecipado_vp` — distribuída nos 5 níveis da rede conforme regra ativa do produto `LEASE_EQUITY`.
 
 ## Vistoria fotográfica nativa (SDC, Flash Capital e Lease Equity)
 

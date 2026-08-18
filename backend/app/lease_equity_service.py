@@ -310,10 +310,14 @@ def process_tokenization(pauta: LeaseEquityPauta, owner_uid: str | None = None) 
                 "valor_avaliacao_homologado": float(pauta.appraisal_value),
             },
             "parametrizacao_finops_mesa": {
-                "ltv_alavancagem_teto_60_porcento": float(ltv_amount),
-                "base_calculo_recompensa_dono_40_porcento": float(credit["base_calculo_recompensa_dono"]),
+                "ltv_captacao_percent": float(credit["ltv_percent"]),
+                "ltv_alavancagem_teto": float(ltv_amount),
                 "faturamento_mensal_bruto_recorrente_dono": float(owner_rent),
+                "ganho_total_proprietario_prazo": float(credit["ganho_total_proprietario_prazo"]),
                 "custo_mensal_pool_investment_1_6_porcento": float(pool_cost),
+                "saque_total_antecipado_vp": float(credit["saque_total_antecipado_vp"]),
+                "comissao_parceiro_pool_percent": float(credit["comissao_parceiro_percent"]),
+                "comissao_parceiro_pool": float(credit["comissao_parceiro_pool"]),
             },
             "workflow_securitizacao_rwa": {
                 "titulo_lastro_vinculado": "NOTA_COMERCIAL_PRIVADA_SERIE_LE01",

@@ -167,7 +167,7 @@ export function LeaseEquityModule() {
         <div>
           <span className="eyebrow dark">LEASE EQUITY ENGINE V1</span>
           <h1>Lease Equity — TAPAF, LTV e RWA</h1>
-          <p>Esteira FinOps: TAPAF R$ 750, matriz LTV assimétrica, tokenização R$ 100/cota e antecipação Price 2,5% a.m.</p>
+          <p>Esteira FinOps: TAPAF R$ 750, LTV 40%/25%/20%, tokenização R$ 100/cota, antecipação Price 2,5% a.m. e comissão parceiro 2% sobre antecipação.</p>
         </div>
         <div className="operational-icon"><Building2 /></div>
       </div>
@@ -182,11 +182,11 @@ export function LeaseEquityModule() {
               {proposals.map((p) => <option key={p.id} value={p.id}>{p.product} · {p.id.slice(0, 8)}</option>)}
             </select>
             <select name="property_type" defaultValue="URBANO_RESIDENCIAL">
-              <option value="URBANO_RESIDENCIAL">Urbano residencial (LTV 60%)</option>
-              <option value="URBANO_COMERCIAL">Urbano comercial (LTV 60%)</option>
-              <option value="LOTE_URBANO">Lote urbano (LTV 40%)</option>
-              <option value="GALPAO">Galpão (LTV 40%)</option>
-              <option value="RURAL">Rural (LTV 30%)</option>
+              <option value="URBANO_RESIDENCIAL">Urbano residencial (LTV 40%)</option>
+              <option value="URBANO_COMERCIAL">Urbano comercial (LTV 40%)</option>
+              <option value="LOTE_URBANO">Lote urbano (LTV 25%)</option>
+              <option value="GALPAO">Galpão (LTV 25%)</option>
+              <option value="RURAL">Rural (LTV 20%)</option>
             </select>
             <input name="appraisal_value" type="number" min="1" step="0.01" placeholder="Valor avaliação (AVM)" defaultValue="1000000" required />
             <input name="registry_number" placeholder="Matrícula" defaultValue="44901" required />
@@ -196,20 +196,24 @@ export function LeaseEquityModule() {
         </section>
 
         <section className="panel">
-          <h2>Simulador LTV assimétrico</h2>
+          <h2>Simulador Lease Equity</h2>
           <form className="stack-form" onSubmit={simulateLtv}>
             <select name="property_type" defaultValue="URBANO_RESIDENCIAL">
-              <option value="URBANO_RESIDENCIAL">Urbano residencial</option>
+              <option value="URBANO_RESIDENCIAL">Urbano (exceto lote/galpão)</option>
+              <option value="LOTE_URBANO">Lote / galpão</option>
               <option value="RURAL">Rural</option>
             </select>
-            <input name="appraisal_value" type="number" defaultValue="1000000" required />
+            <input name="appraisal_value" type="number" defaultValue="600000" required />
             <button type="submit">Calcular matriz</button>
           </form>
           {ltvPreview && (
             <div className="finops-summary">
-              <article><small>Teto LTV</small><strong>{brl.format(Number(ltvPreview.limite_teto_ltv_captacao))}</strong></article>
-              <article><small>Aluguel dono/mês</small><strong>{brl.format(Number(ltvPreview.aluguel_mensal_recorrente_bruto_dono))}</strong></article>
-              <article><small>Custo pool/mês</small><strong>{brl.format(Number(ltvPreview.custo_mensal_remuneracao_pool_investidores))}</strong></article>
+              <article><small>LTV captação ({ltvPreview.ltv_percent}%)</small><strong>{brl.format(Number(ltvPreview.limite_teto_ltv_captacao))}</strong></article>
+              <article><small>Saque mensal dono (0,4%)</small><strong>{brl.format(Number(ltvPreview.aluguel_mensal_recorrente_bruto_dono))}</strong></article>
+              <article><small>Ganho total 36m</small><strong>{brl.format(Number(ltvPreview.ganho_total_proprietario_prazo))}</strong></article>
+              <article><small>Antecipação VP (2,5% a.m.)</small><strong>{brl.format(Number(ltvPreview.saque_total_antecipado_vp))}</strong></article>
+              <article><small>Comissão parceiro (2%)</small><strong>{brl.format(Number(ltvPreview.comissao_parceiro_pool))}</strong></article>
+              <article><small>Custo pool/mês (1,6%)</small><strong>{brl.format(Number(ltvPreview.custo_mensal_remuneracao_pool_investidores))}</strong></article>
             </div>
           )}
         </section>
