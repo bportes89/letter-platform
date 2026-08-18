@@ -21,7 +21,7 @@ from app.models import (
     CollectionAction, CommissionEntry, CommissionRule, DelinquencyCase,
     EscrowAccount, FundingOpportunity, Invoice, RecoveredAsset,
     InvestmentPosition, InvestmentReservation, KycCase, Lead, LedgerEntry,
-    LedgerTransaction, NetworkNode, PaymentReceipt, PayoutApproval, PayoutRequest, PreAnalysisPauta, Proposal, LeaseEquityPauta,
+    LedgerTransaction, NetworkNode, PaymentReceipt, PayoutApproval, PayoutRequest, PreAnalysisPauta, Proposal, LeaseEquityPauta, CollateralNativeInspection,
     Quota, QuotaReservation, SignatureEnvelope, User, UserInvitation,
     ReconciliationBatch, ReconciliationItem, TaxClosing, TaxDocument, TaxException,
     UnderwritingAssessment, UnderwritingDecision, UnderwritingPolicy, OperationalJob, SecurityEvent, TenantQuota,
@@ -60,6 +60,7 @@ from app.schemas import (
     LeaseEquityComplianceReview, LeaseEquityFundingCapture, LeaseEquityActivateRequest,
     LeaseEquityAnticipationRequest, LeaseEquityMonthsRequest, LeaseEquityLtvSimulateRequest,
     LeaseEquityTokenizationRequest,
+    ContractNativeInspectionRequest, CollateralNativeInspectionView,
     LeadUpdate, LeadView, LedgerPostRequest, LedgerTransactionView, LoginRequest,
     FlashCreditCalculationRequest, MfaSetupView, MfaVerify, ModuleView, PasswordResetConfirm, PasswordResetRequest,
     NetworkNodeCreate, NetworkNodeView, PayoutApprove, PayoutCreate, PayoutView, ProposalCreate, ProposalUpdate,
@@ -112,6 +113,10 @@ from app.invoice_processor_service import process_invoice_settlement, receipt_pr
 from app.pre_analysis_service import (
     accept_tapaf_checkout, confirm_tapaf_payment, generate_tapaf_checkout, pauta_view,
     run_engine_phase3, validate_documents_phase1,
+)
+from app.collateral_native_inspection_service import (
+    inspection_view, link_inspection_to_contract, register_contract_native_inspection,
+    resolve_inspection_for_contract,
 )
 from app.lease_equity_engine import EngineLeaseEquityLetter
 from app.lease_equity_service import (
@@ -1049,6 +1054,34 @@ def contract_receipts(contract_id: str, user: User = Depends(get_current_user), 
     return [PaymentReceiptView(**receipt_view(x)) for x in rows]
 
 
+@router.post("/contracts/{contract_id}/native-inspection", response_model=CollateralNativeInspectionView, status_code=201)
+def contract_native_inspection(
+    contract_id: str,
+    payload: ContractNativeInspectionRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    contract = db.scalar(select(Contract).where(Contract.id == contract_id, Contract.organization_id == user.organization_id))
+    if not contract:
+        raise HTTPException(status_code=404, detail="Contrato não encontrado")
+    item = register_contract_native_inspection(db, user, contract, [x.model_dump() for x in payload.photos])
+    audit(db, user, "collateral.native_inspection", "collateral_native_inspection", item.id, {"contract_id": contract_id})
+    db.commit()
+    db.refresh(item)
+    return CollateralNativeInspectionView(**inspection_view(item))
+
+
+@router.get("/contracts/{contract_id}/native-inspection", response_model=CollateralNativeInspectionView)
+def contract_native_inspection_get(contract_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    contract = db.scalar(select(Contract).where(Contract.id == contract_id, Contract.organization_id == user.organization_id))
+    if not contract:
+        raise HTTPException(status_code=404, detail="Contrato não encontrado")
+    item = resolve_inspection_for_contract(db, contract_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Vistoria nativa não registrada para este contrato")
+    return CollateralNativeInspectionView(**inspection_view(item))
+
+
 @router.get("/customer/dashboard/contracts/{contract_id}/receipts", response_model=list[PaymentReceiptView])
 def customer_contract_receipts(contract_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     return contract_receipts(contract_id, user, db)
@@ -1252,7 +1285,12 @@ def create_contract_route(proposal_id: str, payload: ContractCreate, user: User 
     proposal = db.scalar(select(Proposal).where(Proposal.id == proposal_id, Proposal.organization_id == user.organization_id))
     calculation = db.scalar(select(CalculationMemory).where(CalculationMemory.id == payload.calculation_memory_id, CalculationMemory.organization_id == user.organization_id))
     if not proposal or not calculation: raise HTTPException(status_code=404, detail="Proposta ou memória de cálculo não encontrada")
-    contract = create_contract(db, user, proposal, calculation); db.flush(); audit(db, user, "contract.created", "contract", contract.id); db.commit(); db.refresh(contract)
+    contract = create_contract(db, user, proposal, calculation)
+    link_inspection_to_contract(db, proposal.id, contract.id)
+    db.flush()
+    audit(db, user, "contract.created", "contract", contract.id)
+    db.commit()
+    db.refresh(contract)
     return contract
 
 

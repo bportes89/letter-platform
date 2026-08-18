@@ -16,7 +16,7 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, Tabl
 
 from app.models import (
     DelinquencyCase, Invoice, NinaCriticalApproval, NinaDistressCase,
-    NinaDistressEvent, NinaLegalDocument, Operation, Proposal, Quota, User,
+    NinaDistressEvent, NinaLegalDocument, Operation, Proposal, Quota, User, Contract,
 )
 
 
@@ -45,7 +45,12 @@ def create_distress_case(db:Session,user:User,delinquency:DelinquencyCase,apprai
     existing=db.scalar(select(NinaDistressCase).where(NinaDistressCase.delinquency_case_id==delinquency.id))
     if existing:return existing
     invoice=db.get(Invoice,delinquency.invoice_id);proposal=db.get(Proposal,invoice.proposal_id) if invoice else None
-    if not invoice or not proposal or proposal.product!="FLASH_CREDIT":raise HTTPException(status_code=422,detail="NINA Asset exige inadimplência vinculada a operação Flash Credit")
+    if not invoice or not proposal or proposal.product not in {"FLASH_CREDIT","SDC"}:
+        raise HTTPException(status_code=422,detail="NINA Asset exige inadimplência vinculada a SDC ou Flash Capital")
+    contract=db.scalar(select(Contract).where(Contract.proposal_id==proposal.id))
+    if not photo_reference and contract:
+        from app.collateral_native_inspection_service import resolve_auction_photo_reference
+        photo_reference=resolve_auction_photo_reference(db,proposal.id,contract.id)
     operation=db.scalar(select(Operation).where(Operation.proposal_id==proposal.id))
     if matched_quota_id and not db.scalar(select(Quota).where(Quota.id==matched_quota_id,Quota.organization_id==user.organization_id)):raise HTTPException(status_code=404,detail="Cota casada não encontrada")
     case=NinaDistressCase(organization_id=user.organization_id,delinquency_case_id=delinquency.id,operation_id=operation.id if operation else None,days_overdue=delinquency.days_overdue,appraisal_value_avm=money(appraisal_value) if appraisal_value else None,photo_storage_reference=photo_reference,matched_quota_id=matched_quota_id,daily_reduction_amount=money(daily_reduction),legal_hold=True)

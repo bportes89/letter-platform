@@ -66,6 +66,11 @@ export type LeaseEquityPauta = {
   tokenization_json: Record<string, unknown> | null;
   created_at: string; updated_at: string;
 };
+export type CollateralNativeInspection = {
+  id: string; product: string; proposal_id: string; contract_id: string | null;
+  lease_equity_pauta_id: string | null; photos_count: number; vault_s3_uri: string;
+  auction_evidence_ready: boolean; created_at: string; updated_at: string;
+};
 export type Calculation = { id: string; proposal_id: string; version: number; formula_version: string; input: Record<string,unknown>; output: Record<string,string|number|null>; approved_at: string|null };
 export type Reservation = { id: string; quota_id: string; proposal_id: string | null; status: string; expires_at: string; created_at: string };
 export type Contract = { id: string; proposal_id: string; contract_number: string; status: string; template_version: string; content_hash: string; accepted_at: string | null };

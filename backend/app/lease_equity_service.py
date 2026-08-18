@@ -174,13 +174,15 @@ def register_inspection_photos(
 ) -> LeaseEquityPauta:
     if pauta.status != "TAPAF_LIQUIDADA":
         raise HTTPException(status_code=409, detail="Vistoria disponível após TAPAF_LIQUIDADA")
-    if len(photos) < 3:
-        raise HTTPException(status_code=422, detail="Mínimo de 3 fotos nativas com EXIF obrigatório")
-    for photo in photos:
-        if photo.get("source") == "GALLERY":
-            raise HTTPException(status_code=422, detail="Upload da galeria bloqueado — use câmera nativa")
-        if not photo.get("exif_timestamp_unix") or not photo.get("gps_latitude") or not photo.get("gps_longitude"):
-            raise HTTPException(status_code=422, detail="Foto deve conter timestamp Unix e GPS no EXIF")
+    from app.collateral_native_inspection_service import upsert_native_inspection
+
+    upsert_native_inspection(
+        db, user,
+        product="LEASE_EQUITY",
+        proposal_id=pauta.proposal_id,
+        photos=photos,
+        lease_equity_pauta_id=pauta.id,
+    )
     pauta.inspection_photos_count = len(photos)
     pauta.inspection_metadata_json = json.dumps(photos, ensure_ascii=False)
     _transition(db, pauta, user, "EM_AUDITORIA_RISCO", "Vistoria fotográfica nativa concluída")

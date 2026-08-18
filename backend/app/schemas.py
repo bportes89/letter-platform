@@ -1583,6 +1583,31 @@ class LeaseEquityTokenizationRequest(BaseModel):
     owner_uid: str | None = None
 
 
+class NativeInspectionPhoto(BaseModel):
+    filename: str
+    source: str = Field(default="CAMERA_NATIVE")
+    exif_timestamp_unix: int
+    gps_latitude: float
+    gps_longitude: float
+
+
+class ContractNativeInspectionRequest(BaseModel):
+    photos: list[NativeInspectionPhoto] = Field(min_length=3)
+
+
+class CollateralNativeInspectionView(BaseModel):
+    id: str
+    product: str
+    proposal_id: str
+    contract_id: str | None
+    lease_equity_pauta_id: str | None
+    photos_count: int
+    vault_s3_uri: str
+    auction_evidence_ready: bool
+    created_at: datetime
+    updated_at: datetime
+
+
 class LeaseEquityPautaView(BaseModel):
     id: str
     proposal_id: str

@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.models import (
     AuctionBid, AuctionLot, AuctionQualification, AuctionSettlement,
-    DelinquencyCase, Invoice, RecoveredAsset, Role, User,
+    DelinquencyCase, Invoice, Proposal, Contract, RecoveredAsset, Role, User,
 )
 
 
@@ -31,6 +31,21 @@ def create_asset(db: Session, user: User, **data) -> RecoveredAsset:
         ))
         if not case:
             raise HTTPException(status_code=422, detail="Caso não elegível para recuperação")
+        invoice = db.get(Invoice, case.invoice_id)
+        proposal = db.get(Proposal, invoice.proposal_id) if invoice else None
+        contract = db.scalar(select(Contract).where(Contract.proposal_id == proposal.id)) if proposal else None
+        if proposal and contract:
+            from app.collateral_native_inspection_service import resolve_auction_photo_reference
+            photo_ref = resolve_auction_photo_reference(db, proposal.id, contract.id)
+            if photo_ref:
+                gated = data.get("gated_details") or {}
+                if isinstance(gated, dict):
+                    gated.setdefault("native_inspection_vault_uri", photo_ref)
+                    data["gated_details"] = gated
+                if "vistoria nativa" not in data.get("public_description", "").lower():
+                    data["public_description"] = (
+                        f"{data['public_description']} · Laudo fotográfico nativo (conservação/vacância) vinculado."
+                    )
     asset = RecoveredAsset(organization_id=user.organization_id, status="READY", **data)
     db.add(asset)
     return asset

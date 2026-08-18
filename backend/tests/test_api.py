@@ -1407,3 +1407,75 @@ def test_lease_equity_full_pipeline_and_tokenization(client, auth_headers):
     })
     assert unlocked.json()["status"] == "LIBERADO_PARA_ANTECIPACAO"
 
+
+def _native_photos():
+    return [
+        {"filename": f"foto{i}.jpg", "source": "CAMERA_NATIVE", "exif_timestamp_unix": 1700000000 + i,
+         "gps_latitude": -17.5, "gps_longitude": -39.7}
+        for i in range(3)
+    ]
+
+
+def test_contract_native_inspection_sdc_and_flash_links_auction(client, auth_headers):
+    lead = client.get("/api/v1/leads", headers=auth_headers).json()[0]
+    quotas = [q for q in client.get("/api/v1/quotas", headers=auth_headers).json() if q["category"] == "REAL_ESTATE"][:2]
+    for product, amount, calc_fn in (
+        ("SDC", "800000", lambda pid: client.post(f"/api/v1/proposals/{pid}/calculate-sdc", headers=auth_headers, json={
+            "quota_ids": [q["id"] for q in quotas], "duration_months": 12,
+        })),
+        ("FLASH_CREDIT", "400000", lambda pid: client.post(f"/api/v1/proposals/{pid}/calculate-flash-credit", headers=auth_headers, json={
+            "asset_value": "1000000", "capital_source": "RETAIL", "term_months": 36, "ipca_annual_percent": "0",
+        })),
+    ):
+        proposal = client.post("/api/v1/proposals", headers=auth_headers, json={
+            "lead_id": lead["id"], "product": product, "requested_amount": amount, "terms": {},
+        }).json()
+        calc = calc_fn(proposal["id"])
+        assert calc.status_code == 201, calc.text
+        contract = client.post(f"/api/v1/proposals/{proposal['id']}/contracts", headers=auth_headers, json={
+            "calculation_memory_id": calc.json()["id"],
+        })
+        assert contract.status_code == 201
+        cid = contract.json()["id"]
+        inspection = client.post(f"/api/v1/contracts/{cid}/native-inspection", headers=auth_headers, json={
+            "photos": _native_photos(),
+        })
+        assert inspection.status_code == 201
+        assert inspection.json()["product"] == product
+        assert "collateral-inspections" in inspection.json()["vault_s3_uri"]
+        assert inspection.json()["auction_evidence_ready"] is True
+
+        gallery = client.post(f"/api/v1/contracts/{cid}/native-inspection", headers=auth_headers, json={
+            "photos": [
+                {"filename": f"g{i}.jpg", "source": "GALLERY", "exif_timestamp_unix": 1, "gps_latitude": 0, "gps_longitude": 0}
+                for i in range(3)
+            ],
+        })
+        assert gallery.status_code == 422
+        assert "galeria" in gallery.json()["detail"].lower()
+
+
+def test_nina_distress_auto_links_native_inspection_photos(client, auth_headers):
+    lead = client.get("/api/v1/leads", headers=auth_headers).json()[0]
+    proposal = client.post("/api/v1/proposals", headers=auth_headers, json={
+        "lead_id": lead["id"], "product": "FLASH_CREDIT", "requested_amount": "400000", "terms": {},
+    }).json()
+    calc = client.post(f"/api/v1/proposals/{proposal['id']}/calculate-flash-credit", headers=auth_headers, json={
+        "asset_value": "1000000", "capital_source": "RETAIL", "term_months": 36, "ipca_annual_percent": "0",
+    })
+    assert calc.status_code == 201
+    contract = client.post(f"/api/v1/proposals/{proposal['id']}/contracts", headers=auth_headers, json={
+        "calculation_memory_id": calc.json()["id"],
+    }).json()
+    client.post(f"/api/v1/contracts/{contract['id']}/native-inspection", headers=auth_headers, json={"photos": _native_photos()})
+    client.post(f"/api/v1/contracts/{contract['id']}/billing", headers=auth_headers, json={"start_date": "2026-01-01"})
+    contract_invoice_ids = {i["id"] for i in client.get("/api/v1/invoices", headers=auth_headers).json() if i["contract_id"] == contract["id"]}
+    refreshed = client.post("/api/v1/collections/refresh?as_of=2026-05-05", headers=auth_headers)
+    del_case = next(c for c in refreshed.json() if c["invoice_id"] in contract_invoice_ids and c.get("caducity_eligible"))
+    nina = client.post("/api/v1/nina-asset/cases", headers=auth_headers, json={
+        "delinquency_case_id": del_case["id"], "appraisal_value_avm": "800000", "daily_reduction_amount": "500",
+    })
+    assert nina.status_code == 201
+    assert nina.json()["photo_storage_reference"]
+    assert "collateral-inspections" in nina.json()["photo_storage_reference"]
+

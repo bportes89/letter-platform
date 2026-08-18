@@ -12,6 +12,19 @@ Motor: `EngineLeaseEquityLetter`
 
 Pool investidor: **1,6% a.m.** sobre valor alavancado.
 
+## Vistoria fotográfica nativa (SDC, Flash Capital e Lease Equity)
+
+Componente anti-fraude compartilhado:
+- Câmera nativa obrigatória — **galeria bloqueada**
+- EXIF: timestamp Unix + coordenadas GPS
+- Armazenamento: `s3://letter-vault-private/collateral-inspections/{produto}/{id}/`
+- **Uso em inadimplência:** fotos vinculadas automaticamente ao caso NINA Asset e ao ativo de leilão
+
+| Produto | Endpoint |
+|---------|----------|
+| SDC / Flash Capital | `POST /contracts/{id}/native-inspection` |
+| Lease Equity | `POST /finops/lease-equity/inspection-photos` |
+
 ## TAPAF Lease Equity
 
 - Valor fixo: **R$ 750,00** (não reembolsável)

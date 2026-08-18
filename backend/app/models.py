@@ -866,6 +866,21 @@ class LeaseEquityStatusLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True)
 
 
+class CollateralNativeInspection(TimestampMixin, Base):
+    __tablename__ = "collateral_native_inspections"
+    __table_args__ = (UniqueConstraint("organization_id", "proposal_id"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    product: Mapped[str] = mapped_column(String(40), index=True)
+    proposal_id: Mapped[str] = mapped_column(ForeignKey("proposals.id"), index=True)
+    contract_id: Mapped[str | None] = mapped_column(ForeignKey("contracts.id"), index=True)
+    lease_equity_pauta_id: Mapped[str | None] = mapped_column(ForeignKey("lease_equity_pautas.id"), index=True)
+    photos_count: Mapped[int] = mapped_column(default=0)
+    metadata_json: Mapped[str] = mapped_column(Text, default="[]")
+    vault_s3_uri: Mapped[str] = mapped_column(String(500))
+    auction_evidence_ready: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
 class PaymentReceipt(TimestampMixin, Base):
     __tablename__ = "payment_receipts"
     __table_args__ = (UniqueConstraint("invoice_id", "payment_event_id"),)
