@@ -1601,6 +1601,7 @@ class CollateralNativeInspectionView(BaseModel):
     proposal_id: str
     contract_id: str | None
     lease_equity_pauta_id: str | None
+    quitcon_operacao_id: str | None
     photos_count: int
     vault_s3_uri: str
     auction_evidence_ready: bool
@@ -1630,6 +1631,106 @@ class LeaseEquityPautaView(BaseModel):
     anticipation_unlock_at: datetime | None
     credit_matrix: dict
     anticipation_preview: dict
+    tokenization_json: dict | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class QuitConOperacaoCreate(BaseModel):
+    proposal_id: str
+    property_type: str = Field(description="URBANO_RESIDENCIAL | URBANO_COMERCIAL | LOTE_URBANO | GALPAO | RURAL")
+    appraisal_value: Decimal = Field(gt=0)
+    outstanding_balance: Decimal = Field(gt=0)
+    registry_number: str = Field(min_length=1, max_length=80)
+    registry_office: str = Field(min_length=1, max_length=180)
+    quota_id: str | None = None
+    owner_user_id: str | None = None
+
+
+class QuitConTapafWebhook(BaseModel):
+    operacao_id: str
+    event_id: str = Field(min_length=4, max_length=120)
+    amount: Decimal = Field(gt=0)
+
+
+class QuitConInspectionRequest(BaseModel):
+    operacao_id: str
+    photos: list[LeaseEquityInspectionPhoto] = Field(min_length=3)
+
+
+class QuitConComplianceReview(BaseModel):
+    operacao_id: str
+    approved: bool
+    blockers: list[str] | None = None
+
+
+class QuitConFundingCapture(BaseModel):
+    operacao_id: str
+    amount: Decimal = Field(gt=0)
+
+
+class QuitConActivateRequest(BaseModel):
+    operacao_id: str
+    manual: bool = False
+
+
+class QuitConAnticipationRequest(BaseModel):
+    operacao_id: str
+    parcelas_restantes: int = Field(default=36, ge=1, le=36)
+
+
+class QuitConMonthsRequest(BaseModel):
+    operacao_id: str
+    months_in_force: int = Field(ge=0, le=36)
+
+
+class QuitConLtvSimulateRequest(BaseModel):
+    property_type: str
+    appraisal_value: Decimal = Field(gt=0)
+
+
+class QuitConTokenizationRequest(BaseModel):
+    operacao_id: str
+    owner_uid: str | None = None
+
+
+class QuitConCancelInadimplenciaRequest(BaseModel):
+    operacao_id: str
+    days_overdue: int = Field(ge=1)
+
+
+class QuitConOperacaoView(BaseModel):
+    id: str
+    proposal_id: str
+    quota_id: str | None
+    operacao_code: str
+    status: str
+    property_type: str
+    appraisal_value: str
+    outstanding_balance: str
+    registry_number: str
+    registry_office: str
+    tapaf_payment_reference: str | None
+    tapaf_paid_at: datetime | None
+    compliance_dossier_uri: str | None
+    inspection_photos_count: int
+    administrator_approved_at: datetime | None
+    sla_estimated_completion_at: datetime | None
+    sla_dias_estimados: int
+    success_fee_escrow_amount: str
+    funding_captured_amount: str
+    funding_target_amount: str
+    funding_capture_percent: str
+    activation_at: datetime | None
+    activated_manually: bool
+    months_in_force: int
+    anticipation_unlock_at: datetime | None
+    cancellation_reason: str | None
+    penalty_amount: str | None
+    penalty_detail_json: dict | None
+    credit_matrix: dict
+    anticipation_preview: dict
+    penalty_preview: dict | None
     tokenization_json: dict | None
     created_at: datetime
     updated_at: datetime

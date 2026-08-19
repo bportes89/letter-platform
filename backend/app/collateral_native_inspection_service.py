@@ -11,7 +11,7 @@ from app.models import CollateralNativeInspection, Contract, LeaseEquityPauta, P
 from app.storage_service import get_storage
 
 
-NATIVE_INSPECTION_PRODUCTS = frozenset({"SDC", "FLASH_CREDIT", "LEASE_EQUITY"})
+NATIVE_INSPECTION_PRODUCTS = frozenset({"SDC", "FLASH_CREDIT", "LEASE_EQUITY", "QUITCON"})
 MIN_NATIVE_PHOTOS = 3
 
 
@@ -38,12 +38,13 @@ def upsert_native_inspection(
     photos: list[dict],
     contract_id: str | None = None,
     lease_equity_pauta_id: str | None = None,
+    quitcon_operacao_id: str | None = None,
 ) -> CollateralNativeInspection:
     product = product.upper()
     if product not in NATIVE_INSPECTION_PRODUCTS:
         raise HTTPException(status_code=422, detail="Produto sem vistoria nativa homologada")
     validate_native_photos(photos)
-    entity_id = contract_id or lease_equity_pauta_id or proposal_id
+    entity_id = contract_id or lease_equity_pauta_id or quitcon_operacao_id or proposal_id
     key = inspection_vault_key(product, entity_id)
     vault_uri = f"s3://letter-vault-private/{key}"
     manifest = {
@@ -51,6 +52,7 @@ def upsert_native_inspection(
         "proposal_id": proposal_id,
         "contract_id": contract_id,
         "lease_equity_pauta_id": lease_equity_pauta_id,
+        "quitcon_operacao_id": quitcon_operacao_id,
         "photos_count": len(photos),
         "photos": photos,
         "purpose": "ONBOARDING_VISTORIA_NATIVA",
@@ -74,6 +76,8 @@ def upsert_native_inspection(
             item.contract_id = contract_id
         if lease_equity_pauta_id:
             item.lease_equity_pauta_id = lease_equity_pauta_id
+        if quitcon_operacao_id:
+            item.quitcon_operacao_id = quitcon_operacao_id
     else:
         item = CollateralNativeInspection(
             organization_id=user.organization_id,
@@ -81,6 +85,7 @@ def upsert_native_inspection(
             proposal_id=proposal_id,
             contract_id=contract_id,
             lease_equity_pauta_id=lease_equity_pauta_id,
+            quitcon_operacao_id=quitcon_operacao_id,
             photos_count=len(photos),
             metadata_json=json.dumps(photos, ensure_ascii=False),
             vault_s3_uri=vault_uri,
@@ -138,6 +143,7 @@ def inspection_view(item: CollateralNativeInspection) -> dict:
         "proposal_id": item.proposal_id,
         "contract_id": item.contract_id,
         "lease_equity_pauta_id": item.lease_equity_pauta_id,
+        "quitcon_operacao_id": item.quitcon_operacao_id,
         "photos_count": item.photos_count,
         "vault_s3_uri": item.vault_s3_uri,
         "auction_evidence_ready": item.auction_evidence_ready,

@@ -66,9 +66,28 @@ export type LeaseEquityPauta = {
   tokenization_json: Record<string, unknown> | null;
   created_at: string; updated_at: string;
 };
+export type QuitConOperacao = {
+  id: string; proposal_id: string; quota_id: string | null; operacao_code: string; status: string;
+  property_type: string; appraisal_value: string; outstanding_balance: string;
+  registry_number: string; registry_office: string;
+  tapaf_payment_reference: string | null; tapaf_paid_at: string | null;
+  compliance_dossier_uri: string | null; inspection_photos_count: number;
+  administrator_approved_at: string | null; sla_estimated_completion_at: string | null;
+  sla_dias_estimados: number; success_fee_escrow_amount: string;
+  funding_captured_amount: string; funding_target_amount: string; funding_capture_percent: string;
+  activation_at: string | null; activated_manually: boolean; months_in_force: number;
+  anticipation_unlock_at: string | null;
+  cancellation_reason: string | null; penalty_amount: string | null;
+  penalty_detail_json: Record<string, unknown> | null;
+  credit_matrix: Record<string, string>;
+  anticipation_preview: Record<string, string | number>;
+  penalty_preview: Record<string, unknown> | null;
+  tokenization_json: Record<string, unknown> | null;
+  created_at: string; updated_at: string;
+};
 export type CollateralNativeInspection = {
   id: string; product: string; proposal_id: string; contract_id: string | null;
-  lease_equity_pauta_id: string | null; photos_count: number; vault_s3_uri: string;
+  lease_equity_pauta_id: string | null; quitcon_operacao_id: string | null; photos_count: number; vault_s3_uri: string;
   auction_evidence_ready: boolean; created_at: string; updated_at: string;
 };
 export type Calculation = { id: string; proposal_id: string; version: number; formula_version: string; input: Record<string,unknown>; output: Record<string,string|number|null>; approved_at: string|null };

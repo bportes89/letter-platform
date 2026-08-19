@@ -1506,3 +1506,98 @@ def test_nina_distress_auto_links_native_inspection_photos(client, auth_headers)
     assert nina.json()["photo_storage_reference"]
     assert "collateral-inspections" in nina.json()["photo_storage_reference"]
 
+
+def test_quitcon_engine_canonical_doc252():
+    from app.quitcon_engine import EngineQuitConLetter, money
+
+    engine = EngineQuitConLetter()
+    credit = engine.processar_matriz_credito_ltv("URBANO_RESIDENCIAL", Decimal("1000000"))
+    assert credit["ltv_percent"] == "60.00"
+    assert credit["limite_teto_ltv_captacao"] == "600000.00"
+    assert credit["base_calculo_recompensa_dono"] == "400000.00"
+    assert credit["aluguel_mensal_recorrente_bruto_dono"] == "1600.00"
+    assert credit["custo_mensal_remuneracao_pool_investidores"] == "9600.00"
+    assert credit["sla_dias_estimados"] == 45
+
+    escrow = engine.calcular_taxa_sucesso_escrow(Decimal("250000"))
+    assert escrow == Decimal("25000.00")
+    inad = engine.calcular_multa_inadimplencia_cessionario(escrow)
+    assert inad["taxa_sucesso_escrow_retida_integralmente"] == "25000.00"
+    desist = engine.calcular_multa_desistencia_cedente(Decimal("250000"))
+    assert desist["multa_10_porcento_negocio"] == "25000.00"
+
+    rwa = engine.gerar_fracionamento_securitizado_rwa(Decimal("600000"), "LETTER_QUITCON_0044_2026")
+    assert rwa["total_supply_tokens_mint"] == 6000
+    released = engine.calcular_antecipacao_recebiveis_price(Decimal("1600"), 36, 6)
+    assert released["status_antecipacao"] == "LIBERADO_PARA_SAQUE_VISTA"
+    assert Decimal(released["valor_liquido_payout_vista"]) == money(
+        Decimal("1600") * ((Decimal("1") - Decimal("1.025") ** -36) / Decimal("0.025"))
+    )
+
+
+def test_quitcon_full_pipeline_penalties_and_tokenization(client, auth_headers):
+    lead = client.get("/api/v1/leads", headers=auth_headers).json()[0]
+    proposal = client.post("/api/v1/proposals", headers=auth_headers, json={
+        "lead_id": lead["id"], "product": "SDC", "requested_amount": "600000", "terms": {},
+    }).json()
+    created = client.post("/api/v1/finops/quitcon/operacoes", headers=auth_headers, json={
+        "proposal_id": proposal["id"],
+        "property_type": "URBANO_RESIDENCIAL",
+        "appraisal_value": "1000000",
+        "outstanding_balance": "250000",
+        "registry_number": "44901",
+        "registry_office": "Teixeira de Freitas - BA",
+    })
+    assert created.status_code == 201
+    operacao = created.json()
+    assert operacao["status"] == "AGUARDANDO_TAPAF"
+    assert operacao["sla_dias_estimados"] == 45
+    assert operacao["success_fee_escrow_amount"] == "25000.00"
+    assert operacao["credit_matrix"]["aluguel_mensal_recorrente_bruto_dono"] == "1600.00"
+
+    paid = client.post("/api/v1/finops/quitcon/tapaf-payment-webhook", headers=auth_headers, json={
+        "operacao_id": operacao["id"], "event_id": "tapaf-qc-001", "amount": "1500.00",
+    })
+    assert paid.status_code == 200 and paid.json()["status"] == "TAPAF_LIQUIDADA"
+
+    photos = _native_photos()
+    inspection = client.post("/api/v1/finops/quitcon/inspection-photos", headers=auth_headers, json={
+        "operacao_id": operacao["id"], "photos": photos,
+    })
+    assert inspection.status_code == 200 and inspection.json()["status"] == "EM_AUDITORIA_RISCO"
+
+    compliance = client.post("/api/v1/finops/quitcon/compliance-review", headers=auth_headers, json={
+        "operacao_id": operacao["id"], "approved": True,
+    })
+    assert compliance.json()["status"] == "AGUARDANDO_ASSINATURA"
+
+    admin = client.post(f"/api/v1/finops/quitcon/administrator-approval?operacao_id={operacao['id']}", headers=auth_headers)
+    assert admin.status_code == 200 and admin.json()["administrator_approved_at"]
+    assert admin.json()["penalty_preview"]
+
+    client.post(f"/api/v1/finops/quitcon/sign-contract?operacao_id={operacao['id']}", headers=auth_headers)
+    client.post(f"/api/v1/finops/quitcon/submit-registry?operacao_id={operacao['id']}", headers=auth_headers)
+    gravame = client.post(f"/api/v1/finops/quitcon/complete-gravame?operacao_id={operacao['id']}", headers=auth_headers)
+    assert gravame.json()["status"] == "GRAVAME_CONCLUIDO"
+
+    funding = client.post("/api/v1/finops/quitcon/funding-capture", headers=auth_headers, json={
+        "operacao_id": operacao["id"], "amount": "180000.00",
+    })
+    assert funding.status_code == 200 and funding.json()["status"] == "ATIVO_OK_EM_PRODUCAO"
+
+    token = client.post("/api/v1/finops/quitcon/tokenization-processor", headers=auth_headers, json={
+        "operacao_id": operacao["id"], "owner_uid": "USER_PF_88219_BA",
+    })
+    assert token.status_code == 200
+    data = token.json()["data"]
+    assert data["parametrizacao_finops_mesa"]["ltv_alavancagem_teto_60_porcento"] == 600000.0
+    assert data["governanca_risco_doc252"]["sla_dias_estimados"] == 45
+    assert data["workflow_securitizacao_rwa"]["tokenizacao_blockchain_metadata"]["total_supply_tokens_emitidos"] == 6000
+
+    cancel = client.post("/api/v1/finops/quitcon/cancel-inadimplencia", headers=auth_headers, json={
+        "operacao_id": operacao["id"], "days_overdue": 16,
+    })
+    assert cancel.status_code == 200
+    assert cancel.json()["status"] == "CANCELADO_INADIMPLENCIA_CESSIONARIO"
+    assert cancel.json()["penalty_amount"] == "25000.00"
+

@@ -18,6 +18,7 @@ import { LSSModule } from "@/components/lss-module";
 import { FinOpsModule } from "@/components/finops-module";
 import { PreAnalysisModule } from "@/components/pre-analysis-module";
 import { LeaseEquityModule } from "@/components/lease-equity-module";
+import { QuitConModule } from "@/components/quitcon-module";
 
 export default function ModulePage() {
   const {key}=useParams<{key:string}>(); const [module,setModule]=useState<Module|null>(null); const [loading,setLoading]=useState(true);
@@ -48,7 +49,7 @@ export default function ModulePage() {
   if(key==="reports")return <BIModule/>;
   if(key==="operations")return <OperationsModule/>;
   if(key==="lss")return <LSSModule/>;
-  if(key==="finops")return <><FinOpsModule/><PreAnalysisModule/><LeaseEquityModule/></>;
+  if(key==="finops")return <><FinOpsModule/><PreAnalysisModule/><LeaseEquityModule/><QuitConModule/></>;
 
   if(loading)return <div className="loading">Carregando módulo...</div>;
   if(!module)return <div className="error">Módulo &quot;{key}&quot; não encontrado ou indisponível neste ambiente.</div>;

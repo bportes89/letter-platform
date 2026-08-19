@@ -21,7 +21,7 @@ from app.models import (
     CollectionAction, CommissionEntry, CommissionRule, DelinquencyCase,
     EscrowAccount, FundingOpportunity, Invoice, RecoveredAsset,
     InvestmentPosition, InvestmentReservation, KycCase, Lead, LedgerEntry,
-    LedgerTransaction, NetworkNode, PaymentReceipt, PayoutApproval, PayoutRequest, PreAnalysisPauta, Proposal, LeaseEquityPauta, CollateralNativeInspection,
+    LedgerTransaction, NetworkNode, PaymentReceipt, PayoutApproval, PayoutRequest, PreAnalysisPauta, Proposal, LeaseEquityPauta, QuitConOperacao, CollateralNativeInspection,
     Quota, QuotaReservation, SignatureEnvelope, User, UserInvitation,
     ReconciliationBatch, ReconciliationItem, TaxClosing, TaxDocument, TaxException,
     UnderwritingAssessment, UnderwritingDecision, UnderwritingPolicy, OperationalJob, SecurityEvent, TenantQuota,
@@ -60,6 +60,10 @@ from app.schemas import (
     LeaseEquityComplianceReview, LeaseEquityFundingCapture, LeaseEquityActivateRequest,
     LeaseEquityAnticipationRequest, LeaseEquityMonthsRequest, LeaseEquityLtvSimulateRequest,
     LeaseEquityTokenizationRequest,
+    QuitConOperacaoCreate, QuitConOperacaoView, QuitConTapafWebhook, QuitConInspectionRequest,
+    QuitConComplianceReview, QuitConFundingCapture, QuitConActivateRequest,
+    QuitConAnticipationRequest, QuitConMonthsRequest, QuitConLtvSimulateRequest,
+    QuitConTokenizationRequest, QuitConCancelInadimplenciaRequest,
     ContractNativeInspectionRequest, CollateralNativeInspectionView,
     LeadUpdate, LeadView, LedgerPostRequest, LedgerTransactionView, LoginRequest,
     FlashCreditCalculationRequest, MfaSetupView, MfaVerify, ModuleView, PasswordResetConfirm, PasswordResetRequest,
@@ -126,6 +130,22 @@ from app.lease_equity_service import (
     register_inspection_photos, run_compliance_review, sign_contract, simulate_anticipation,
     submit_registry_protocol,
 )
+from app.quitcon_engine import EngineQuitConLetter
+from app.quitcon_service import (
+    activate_ok as activate_quitcon_ok, cancel_desistencia_cedente, cancel_inadimplencia_cessionario,
+    complete_gravame as complete_quitcon_gravame,
+    confirm_tapaf_payment as confirm_quitcon_tapaf,
+    create_operacao, generate_tapaf_checkout as generate_quitcon_tapaf,
+    operacao_view as quitcon_operacao_view,
+    process_tokenization as process_quitcon_tokenization,
+    record_funding_capture as record_quitcon_funding,
+    refresh_anticipation_eligibility as refresh_quitcon_anticipation,
+    register_administrator_approval, register_inspection_photos as register_quitcon_inspection,
+    run_compliance_review as run_quitcon_compliance,
+    sign_contract as sign_quitcon_contract,
+    simulate_anticipation as simulate_quitcon_anticipation,
+    submit_registry_protocol as submit_quitcon_registry,
+)
 from app.storage_service import get_storage
 from app.vehicle_registry_service import query_vehicle_registry
 from app.finops_engine import create_contract_quote, four_scenarios, ingest_event, settlement_curve, sdc_bullet_and_split
@@ -176,6 +196,8 @@ def platform_capabilities():
         "features": {
             "finops_pre_analysis_v6": True,
             "finops_invoice_processor_v3": True,
+            "finops_lease_equity_v1": True,
+            "finops_quitcon_v1": True,
             "finops_events": True,
             "nina_routing": True,
             "valid_stamp": True,
@@ -1024,6 +1046,192 @@ def lease_equity_tokenization(payload: LeaseEquityTokenizationRequest, user: Use
     pauta = _load_lease_pauta(db, user, payload.pauta_id)
     result = process_tokenization(pauta, payload.owner_uid)
     audit(db, user, "finops.lease_equity.tokenization", "lease_equity_pauta", pauta.id)
+    db.commit()
+    return result
+
+
+def _load_quitcon_operacao(db: Session, user: User, operacao_id: str) -> QuitConOperacao:
+    operacao = db.scalar(
+        select(QuitConOperacao).where(
+            QuitConOperacao.id == operacao_id,
+            QuitConOperacao.organization_id == user.organization_id,
+        )
+    )
+    if not operacao:
+        raise HTTPException(status_code=404, detail="Operação QuitCon não encontrada")
+    return operacao
+
+
+@router.post("/finops/quitcon/operacoes", response_model=QuitConOperacaoView, status_code=201)
+def quitcon_create_operacao(payload: QuitConOperacaoCreate, user: User = Depends(require_scope("proposals:write")), db: Session = Depends(get_db)):
+    proposal = _load_proposal(db, user, payload.proposal_id)
+    operacao = create_operacao(
+        db, user, proposal,
+        property_type=payload.property_type,
+        appraisal_value=payload.appraisal_value,
+        outstanding_balance=payload.outstanding_balance,
+        registry_number=payload.registry_number,
+        registry_office=payload.registry_office,
+        quota_id=payload.quota_id,
+        owner_user_id=payload.owner_user_id,
+    )
+    audit(db, user, "finops.quitcon.create", "quitcon_operacao", operacao.id)
+    db.commit()
+    db.refresh(operacao)
+    return QuitConOperacaoView(**quitcon_operacao_view(operacao))
+
+
+@router.get("/finops/quitcon/operacoes", response_model=list[QuitConOperacaoView])
+def quitcon_list_operacoes(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    items = list(db.scalars(
+        select(QuitConOperacao).where(QuitConOperacao.organization_id == user.organization_id).order_by(QuitConOperacao.created_at.desc())
+    ))
+    return [QuitConOperacaoView(**quitcon_operacao_view(x)) for x in items]
+
+
+@router.get("/finops/quitcon/operacoes/{operacao_id}", response_model=QuitConOperacaoView)
+def quitcon_get_operacao(operacao_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return QuitConOperacaoView(**quitcon_operacao_view(_load_quitcon_operacao(db, user, operacao_id)))
+
+
+@router.post("/finops/quitcon/tapaf-checkout")
+def quitcon_tapaf_checkout(operacao_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    operacao = _load_quitcon_operacao(db, user, operacao_id)
+    return generate_quitcon_tapaf(operacao)
+
+
+@router.post("/finops/quitcon/tapaf-payment-webhook", response_model=QuitConOperacaoView)
+def quitcon_tapaf_webhook(payload: QuitConTapafWebhook, user: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
+    operacao = _load_quitcon_operacao(db, user, payload.operacao_id)
+    confirm_quitcon_tapaf(db, user, operacao, payload.event_id, payload.amount)
+    audit(db, user, "finops.quitcon.tapaf_paid", "quitcon_operacao", operacao.id)
+    db.commit()
+    db.refresh(operacao)
+    return QuitConOperacaoView(**quitcon_operacao_view(operacao))
+
+
+@router.post("/finops/quitcon/inspection-photos", response_model=QuitConOperacaoView)
+def quitcon_inspection(payload: QuitConInspectionRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    operacao = _load_quitcon_operacao(db, user, payload.operacao_id)
+    register_quitcon_inspection(db, user, operacao, [x.model_dump() for x in payload.photos])
+    audit(db, user, "finops.quitcon.inspection", "quitcon_operacao", operacao.id)
+    db.commit()
+    db.refresh(operacao)
+    return QuitConOperacaoView(**quitcon_operacao_view(operacao))
+
+
+@router.post("/finops/quitcon/compliance-review", response_model=QuitConOperacaoView)
+def quitcon_compliance(payload: QuitConComplianceReview, user: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
+    operacao = _load_quitcon_operacao(db, user, payload.operacao_id)
+    run_quitcon_compliance(db, user, operacao, approved=payload.approved, blockers=payload.blockers)
+    audit(db, user, "finops.quitcon.compliance", "quitcon_operacao", operacao.id, {"approved": payload.approved})
+    db.commit()
+    db.refresh(operacao)
+    return QuitConOperacaoView(**quitcon_operacao_view(operacao))
+
+
+@router.post("/finops/quitcon/administrator-approval", response_model=QuitConOperacaoView)
+def quitcon_administrator_approval(operacao_id: str, user: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
+    operacao = _load_quitcon_operacao(db, user, operacao_id)
+    register_administrator_approval(db, user, operacao)
+    audit(db, user, "finops.quitcon.administrator_approval", "quitcon_operacao", operacao.id)
+    db.commit()
+    db.refresh(operacao)
+    return QuitConOperacaoView(**quitcon_operacao_view(operacao))
+
+
+@router.post("/finops/quitcon/sign-contract", response_model=QuitConOperacaoView)
+def quitcon_sign(operacao_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    operacao = _load_quitcon_operacao(db, user, operacao_id)
+    sign_quitcon_contract(db, user, operacao)
+    db.commit()
+    db.refresh(operacao)
+    return QuitConOperacaoView(**quitcon_operacao_view(operacao))
+
+
+@router.post("/finops/quitcon/submit-registry", response_model=QuitConOperacaoView)
+def quitcon_registry(operacao_id: str, user: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
+    operacao = _load_quitcon_operacao(db, user, operacao_id)
+    submit_quitcon_registry(db, user, operacao)
+    db.commit()
+    db.refresh(operacao)
+    return QuitConOperacaoView(**quitcon_operacao_view(operacao))
+
+
+@router.post("/finops/quitcon/complete-gravame", response_model=QuitConOperacaoView)
+def quitcon_gravame(operacao_id: str, user: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
+    operacao = _load_quitcon_operacao(db, user, operacao_id)
+    complete_quitcon_gravame(db, user, operacao)
+    db.commit()
+    db.refresh(operacao)
+    return QuitConOperacaoView(**quitcon_operacao_view(operacao))
+
+
+@router.post("/finops/quitcon/funding-capture", response_model=QuitConOperacaoView)
+def quitcon_funding(payload: QuitConFundingCapture, user: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
+    operacao = _load_quitcon_operacao(db, user, payload.operacao_id)
+    record_quitcon_funding(db, user, operacao, payload.amount)
+    db.commit()
+    db.refresh(operacao)
+    return QuitConOperacaoView(**quitcon_operacao_view(operacao))
+
+
+@router.post("/finops/quitcon/activate", response_model=QuitConOperacaoView)
+def quitcon_activate(payload: QuitConActivateRequest, user: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
+    operacao = _load_quitcon_operacao(db, user, payload.operacao_id)
+    activate_quitcon_ok(db, user, operacao, manual=payload.manual)
+    audit(db, user, "finops.quitcon.activate", "quitcon_operacao", operacao.id, {"manual": payload.manual})
+    db.commit()
+    db.refresh(operacao)
+    return QuitConOperacaoView(**quitcon_operacao_view(operacao))
+
+
+@router.post("/finops/quitcon/refresh-anticipation", response_model=QuitConOperacaoView)
+def quitcon_refresh_anticipation(payload: QuitConMonthsRequest, user: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
+    operacao = _load_quitcon_operacao(db, user, payload.operacao_id)
+    refresh_quitcon_anticipation(db, user, operacao, payload.months_in_force)
+    db.commit()
+    db.refresh(operacao)
+    return QuitConOperacaoView(**quitcon_operacao_view(operacao))
+
+
+@router.post("/finops/quitcon/cancel-inadimplencia", response_model=QuitConOperacaoView)
+def quitcon_cancel_inadimplencia(payload: QuitConCancelInadimplenciaRequest, user: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
+    operacao = _load_quitcon_operacao(db, user, payload.operacao_id)
+    cancel_inadimplencia_cessionario(db, user, operacao, days_overdue=payload.days_overdue)
+    audit(db, user, "finops.quitcon.cancel_inadimplencia", "quitcon_operacao", operacao.id)
+    db.commit()
+    db.refresh(operacao)
+    return QuitConOperacaoView(**quitcon_operacao_view(operacao))
+
+
+@router.post("/finops/quitcon/cancel-desistencia", response_model=QuitConOperacaoView)
+def quitcon_cancel_desistencia(operacao_id: str, user: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
+    operacao = _load_quitcon_operacao(db, user, operacao_id)
+    cancel_desistencia_cedente(db, user, operacao)
+    audit(db, user, "finops.quitcon.cancel_desistencia", "quitcon_operacao", operacao.id)
+    db.commit()
+    db.refresh(operacao)
+    return QuitConOperacaoView(**quitcon_operacao_view(operacao))
+
+
+@router.post("/finops/quitcon/simulate-ltv")
+def quitcon_simulate_ltv(payload: QuitConLtvSimulateRequest, user: User = Depends(get_current_user)):
+    engine = EngineQuitConLetter()
+    return engine.processar_matriz_credito_ltv(payload.property_type, payload.appraisal_value)
+
+
+@router.post("/finops/quitcon/simulate-anticipation")
+def quitcon_simulate_anticipation(payload: QuitConAnticipationRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    operacao = _load_quitcon_operacao(db, user, payload.operacao_id)
+    return simulate_quitcon_anticipation(operacao, payload.parcelas_restantes)
+
+
+@router.post("/finops/quitcon/tokenization-processor")
+def quitcon_tokenization(payload: QuitConTokenizationRequest, user: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
+    operacao = _load_quitcon_operacao(db, user, payload.operacao_id)
+    result = process_quitcon_tokenization(operacao, payload.owner_uid)
+    audit(db, user, "finops.quitcon.tokenization", "quitcon_operacao", operacao.id)
     db.commit()
     return result
 
