@@ -1511,13 +1511,13 @@ def test_quitcon_engine_canonical_doc252():
     from app.quitcon_engine import EngineQuitConLetter
 
     engine = EngineQuitConLetter()
-    credit = engine.processar_matriz_credito_ltv("URBANO_RESIDENCIAL", Decimal("1000000"))
-    assert credit["ltv_percent"] == "60.00"
-    assert credit["limite_teto_ltv_captacao"] == "600000.00"
-    assert credit["custo_mensal_remuneracao_pool_investidores"] == "9600.00"
-    assert credit["sla_dias_estimados"] == 45
-    assert credit["remuneracao_proprietario_aplicavel"] is False
-    assert "Lease Equity" in credit["nota_produto"]
+    finance = engine.processar_matriz_financeira(Decimal("250000"))
+    assert finance["saldo_devedor_bruto"] == "250000.00"
+    assert finance["meta_captacao_quitacao"] == "250000.00"
+    assert finance["custo_mensal_remuneracao_pool_investidores"] == "4000.00"
+    assert finance["sla_dias_estimados"] == 45
+    assert finance["ltv_assimetrico_aplicavel"] is False
+    assert finance["remuneracao_proprietario_aplicavel"] is False
 
     escrow = engine.calcular_taxa_sucesso_escrow(Decimal("250000"))
     assert escrow == Decimal("25000.00")
@@ -1526,8 +1526,8 @@ def test_quitcon_engine_canonical_doc252():
     desist = engine.calcular_multa_desistencia_cedente(Decimal("250000"))
     assert desist["multa_10_porcento_negocio"] == "25000.00"
 
-    rwa = engine.gerar_fracionamento_securitizado_rwa(Decimal("600000"), "LETTER_QUITCON_0044_2026")
-    assert rwa["total_supply_tokens_mint"] == 6000
+    rwa = engine.gerar_fracionamento_securitizado_rwa(Decimal("250000"), "LETTER_QUITCON_0044_2026")
+    assert rwa["total_supply_tokens_mint"] == 2500
 
 
 def test_quitcon_full_pipeline_penalties_and_tokenization(client, auth_headers):
@@ -1537,18 +1537,17 @@ def test_quitcon_full_pipeline_penalties_and_tokenization(client, auth_headers):
     }).json()
     created = client.post("/api/v1/finops/quitcon/operacoes", headers=auth_headers, json={
         "proposal_id": proposal["id"],
-        "property_type": "URBANO_RESIDENCIAL",
-        "appraisal_value": "1000000",
         "outstanding_balance": "250000",
         "registry_number": "44901",
-        "registry_office": "Teixeira de Freitas - BA",
+        "registry_office": "Administradora Demo",
     })
     assert created.status_code == 201
     operacao = created.json()
     assert operacao["status"] == "AGUARDANDO_TAPAF"
     assert operacao["sla_dias_estimados"] == 45
     assert operacao["success_fee_escrow_amount"] == "25000.00"
-    assert operacao["credit_matrix"]["remuneracao_proprietario_aplicavel"] is False
+    assert operacao["credit_matrix"]["ltv_assimetrico_aplicavel"] is False
+    assert operacao["credit_matrix"]["meta_captacao_quitacao"] == "250000.00"
 
     paid = client.post("/api/v1/finops/quitcon/tapaf-payment-webhook", headers=auth_headers, json={
         "operacao_id": operacao["id"], "event_id": "tapaf-qc-001", "amount": "1500.00",
@@ -1576,7 +1575,7 @@ def test_quitcon_full_pipeline_penalties_and_tokenization(client, auth_headers):
     assert gravame.json()["status"] == "GRAVAME_CONCLUIDO"
 
     funding = client.post("/api/v1/finops/quitcon/funding-capture", headers=auth_headers, json={
-        "operacao_id": operacao["id"], "amount": "180000.00",
+        "operacao_id": operacao["id"], "amount": "75000.00",
     })
     assert funding.status_code == 200 and funding.json()["status"] == "ATIVO_OK_EM_PRODUCAO"
 
@@ -1585,10 +1584,11 @@ def test_quitcon_full_pipeline_penalties_and_tokenization(client, auth_headers):
     })
     assert token.status_code == 200
     data = token.json()["data"]
-    assert data["parametrizacao_finops_mesa"]["ltv_alavancagem_teto"] == 600000.0
+    assert data["parametrizacao_finops_mesa"]["meta_captacao_quitacao"] == 250000.0
+    assert data["parametrizacao_finops_mesa"]["ltv_assimetrico_aplicavel"] is False
     assert data["parametrizacao_finops_mesa"]["remuneracao_proprietario_0_4_porcento"] is False
     assert data["governanca_risco_doc252"]["sla_dias_estimados"] == 45
-    assert data["workflow_securitizacao_rwa"]["tokenizacao_blockchain_metadata"]["total_supply_tokens_emitidos"] == 6000
+    assert data["workflow_securitizacao_rwa"]["tokenizacao_blockchain_metadata"]["total_supply_tokens_emitidos"] == 2500
 
     cancel = client.post("/api/v1/finops/quitcon/cancel-inadimplencia", headers=auth_headers, json={
         "operacao_id": operacao["id"], "days_overdue": 16,

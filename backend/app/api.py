@@ -62,7 +62,7 @@ from app.schemas import (
     LeaseEquityTokenizationRequest,
     QuitConOperacaoCreate, QuitConOperacaoView, QuitConTapafWebhook, QuitConInspectionRequest,
     QuitConComplianceReview, QuitConFundingCapture, QuitConActivateRequest,
-    QuitConLtvSimulateRequest,
+    QuitConSimulateRequest,
     QuitConTokenizationRequest, QuitConCancelInadimplenciaRequest,
     ContractNativeInspectionRequest, CollateralNativeInspectionView,
     LeadUpdate, LeadView, LedgerPostRequest, LedgerTransactionView, LoginRequest,
@@ -1204,10 +1204,16 @@ def quitcon_cancel_desistencia(operacao_id: str, user: User = Depends(require_sc
     return QuitConOperacaoView(**quitcon_operacao_view(operacao))
 
 
-@router.post("/finops/quitcon/simulate-ltv")
-def quitcon_simulate_ltv(payload: QuitConLtvSimulateRequest, user: User = Depends(get_current_user)):
+@router.post("/finops/quitcon/simulate")
+def quitcon_simulate(payload: QuitConSimulateRequest, user: User = Depends(get_current_user)):
     engine = EngineQuitConLetter()
-    return engine.processar_matriz_credito_ltv(payload.property_type, payload.appraisal_value)
+    return engine.processar_matriz_financeira(payload.outstanding_balance, payload.appraisal_value)
+
+
+@router.post("/finops/quitcon/simulate-ltv")
+def quitcon_simulate_ltv_legacy(payload: QuitConSimulateRequest, user: User = Depends(get_current_user)):
+    """Legado — QuitCon não usa LTV assimétrico; redireciona para simulação por saldo devedor."""
+    return quitcon_simulate(payload, user)
 
 
 @router.post("/finops/quitcon/tokenization-processor")

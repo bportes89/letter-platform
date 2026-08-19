@@ -18,7 +18,7 @@ export function QuitConModule() {
   const [operacoes, setOperacoes] = useState<QuitConOperacao[]>([]);
   const [selected, setSelected] = useState<QuitConOperacao | null>(null);
   const [message, setMessage] = useState("");
-  const [ltvPreview, setLtvPreview] = useState<Record<string, string> | null>(null);
+  const [financePreview, setFinancePreview] = useState<Record<string, string | boolean> | null>(null);
   const [tokenization, setTokenization] = useState<Record<string, unknown> | null>(null);
   const cameraRef = useRef<HTMLInputElement>(null);
   const [photoMeta, setPhotoMeta] = useState<Array<{ filename: string; exif_timestamp_unix: number; gps_latitude: number; gps_longitude: number }>>([]);
@@ -43,11 +43,10 @@ export function QuitConModule() {
         method: "POST",
         body: JSON.stringify({
           proposal_id: f.get("proposal_id"),
-          property_type: f.get("property_type"),
-          appraisal_value: f.get("appraisal_value"),
           outstanding_balance: f.get("outstanding_balance"),
           registry_number: f.get("registry_number"),
           registry_office: f.get("registry_office"),
+          appraisal_value: f.get("appraisal_value") || undefined,
         }),
       });
       setMessage(`Operação ${item.operacao_code} criada — AGUARDANDO_TAPAF.`);
@@ -129,16 +128,19 @@ export function QuitConModule() {
     }
   }
 
-  async function simulateLtv(e: FormEvent<HTMLFormElement>) {
+  async function simulateFinance(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
     try {
-      setLtvPreview(await api<Record<string, string>>("/finops/quitcon/simulate-ltv", {
+      setFinancePreview(await api<Record<string, string | boolean>>("/finops/quitcon/simulate", {
         method: "POST",
-        body: JSON.stringify({ property_type: f.get("property_type"), appraisal_value: f.get("appraisal_value") }),
+        body: JSON.stringify({
+          outstanding_balance: f.get("outstanding_balance"),
+          appraisal_value: f.get("appraisal_value") || undefined,
+        }),
       }));
     } catch (x) {
-      setMessage(x instanceof Error ? x.message : "Falha LTV");
+      setMessage(x instanceof Error ? x.message : "Falha simulação");
     }
   }
 
@@ -163,7 +165,7 @@ export function QuitConModule() {
         <div>
           <span className="eyebrow dark">QUITCON ENGINE V1</span>
           <h1>QuitCon — quitação de consórcio</h1>
-          <p>TAPAF R$ 1.500, LTV 60/40/30, multas 10%, SLA 45 dias e tokenização RWA. Sem remuneração 0,4% — exclusiva Lease Equity.</p>
+          <p>TAPAF R$ 1.500, base = saldo devedor da cota, multas 10%, SLA 45 dias e tokenização RWA. Sem LTV assimétrico nem 0,4% — exclusivos Lease Equity.</p>
         </div>
         <div className="operational-icon"><Building2 /></div>
       </div>
@@ -177,34 +179,27 @@ export function QuitConModule() {
               <option value="">Proposta vinculada</option>
               {proposals.map((p) => <option key={p.id} value={p.id}>{p.product} · {p.id.slice(0, 8)}</option>)}
             </select>
-            <select name="property_type" defaultValue="URBANO_RESIDENCIAL">
-              <option value="URBANO_RESIDENCIAL">Urbano residencial (LTV 60%)</option>
-              <option value="LOTE_URBANO">Lote urbano (LTV 40%)</option>
-              <option value="RURAL">Rural (LTV 30%)</option>
-            </select>
-            <input name="appraisal_value" type="number" defaultValue="1000000" placeholder="Valor avaliação" required />
-            <input name="outstanding_balance" type="number" defaultValue="250000" placeholder="Saldo devedor bruto" required />
-            <input name="registry_number" placeholder="Matrícula" defaultValue="44901" required />
-            <input name="registry_office" placeholder="Cartório RGI" defaultValue="Teixeira de Freitas - BA" required />
+            <input name="outstanding_balance" type="number" defaultValue="250000" placeholder="Saldo devedor bruto da cota" required />
+            <input name="appraisal_value" type="number" placeholder="Avaliação referência (opcional)" />
+            <input name="registry_number" placeholder="Matrícula / ref. garantia" defaultValue="44901" required />
+            <input name="registry_office" placeholder="Cartório ou administradora" defaultValue="Administradora Demo" required />
             <button type="submit">Abrir operação AGUARDANDO_TAPAF</button>
           </form>
         </section>
 
         <section className="panel">
-          <h2>Simulador LTV QuitCon</h2>
-          <form className="stack-form" onSubmit={simulateLtv}>
-            <select name="property_type" defaultValue="URBANO_RESIDENCIAL">
-              <option value="URBANO_RESIDENCIAL">Urbano</option>
-              <option value="RURAL">Rural</option>
-            </select>
-            <input name="appraisal_value" type="number" defaultValue="1000000" required />
+          <h2>Simulador QuitCon</h2>
+          <form className="stack-form" onSubmit={simulateFinance}>
+            <input name="outstanding_balance" type="number" defaultValue="250000" placeholder="Saldo devedor bruto" required />
+            <input name="appraisal_value" type="number" placeholder="Avaliação referência (opcional)" />
             <button type="submit">Calcular matriz</button>
           </form>
-          {ltvPreview && (
+          {financePreview && (
             <div className="finops-summary">
-              <article><small>Teto LTV ({ltvPreview.ltv_percent}%)</small><strong>{brl.format(Number(ltvPreview.limite_teto_ltv_captacao))}</strong></article>
-              <article><small>Custo pool/mês (1,6%)</small><strong>{brl.format(Number(ltvPreview.custo_mensal_remuneracao_pool_investidores))}</strong></article>
-              <article><small>SLA estimado</small><strong>{ltvPreview.sla_dias_estimados} dias</strong></article>
+              <article><small>Meta captação (saldo)</small><strong>{brl.format(Number(financePreview.meta_captacao_quitacao))}</strong></article>
+              <article><small>Custo pool/mês (1,6%)</small><strong>{brl.format(Number(financePreview.custo_mensal_remuneracao_pool_investidores))}</strong></article>
+              <article><small>Tokens estimados</small><strong>{Math.floor(Number(financePreview.meta_captacao_quitacao) / 100)}</strong></article>
+              <article><small>SLA estimado</small><strong>{String(financePreview.sla_dias_estimados)} dias</strong></article>
             </div>
           )}
         </section>
@@ -229,7 +224,7 @@ export function QuitConModule() {
               <article><small>SLA conclusão</small><strong><Timer />{selected.sla_dias_estimados}d — {selected.sla_estimated_completion_at ? new Date(selected.sla_estimated_completion_at).toLocaleDateString("pt-BR") : "—"}</strong></article>
               <article><small>Taxa sucesso Escrow (10%)</small><strong>{brl.format(Number(selected.success_fee_escrow_amount))}</strong></article>
               <article><small>Captação</small><strong>{selected.funding_capture_percent}%</strong></article>
-              <article><small>Tokens estimados</small><strong>{Math.floor(Number(selected.credit_matrix.limite_teto_ltv_captacao) / 100)}</strong></article>
+              <article><small>Tokens estimados</small><strong>{Math.floor(Number(selected.credit_matrix.meta_captacao_quitacao) / 100)}</strong></article>
             </div>
             <div className="tapaf-actions">
               <button type="button" disabled={selected.status !== "AGUARDANDO_TAPAF"} onClick={() => void payTapaf()}>Pagar TAPAF R$ 1.500</button>

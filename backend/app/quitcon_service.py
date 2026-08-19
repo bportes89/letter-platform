@@ -49,9 +49,9 @@ def _transition(db: Session, operacao: QuitConOperacao, user: User, to_status: s
 
 def operacao_view(item: QuitConOperacao) -> dict:
     engine = EngineQuitConLetter()
-    credit = engine.processar_matriz_credito_ltv(item.property_type, item.appraisal_value)
+    finance = engine.processar_matriz_financeira(item.outstanding_balance, item.appraisal_value)
     captured = money(item.funding_captured_amount)
-    target = money(item.funding_target_amount or Decimal(str(credit["limite_teto_ltv_captacao"])))
+    target = money(item.funding_target_amount or Decimal(str(finance["meta_captacao_quitacao"])))
     capture_pct = money(captured / target * 100) if target > 0 else money(0)
     penalty_preview = None
     if item.administrator_approved_at:
@@ -91,7 +91,7 @@ def operacao_view(item: QuitConOperacao) -> dict:
         "cancellation_reason": item.cancellation_reason,
         "penalty_amount": str(item.penalty_amount) if item.penalty_amount else None,
         "penalty_detail_json": json.loads(item.penalty_detail_json) if item.penalty_detail_json else None,
-        "credit_matrix": credit,
+        "credit_matrix": finance,
         "penalty_preview": penalty_preview,
         "tokenization_json": json.loads(item.tokenization_json) if item.tokenization_json else None,
         "created_at": item.created_at,
@@ -104,11 +104,11 @@ def create_operacao(
     user: User,
     proposal: Proposal,
     *,
-    property_type: str,
-    appraisal_value,
     outstanding_balance,
     registry_number: str,
     registry_office: str,
+    property_type: str = "CONSORCIO",
+    appraisal_value=None,
     quota_id: str | None = None,
     owner_user_id: str | None = None,
 ) -> QuitConOperacao:
@@ -121,8 +121,8 @@ def create_operacao(
     if existing:
         return existing
     engine = EngineQuitConLetter()
-    credit = engine.processar_matriz_credito_ltv(property_type, appraisal_value)
     saldo = money(outstanding_balance)
+    finance = engine.processar_matriz_financeira(saldo, appraisal_value or saldo)
     code = f"LETTER_QUITCON_{proposal.id[:8].upper()}"
     now = datetime.now(UTC)
     item = QuitConOperacao(
@@ -133,11 +133,11 @@ def create_operacao(
         operacao_code=code,
         status="AGUARDANDO_TAPAF",
         property_type=property_type.upper(),
-        appraisal_value=money(appraisal_value),
+        appraisal_value=money(appraisal_value or saldo),
         outstanding_balance=saldo,
         registry_number=registry_number,
         registry_office=registry_office,
-        funding_target_amount=Decimal(str(credit["limite_teto_ltv_captacao"])),
+        funding_target_amount=Decimal(str(finance["meta_captacao_quitacao"])),
         success_fee_escrow_amount=engine.calcular_taxa_sucesso_escrow(saldo),
         sla_estimated_completion_at=now + timedelta(days=engine.sla_dias_estimados),
     )
@@ -320,28 +320,28 @@ def process_tokenization(operacao: QuitConOperacao, owner_uid: str | None = None
     if operacao.status not in {"GRAVAME_CONCLUIDO", "ATIVO_OK_EM_PRODUCAO"}:
         raise HTTPException(status_code=409, detail="Tokenização exige gravame concluído ou produção ativa")
     engine = EngineQuitConLetter()
-    credit = engine.processar_matriz_credito_ltv(operacao.property_type, operacao.appraisal_value)
-    ltv_amount = Decimal(credit["limite_teto_ltv_captacao"])
-    pool_cost = Decimal(credit["custo_mensal_remuneracao_pool_investidores"])
-    rwa = engine.gerar_fracionamento_securitizado_rwa(ltv_amount, operacao.operacao_code)
+    finance = engine.processar_matriz_financeira(operacao.outstanding_balance, operacao.appraisal_value)
+    lastro = Decimal(finance["meta_captacao_quitacao"])
+    pool_cost = Decimal(finance["custo_mensal_remuneracao_pool_investidores"])
+    rwa = engine.gerar_fracionamento_securitizado_rwa(lastro, operacao.operacao_code)
     payload = {
         "endpoint": "/api/v1/finops/quitcon/tokenization-processor",
         "status": "SUCCESS",
         "data": {
             "contrato_id": operacao.operacao_code,
             "proprietario_uid": owner_uid or f"USER_PF_{operacao.owner_user_id[:8].upper()}",
-            "colateral_imobiliario": {
-                "matricula_numero": operacao.registry_number,
-                "comarca_cartorio_rgi": operacao.registry_office,
-                "tipo_bem": operacao.property_type,
-                "valor_avaliacao_homologado": float(operacao.appraisal_value),
+            "colateral_consorcio": {
+                "matricula_ou_garantia": operacao.registry_number,
+                "referencia_cartorio_ou_adm": operacao.registry_office,
+                "tipo_operacao": operacao.property_type,
+                "valor_avaliacao_referencia": float(operacao.appraisal_value),
                 "saldo_devedor_bruto": float(operacao.outstanding_balance),
             },
             "parametrizacao_finops_mesa": {
-                "ltv_captacao_percent": float(credit["ltv_percent"]),
-                "ltv_alavancagem_teto": float(ltv_amount),
+                "meta_captacao_quitacao": float(lastro),
                 "custo_mensal_pool_investment_1_6_porcento": float(pool_cost),
                 "taxa_sucesso_escrow_10_porcento": float(operacao.success_fee_escrow_amount),
+                "ltv_assimetrico_aplicavel": False,
                 "remuneracao_proprietario_0_4_porcento": False,
             },
             "workflow_securitizacao_rwa": {

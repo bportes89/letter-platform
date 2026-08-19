@@ -1,4 +1,7 @@
-"""LETTER_FINOPS_QUITCON_ENGINE_2026_V1 — motor LTV, multas e tokenização RWA (sem remuneração 0,4% — exclusiva Lease Equity)."""
+"""LETTER_FINOPS_QUITCON_ENGINE_2026_V1 — quitação consórcio, multas e tokenização RWA.
+
+LTV assimétrico e remuneração 0,4% a.m. são exclusivos do Lease Equity.
+"""
 
 from decimal import Decimal, ROUND_HALF_UP
 
@@ -19,28 +22,29 @@ class EngineQuitConLetter:
     dias_inadimplencia_cancelamento = 15
     prazo_deposito_quitacao_horas_uteis = 48
 
-    def processar_matriz_credito_ltv(self, tipologia_imovel: str, valor_avaliacao: Decimal) -> dict:
-        tipo = tipologia_imovel.upper()
-        v_aval = money(Decimal(str(valor_avaliacao)))
-        if tipo in {"URBANO_RESIDENCIAL", "URBANO_COMERCIAL"}:
-            ltv_maximo_captacao = Decimal("0.60")
-        elif tipo in {"LOTE_URBANO", "GALPAO"}:
-            ltv_maximo_captacao = Decimal("0.40")
-        elif tipo == "RURAL":
-            ltv_maximo_captacao = Decimal("0.30")
-        else:
-            raise ValueError("TIPOLOGIA_IMOVEL_INVALIDA_MESA_RISCO")
-        valor_maximo_alavancado_pool = money(v_aval * ltv_maximo_captacao)
-        custo_mensal_pool_investidores = money(valor_maximo_alavancado_pool * self.rentabilidade_investidor_pool)
+    def processar_matriz_financeira(
+        self,
+        saldo_devedor_bruto: Decimal,
+        valor_avaliacao_referencia: Decimal | None = None,
+    ) -> dict:
+        saldo = money(Decimal(str(saldo_devedor_bruto)))
+        if saldo <= 0:
+            raise ValueError("SALDO_DEVEDOR_INVALIDO")
+        avaliacao = money(Decimal(str(valor_avaliacao_referencia))) if valor_avaliacao_referencia else saldo
+        meta_captacao = saldo
+        custo_mensal_pool = money(meta_captacao * self.rentabilidade_investidor_pool)
         return {
-            "tipologia_processada": tipo,
-            "valor_avaliacao_imovel": str(v_aval),
-            "limite_teto_ltv_captacao": str(valor_maximo_alavancado_pool),
-            "custo_mensal_remuneracao_pool_investidores": str(custo_mensal_pool_investidores),
-            "ltv_percent": str(money(ltv_maximo_captacao * HUNDRED)),
+            "saldo_devedor_bruto": str(saldo),
+            "valor_avaliacao_referencia": str(avaliacao),
+            "meta_captacao_quitacao": str(meta_captacao),
+            "custo_mensal_remuneracao_pool_investidores": str(custo_mensal_pool),
             "sla_dias_estimados": self.sla_dias_estimados,
+            "ltv_assimetrico_aplicavel": False,
             "remuneracao_proprietario_aplicavel": False,
-            "nota_produto": "Remuneração 0,4% a.m. é exclusiva do Lease Equity — QuitCon não possui payout recorrente ao proprietário.",
+            "nota_produto": (
+                "QuitCon: base financeira = saldo devedor bruto da cota. "
+                "LTV assimétrico e remuneração 0,4% a.m. são exclusivos do Lease Equity."
+            ),
         }
 
     def calcular_taxa_sucesso_escrow(self, saldo_devedor_bruto: Decimal) -> Decimal:
@@ -68,9 +72,9 @@ class EngineQuitConLetter:
             "total_penalidades_cedente": str(money(multa + money(custos_vistoria))),
         }
 
-    def gerar_fracionamento_securitizado_rwa(self, valor_alavancado_ltv: Decimal, contrato_id: str) -> dict:
-        v_alavancado = money(Decimal(str(valor_alavancado_ltv)))
-        total_tokens_emissao = int(v_alavancado / self.valor_nominal_unitario_token)
+    def gerar_fracionamento_securitizado_rwa(self, valor_lastro: Decimal, contrato_id: str) -> dict:
+        v_lastro = money(Decimal(str(valor_lastro)))
+        total_tokens_emissao = int(v_lastro / self.valor_nominal_unitario_token)
         rendimento_por_token_mes = money(self.valor_nominal_unitario_token * self.rentabilidade_investidor_pool)
         return {
             "contrato_vinculado_rwa": contrato_id,

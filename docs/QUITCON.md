@@ -2,62 +2,41 @@
 
 Motor: `EngineQuitConLetter`
 
-Produto de **quitação de cota de consórcio** com colateral imobiliário/automotivo, tokenização RWA e regras de multa doc252.
+Produto de **quitação de cota de consórcio** com multas doc252, SLA e tokenização RWA.
 
-> **Importante:** QuitCon **não possui** remuneração de **0,4% a.m.** ao proprietário — essa regra é **exclusiva do Lease Equity**.
+> **Importante:** QuitCon **não possui** LTV assimétrico por tipologia nem remuneração de **0,4% a.m.** — ambos são **exclusivos do Lease Equity**.
+
+## Base financeira
+
+- **Saldo devedor bruto da cota** = meta de captação / lastro de tokenização
+- Avaliação do bem (quando informada) = referência opcional, **não** aplica matriz LTV
+- Pool investidor: **1,6% a.m.** sobre o saldo devedor (meta de captação)
 
 ## TAPAF
 
 - Valor fixo: **R$ 1.500,00** (não reembolsável)
-- Status inicial: `AGUARDANDO_TAPAF`
-
-## Matriz LTV (captação / tokenização)
-
-| Tipologia | LTV máx. captação |
-|-----------|-------------------|
-| Urbano residencial/comercial | 60% |
-| Lote / Galpão | 40% |
-| Rural | 30% |
-
-Pool investidor: **1,6% a.m.** sobre valor alavancado (LTV).
 
 ## SLA
 
-- Prazo médio estimado de conclusão: **45 dias** (`sla_estimated_completion_at`)
+- Prazo médio estimado de conclusão: **45 dias**
 
-## Multas e cancelamentos (doc252)
+## Multas (doc252)
 
-### Inadimplência pós-aprovação administradora (cessionário)
-
-- Após aprovação da administradora, responsabilidade das parcelas é do **cessionário**
-- Atraso **> 15 dias** → cancelamento + **taxa de sucesso 10% retida integralmente** em Escrow
-
-### Desistência do cedente
-
-- Após aprovação final, se o cedente desistir ou não depositar quitação em **48h úteis**
-- **Multa 10%** sobre saldo devedor bruto + reembolso ao cessionário (vistoria/parcelas antecipadas)
+| Evento | Regra |
+|--------|-------|
+| Inadimplência cessionário (>15d pós-aprovação adm.) | Taxa sucesso **10%** retida integralmente em Escrow |
+| Desistência cedente (pós-aprovação) | Multa **10%** sobre saldo devedor + reembolso cessionário |
 
 ## Estados da esteira
 
 ```
-AGUARDANDO_TAPAF → TAPAF_LIQUIDADA → EM_AUDITORIA_RISCO → AGUARDANDO_ASSINATURA
-→ PRONTO_PARA_CARTORIO → EM_ANALISE_NO_RGI → GRAVAME_CONCLUIDO → ATIVO_OK_EM_PRODUCAO
+AGUARDANDO_TAPAF → … → GRAVAME_CONCLUIDO → ATIVO_OK_EM_PRODUCAO
 ```
 
-Estados terminais de penalidade: `CANCELADO_INADIMPLENCIA_CESSIONARIO`, `CANCELADO_DESISTENCIA_CEDENTE`
+Gatilho OK: captação ≥ **30%** do saldo devedor ou ativação manual.
 
-## API principal
+## API
 
-| Endpoint | Descrição |
-|----------|-----------|
-| `POST /finops/quitcon/operacoes` | Abrir operação |
-| `POST /finops/quitcon/tapaf-payment-webhook` | Liquidar TAPAF R$ 1.500 |
-| `POST /finops/quitcon/inspection-photos` | Vistoria nativa |
-| `POST /finops/quitcon/administrator-approval` | Marcar aprovação administradora |
-| `POST /finops/quitcon/cancel-inadimplencia` | Multa cessionário |
-| `POST /finops/quitcon/cancel-desistencia` | Multa cedente |
-| `POST /finops/quitcon/tokenization-processor` | Tokenização RWA ERC-3643 |
-
-## Gatilho de produção
-
-- Captação ≥ **30%** do teto LTV ou ativação manual admin
+- `POST /finops/quitcon/simulate` — simulação por saldo devedor
+- `POST /finops/quitcon/operacoes` — abrir operação
+- Demais endpoints: TAPAF, vistoria, multas, tokenização RWA

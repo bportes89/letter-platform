@@ -1638,11 +1638,11 @@ class LeaseEquityPautaView(BaseModel):
 
 class QuitConOperacaoCreate(BaseModel):
     proposal_id: str
-    property_type: str = Field(description="URBANO_RESIDENCIAL | URBANO_COMERCIAL | LOTE_URBANO | GALPAO | RURAL")
-    appraisal_value: Decimal = Field(gt=0)
     outstanding_balance: Decimal = Field(gt=0)
     registry_number: str = Field(min_length=1, max_length=80)
     registry_office: str = Field(min_length=1, max_length=180)
+    property_type: str = Field(default="CONSORCIO", description="Metadado da operação — não define LTV")
+    appraisal_value: Decimal | None = Field(default=None, gt=0, description="Referência opcional de avaliação")
     quota_id: str | None = None
     owner_user_id: str | None = None
 
@@ -1674,9 +1674,9 @@ class QuitConActivateRequest(BaseModel):
     manual: bool = False
 
 
-class QuitConLtvSimulateRequest(BaseModel):
-    property_type: str
-    appraisal_value: Decimal = Field(gt=0)
+class QuitConSimulateRequest(BaseModel):
+    outstanding_balance: Decimal = Field(gt=0)
+    appraisal_value: Decimal | None = Field(default=None, gt=0)
 
 
 class QuitConTokenizationRequest(BaseModel):
