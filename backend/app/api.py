@@ -63,6 +63,7 @@ from app.schemas import (
     QuitConOperacaoCreate, QuitConOperacaoView, QuitConTapafWebhook, QuitConInspectionRequest,
     QuitConComplianceReview, QuitConFundingCapture, QuitConActivateRequest,
     QuitConSimulateRequest,
+    SdcQuitConIntegrationView, SdcQuitConProjectionRequest,
     QuitConTokenizationRequest, QuitConCancelInadimplenciaRequest,
     ContractNativeInspectionRequest, CollateralNativeInspectionView,
     LeadUpdate, LeadView, LedgerPostRequest, LedgerTransactionView, LoginRequest,
@@ -733,11 +734,26 @@ def calculate_proposal(proposal_id: str, payload: CalculationRequest, user: User
     return CalculationView(id=calculation.id, proposal_id=calculation.proposal_id, version=calculation.version, formula_version=calculation.formula_version, input=json.loads(calculation.input_json), output=json.loads(calculation.output_json), approved_at=calculation.approved_at)
 
 
-def calculation_view(calculation: CalculationMemory) -> CalculationView:
+def _sdc_quitcon_from_calculation(calculation: CalculationMemory) -> dict | None:
+    if not calculation.formula_version.startswith("sdc-"):
+        return None
+    output = json.loads(calculation.output_json)
+    input_data = json.loads(calculation.input_json)
+    saldo = output.get("maturity_total") or output.get("principal")
+    if not saldo:
+        return None
+    meses = output.get("duration_months") or input_data.get("duration_months")
+    engine = EngineQuitConLetter()
+    return engine.gerar_integracao_sdc_quitcon(Decimal(str(saldo)), int(meses) if meses is not None else None)
+
+
+def calculation_view(calculation: CalculationMemory, *, attach_quitcon_sdc: bool = False) -> CalculationView:
+    quitcon_sdc = _sdc_quitcon_from_calculation(calculation) if attach_quitcon_sdc else None
     return CalculationView(
         id=calculation.id, proposal_id=calculation.proposal_id, version=calculation.version,
         formula_version=calculation.formula_version, input=json.loads(calculation.input_json),
         output=json.loads(calculation.output_json), approved_at=calculation.approved_at,
+        quitcon_sdc=quitcon_sdc,
     )
 
 
@@ -752,7 +768,7 @@ def calculate_sdc_proposal(proposal_id: str, payload: SdcCalculationRequest, use
         payload.pool_investor_rate_percent, payload.pool_investment_amount,
     )
     db.flush(); audit(db, user, "proposal.sdc_calculated", "calculation", calculation.id); db.commit(); db.refresh(calculation)
-    return calculation_view(calculation)
+    return calculation_view(calculation, attach_quitcon_sdc=True)
 
 
 @router.post("/proposals/{proposal_id}/calculate-flash-credit", response_model=CalculationView, status_code=201)
@@ -1202,6 +1218,30 @@ def quitcon_cancel_desistencia(operacao_id: str, user: User = Depends(require_sc
     db.commit()
     db.refresh(operacao)
     return QuitConOperacaoView(**quitcon_operacao_view(operacao))
+
+
+@router.post("/finops/sdc/quitcon-projection", response_model=SdcQuitConIntegrationView)
+def sdc_quitcon_projection(payload: SdcQuitConProjectionRequest, user: User = Depends(get_current_user)):
+    engine = EngineQuitConLetter()
+    return engine.gerar_integracao_sdc_quitcon(payload.saldo_devedor_simulado, payload.meses_restantes)
+
+
+@router.get("/contracts/{contract_id}/sdc-quitcon-card", response_model=SdcQuitConIntegrationView)
+def contract_sdc_quitcon_card(contract_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    contract = db.scalar(select(Contract).where(Contract.id == contract_id, Contract.organization_id == user.organization_id))
+    if not contract:
+        raise HTTPException(status_code=404, detail="Contrato não encontrado")
+    if not contract.template_version.startswith("sdc-"):
+        raise HTTPException(status_code=422, detail="Contrato não é SDC")
+    if contract.status not in {"ACCEPTED", "SIGNED"}:
+        raise HTTPException(status_code=422, detail="Contrato SDC não está ativo para exibição QuitCon")
+    calculation = db.get(CalculationMemory, contract.calculation_memory_id)
+    if not calculation:
+        raise HTTPException(status_code=404, detail="Memória de cálculo não encontrada")
+    bundle = _sdc_quitcon_from_calculation(calculation)
+    if not bundle:
+        raise HTTPException(status_code=422, detail="Não foi possível derivar projeção QuitCon para este contrato")
+    return bundle
 
 
 @router.post("/finops/quitcon/simulate")

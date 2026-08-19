@@ -88,7 +88,36 @@ export type CollateralNativeInspection = {
   lease_equity_pauta_id: string | null; quitcon_operacao_id: string | null; photos_count: number; vault_s3_uri: string;
   auction_evidence_ready: boolean; created_at: string; updated_at: string;
 };
-export type Calculation = { id: string; proposal_id: string; version: number; formula_version: string; input: Record<string,unknown>; output: Record<string,string|number|null>; approved_at: string|null };
+export type SdcQuitConProjectionLine = {
+  prazo_meses: number;
+  valor_bruto_referencia: string;
+  valor_quitcon_estimado_vp: string;
+  desconto_financeiro_obtido: string;
+  status_operacao: string;
+  nota_compliance: string;
+};
+export type SdcQuitConIntegration = {
+  card: {
+    saldo_devedor_atual: string;
+    quitacao_vista_quitcon_vp: string;
+    meses_restantes_referencia: number;
+    taxa_desconto_mensal_percent: string;
+    modal: { titulo: string; corpo: string };
+  };
+  projecao_temporal: {
+    saldo_devedor_referencia: string;
+    taxa_desconto_mensal: string;
+    formula: string;
+    nota_compliance_rodape: string;
+    linhas: SdcQuitConProjectionLine[];
+    tabela: Record<string, SdcQuitConProjectionLine>;
+  };
+};
+export type Calculation = {
+  id: string; proposal_id: string; version: number; formula_version: string;
+  input: Record<string, unknown>; output: Record<string, string | number | null>;
+  approved_at: string | null; quitcon_sdc?: SdcQuitConIntegration | null;
+};
 export type Reservation = { id: string; quota_id: string; proposal_id: string | null; status: string; expires_at: string; created_at: string };
 export type Contract = { id: string; proposal_id: string; contract_number: string; status: string; template_version: string; content_hash: string; accepted_at: string | null };
 export type TransactionAcceptance = { id:string; contract_id:string; template_id:string; acceptance_type:string; accepted_by_id:string; accepted_at:string; evidence_hash:string };

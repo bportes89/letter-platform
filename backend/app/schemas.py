@@ -958,6 +958,17 @@ class CalculationView(BaseModel):
     input: dict
     output: dict
     approved_at: datetime | None = None
+    quitcon_sdc: dict | None = None
+
+
+class SdcQuitConProjectionRequest(BaseModel):
+    saldo_devedor_simulado: Decimal = Field(gt=0)
+    meses_restantes: int | None = Field(default=None, ge=0, le=600)
+
+
+class SdcQuitConIntegrationView(BaseModel):
+    card: dict
+    projecao_temporal: dict
 
 
 class ContractCreate(BaseModel):

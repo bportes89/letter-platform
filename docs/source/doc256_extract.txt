@@ -1,0 +1,77 @@
+
+MANUAL DE ESPECIFICAÇÃO DE INTERFACE E AUTOMAÇÃO — QUITCON INTEGRADO AO SDC
+Módulo Lógico: LETTER_SDC_QUITCON_UI_INTEGRATION_2026Escopo: Exibição de componente na área logada do SDC, Modal explicativo (Tooltip), e tela pós-simulação com régua de projeção temporal deflacionada a 1% ao mês.Target: CTO, Desenvolvedores Front-end (React Native / Flutter) e UX/UI Designers.
+1. COMPONENTE DA ÁREA LOGADA SDC (CARTA FATURADA ATIVA)
+Na tela de detalhes do contrato SDC ativo do cliente, o sistema deve renderizar um card de destaque focado em conversão de quitação antecipada.
+A. Elementos Visuais do Card
+Título Principal: Saldo Devedor Atual: R$ [Valor_Bruto_Atual]
+Linha de Destaque FinOps: Quitação à Vista QuitCon: R$ [Valor_Deflacionado_VP]
+Componente Interativo: Ícone de Interrogação (?) estilizado ao lado do valor deflacionado, atuando como gatilho de clique (Trigger Tooltip/Modal).
+B. Texto Limpo e Resumido do Botão de Interrogação (?)
+Ao clicar no ícone (?), o aplicativo abrirá um modal nativo com o seguinte texto explicativo para o cliente:
+Como funciona a Quitação Inteligente QuitCon?
+Nós aplicamos um desconto financeiro de 1% ao mês sobre o prazo que resta para encerrar o seu contrato, trazendo a sua dívida a valor presente.
+A plataforma encontra um investidor de Capital de Giro para assumir o pagamento das suas parcelas restantes no consórcio. A LETTER cuida de toda a burocracia de transferência de titularidade e substituição da garantia junto à administradora.
+Resultado: Você quita o seu contrato à vista com um super desconto e libera o seu imóvel ou veículo da alienação sem precisar desembolsar o valor bruto total.
+2. ENGENHARIA DA TELA PÓS-SIMULAÇÃO SDC (MÓDULO DE PROJEÇÃO TEMPORAL)
+Imediatamente após o cliente realizar uma simulação de SDC na plataforma ou no site, o sistema deve apresentar uma tabela comparativa contendo cenários de simulação para quitação acelerada via QuitCon.
+A. Texto de Alerta Obrigatório no Rodapé da Tabela
+O front-end deve exibir obrigatoriamente em fonte de tamanho reduzido a seguinte nota de compliance:
+"Os valores exibidos na tabela abaixo são estimados. As parcelas e o saldo devedor de consórcios sofrem reajustes periódicos com base nos índices de correção das próprias administradoras (como INCC ou IPCA), alterando o valor final de quitação."
+B. Estrutura da Tabela de Simulação de Prazos QuitCon
+O sistema calculará as faixas utilizando a fórmula de deflacionamento de 1% ao mês aplicada sobre o saldo remanescente simulado naqueles respectivos meses de projeção futura.
+Prazo Estimado para Quitação
+Parâmetro de Cálculo (Meses $n$)
+Valor Projetado de Quitação QuitCon
+Status da Operação
+Quitação em 6 Meses
+$n = 6$
+R$ [VP_Mes_6]
+Estimativa com desconto de 6%
+Quitação em 12 Meses
+$n = 12$
+R$ [VP_Mes_12]
+Estimativa com desconto de 12%
+Quitação em 18 Meses
+$n = 18$
+R$ [VP_Mes_18]
+Estimativa com desconto de 18%
+Quitação em 24 Meses
+$n = 24$
+R$ [VP_Mes_24]
+Estimativa com desconto de 24%
+Quitação em 36 Meses
+$n = 36$
+R$ [VP_Mes_36]
+Estimativa com desconto de 36%
+Quitação em 48 Meses
+$n = 48$
+R$ [VP_Mes_48]
+Estimativa com desconto de 48%
+3. LÓGICA DO BACK-END (ALGORITMO PARA O CTO)
+O seu CTO deve acoplar a função tratada a seguir no microsserviço de simulação. Ela recebe o saldo devedor futuro projetado e cospe a matriz de dados que alimenta a tabela do front-end:
+def gerar_tabela_projeção_quitcon(saldo_devedor_simulado: float):
+    """
+    Gera os valores estimados de quitação QuitCon aplicando o deflacionamento 
+    de 1% ao mês para as janelas de 6 a 48 meses.
+    """
+    sb = float(saldo_devedor_simulado)
+    taxa_i = 0.01  # 1% ao mês de desconto QuitCon
+    Prazos = [6, 12, 18, 24, 36, 48]
+    tabela_retorno = {}
+    
+    for n in Prazos:
+        # Fórmula: VP = SB / (1 + i * n)
+        valor_presente_estimado = sb / (1 + (taxa_i * n))
+        chave_prazo = f"quitacao_{n}_meses"
+        
+        tabela_retorno[chave_prazo] = {
+            "prazo_meses": n,
+            "valor_bruto_referencia": round(sb, 2),
+            "valor_quiton_estimado_vp": round(valor_presente_estimado, 2),
+            "desconto_financeiro_obtido": round(sb - valor_presente_estimado, 2),
+            "nota_compliance": "VALOR_ESTIMADO_SUJEITO_A_REAJUSTES_DA_ADMINISTRADORA"
+        }
+        
+    return tabela_retorno
+A automação visual e lógica para o SDC + QuitCon está estruturada com todas as regras de exibição e simulação de prazos futuras. Como prefere seguir agora com as ferramentas de suporte do ecossistema?

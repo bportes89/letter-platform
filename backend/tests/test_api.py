@@ -216,6 +216,11 @@ def test_sdc_bullet_engine_uses_documented_splits(client, auth_headers):
     assert output["platform_spread"] == "192000.00"
     assert output["start_fee_milestone_1"] == "1500.00"
     assert output["start_fee_milestone_2"] == "22500.00"
+    quitcon = calculated.json()["quitcon_sdc"]
+    assert quitcon is not None
+    assert quitcon["card"]["saldo_devedor_atual"] == output["maturity_total"]
+    assert len(quitcon["projecao_temporal"]["linhas"]) == 6
+    assert quitcon["projecao_temporal"]["tabela"]["quitacao_12_meses"]["valor_quitcon_estimado_vp"] == "1100000.00"
     contract = client.post(f"/api/v1/proposals/{proposal['id']}/contracts", headers=auth_headers, json={"calculation_memory_id":calculated.json()["id"]})
     assert contract.status_code == 201
     assert contract.json()["template_version"] == "sdc-bullet-v1"
@@ -1596,4 +1601,43 @@ def test_quitcon_full_pipeline_penalties_and_tokenization(client, auth_headers):
     assert cancel.status_code == 200
     assert cancel.json()["status"] == "CANCELADO_INADIMPLENCIA_CESSIONARIO"
     assert cancel.json()["penalty_amount"] == "25000.00"
+
+
+def test_quitcon_sdc_projection_doc256(client, auth_headers):
+    from app.quitcon_engine import EngineQuitConLetter
+
+    engine = EngineQuitConLetter()
+    vp6 = engine.calcular_valor_quitcon_vp(Decimal("250000"), 6)
+    assert vp6 == Decimal("235849.06")
+    table = engine.gerar_tabela_projecao_quitcon(Decimal("250000"))
+    assert table["tabela"]["quitacao_48_meses"]["status_operacao"] == "Estimativa com desconto de 48%"
+    assert table["tabela"]["quitacao_48_meses"]["valor_quitcon_estimado_vp"] == "168918.92"
+
+    projection = client.post("/api/v1/finops/sdc/quitcon-projection", headers=auth_headers, json={
+        "saldo_devedor_simulado": "250000",
+        "meses_restantes": 12,
+    })
+    assert projection.status_code == 200
+    body = projection.json()
+    assert body["card"]["quitacao_vista_quitcon_vp"] == "223214.29"
+    assert body["card"]["modal"]["titulo"] == "Como funciona a Quitação Inteligente QuitCon?"
+    assert "INCC ou IPCA" in body["projecao_temporal"]["nota_compliance_rodape"]
+
+    lead = client.get("/api/v1/leads", headers=auth_headers).json()[0]
+    proposal = client.post("/api/v1/proposals", headers=auth_headers, json={
+        "lead_id": lead["id"], "product": "SDC", "requested_amount": "800000", "terms": {},
+    }).json()
+    quotas = [q for q in client.get("/api/v1/quotas", headers=auth_headers).json() if q["category"] == "REAL_ESTATE"][:2]
+    calculated = client.post(f"/api/v1/proposals/{proposal['id']}/calculate-sdc", headers=auth_headers, json={
+        "quota_ids": [q["id"] for q in quotas], "duration_months": 12,
+    }).json()
+    contract = client.post(f"/api/v1/proposals/{proposal['id']}/contracts", headers=auth_headers, json={
+        "calculation_memory_id": calculated["id"],
+    }).json()
+    client.post(f"/api/v1/contracts/{contract['id']}/accept", headers=auth_headers, json={
+        "confirmation": True, "ip_address": "127.0.0.1", "user_agent": "pytest",
+    })
+    card = client.get(f"/api/v1/contracts/{contract['id']}/sdc-quitcon-card", headers=auth_headers)
+    assert card.status_code == 200
+    assert card.json()["card"]["saldo_devedor_atual"] == calculated["output"]["maturity_total"]
 
