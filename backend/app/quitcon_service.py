@@ -21,8 +21,7 @@ VALID_TRANSITIONS = {
     "PRONTO_PARA_CARTORIO": {"EM_ANALISE_NO_RGI", "CANCELADO_DESISTENCIA_CEDENTE"},
     "EM_ANALISE_NO_RGI": {"GRAVAME_CONCLUIDO", "CANCELADO_DESISTENCIA_CEDENTE"},
     "GRAVAME_CONCLUIDO": {"ATIVO_OK_EM_PRODUCAO", "CANCELADO_DESISTENCIA_CEDENTE", "CANCELADO_INADIMPLENCIA_CESSIONARIO"},
-    "ATIVO_OK_EM_PRODUCAO": {"LIBERADO_PARA_ANTECIPACAO", "CANCELADO_INADIMPLENCIA_CESSIONARIO"},
-    "LIBERADO_PARA_ANTECIPACAO": {"CANCELADO_INADIMPLENCIA_CESSIONARIO"},
+    "ATIVO_OK_EM_PRODUCAO": {"CANCELADO_INADIMPLENCIA_CESSIONARIO"},
 }
 
 
@@ -54,11 +53,6 @@ def operacao_view(item: QuitConOperacao) -> dict:
     captured = money(item.funding_captured_amount)
     target = money(item.funding_target_amount or Decimal(str(credit["limite_teto_ltv_captacao"])))
     capture_pct = money(captured / target * 100) if target > 0 else money(0)
-    anticipation = engine.calcular_antecipacao_recebiveis_price(
-        Decimal(credit["aluguel_mensal_recorrente_bruto_dono"]),
-        parcelas_restantes=36,
-        meses_vigencia_atual=item.months_in_force,
-    )
     penalty_preview = None
     if item.administrator_approved_at:
         penalty_preview = {
@@ -94,13 +88,10 @@ def operacao_view(item: QuitConOperacao) -> dict:
         "funding_capture_percent": str(capture_pct),
         "activation_at": item.activation_at,
         "activated_manually": item.activated_manually,
-        "months_in_force": item.months_in_force,
-        "anticipation_unlock_at": item.anticipation_unlock_at,
         "cancellation_reason": item.cancellation_reason,
         "penalty_amount": str(item.penalty_amount) if item.penalty_amount else None,
         "penalty_detail_json": json.loads(item.penalty_detail_json) if item.penalty_detail_json else None,
         "credit_matrix": credit,
-        "anticipation_preview": anticipation,
         "penalty_preview": penalty_preview,
         "tokenization_json": json.loads(item.tokenization_json) if item.tokenization_json else None,
         "created_at": item.created_at,
@@ -280,18 +271,7 @@ def activate_ok(db: Session, user: User, operacao: QuitConOperacao, *, manual: b
             raise HTTPException(status_code=409, detail="Captação mínima de 30% não atingida")
     operacao.activation_at = datetime.now(UTC)
     operacao.activated_manually = manual
-    operacao.anticipation_unlock_at = operacao.activation_at + timedelta(days=30 * EngineQuitConLetter.carencia_meses_minima)
-    _transition(db, operacao, user, "ATIVO_OK_EM_PRODUCAO", "Gatilho OK — payout aluguel D+30")
-    db.flush()
-    return operacao
-
-
-def refresh_anticipation_eligibility(db: Session, user: User, operacao: QuitConOperacao, months_in_force: int) -> QuitConOperacao:
-    if operacao.status != "ATIVO_OK_EM_PRODUCAO":
-        raise HTTPException(status_code=409, detail="Carência aplicável apenas em ATIVO_OK_EM_PRODUCAO")
-    operacao.months_in_force = int(months_in_force)
-    if months_in_force >= EngineQuitConLetter.carencia_meses_minima:
-        _transition(db, operacao, user, "LIBERADO_PARA_ANTECIPACAO", "6 meses de vigência e adimplência")
+    _transition(db, operacao, user, "ATIVO_OK_EM_PRODUCAO", "Gatilho OK — operação QuitCon em produção")
     db.flush()
     return operacao
 
@@ -336,31 +316,14 @@ def cancel_desistencia_cedente(db: Session, user: User, operacao: QuitConOperaca
     return operacao
 
 
-def simulate_anticipation(operacao: QuitConOperacao, parcelas_restantes: int = 36) -> dict:
-    engine = EngineQuitConLetter()
-    credit = engine.processar_matriz_credito_ltv(operacao.property_type, operacao.appraisal_value)
-    result = engine.calcular_antecipacao_recebiveis_price(
-        Decimal(credit["aluguel_mensal_recorrente_bruto_dono"]),
-        parcelas_restantes=parcelas_restantes,
-        meses_vigencia_atual=operacao.months_in_force,
-    )
-    result["carencia_meses_minima"] = EngineQuitConLetter.carencia_meses_minima
-    result["data_liberacao_clique_app"] = (
-        operacao.anticipation_unlock_at.isoformat() if operacao.anticipation_unlock_at else None
-    )
-    return result
-
-
 def process_tokenization(operacao: QuitConOperacao, owner_uid: str | None = None) -> dict:
-    if operacao.status not in {"GRAVAME_CONCLUIDO", "ATIVO_OK_EM_PRODUCAO", "LIBERADO_PARA_ANTECIPACAO"}:
+    if operacao.status not in {"GRAVAME_CONCLUIDO", "ATIVO_OK_EM_PRODUCAO"}:
         raise HTTPException(status_code=409, detail="Tokenização exige gravame concluído ou produção ativa")
     engine = EngineQuitConLetter()
     credit = engine.processar_matriz_credito_ltv(operacao.property_type, operacao.appraisal_value)
     ltv_amount = Decimal(credit["limite_teto_ltv_captacao"])
-    owner_rent = Decimal(credit["aluguel_mensal_recorrente_bruto_dono"])
     pool_cost = Decimal(credit["custo_mensal_remuneracao_pool_investidores"])
     rwa = engine.gerar_fracionamento_securitizado_rwa(ltv_amount, operacao.operacao_code)
-    anticipation = engine.calcular_antecipacao_recebiveis_price(owner_rent, 36, operacao.months_in_force)
     payload = {
         "endpoint": "/api/v1/finops/quitcon/tokenization-processor",
         "status": "SUCCESS",
@@ -375,11 +338,11 @@ def process_tokenization(operacao: QuitConOperacao, owner_uid: str | None = None
                 "saldo_devedor_bruto": float(operacao.outstanding_balance),
             },
             "parametrizacao_finops_mesa": {
-                "ltv_alavancagem_teto_60_porcento": float(ltv_amount),
-                "base_calculo_recompensa_dono_40_porcento": float(credit["base_calculo_recompensa_dono"]),
-                "faturamento_mensal_bruto_recorrente_dono": float(owner_rent),
+                "ltv_captacao_percent": float(credit["ltv_percent"]),
+                "ltv_alavancagem_teto": float(ltv_amount),
                 "custo_mensal_pool_investment_1_6_porcento": float(pool_cost),
                 "taxa_sucesso_escrow_10_porcento": float(operacao.success_fee_escrow_amount),
+                "remuneracao_proprietario_0_4_porcento": False,
             },
             "workflow_securitizacao_rwa": {
                 "titulo_lastro_vinculado": "NOTA_COMERCIAL_PRIVADA_SERIE_QC01",
@@ -398,15 +361,6 @@ def process_tokenization(operacao: QuitConOperacao, owner_uid: str | None = None
                 "sla_estimado_conclusao": operacao.sla_estimated_completion_at.isoformat() if operacao.sla_estimated_completion_at else None,
                 "multa_inadimplencia_cessionario_percent": float(engine.multa_percentual * 100),
                 "multa_desistencia_cedente_percent": float(engine.multa_percentual * 100),
-            },
-            "trava_seguranca_antecipacao_futura": {
-                "carecia_meses_minima": EngineQuitConLetter.carencia_meses_minima,
-                "data_liberacao_clique_app": (
-                    operacao.anticipation_unlock_at.strftime("%Y-%m-%d %H:%M:%S")
-                    if operacao.anticipation_unlock_at else None
-                ),
-                "taxa_desconto_price_fixada": float(EngineQuitConLetter.taxa_desconto_antecipacao_mensal),
-                "status_antecipacao_atual": anticipation["status_antecipacao"],
             },
         },
     }

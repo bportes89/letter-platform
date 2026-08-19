@@ -9,7 +9,7 @@ const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" 
 const STATUSES = [
   "AGUARDANDO_TAPAF", "TAPAF_LIQUIDADA", "EM_AUDITORIA_RISCO", "REPROVADO_COMPLIANCE",
   "AGUARDANDO_ASSINATURA", "PRONTO_PARA_CARTORIO", "EM_ANALISE_NO_RGI", "GRAVAME_CONCLUIDO",
-  "ATIVO_OK_EM_PRODUCAO", "LIBERADO_PARA_ANTECIPACAO",
+  "ATIVO_OK_EM_PRODUCAO",
   "CANCELADO_INADIMPLENCIA_CESSIONARIO", "CANCELADO_DESISTENCIA_CEDENTE",
 ];
 
@@ -157,15 +157,13 @@ export function QuitConModule() {
     }
   }
 
-  const canAnticipate = selected?.status === "LIBERADO_PARA_ANTECIPACAO";
-
   return (
     <>
       <div className="page-heading">
         <div>
           <span className="eyebrow dark">QUITCON ENGINE V1</span>
           <h1>QuitCon — quitação de consórcio</h1>
-          <p>TAPAF R$ 1.500, LTV 60/40/30, multas 10%, SLA 45 dias, antecipação Price 2,5% a.m. e tokenização RWA.</p>
+          <p>TAPAF R$ 1.500, LTV 60/40/30, multas 10%, SLA 45 dias e tokenização RWA. Sem remuneração 0,4% — exclusiva Lease Equity.</p>
         </div>
         <div className="operational-icon"><Building2 /></div>
       </div>
@@ -205,8 +203,7 @@ export function QuitConModule() {
           {ltvPreview && (
             <div className="finops-summary">
               <article><small>Teto LTV ({ltvPreview.ltv_percent}%)</small><strong>{brl.format(Number(ltvPreview.limite_teto_ltv_captacao))}</strong></article>
-              <article><small>Base dono ({ltvPreview.base_recompensa_percent}%)</small><strong>{brl.format(Number(ltvPreview.base_calculo_recompensa_dono))}</strong></article>
-              <article><small>Aluguel dono/mês</small><strong>{brl.format(Number(ltvPreview.aluguel_mensal_recorrente_bruto_dono))}</strong></article>
+              <article><small>Custo pool/mês (1,6%)</small><strong>{brl.format(Number(ltvPreview.custo_mensal_remuneracao_pool_investidores))}</strong></article>
               <article><small>SLA estimado</small><strong>{ltvPreview.sla_dias_estimados} dias</strong></article>
             </div>
           )}
@@ -232,7 +229,7 @@ export function QuitConModule() {
               <article><small>SLA conclusão</small><strong><Timer />{selected.sla_dias_estimados}d — {selected.sla_estimated_completion_at ? new Date(selected.sla_estimated_completion_at).toLocaleDateString("pt-BR") : "—"}</strong></article>
               <article><small>Taxa sucesso Escrow (10%)</small><strong>{brl.format(Number(selected.success_fee_escrow_amount))}</strong></article>
               <article><small>Captação</small><strong>{selected.funding_capture_percent}%</strong></article>
-              <article><small>Aluguel dono</small><strong>{brl.format(Number(selected.credit_matrix.aluguel_mensal_recorrente_bruto_dono))}</strong></article>
+              <article><small>Tokens estimados</small><strong>{Math.floor(Number(selected.credit_matrix.limite_teto_ltv_captacao) / 100)}</strong></article>
             </div>
             <div className="tapaf-actions">
               <button type="button" disabled={selected.status !== "AGUARDANDO_TAPAF"} onClick={() => void payTapaf()}>Pagar TAPAF R$ 1.500</button>
@@ -264,14 +261,6 @@ export function QuitConModule() {
             {selected.penalty_amount && (
               <div className="notice">Multa aplicada: {brl.format(Number(selected.penalty_amount))} — {selected.cancellation_reason}</div>
             )}
-
-            <section className="panel">
-              <h3>Antecipação (Price 2,5% a.m.)</h3>
-              <button type="button" disabled={!canAnticipate}>{canAnticipate ? "Antecipar recebíveis" : "Antecipar (bloqueado)"}</button>
-              {selected.anticipation_preview?.valor_liquido_payout_vista && (
-                <article><small>Payout à vista</small><strong>{brl.format(Number(selected.anticipation_preview.valor_liquido_payout_vista))}</strong></article>
-              )}
-            </section>
 
             {tokenization && (
               <section className="panel">

@@ -2,22 +2,24 @@
 
 Motor: `EngineQuitConLetter`
 
-Produto de quitação de cota de consórcio com colateral imobiliário/automotivo, tokenização RWA e regras de multa doc252.
+Produto de **quitação de cota de consórcio** com colateral imobiliário/automotivo, tokenização RWA e regras de multa doc252.
+
+> **Importante:** QuitCon **não possui** remuneração de **0,4% a.m.** ao proprietário — essa regra é **exclusiva do Lease Equity**.
 
 ## TAPAF
 
 - Valor fixo: **R$ 1.500,00** (não reembolsável)
 - Status inicial: `AGUARDANDO_TAPAF`
 
-## Matriz LTV assimétrica
+## Matriz LTV (captação / tokenização)
 
-| Tipologia | LTV máx. captação | Base recompensa dono | Aluguel dono (0,4% a.m.) |
-|-----------|-------------------|----------------------|--------------------------|
-| Urbano residencial/comercial | 60% | 40% AVM | base × 0,4% |
-| Lote / Galpão | 40% | 25% AVM | base × 0,4% |
-| Rural | 30% | 20% AVM | base × 0,4% |
+| Tipologia | LTV máx. captação |
+|-----------|-------------------|
+| Urbano residencial/comercial | 60% |
+| Lote / Galpão | 40% |
+| Rural | 30% |
 
-Pool investidor: **1,6% a.m.** sobre valor alavancado.
+Pool investidor: **1,6% a.m.** sobre valor alavancado (LTV).
 
 ## SLA
 
@@ -40,7 +42,6 @@ Pool investidor: **1,6% a.m.** sobre valor alavancado.
 ```
 AGUARDANDO_TAPAF → TAPAF_LIQUIDADA → EM_AUDITORIA_RISCO → AGUARDANDO_ASSINATURA
 → PRONTO_PARA_CARTORIO → EM_ANALISE_NO_RGI → GRAVAME_CONCLUIDO → ATIVO_OK_EM_PRODUCAO
-→ LIBERADO_PARA_ANTECIPACAO
 ```
 
 Estados terminais de penalidade: `CANCELADO_INADIMPLENCIA_CESSIONARIO`, `CANCELADO_DESISTENCIA_CEDENTE`
@@ -57,8 +58,6 @@ Estados terminais de penalidade: `CANCELADO_INADIMPLENCIA_CESSIONARIO`, `CANCELA
 | `POST /finops/quitcon/cancel-desistencia` | Multa cedente |
 | `POST /finops/quitcon/tokenization-processor` | Tokenização RWA ERC-3643 |
 
-## Antecipação
+## Gatilho de produção
 
-- Taxa desconto Price: **2,5% a.m.**
-- Carência mínima: **6 meses**
-- Gatilho OK: captação ≥ **30%** do teto LTV ou ativação manual
+- Captação ≥ **30%** do teto LTV ou ativação manual admin

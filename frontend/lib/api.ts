@@ -75,12 +75,10 @@ export type QuitConOperacao = {
   administrator_approved_at: string | null; sla_estimated_completion_at: string | null;
   sla_dias_estimados: number; success_fee_escrow_amount: string;
   funding_captured_amount: string; funding_target_amount: string; funding_capture_percent: string;
-  activation_at: string | null; activated_manually: boolean; months_in_force: number;
-  anticipation_unlock_at: string | null;
+  activation_at: string | null; activated_manually: boolean;
   cancellation_reason: string | null; penalty_amount: string | null;
   penalty_detail_json: Record<string, unknown> | null;
   credit_matrix: Record<string, string>;
-  anticipation_preview: Record<string, string | number>;
   penalty_preview: Record<string, unknown> | null;
   tokenization_json: Record<string, unknown> | null;
   created_at: string; updated_at: string;

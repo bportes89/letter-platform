@@ -62,7 +62,7 @@ from app.schemas import (
     LeaseEquityTokenizationRequest,
     QuitConOperacaoCreate, QuitConOperacaoView, QuitConTapafWebhook, QuitConInspectionRequest,
     QuitConComplianceReview, QuitConFundingCapture, QuitConActivateRequest,
-    QuitConAnticipationRequest, QuitConMonthsRequest, QuitConLtvSimulateRequest,
+    QuitConLtvSimulateRequest,
     QuitConTokenizationRequest, QuitConCancelInadimplenciaRequest,
     ContractNativeInspectionRequest, CollateralNativeInspectionView,
     LeadUpdate, LeadView, LedgerPostRequest, LedgerTransactionView, LoginRequest,
@@ -139,11 +139,9 @@ from app.quitcon_service import (
     operacao_view as quitcon_operacao_view,
     process_tokenization as process_quitcon_tokenization,
     record_funding_capture as record_quitcon_funding,
-    refresh_anticipation_eligibility as refresh_quitcon_anticipation,
     register_administrator_approval, register_inspection_photos as register_quitcon_inspection,
     run_compliance_review as run_quitcon_compliance,
     sign_contract as sign_quitcon_contract,
-    simulate_anticipation as simulate_quitcon_anticipation,
     submit_registry_protocol as submit_quitcon_registry,
 )
 from app.storage_service import get_storage
@@ -1186,15 +1184,6 @@ def quitcon_activate(payload: QuitConActivateRequest, user: User = Depends(requi
     return QuitConOperacaoView(**quitcon_operacao_view(operacao))
 
 
-@router.post("/finops/quitcon/refresh-anticipation", response_model=QuitConOperacaoView)
-def quitcon_refresh_anticipation(payload: QuitConMonthsRequest, user: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
-    operacao = _load_quitcon_operacao(db, user, payload.operacao_id)
-    refresh_quitcon_anticipation(db, user, operacao, payload.months_in_force)
-    db.commit()
-    db.refresh(operacao)
-    return QuitConOperacaoView(**quitcon_operacao_view(operacao))
-
-
 @router.post("/finops/quitcon/cancel-inadimplencia", response_model=QuitConOperacaoView)
 def quitcon_cancel_inadimplencia(payload: QuitConCancelInadimplenciaRequest, user: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
     operacao = _load_quitcon_operacao(db, user, payload.operacao_id)
@@ -1219,12 +1208,6 @@ def quitcon_cancel_desistencia(operacao_id: str, user: User = Depends(require_sc
 def quitcon_simulate_ltv(payload: QuitConLtvSimulateRequest, user: User = Depends(get_current_user)):
     engine = EngineQuitConLetter()
     return engine.processar_matriz_credito_ltv(payload.property_type, payload.appraisal_value)
-
-
-@router.post("/finops/quitcon/simulate-anticipation")
-def quitcon_simulate_anticipation(payload: QuitConAnticipationRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    operacao = _load_quitcon_operacao(db, user, payload.operacao_id)
-    return simulate_quitcon_anticipation(operacao, payload.parcelas_restantes)
 
 
 @router.post("/finops/quitcon/tokenization-processor")

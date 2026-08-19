@@ -1674,16 +1674,6 @@ class QuitConActivateRequest(BaseModel):
     manual: bool = False
 
 
-class QuitConAnticipationRequest(BaseModel):
-    operacao_id: str
-    parcelas_restantes: int = Field(default=36, ge=1, le=36)
-
-
-class QuitConMonthsRequest(BaseModel):
-    operacao_id: str
-    months_in_force: int = Field(ge=0, le=36)
-
-
 class QuitConLtvSimulateRequest(BaseModel):
     property_type: str
     appraisal_value: Decimal = Field(gt=0)
@@ -1723,13 +1713,10 @@ class QuitConOperacaoView(BaseModel):
     funding_capture_percent: str
     activation_at: datetime | None
     activated_manually: bool
-    months_in_force: int
-    anticipation_unlock_at: datetime | None
     cancellation_reason: str | None
     penalty_amount: str | None
     penalty_detail_json: dict | None
     credit_matrix: dict
-    anticipation_preview: dict
     penalty_preview: dict | None
     tokenization_json: dict | None
     created_at: datetime

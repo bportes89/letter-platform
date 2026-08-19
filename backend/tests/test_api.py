@@ -1508,16 +1508,16 @@ def test_nina_distress_auto_links_native_inspection_photos(client, auth_headers)
 
 
 def test_quitcon_engine_canonical_doc252():
-    from app.quitcon_engine import EngineQuitConLetter, money
+    from app.quitcon_engine import EngineQuitConLetter
 
     engine = EngineQuitConLetter()
     credit = engine.processar_matriz_credito_ltv("URBANO_RESIDENCIAL", Decimal("1000000"))
     assert credit["ltv_percent"] == "60.00"
     assert credit["limite_teto_ltv_captacao"] == "600000.00"
-    assert credit["base_calculo_recompensa_dono"] == "400000.00"
-    assert credit["aluguel_mensal_recorrente_bruto_dono"] == "1600.00"
     assert credit["custo_mensal_remuneracao_pool_investidores"] == "9600.00"
     assert credit["sla_dias_estimados"] == 45
+    assert credit["remuneracao_proprietario_aplicavel"] is False
+    assert "Lease Equity" in credit["nota_produto"]
 
     escrow = engine.calcular_taxa_sucesso_escrow(Decimal("250000"))
     assert escrow == Decimal("25000.00")
@@ -1528,11 +1528,6 @@ def test_quitcon_engine_canonical_doc252():
 
     rwa = engine.gerar_fracionamento_securitizado_rwa(Decimal("600000"), "LETTER_QUITCON_0044_2026")
     assert rwa["total_supply_tokens_mint"] == 6000
-    released = engine.calcular_antecipacao_recebiveis_price(Decimal("1600"), 36, 6)
-    assert released["status_antecipacao"] == "LIBERADO_PARA_SAQUE_VISTA"
-    assert Decimal(released["valor_liquido_payout_vista"]) == money(
-        Decimal("1600") * ((Decimal("1") - Decimal("1.025") ** -36) / Decimal("0.025"))
-    )
 
 
 def test_quitcon_full_pipeline_penalties_and_tokenization(client, auth_headers):
@@ -1553,7 +1548,7 @@ def test_quitcon_full_pipeline_penalties_and_tokenization(client, auth_headers):
     assert operacao["status"] == "AGUARDANDO_TAPAF"
     assert operacao["sla_dias_estimados"] == 45
     assert operacao["success_fee_escrow_amount"] == "25000.00"
-    assert operacao["credit_matrix"]["aluguel_mensal_recorrente_bruto_dono"] == "1600.00"
+    assert operacao["credit_matrix"]["remuneracao_proprietario_aplicavel"] is False
 
     paid = client.post("/api/v1/finops/quitcon/tapaf-payment-webhook", headers=auth_headers, json={
         "operacao_id": operacao["id"], "event_id": "tapaf-qc-001", "amount": "1500.00",
@@ -1590,7 +1585,8 @@ def test_quitcon_full_pipeline_penalties_and_tokenization(client, auth_headers):
     })
     assert token.status_code == 200
     data = token.json()["data"]
-    assert data["parametrizacao_finops_mesa"]["ltv_alavancagem_teto_60_porcento"] == 600000.0
+    assert data["parametrizacao_finops_mesa"]["ltv_alavancagem_teto"] == 600000.0
+    assert data["parametrizacao_finops_mesa"]["remuneracao_proprietario_0_4_porcento"] is False
     assert data["governanca_risco_doc252"]["sla_dias_estimados"] == 45
     assert data["workflow_securitizacao_rwa"]["tokenizacao_blockchain_metadata"]["total_supply_tokens_emitidos"] == 6000
 
