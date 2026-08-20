@@ -971,6 +971,26 @@ class SdcQuitConIntegrationView(BaseModel):
     projecao_temporal: dict
 
 
+class SdcStartQuitConRequest(BaseModel):
+    proposal_id: str | None = None
+    contract_id: str | None = None
+    calculation_memory_id: str | None = None
+    meses_restantes: int | None = Field(default=None, ge=0, le=600)
+    confirmation: bool = True
+
+
+class SdcStartQuitConResponse(BaseModel):
+    created: bool
+    operacao_id: str
+    operacao_code: str
+    status: str
+    quitcon_sdc: dict
+    tapaf_checkout: dict
+    next_step: str
+    finops_route: str
+    message: str
+
+
 class ContractCreate(BaseModel):
     calculation_memory_id: str
 

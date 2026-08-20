@@ -1,12 +1,106 @@
 "use client";
 
-import { CircleHelp, Sparkles } from "lucide-react";
+import { ArrowRight, CircleHelp, Loader2, Sparkles } from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
-import { SdcQuitConIntegration } from "@/lib/api";
+import { api, SdcQuitConIntegration, SdcStartQuitConResponse } from "@/lib/api";
 
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
-export function SdcQuitConCard({ data }: { data: SdcQuitConIntegration }) {
+export type SdcQuitConContext = {
+  proposalId?: string;
+  contractId?: string;
+  calculationMemoryId?: string;
+  mesesRestantes?: number;
+};
+
+function SdcQuitConAdvancePanel({
+  data,
+  context,
+  onStarted,
+}: {
+  data: SdcQuitConIntegration;
+  context: SdcQuitConContext;
+  onStarted?: (result: SdcStartQuitConResponse) => void;
+}) {
+  const [loading, setLoading] = useState(false);
+  const [confirmed, setConfirmed] = useState(false);
+  const [result, setResult] = useState<SdcStartQuitConResponse | null>(null);
+  const [error, setError] = useState("");
+
+  async function advance() {
+    if (!confirmed || loading) return;
+    if (!context.proposalId && !context.contractId) {
+      setError("Vincule a proposta ou contrato SDC antes de avançar.");
+      return;
+    }
+    setLoading(true);
+    setError("");
+    try {
+      const payload: Record<string, unknown> = {
+        confirmation: true,
+        meses_restantes: context.mesesRestantes ?? data.card.meses_restantes_referencia,
+      };
+      if (context.proposalId) payload.proposal_id = context.proposalId;
+      if (context.contractId) payload.contract_id = context.contractId;
+      if (context.calculationMemoryId) payload.calculation_memory_id = context.calculationMemoryId;
+
+      const res = await api<SdcStartQuitConResponse>("/finops/sdc/start-quitcon", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      setResult(res);
+      onStarted?.(res);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Falha ao abrir operação QuitCon");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  if (result) {
+    return (
+      <div className="sdc-quitcon-advance success">
+        <b>{result.message}</b>
+        <small>
+          Operação <code>{result.operacao_code}</code> · {result.status.replaceAll("_", " ")}
+        </small>
+        <small>Próximo passo: TAPAF {brl.format(Number(result.tapaf_checkout.valor_tapaf_brl))}</small>
+        <Link href={result.finops_route} className="sdc-quitcon-advance-link">
+          Ir para FinOps QuitCon <ArrowRight />
+        </Link>
+      </div>
+    );
+  }
+
+  return (
+    <div className="sdc-quitcon-advance">
+      <label className="sdc-quitcon-check">
+        <input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} />
+        <span>
+          Quero avançar com a quitação QuitCon no valor estimado de{" "}
+          <strong>{brl.format(Number(data.card.quitacao_vista_quitcon_vp))}</strong> e iniciar a operação
+          (TAPAF R$ 1.500,00).
+        </span>
+      </label>
+      {error && <small className="sdc-quitcon-error">{error}</small>}
+      <button type="button" className="sdc-quitcon-advance-btn" disabled={!confirmed || loading} onClick={() => void advance()}>
+        {loading ? <Loader2 className="spin" /> : <ArrowRight />}
+        Quero avançar com QuitCon
+      </button>
+    </div>
+  );
+}
+
+export function SdcQuitConCard({
+  data,
+  context,
+  onStarted,
+}: {
+  data: SdcQuitConIntegration;
+  context?: SdcQuitConContext;
+  onStarted?: (result: SdcStartQuitConResponse) => void;
+}) {
   const [open, setOpen] = useState(false);
   const { card } = data;
   const paragraphs = card.modal.corpo.split("\n\n").filter(Boolean);
@@ -34,6 +128,7 @@ export function SdcQuitConCard({ data }: { data: SdcQuitConIntegration }) {
         <small className="sdc-quitcon-meta">
           Desconto de {card.taxa_desconto_mensal_percent}% a.m. · referência {card.meses_restantes_referencia} meses
         </small>
+        {context && <SdcQuitConAdvancePanel data={data} context={context} onStarted={onStarted} />}
       </div>
       {open && (
         <div className="sdc-quitcon-modal-backdrop" onClick={() => setOpen(false)}>
@@ -50,7 +145,15 @@ export function SdcQuitConCard({ data }: { data: SdcQuitConIntegration }) {
   );
 }
 
-export function SdcQuitConProjectionTable({ data }: { data: SdcQuitConIntegration }) {
+export function SdcQuitConProjectionTable({
+  data,
+  context,
+  onStarted,
+}: {
+  data: SdcQuitConIntegration;
+  context?: SdcQuitConContext;
+  onStarted?: (result: SdcStartQuitConResponse) => void;
+}) {
   const { projecao_temporal: proj } = data;
   return (
     <div className="sdc-quitcon-projection">
@@ -82,6 +185,7 @@ export function SdcQuitConProjectionTable({ data }: { data: SdcQuitConIntegratio
         </table>
       </div>
       <small className="sdc-quitcon-compliance">{proj.nota_compliance_rodape}</small>
+      {context && <SdcQuitConAdvancePanel data={data} context={context} onStarted={onStarted} />}
     </div>
   );
 }

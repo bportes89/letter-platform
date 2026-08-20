@@ -23,6 +23,7 @@ VP = SB / (1 + 0.01 * n)
 | Método | Rota | Uso |
 |--------|------|-----|
 | POST | `/finops/sdc/quitcon-projection` | Projeção standalone |
+| POST | `/finops/sdc/start-quitcon` | Simulação SDC → abre operação QuitCon (`AGUARDANDO_TAPAF`) |
 | GET | `/contracts/{id}/sdc-quitcon-card` | Card em contrato `ACCEPTED`/`SIGNED` |
 | POST | `/proposals/{id}/calculate-sdc` | Retorna `quitcon_sdc` embutido |
 
@@ -31,6 +32,13 @@ VP = SB / (1 + 0.01 * n)
 - `backend/app/quitcon_engine.py` — `gerar_tabela_projecao_quitcon`, `gerar_integracao_sdc_quitcon`
 - `frontend/components/sdc-quitcon-card.tsx` — card + tabela + modal
 - `docs/source/doc256_extract.txt` — especificação original
+
+## Fluxo “Quero avançar”
+
+1. Cliente vê projeção QuitCon (pós-simulação SDC ou card no contrato ativo).
+2. Marca confirmação e clica **Quero avançar com QuitCon**.
+3. `POST /finops/sdc/start-quitcon` abre operação na esteira (`AGUARDANDO_TAPAF`) com saldo bruto da memória SDC.
+4. Cliente segue em **FinOps → QuitCon** para TAPAF, administradora e demais etapas.
 
 ## Compliance
 

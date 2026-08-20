@@ -113,6 +113,17 @@ export type SdcQuitConIntegration = {
     tabela: Record<string, SdcQuitConProjectionLine>;
   };
 };
+export type SdcStartQuitConResponse = {
+  created: boolean;
+  operacao_id: string;
+  operacao_code: string;
+  status: string;
+  quitcon_sdc: SdcQuitConIntegration;
+  tapaf_checkout: { valor_tapaf_brl: string; status: string; operacao_id?: string };
+  next_step: string;
+  finops_route: string;
+  message: string;
+};
 export type Calculation = {
   id: string; proposal_id: string; version: number; formula_version: string;
   input: Record<string, unknown>; output: Record<string, string | number | null>;

@@ -3,7 +3,7 @@ from datetime import UTC, date, datetime
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, Response, UploadFile
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
@@ -64,6 +64,7 @@ from app.schemas import (
     QuitConComplianceReview, QuitConFundingCapture, QuitConActivateRequest,
     QuitConSimulateRequest,
     SdcQuitConIntegrationView, SdcQuitConProjectionRequest,
+    SdcStartQuitConRequest, SdcStartQuitConResponse,
     QuitConTokenizationRequest, QuitConCancelInadimplenciaRequest,
     ContractNativeInspectionRequest, CollateralNativeInspectionView,
     LeadUpdate, LeadView, LedgerPostRequest, LedgerTransactionView, LoginRequest,
@@ -113,6 +114,7 @@ from app.identity_service import (
 from app.core.security import decode_token, hash_password, verify_password
 from app.dependencies import require_step_up
 from app.product_service import calculate_flash_credit, calculate_sdc
+from app.sdc_quitcon_service import start_quitcon_from_sdc
 from app.valid_stamp_requirements import valid_stamp_requirements
 from app.invoice_processor_service import process_invoice_settlement, receipt_processor_response, receipt_view
 from app.pre_analysis_service import (
@@ -1218,6 +1220,35 @@ def quitcon_cancel_desistencia(operacao_id: str, user: User = Depends(require_sc
     db.commit()
     db.refresh(operacao)
     return QuitConOperacaoView(**quitcon_operacao_view(operacao))
+
+
+@router.post("/finops/sdc/start-quitcon", response_model=SdcStartQuitConResponse)
+def sdc_start_quitcon(payload: SdcStartQuitConRequest, user: User = Depends(require_scope("proposals:write")), db: Session = Depends(get_db)):
+    if not payload.confirmation:
+        raise HTTPException(status_code=422, detail="Confirme o avanço para abrir a operação QuitCon")
+    if not payload.proposal_id and not payload.contract_id:
+        raise HTTPException(status_code=422, detail="Informe proposal_id ou contract_id")
+    result = start_quitcon_from_sdc(
+        db,
+        user,
+        proposal_id=payload.proposal_id,
+        contract_id=payload.contract_id,
+        calculation_memory_id=payload.calculation_memory_id,
+        meses_restantes=payload.meses_restantes,
+    )
+    audit(
+        db,
+        user,
+        "finops.sdc.quitcon_started" if result["created"] else "finops.sdc.quitcon_existing",
+        "quitcon_operacao",
+        result["operacao_id"],
+        {"origem": "SDC_SIMULADOR"},
+    )
+    db.commit()
+    body = SdcStartQuitConResponse(**result)
+    if result["created"]:
+        return JSONResponse(status_code=201, content=body.model_dump())
+    return body
 
 
 @router.post("/finops/sdc/quitcon-projection", response_model=SdcQuitConIntegrationView)

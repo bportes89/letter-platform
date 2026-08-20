@@ -1641,3 +1641,50 @@ def test_quitcon_sdc_projection_doc256(client, auth_headers):
     assert card.status_code == 200
     assert card.json()["card"]["saldo_devedor_atual"] == calculated["output"]["maturity_total"]
 
+
+def test_sdc_start_quitcon_from_simulation_and_contract(client, auth_headers):
+    lead = client.get("/api/v1/leads", headers=auth_headers).json()[0]
+    proposal = client.post("/api/v1/proposals", headers=auth_headers, json={
+        "lead_id": lead["id"], "product": "SDC", "requested_amount": "800000", "terms": {},
+    }).json()
+    quotas = [q for q in client.get("/api/v1/quotas", headers=auth_headers).json() if q["category"] == "REAL_ESTATE"][:2]
+    calculated = client.post(f"/api/v1/proposals/{proposal['id']}/calculate-sdc", headers=auth_headers, json={
+        "quota_ids": [q["id"] for q in quotas], "duration_months": 12,
+    })
+    assert calculated.status_code == 201
+    calc = calculated.json()
+
+    started = client.post("/api/v1/finops/sdc/start-quitcon", headers=auth_headers, json={
+        "proposal_id": proposal["id"],
+        "calculation_memory_id": calc["id"],
+        "confirmation": True,
+    })
+    assert started.status_code == 201
+    body = started.json()
+    assert body["created"] is True
+    assert body["status"] == "AGUARDANDO_TAPAF"
+    assert body["tapaf_checkout"]["valor_tapaf_brl"] == "1500.00"
+    assert body["quitcon_sdc"]["card"]["saldo_devedor_atual"] == calc["output"]["maturity_total"]
+
+    again = client.post("/api/v1/finops/sdc/start-quitcon", headers=auth_headers, json={
+        "proposal_id": proposal["id"],
+        "calculation_memory_id": calc["id"],
+        "confirmation": True,
+    })
+    assert again.status_code == 200
+    assert again.json()["created"] is False
+    assert again.json()["operacao_id"] == body["operacao_id"]
+
+    contract = client.post(f"/api/v1/proposals/{proposal['id']}/contracts", headers=auth_headers, json={
+        "calculation_memory_id": calc["id"],
+    }).json()
+    client.post(f"/api/v1/contracts/{contract['id']}/accept", headers=auth_headers, json={
+        "confirmation": True, "ip_address": "127.0.0.1", "user_agent": "pytest",
+    })
+    from_contract = client.post("/api/v1/finops/sdc/start-quitcon", headers=auth_headers, json={
+        "contract_id": contract["id"],
+        "confirmation": True,
+    })
+    assert from_contract.status_code == 200
+    assert from_contract.json()["operacao_id"] == body["operacao_id"]
+
