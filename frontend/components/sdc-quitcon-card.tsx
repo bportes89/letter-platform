@@ -118,13 +118,19 @@ export function SdcQuitConCard({
         </div>
         <div className="sdc-quitcon-card-row highlight">
           <small>
-            Quitação à Vista QuitCon
+            Quitação à Vista QuitCon (VP)
             <button type="button" className="sdc-quitcon-help" aria-label="Como funciona" onClick={() => setOpen(true)}>
               <CircleHelp />
             </button>
           </small>
           <strong>{brl.format(Number(card.quitacao_vista_quitcon_vp))}</strong>
         </div>
+        {card.pagamento_total_cedente_vp_mais_3_porcento && (
+          <div className="sdc-quitcon-card-row">
+            <small>Cedente paga na quitação (VP + 3%)</small>
+            <strong>{brl.format(Number(card.pagamento_total_cedente_vp_mais_3_porcento))}</strong>
+          </div>
+        )}
         <small className="sdc-quitcon-meta">
           Desconto de {card.taxa_desconto_mensal_percent}% a.m. · referência {card.meses_restantes_referencia} meses
         </small>

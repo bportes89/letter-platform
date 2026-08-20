@@ -905,6 +905,8 @@ class QuitConOperacao(TimestampMixin, Base):
     meses_restantes: Mapped[int] = mapped_column(default=48)
     quitacao_vp_amount: Mapped[float | None] = mapped_column(Numeric(15, 2))
     operational_service_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    operational_service_fee_amount: Mapped[float | None] = mapped_column(Numeric(15, 2))
+    operational_service_paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     success_fee_escrow_paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     success_fee_escrow_reference: Mapped[str | None] = mapped_column(String(120))
     success_fee_refunded: Mapped[bool] = mapped_column(Boolean, default=False)

@@ -100,10 +100,12 @@ class EngineQuitConLetter:
         sb = money(Decimal(str(saldo_devedor_simulado)))
         meses = int(meses_restantes) if meses_restantes is not None else max(self.prazos_projecao_meses)
         vp_vista = self.calcular_valor_quitcon_vp(sb, meses)
+        pagamento_total = self.calcular_pagamento_total_cedente(vp_vista)
         return {
             "card": {
                 "saldo_devedor_atual": str(sb),
                 "quitacao_vista_quitcon_vp": str(vp_vista),
+                "pagamento_total_cedente_vp_mais_3_porcento": str(pagamento_total),
                 "meses_restantes_referencia": meses,
                 "taxa_desconto_mensal_percent": str(money(self.taxa_desconto_projecao_mensal * HUNDRED)),
                 "modal": {
@@ -148,6 +150,30 @@ class EngineQuitConLetter:
             "administradoras_whitelist": list(self.administradoras_whitelist),
         }
 
+    def calcular_taxa_intermediacao_sobre_quitacao(self, valor_quitacao: Decimal) -> Decimal:
+        """3% sobre o valor de quitação (VP) — pago junto na liquidação: VP + 3%."""
+        vq = money(Decimal(str(valor_quitacao)))
+        return money(vq * self.taxa_intermediacao_percent)
+
+    def calcular_pagamento_total_cedente(self, valor_quitacao: Decimal) -> Decimal:
+        vq = money(Decimal(str(valor_quitacao)))
+        return money(vq + self.calcular_taxa_intermediacao_sobre_quitacao(vq))
+
+    def calcular_taxa_servico_operacional_inicio(self, valor_quitacao: Decimal) -> Decimal:
+        """2% sobre VP — taxa LETTER na abertura se cliente não conduzir junto à administradora."""
+        vq = money(Decimal(str(valor_quitacao)))
+        return money(vq * self.taxa_servico_operacional_percent)
+
+    def calcular_liberacao_cessionario(self, valor_quitacao: Decimal) -> dict:
+        """5% descontados na liberação do capital de giro sobre a base de quitação (VP)."""
+        vq = money(Decimal(str(valor_quitacao)))
+        taxa = money(vq * self.taxa_plataforma_cessionario_percent)
+        return {
+            "valor_base_quitacao": str(vq),
+            "taxa_plataforma_5_porcento": str(taxa),
+            "capital_giro_liquido_na_liberacao": str(money(vq - taxa)),
+        }
+
     def simular_quitcon_doc253(
         self,
         saldo_devedor_bruto: Decimal,
@@ -162,16 +188,12 @@ class EngineQuitConLetter:
         sb = money(Decimal(str(saldo_devedor_bruto)))
         meses = max(int(meses_restantes), 0)
         vp = self.calcular_valor_quitcon_vp(sb, meses)
-        taxa_intermediacao = money(sb * self.taxa_intermediacao_percent)
-        valor_liquido_antes_servico = money(vp - taxa_intermediacao)
-        taxa_servico = (
-            money(valor_liquido_antes_servico * self.taxa_servico_operacional_percent)
-            if operational_service
-            else money(Decimal("0"))
+        taxa_intermediacao = self.calcular_taxa_intermediacao_sobre_quitacao(vp)
+        pagamento_total_cedente = self.calcular_pagamento_total_cedente(vp)
+        taxa_servico_inicio = (
+            self.calcular_taxa_servico_operacional_inicio(vp) if operational_service else money(Decimal("0"))
         )
-        valor_liquido_cedente = money(valor_liquido_antes_servico - taxa_servico)
-        taxa_plataforma_cessionario = money(vp * self.taxa_plataforma_cessionario_percent)
-        capital_giro_liquido = money(vp - taxa_plataforma_cessionario)
+        liberacao = self.calcular_liberacao_cessionario(vp)
         taxa_sucesso_escrow = self.calcular_taxa_sucesso_escrow(vp)
         elegibilidade = self.validar_elegibilidade_cedente(
             contemplada=contemplada,
@@ -188,16 +210,21 @@ class EngineQuitConLetter:
             "elegibilidade": elegibilidade,
             "cedente": {
                 "quitacao_vista_vp": str(vp),
-                "taxa_intermediacao_3_porcento": str(taxa_intermediacao),
-                "taxa_servico_operacional_2_porcento": str(taxa_servico),
+                "taxa_intermediacao_3_porcento_sobre_quitacao": str(taxa_intermediacao),
+                "pagamento_total_quitacao_mais_intermediacao": str(pagamento_total_cedente),
+                "formula_pagamento_cedente": "VP + (3% × VP)",
+                "taxa_servico_operacional_2_porcento_inicio": str(taxa_servico_inicio),
                 "servico_operacional_contratado": operational_service,
-                "valor_liquido_estimado_cedente": str(valor_liquido_cedente),
+                "nota_taxa_servico": (
+                    "2% pago na abertura do processo quando a LETTER conduz a burocracia junto à administradora."
+                ),
                 "prazo_deposito_pos_aprovacao_horas_uteis": self.prazo_deposito_quitacao_horas_uteis,
             },
             "cessionario": {
-                "valor_assumido_deflacionado": str(vp),
-                "taxa_plataforma_5_porcento": str(taxa_plataforma_cessionario),
-                "capital_giro_liquido_estimado": str(capital_giro_liquido),
+                "valor_base_quitacao": liberacao["valor_base_quitacao"],
+                "taxa_plataforma_5_porcento_na_liberacao": liberacao["taxa_plataforma_5_porcento"],
+                "capital_giro_liquido_na_liberacao": liberacao["capital_giro_liquido_na_liberacao"],
+                "formula_liberacao": "VP − (5% × VP)",
                 "tapaf_nominal": str(self.taxa_tapaf_nominal),
                 "taxa_sucesso_escrow_10_porcento": str(taxa_sucesso_escrow),
                 "taxa_sucesso_reembolsavel_se_reprovado_adm": True,
@@ -237,10 +264,11 @@ class EngineQuitConLetter:
             "meses_restantes": meses,
             "meta_captacao_quitacao": str(meta_captacao),
             "custo_mensal_remuneracao_pool_investidores": str(custo_mensal_pool),
-            "taxa_intermediacao_3_porcento": simulacao["cedente"]["taxa_intermediacao_3_porcento"],
-            "taxa_servico_operacional_2_porcento": simulacao["cedente"]["taxa_servico_operacional_2_porcento"],
-            "taxa_plataforma_cessionario_5_porcento": simulacao["cessionario"]["taxa_plataforma_5_porcento"],
-            "capital_giro_liquido_cessionario": simulacao["cessionario"]["capital_giro_liquido_estimado"],
+            "taxa_intermediacao_3_porcento": simulacao["cedente"]["taxa_intermediacao_3_porcento_sobre_quitacao"],
+            "pagamento_total_cedente": simulacao["cedente"]["pagamento_total_quitacao_mais_intermediacao"],
+            "taxa_servico_operacional_2_porcento": simulacao["cedente"]["taxa_servico_operacional_2_porcento_inicio"],
+            "taxa_plataforma_cessionario_5_porcento": simulacao["cessionario"]["taxa_plataforma_5_porcento_na_liberacao"],
+            "capital_giro_liquido_cessionario": simulacao["cessionario"]["capital_giro_liquido_na_liberacao"],
             "taxa_sucesso_escrow_10_porcento": simulacao["cessionario"]["taxa_sucesso_escrow_10_porcento"],
             "sla_dias_estimados": self.sla_dias_estimados,
             "ltv_assimetrico_aplicavel": False,

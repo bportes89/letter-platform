@@ -169,6 +169,25 @@ export function QuitConModule() {
     }
   }
 
+  async function payOperationalService() {
+    if (!selected?.operational_service_fee_amount) return;
+    try {
+      const item = await api<QuitConOperacao>("/finops/quitcon/operational-service-payment-webhook", {
+        method: "POST",
+        body: JSON.stringify({
+          operacao_id: selected.id,
+          event_id: `svc-qc-${Date.now()}`,
+          amount: selected.operational_service_fee_amount,
+        }),
+      });
+      setSelected(item);
+      setMessage("Taxa de serviço operacional 2% paga — LETTER conduz junto à administradora.");
+      await load();
+    } catch (x) {
+      setMessage(x instanceof Error ? x.message : "Falha taxa serviço operacional");
+    }
+  }
+
   async function paySuccessFee() {
     if (!selected) return;
     try {
@@ -213,7 +232,7 @@ export function QuitConModule() {
         <div>
           <span className="eyebrow dark">QUITCON ENGINE V1</span>
           <h1>QuitCon — quitação de consórcio</h1>
-          <p>Manual doc253: VP 1% a.m., taxas 3%/2%/5%/10%, whitelist administradoras, TAPAF R$ 1.500, Escrow e SLA 45 dias.</p>
+          <p>Manual doc253: VP 1% a.m. · Cedente paga VP+3% na quitação · Cessionário recebe VP−5% · TAPAF R$ 1.500 · SLA 45 dias.</p>
         </div>
         <div className="operational-icon"><Building2 /></div>
       </div>
@@ -235,7 +254,7 @@ export function QuitConModule() {
             <label><input type="checkbox" name="contemplada" defaultChecked /> Contemplada + bem faturado</label>
             <label><input type="checkbox" name="bem_faturado" defaultChecked /> Bem faturado</label>
             <label><input type="checkbox" name="parcelas_em_dia" defaultChecked /> Parcelas em dia</label>
-            <label><input type="checkbox" name="operational_service" /> Serviço operacional LETTER (+2%)</label>
+            <label><input type="checkbox" name="operational_service" /> Serviço operacional LETTER (+2% na abertura, se não conduzir junto à ADM)</label>
             <button type="submit">Abrir operação AGUARDANDO_TAPAF</button>
           </form>
         </section>
@@ -246,14 +265,15 @@ export function QuitConModule() {
             <input name="outstanding_balance" type="number" defaultValue="250000" placeholder="Saldo devedor bruto" required />
             <input name="meses_restantes" type="number" defaultValue="12" min="1" placeholder="Meses restantes" required />
             <input name="administrator_name" placeholder="Administradora" defaultValue="Embracon" />
-            <label><input type="checkbox" name="operational_service" /> Serviço operacional (+2%)</label>
+            <label><input type="checkbox" name="operational_service" /> Serviço operacional (+2% na abertura)</label>
             <button type="submit">Simular doc253</button>
           </form>
           {financePreview && (
             <div className="finops-summary">
               <article><small>VP quitação</small><strong>{brl.format(Number((financePreview as Record<string,string>).valor_presente_quitacao ?? financePreview.meta_captacao_quitacao))}</strong></article>
-              <article><small>Intermediação 3%</small><strong>{brl.format(Number((financePreview as Record<string,unknown>).cedente ? (financePreview as Record<string,Record<string,string>>).cedente.taxa_intermediacao_3_porcento : 0))}</strong></article>
-              <article><small>Capital giro cessionário</small><strong>{brl.format(Number((financePreview as Record<string,Record<string,string>>).cessionario?.capital_giro_liquido_estimado ?? financePreview.meta_captacao_quitacao))}</strong></article>
+              <article><small>Cedente paga (VP + 3%)</small><strong>{brl.format(Number((financePreview as Record<string,Record<string,string>>).cedente?.pagamento_total_quitacao_mais_intermediacao ?? (financePreview as Record<string,string>).pagamento_total_cedente ?? 0))}</strong></article>
+              <article><small>Taxa serviço 2% (abertura)</small><strong>{brl.format(Number((financePreview as Record<string,Record<string,string>>).cedente?.taxa_servico_operacional_2_porcento_inicio ?? (financePreview as Record<string,string>).taxa_servico_operacional_2_porcento ?? 0))}</strong></article>
+              <article><small>Cessionário recebe (VP − 5%)</small><strong>{brl.format(Number((financePreview as Record<string,Record<string,string>>).cessionario?.capital_giro_liquido_na_liberacao ?? (financePreview as Record<string,string>).capital_giro_liquido_cessionario ?? financePreview.meta_captacao_quitacao))}</strong></article>
               <article><small>Escrow 10%</small><strong>{brl.format(Number((financePreview as Record<string,Record<string,string>>).cessionario?.taxa_sucesso_escrow_10_porcento ?? 0))}</strong></article>
             </div>
           )}
@@ -278,12 +298,19 @@ export function QuitConModule() {
             <div className="finops-summary">
               <article><small>SLA conclusão</small><strong><Timer />{selected.sla_dias_estimados}d — {selected.sla_estimated_completion_at ? new Date(selected.sla_estimated_completion_at).toLocaleDateString("pt-BR") : "—"}</strong></article>
               <article><small>Taxa sucesso Escrow (10%)</small><strong>{brl.format(Number(selected.success_fee_escrow_amount))}</strong></article>
+              {selected.operational_service_enabled && (
+                <article><small>Taxa serviço 2% (abertura)</small><strong>{brl.format(Number(selected.operational_service_fee_amount ?? 0))}{selected.operational_service_paid_at ? " ✓" : " pendente"}</strong></article>
+              )}
+              {selected.cedente_payment_amount && (
+                <article><small>Cedente paga quitação (VP + 3%)</small><strong>{brl.format(Number(selected.cedente_payment_amount))}</strong></article>
+              )}
               <article><small>Captação</small><strong>{selected.funding_capture_percent}%</strong></article>
               <article><small>Tokens estimados</small><strong>{Math.floor(Number(selected.credit_matrix.meta_captacao_quitacao) / 100)}</strong></article>
             </div>
             <div className="tapaf-actions">
               <button type="button" disabled={selected.status !== "AGUARDANDO_TAPAF"} onClick={() => void payTapaf()}>Pagar TAPAF R$ 1.500</button>
-              <button type="button" disabled={selected.status !== "TAPAF_LIQUIDADA" || !!selected.success_fee_escrow_paid_at} onClick={() => void paySuccessFee()}>Depositar taxa sucesso Escrow 10%</button>
+              <button type="button" disabled={!selected.operational_service_enabled || selected.status !== "TAPAF_LIQUIDADA" || !!selected.operational_service_paid_at} onClick={() => void payOperationalService()}>Pagar taxa serviço 2% (abertura)</button>
+              <button type="button" disabled={selected.status !== "TAPAF_LIQUIDADA" || !!selected.success_fee_escrow_paid_at || (selected.operational_service_enabled && !selected.operational_service_paid_at)} onClick={() => void paySuccessFee()}>Depositar taxa sucesso Escrow 10%</button>
               <button type="button" disabled={!selected.administrator_approved_at || !!selected.cedente_payment_escrow_reference} onClick={() => void payCedenteEscrow()}>Pagar quitação cedente (Escrow)</button>
               <button type="button" disabled={selected.status !== "EM_AUDITORIA_RISCO"} onClick={() => void runStep("/finops/quitcon/compliance-review", "Compliance aprovado", { operacao_id: selected.id, approved: true })}>Aprovar compliance</button>
               <button type="button" disabled={!!selected.administrator_approved_at} onClick={() => void runStep(`/finops/quitcon/administrator-approval?operacao_id=${selected.id}`, "Administradora aprovou cessão")}>Aprovação administradora</button>

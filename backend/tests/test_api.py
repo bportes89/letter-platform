@@ -1519,9 +1519,12 @@ def test_quitcon_engine_canonical_doc253():
     sim = engine.simular_quitcon_doc253(Decimal("250000"), 12, administrator_name="Embracon")
     assert sim["saldo_devedor_bruto"] == "250000.00"
     assert sim["valor_presente_quitacao"] == "223214.29"
-    assert sim["cedente"]["taxa_intermediacao_3_porcento"] == "7500.00"
-    assert sim["cessionario"]["taxa_plataforma_5_porcento"] == "11160.71"
-    assert sim["cessionario"]["capital_giro_liquido_estimado"] == "212053.58"
+    assert sim["cedente"]["taxa_intermediacao_3_porcento_sobre_quitacao"] == "6696.43"
+    assert sim["cedente"]["pagamento_total_quitacao_mais_intermediacao"] == "229910.72"
+    assert sim["cessionario"]["capital_giro_liquido_na_liberacao"] == "212053.58"
+    assert engine.calcular_pagamento_total_cedente(Decimal("400000")) == Decimal("412000.00")
+    assert engine.calcular_liberacao_cessionario(Decimal("400000"))["capital_giro_liquido_na_liberacao"] == "380000.00"
+    assert engine.calcular_taxa_servico_operacional_inicio(Decimal("400000")) == Decimal("8000.00")
     assert sim["elegibilidade"]["elegivel"] is True
     assert engine.administradora_permitida("Embracon") is True
     assert engine.administradora_permitida("Administradora Demo") is False
@@ -1577,7 +1580,7 @@ def test_quitcon_full_pipeline_penalties_and_tokenization(client, auth_headers):
 
     admin = client.post(f"/api/v1/finops/quitcon/administrator-approval?operacao_id={operacao['id']}", headers=auth_headers)
     assert admin.status_code == 200 and admin.json()["administrator_approved_at"]
-    assert admin.json()["cedente_payment_amount"] == "223214.29"
+    assert admin.json()["cedente_payment_amount"] == "229910.72"
     assert admin.json()["penalty_preview"]
 
     client.post(f"/api/v1/finops/quitcon/sign-contract?operacao_id={operacao['id']}", headers=auth_headers)
@@ -1639,6 +1642,7 @@ def test_quitcon_sdc_projection_doc256(client, auth_headers):
     assert projection.status_code == 200
     body = projection.json()
     assert body["card"]["quitacao_vista_quitcon_vp"] == "223214.29"
+    assert body["card"]["pagamento_total_cedente_vp_mais_3_porcento"] == "229910.72"
     assert body["card"]["modal"]["titulo"] == "Como funciona a Quitação Inteligente QuitCon?"
     assert "INCC ou IPCA" in body["projecao_temporal"]["nota_compliance_rodape"]
 

@@ -63,6 +63,7 @@ from app.schemas import (
     QuitConOperacaoCreate, QuitConOperacaoView, QuitConTapafWebhook, QuitConInspectionRequest,
     QuitConComplianceReview, QuitConFundingCapture, QuitConActivateRequest,
     QuitConPublicSimulateRequest, QuitConSuccessFeeWebhook, QuitConCedentePaymentWebhook,
+    QuitConOperationalServiceWebhook,
     QuitConAdminRejectionRequest,
     QuitConSimulateRequest,
     SdcQuitConIntegrationView, SdcQuitConProjectionRequest,
@@ -142,6 +143,7 @@ from app.quitcon_service import (
     confirm_tapaf_payment as confirm_quitcon_tapaf,
     create_operacao, generate_tapaf_checkout as generate_quitcon_tapaf,
     generate_success_fee_checkout, confirm_success_fee_payment,
+    generate_operational_service_checkout, confirm_operational_service_payment,
     generate_cedente_payment_checkout, confirm_cedente_payment_escrow,
     register_administrator_rejection,
     operacao_view as quitcon_operacao_view,
@@ -1321,6 +1323,22 @@ def quitcon_simulate(payload: QuitConSimulateRequest, user: User = Depends(get_c
 def quitcon_administradoras_whitelist(user: User = Depends(get_current_user)):
     engine = EngineQuitConLetter()
     return {"administradoras": list(engine.administradoras_whitelist)}
+
+
+@router.post("/finops/quitcon/operational-service-checkout")
+def quitcon_operational_service_checkout(operacao_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    operacao = _load_quitcon_operacao(db, user, operacao_id)
+    return generate_operational_service_checkout(operacao)
+
+
+@router.post("/finops/quitcon/operational-service-payment-webhook", response_model=QuitConOperacaoView)
+def quitcon_operational_service_webhook(payload: QuitConOperationalServiceWebhook, user: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
+    operacao = _load_quitcon_operacao(db, user, payload.operacao_id)
+    confirm_operational_service_payment(db, user, operacao, payload.event_id, payload.amount)
+    audit(db, user, "finops.quitcon.operational_service_paid", "quitcon_operacao", operacao.id)
+    db.commit()
+    db.refresh(operacao)
+    return QuitConOperacaoView(**quitcon_operacao_view(operacao))
 
 
 @router.post("/finops/quitcon/success-fee-checkout")

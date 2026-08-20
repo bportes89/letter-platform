@@ -104,6 +104,8 @@ def operacao_view(item: QuitConOperacao) -> dict:
         "meses_restantes": meses,
         "quitacao_vp_amount": str(item.quitacao_vp_amount) if item.quitacao_vp_amount else finance.get("valor_presente_quitacao"),
         "operational_service_enabled": item.operational_service_enabled,
+        "operational_service_fee_amount": str(item.operational_service_fee_amount) if item.operational_service_fee_amount else None,
+        "operational_service_paid_at": item.operational_service_paid_at,
         "success_fee_escrow_paid_at": item.success_fee_escrow_paid_at,
         "success_fee_refunded": item.success_fee_refunded,
         "cedente_payment_amount": str(item.cedente_payment_amount) if item.cedente_payment_amount else None,
@@ -184,6 +186,9 @@ def create_operacao(
         meses_restantes=int(meses_restantes),
         quitacao_vp_amount=vp,
         operational_service_enabled=operational_service,
+        operational_service_fee_amount=(
+            engine.calcular_taxa_servico_operacional_inicio(vp) if operational_service else None
+        ),
         funding_target_amount=Decimal(str(finance["meta_captacao_quitacao"])),
         success_fee_escrow_amount=engine.calcular_taxa_sucesso_escrow(vp),
         sla_estimated_completion_at=now + timedelta(days=engine.sla_dias_estimados),
@@ -227,9 +232,44 @@ def confirm_tapaf_payment(db: Session, user: User, operacao: QuitConOperacao, ev
     return operacao
 
 
+def generate_operational_service_checkout(operacao: QuitConOperacao) -> dict:
+    if not operacao.operational_service_enabled:
+        raise HTTPException(status_code=409, detail="Serviço operacional LETTER não contratado")
+    if operacao.operational_service_paid_at:
+        raise HTTPException(status_code=409, detail="Taxa de serviço operacional já paga")
+    amount = money(operacao.operational_service_fee_amount or 0)
+    if amount <= 0:
+        raise HTTPException(status_code=422, detail="Valor da taxa de serviço indisponível")
+    return {
+        "endpoint": "/api/v1/finops/quitcon/operational-service-payment-webhook",
+        "status": "READY",
+        "valor_taxa_servico_operacional_brl": str(amount),
+        "momento_cobranca": "ABERTURA_PROCESSO",
+        "gateway_baas_pix_qrcode": f"00020101021126580014br.gov.bcb.pix0136letter-quitcon-svc-{operacao.id[:8]}",
+        "texto_tooltip": (
+            "Taxa de serviço 2% sobre a quitação — paga na abertura quando a LETTER conduz o processo junto à administradora."
+        ),
+    }
+
+
+def confirm_operational_service_payment(db: Session, user: User, operacao: QuitConOperacao, event_id: str, amount) -> QuitConOperacao:
+    if operacao.status != "TAPAF_LIQUIDADA":
+        raise HTTPException(status_code=409, detail="Taxa de serviço disponível após TAPAF_LIQUIDADA")
+    if not operacao.operational_service_enabled:
+        raise HTTPException(status_code=409, detail="Serviço operacional não contratado")
+    expected = money(operacao.operational_service_fee_amount or 0)
+    if money(amount) != expected:
+        raise HTTPException(status_code=422, detail=f"Valor da taxa de serviço deve ser exatamente R$ {expected}")
+    operacao.operational_service_paid_at = datetime.now(UTC)
+    db.flush()
+    return operacao
+
+
 def generate_success_fee_checkout(operacao: QuitConOperacao) -> dict:
     if operacao.status != "TAPAF_LIQUIDADA":
         raise HTTPException(status_code=409, detail="Taxa de sucesso disponível após TAPAF_LIQUIDADA")
+    if operacao.operational_service_enabled and not operacao.operational_service_paid_at:
+        raise HTTPException(status_code=409, detail="Pague a taxa de serviço operacional 2% antes da taxa de sucesso")
     if operacao.success_fee_escrow_paid_at:
         raise HTTPException(status_code=409, detail="Taxa de sucesso já depositada em Escrow")
     amount = money(operacao.success_fee_escrow_amount)
@@ -250,6 +290,8 @@ def generate_success_fee_checkout(operacao: QuitConOperacao) -> dict:
 def confirm_success_fee_payment(db: Session, user: User, operacao: QuitConOperacao, event_id: str, amount) -> QuitConOperacao:
     if operacao.status != "TAPAF_LIQUIDADA":
         raise HTTPException(status_code=409, detail="Depósito Escrow indisponível neste status")
+    if operacao.operational_service_enabled and not operacao.operational_service_paid_at:
+        raise HTTPException(status_code=409, detail="Taxa de serviço operacional 2% pendente")
     expected = money(operacao.success_fee_escrow_amount)
     if money(amount) != expected:
         raise HTTPException(status_code=422, detail=f"Valor da taxa de sucesso deve ser exatamente R$ {expected}")
@@ -268,7 +310,8 @@ def register_administrator_approval(db: Session, user: User, operacao: QuitConOp
     if not operacao.administrator_approved_at:
         operacao.administrator_approved_at = datetime.now(UTC)
         vp = money(operacao.quitacao_vp_amount or operacao.outstanding_balance)
-        operacao.cedente_payment_amount = vp
+        engine = EngineQuitConLetter()
+        operacao.cedente_payment_amount = engine.calcular_pagamento_total_cedente(vp)
         operacao.cedente_payment_due_at = datetime.now(UTC) + timedelta(
             hours=EngineQuitConLetter.prazo_deposito_quitacao_horas_uteis
         )
@@ -327,6 +370,8 @@ def confirm_cedente_payment_escrow(db: Session, user: User, operacao: QuitConOpe
 def register_inspection_photos(db: Session, user: User, operacao: QuitConOperacao, photos: list[dict]) -> QuitConOperacao:
     if operacao.status != "TAPAF_LIQUIDADA":
         raise HTTPException(status_code=409, detail="Vistoria disponível após TAPAF_LIQUIDADA")
+    if operacao.operational_service_enabled and not operacao.operational_service_paid_at:
+        raise HTTPException(status_code=409, detail="Pague a taxa de serviço operacional 2% antes da vistoria")
     if not operacao.success_fee_escrow_paid_at:
         raise HTTPException(status_code=409, detail="Deposite a taxa de sucesso 10% em Escrow antes da vistoria")
     from app.collateral_native_inspection_service import upsert_native_inspection

@@ -1699,6 +1699,12 @@ class QuitConSuccessFeeWebhook(BaseModel):
     amount: Decimal = Field(gt=0)
 
 
+class QuitConOperationalServiceWebhook(BaseModel):
+    operacao_id: str
+    event_id: str = Field(min_length=4, max_length=120)
+    amount: Decimal = Field(gt=0)
+
+
 class QuitConCedentePaymentWebhook(BaseModel):
     operacao_id: str
     event_id: str = Field(min_length=4, max_length=120)
@@ -1791,6 +1797,8 @@ class QuitConOperacaoView(BaseModel):
     meses_restantes: int | None = None
     quitacao_vp_amount: str | None = None
     operational_service_enabled: bool = False
+    operational_service_fee_amount: str | None = None
+    operational_service_paid_at: datetime | None = None
     success_fee_escrow_paid_at: datetime | None = None
     success_fee_refunded: bool = False
     cedente_payment_amount: str | None = None

@@ -81,6 +81,8 @@ export type QuitConOperacao = {
   meses_restantes?: number;
   quitacao_vp_amount?: string | null;
   operational_service_enabled?: boolean;
+  operational_service_fee_amount?: string | null;
+  operational_service_paid_at?: string | null;
   success_fee_escrow_paid_at?: string | null;
   success_fee_refunded?: boolean;
   cedente_payment_amount?: string | null;
@@ -109,6 +111,7 @@ export type SdcQuitConIntegration = {
   card: {
     saldo_devedor_atual: string;
     quitacao_vista_quitcon_vp: string;
+    pagamento_total_cedente_vp_mais_3_porcento?: string;
     meses_restantes_referencia: number;
     taxa_desconto_mensal_percent: string;
     modal: { titulo: string; corpo: string };

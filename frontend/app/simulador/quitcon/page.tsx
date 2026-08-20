@@ -54,7 +54,7 @@ export default function QuitConPublicSimulatorPage() {
         <div>
           <span className="eyebrow dark">SIMULADOR PÚBLICO</span>
           <h1>QuitCon — quitação inteligente de consórcio</h1>
-          <p>Deflacionamento 1% a.m., taxas doc253 e elegibilidade por administradora whitelist.</p>
+          <p>Deflacionamento 1% a.m. · Cedente paga VP+3% na quitação · Cessionário recebe VP−5% na liberação.</p>
         </div>
         <div className="operational-icon"><Building2 /></div>
       </div>
@@ -70,24 +70,30 @@ export default function QuitConPublicSimulatorPage() {
           <label><input type="checkbox" name="contemplada" defaultChecked /> Cota contemplada e bem faturado</label>
           <label><input type="checkbox" name="bem_faturado" defaultChecked /> Bem faturado</label>
           <label><input type="checkbox" name="parcelas_em_dia" defaultChecked /> Parcelas em dia</label>
-          <label><input type="checkbox" name="operational_service" /> Serviço operacional LETTER (+2%)</label>
+          <label><input type="checkbox" name="operational_service" /> Serviço operacional LETTER (+2% na abertura)</label>
           <button type="submit"><Sparkles /> Simular QuitCon</button>
         </form>
         {error && <div className="error">{error}</div>}
         {result && (
           <div className="sdc-quitcon-projection">
             <div className="sdc-quitcon-projection-head">
-              <b>Quitação estimada: {brl.format(Number(result.valor_presente_quitacao))}</b>
+              <b>Quitação estimada (VP): {brl.format(Number(result.valor_presente_quitacao))}</b>
               <small>Saldo bruto {brl.format(Number(result.saldo_devedor_bruto))} · {result.meses_restantes} meses</small>
               <small>Elegível: {result.elegibilidade.elegivel ? "Sim" : `Não (${result.elegibilidade.blockers.join(", ")})`}</small>
             </div>
             <div className="scenario-grid">
-              <article><b>Cedente — intermediacao 3%</b><span>{brl.format(Number(result.cedente.taxa_intermediacao_3_porcento))}</span></article>
-              <article><b>Cedente — líquido estimado</b><span>{brl.format(Number(result.cedente.valor_liquido_estimado_cedente))}</span></article>
-              <article><b>Cessionário — capital de giro</b><span>{brl.format(Number(result.cessionario.capital_giro_liquido_estimado))}</span></article>
+              <article><b>Cedente — intermediação 3% (sobre VP)</b><span>{brl.format(Number(result.cedente.taxa_intermediacao_3_porcento_sobre_quitacao))}</span></article>
+              <article><b>Cedente — pagamento total (VP + 3%)</b><span>{brl.format(Number(result.cedente.pagamento_total_quitacao_mais_intermediacao))}</span></article>
+              {Boolean(result.cedente.servico_operacional_contratado) && (
+                <article><b>Taxa serviço LETTER 2% (abertura)</b><span>{brl.format(Number(result.cedente.taxa_servico_operacional_2_porcento_inicio))}</span></article>
+              )}
+              <article><b>Cessionário — capital de giro (VP − 5%)</b><span>{brl.format(Number(result.cessionario.capital_giro_liquido_na_liberacao))}</span></article>
               <article><b>Taxa sucesso Escrow 10%</b><span>{brl.format(Number(result.cessionario.taxa_sucesso_escrow_10_porcento))}</span></article>
             </div>
-            <small className="sdc-quitcon-compliance">Valores estimados. TAPAF R$ 1.500. SLA médio {result.compliance.sla_dias_estimados} dias.</small>
+            <small className="sdc-quitcon-compliance">
+              Exemplo: VP R$ 400.000 → cedente paga R$ 412.000 (400k + 3%) · cessionário recebe R$ 380.000 (400k − 5%).
+              TAPAF R$ 1.500. SLA médio {result.compliance.sla_dias_estimados} dias.
+            </small>
           </div>
         )}
       </section>
