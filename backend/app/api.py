@@ -838,7 +838,7 @@ def contract_early_settlement(contract_id:str,payload:ContractSettlementRequest,
     contract=db.scalar(select(Contract).where(Contract.id==contract_id,Contract.organization_id==user.organization_id))
     if not contract:raise HTTPException(404,"Contrato não encontrado")
     calculation=db.scalar(select(CalculationMemory).where(CalculationMemory.id==contract.calculation_memory_id,CalculationMemory.product=="FLASH_CREDIT"))
-    if not calculation:raise HTTPException(422,"Contrato não possui memória Flash Credit")
+    if not calculation:raise HTTPException(422,"Contrato não possui memória Flash Capital")
     output=json.loads(calculation.output_json);principal=Decimal(str(output["principal"]))
     item=create_contract_quote(db,user,contract,principal,payload.track.upper(),payload.ipca_projected_percent,payload.balloon,payload.current_installment)
     audit(db,user,"finops.early_settlement_quoted","early_settlement_quote",item.id,{"contract_id":contract.id,"sandbox_only":True});db.commit();db.refresh(item);return item
@@ -1501,7 +1501,7 @@ def flash_policy_list(user:User=Depends(get_current_user),db:Session=Depends(get
 @router.post("/flash-credit/policies/{policy_id}/approve",response_model=FlashCreditPolicyView)
 def flash_policy_approve(policy_id:str,user:User=Depends(require_step_up),_:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
     item=db.scalar(select(FlashCreditPolicy).where(FlashCreditPolicy.id==policy_id,FlashCreditPolicy.organization_id==user.organization_id))
-    if not item:raise HTTPException(404,"Política Flash Credit não encontrada")
+    if not item:raise HTTPException(404,"Política Flash Capital não encontrada")
     approve_flash_policy(db,user,item);audit(db,user,"flash_credit.policy_approved","flash_credit_policy",item.id);db.commit();db.refresh(item);return item
 
 
