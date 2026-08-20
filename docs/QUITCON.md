@@ -1,42 +1,54 @@
-# QuitCon — LETTER_FINOPS_QUITCON_ENGINE_2026_V1
+# QuitCon — Manual do Produto (doc253)
 
-Motor: `EngineQuitConLetter`
+Módulo: `LETTER_QUITCON_PRODUTO_2026_DOC253`
 
-Produto de **quitação de cota de consórcio** com multas doc252, SLA e tokenização RWA.
+## Posicionamento
 
-> **Importante:** QuitCon **não possui** LTV assimétrico por tipologia nem remuneração de **0,4% a.m.** — ambos são **exclusivos do Lease Equity**.
+Solução LETTER para **quitação de bens adquiridos via consórcio** com arbitragem e assunção de dívida:
 
-## Base financeira
+- **Cedente:** quita saldo com desconto (VP 1% a.m.) e libera alienação
+- **Cessionário:** capital de giro mais barato assumindo parcelas restantes
 
-- **Saldo devedor bruto da cota** = meta de captação / lastro de tokenização
-- Avaliação do bem (quando informada) = referência opcional, **não** aplica matriz LTV
-- Pool investidor: **1,6% a.m.** sobre o saldo devedor (meta de captação)
+## Taxas doc253
 
-## TAPAF
+| Taxa | Base | Observação |
+|------|------|------------|
+| Deflacionamento | 1% a.m. | `VP = SB / (1 + 0.01 × n)` |
+| Intermediação | 3% | Saldo devedor bruto |
+| Serviço operacional | 2% (opcional) | Valor líquido cedente |
+| Plataforma cessionário | 5% | Valor liberado (VP) |
+| TAPAF | R$ 1.500 | Não reembolsável |
+| Taxa sucesso Escrow | 10% | Valor liberado — **100% devolvida** se ADM reprovar |
 
-- Valor fixo: **R$ 1.500,00** (não reembolsável)
+## Elegibilidade
 
-## SLA
+- Cota **contemplada** e **bem faturado**
+- Parcelas **em dia**
+- Administradora na **whitelist:** Âncora, HS, Embracon, Ademicon, Tradição, Recon, Groscon, Roma, Reserva
 
-- Prazo médio estimado de conclusão: **45 dias**
+## Jornada (4 fases)
 
-## Multas (doc252)
-
-| Evento | Regra |
-|--------|-------|
-| Inadimplência cessionário (>15d pós-aprovação adm.) | Taxa sucesso **10%** retida integralmente em Escrow |
-| Desistência cedente (pós-aprovação) | Multa **10%** sobre saldo devedor + reembolso cessionário |
-
-## Estados da esteira
-
-```
-AGUARDANDO_TAPAF → … → GRAVAME_CONCLUIDO → ATIVO_OK_EM_PRODUCAO
-```
-
-Gatilho OK: captação ≥ **30%** do saldo devedor ou ativação manual.
+1. **Simulação e envio** — Super App, site ou SDC integrado
+2. **Análise e entradas** — TAPAF + taxa sucesso 10% em Escrow
+3. **Administradora** — SLA médio **45 dias**
+4. **Desbloqueio** — pagamento cedente em Escrow (48h úteis pós-aprovação) + liberação final
 
 ## API
 
-- `POST /finops/quitcon/simulate` — simulação por saldo devedor
-- `POST /finops/quitcon/operacoes` — abrir operação
-- Demais endpoints: TAPAF, vistoria, multas, tokenização RWA
+| Método | Rota |
+|--------|------|
+| POST | `/public/quitcon/simulate` — simulador site (sem login) |
+| POST | `/finops/quitcon/simulate` — simulador autenticado doc253 |
+| POST | `/finops/quitcon/operacoes` — abrir esteira |
+| POST | `/finops/quitcon/success-fee-payment-webhook` — Escrow 10% |
+| POST | `/finops/quitcon/cedente-payment-webhook` — pagamento cedente travado |
+| POST | `/finops/quitcon/administrator-rejection` — reprova ADM + reembolso fee |
+
+## Frontend
+
+- **FinOps → QuitCon** — esteira operacional
+- **`/simulador/quitcon`** — simulador público
+
+## Relação SDC
+
+SDC usa QuitCon apenas como **simulador de quitação** (doc256). A esteira QuitCon permanece **independente**.

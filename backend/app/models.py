@@ -902,6 +902,16 @@ class QuitConOperacao(TimestampMixin, Base):
     penalty_amount: Mapped[float | None] = mapped_column(Numeric(15, 2))
     penalty_detail_json: Mapped[str | None] = mapped_column(Text)
     tokenization_json: Mapped[str | None] = mapped_column(Text)
+    meses_restantes: Mapped[int] = mapped_column(default=48)
+    quitacao_vp_amount: Mapped[float | None] = mapped_column(Numeric(15, 2))
+    operational_service_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    success_fee_escrow_paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    success_fee_escrow_reference: Mapped[str | None] = mapped_column(String(120))
+    success_fee_refunded: Mapped[bool] = mapped_column(Boolean, default=False)
+    cedente_payment_amount: Mapped[float | None] = mapped_column(Numeric(15, 2))
+    cedente_payment_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cedente_payment_escrow_reference: Mapped[str | None] = mapped_column(String(120))
+    product_snapshot_json: Mapped[str | None] = mapped_column(Text)
 
 
 class QuitConStatusLog(Base):

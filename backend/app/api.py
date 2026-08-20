@@ -62,6 +62,8 @@ from app.schemas import (
     LeaseEquityTokenizationRequest,
     QuitConOperacaoCreate, QuitConOperacaoView, QuitConTapafWebhook, QuitConInspectionRequest,
     QuitConComplianceReview, QuitConFundingCapture, QuitConActivateRequest,
+    QuitConPublicSimulateRequest, QuitConSuccessFeeWebhook, QuitConCedentePaymentWebhook,
+    QuitConAdminRejectionRequest,
     QuitConSimulateRequest,
     SdcQuitConIntegrationView, SdcQuitConProjectionRequest,
     SdcStartQuitConRequest, SdcStartQuitConResponse,
@@ -139,6 +141,9 @@ from app.quitcon_service import (
     complete_gravame as complete_quitcon_gravame,
     confirm_tapaf_payment as confirm_quitcon_tapaf,
     create_operacao, generate_tapaf_checkout as generate_quitcon_tapaf,
+    generate_success_fee_checkout, confirm_success_fee_payment,
+    generate_cedente_payment_checkout, confirm_cedente_payment_escrow,
+    register_administrator_rejection,
     operacao_view as quitcon_operacao_view,
     process_tokenization as process_quitcon_tokenization,
     record_funding_capture as record_quitcon_funding,
@@ -794,6 +799,24 @@ def list_calculations(proposal_id: str, user: User = Depends(get_current_user), 
     return [CalculationView(id=x.id, proposal_id=x.proposal_id, version=x.version, formula_version=x.formula_version, input=json.loads(x.input_json), output=json.loads(x.output_json), approved_at=x.approved_at) for x in rows]
 
 
+@router.post("/public/quitcon/simulate")
+def public_quitcon_simulator(payload: QuitConPublicSimulateRequest, request: Request):
+    ip = request.client.host if request.client else "unknown"
+    allowed, retry = rate_limiter.allow(f"public-quitcon:{ip}", settings.public_rate_limit_per_minute)
+    if not allowed:
+        raise HTTPException(429, "Limite do simulador atingido", headers={"Retry-After": str(retry)})
+    engine = EngineQuitConLetter()
+    return engine.simular_quitcon_doc253(
+        payload.outstanding_balance,
+        payload.meses_restantes,
+        operational_service=payload.operational_service,
+        administrator_name=payload.administrator_name,
+        contemplada=payload.contemplada,
+        bem_faturado=payload.bem_faturado,
+        parcelas_em_dia=payload.parcelas_em_dia,
+    )
+
+
 @router.post("/public/flash-credit/simulate")
 def public_flash_simulator(payload:FlashSimulatorRequest,request:Request):
     ip=request.client.host if request.client else "unknown";allowed,retry=rate_limiter.allow(f"public-flash:{ip}",settings.public_rate_limit_per_minute)
@@ -1090,6 +1113,11 @@ def quitcon_create_operacao(payload: QuitConOperacaoCreate, user: User = Depends
         registry_office=payload.registry_office,
         quota_id=payload.quota_id,
         owner_user_id=payload.owner_user_id,
+        meses_restantes=payload.meses_restantes,
+        operational_service=payload.operational_service,
+        contemplada=payload.contemplada,
+        bem_faturado=payload.bem_faturado,
+        parcelas_em_dia=payload.parcelas_em_dia,
     )
     audit(db, user, "finops.quitcon.create", "quitcon_operacao", operacao.id)
     db.commit()
@@ -1278,7 +1306,63 @@ def contract_sdc_quitcon_card(contract_id: str, user: User = Depends(get_current
 @router.post("/finops/quitcon/simulate")
 def quitcon_simulate(payload: QuitConSimulateRequest, user: User = Depends(get_current_user)):
     engine = EngineQuitConLetter()
-    return engine.processar_matriz_financeira(payload.outstanding_balance, payload.appraisal_value)
+    return engine.simular_quitcon_doc253(
+        payload.outstanding_balance,
+        payload.meses_restantes,
+        operational_service=payload.operational_service,
+        administrator_name=payload.administrator_name,
+        contemplada=payload.contemplada,
+        bem_faturado=payload.bem_faturado,
+        parcelas_em_dia=payload.parcelas_em_dia,
+    )
+
+
+@router.get("/finops/quitcon/administradoras-whitelist")
+def quitcon_administradoras_whitelist(user: User = Depends(get_current_user)):
+    engine = EngineQuitConLetter()
+    return {"administradoras": list(engine.administradoras_whitelist)}
+
+
+@router.post("/finops/quitcon/success-fee-checkout")
+def quitcon_success_fee_checkout(operacao_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    operacao = _load_quitcon_operacao(db, user, operacao_id)
+    return generate_success_fee_checkout(operacao)
+
+
+@router.post("/finops/quitcon/success-fee-payment-webhook", response_model=QuitConOperacaoView)
+def quitcon_success_fee_webhook(payload: QuitConSuccessFeeWebhook, user: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
+    operacao = _load_quitcon_operacao(db, user, payload.operacao_id)
+    confirm_success_fee_payment(db, user, operacao, payload.event_id, payload.amount)
+    audit(db, user, "finops.quitcon.success_fee_paid", "quitcon_operacao", operacao.id)
+    db.commit()
+    db.refresh(operacao)
+    return QuitConOperacaoView(**quitcon_operacao_view(operacao))
+
+
+@router.post("/finops/quitcon/administrator-rejection", response_model=QuitConOperacaoView)
+def quitcon_admin_rejection(payload: QuitConAdminRejectionRequest, user: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
+    operacao = _load_quitcon_operacao(db, user, payload.operacao_id)
+    register_administrator_rejection(db, user, operacao, reason=payload.reason or "")
+    audit(db, user, "finops.quitcon.admin_rejection", "quitcon_operacao", operacao.id)
+    db.commit()
+    db.refresh(operacao)
+    return QuitConOperacaoView(**quitcon_operacao_view(operacao))
+
+
+@router.post("/finops/quitcon/cedente-payment-checkout")
+def quitcon_cedente_payment_checkout(operacao_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    operacao = _load_quitcon_operacao(db, user, operacao_id)
+    return generate_cedente_payment_checkout(operacao)
+
+
+@router.post("/finops/quitcon/cedente-payment-webhook", response_model=QuitConOperacaoView)
+def quitcon_cedente_payment_webhook(payload: QuitConCedentePaymentWebhook, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    operacao = _load_quitcon_operacao(db, user, payload.operacao_id)
+    confirm_cedente_payment_escrow(db, user, operacao, payload.event_id, payload.amount)
+    audit(db, user, "finops.quitcon.cedente_payment_escrow", "quitcon_operacao", operacao.id)
+    db.commit()
+    db.refresh(operacao)
+    return QuitConOperacaoView(**quitcon_operacao_view(operacao))
 
 
 @router.post("/finops/quitcon/simulate-ltv")

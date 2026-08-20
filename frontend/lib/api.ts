@@ -78,6 +78,15 @@ export type QuitConOperacao = {
   activation_at: string | null; activated_manually: boolean;
   cancellation_reason: string | null; penalty_amount: string | null;
   penalty_detail_json: Record<string, unknown> | null;
+  meses_restantes?: number;
+  quitacao_vp_amount?: string | null;
+  operational_service_enabled?: boolean;
+  success_fee_escrow_paid_at?: string | null;
+  success_fee_refunded?: boolean;
+  cedente_payment_amount?: string | null;
+  cedente_payment_due_at?: string | null;
+  cedente_payment_escrow_reference?: string | null;
+  product_snapshot?: Record<string, unknown> | null;
   credit_matrix: Record<string, string>;
   penalty_preview: Record<string, unknown> | null;
   tokenization_json: Record<string, unknown> | null;

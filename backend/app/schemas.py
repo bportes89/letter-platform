@@ -1676,6 +1676,38 @@ class QuitConOperacaoCreate(BaseModel):
     appraisal_value: Decimal | None = Field(default=None, gt=0, description="Referência opcional de avaliação")
     quota_id: str | None = None
     owner_user_id: str | None = None
+    meses_restantes: int = Field(default=48, ge=1, le=600)
+    operational_service: bool = False
+    contemplada: bool = True
+    bem_faturado: bool = True
+    parcelas_em_dia: bool = True
+
+
+class QuitConPublicSimulateRequest(BaseModel):
+    outstanding_balance: Decimal = Field(gt=0)
+    meses_restantes: int = Field(ge=1, le=600)
+    operational_service: bool = False
+    administrator_name: str | None = None
+    contemplada: bool = True
+    bem_faturado: bool = True
+    parcelas_em_dia: bool = True
+
+
+class QuitConSuccessFeeWebhook(BaseModel):
+    operacao_id: str
+    event_id: str = Field(min_length=4, max_length=120)
+    amount: Decimal = Field(gt=0)
+
+
+class QuitConCedentePaymentWebhook(BaseModel):
+    operacao_id: str
+    event_id: str = Field(min_length=4, max_length=120)
+    amount: Decimal = Field(gt=0)
+
+
+class QuitConAdminRejectionRequest(BaseModel):
+    operacao_id: str
+    reason: str | None = None
 
 
 class QuitConTapafWebhook(BaseModel):
@@ -1707,6 +1739,12 @@ class QuitConActivateRequest(BaseModel):
 
 class QuitConSimulateRequest(BaseModel):
     outstanding_balance: Decimal = Field(gt=0)
+    meses_restantes: int = Field(default=48, ge=1, le=600)
+    operational_service: bool = False
+    administrator_name: str | None = None
+    contemplada: bool = True
+    bem_faturado: bool = True
+    parcelas_em_dia: bool = True
     appraisal_value: Decimal | None = Field(default=None, gt=0)
 
 
@@ -1750,6 +1788,15 @@ class QuitConOperacaoView(BaseModel):
     credit_matrix: dict
     penalty_preview: dict | None
     tokenization_json: dict | None
+    meses_restantes: int | None = None
+    quitacao_vp_amount: str | None = None
+    operational_service_enabled: bool = False
+    success_fee_escrow_paid_at: datetime | None = None
+    success_fee_refunded: bool = False
+    cedente_payment_amount: str | None = None
+    cedente_payment_due_at: datetime | None = None
+    cedente_payment_escrow_reference: str | None = None
+    product_snapshot: dict | None = None
     created_at: datetime
     updated_at: datetime
 

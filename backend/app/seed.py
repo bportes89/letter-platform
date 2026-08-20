@@ -41,7 +41,7 @@ def seed():
             organization_id=org.id, name="Investidor Varejo", email="investidor@letter.com.br",
             document="55555555555", password_hash=hash_password(password), role=Role.RETAIL_INVESTOR,
         )
-        adm = Administrator(name="Administradora Demonstração", document="22222222000122", authorization_status="APPROVED_MANUALLY")
+        adm = Administrator(name="Embracon", document="22222222000122", authorization_status="APPROVED_MANUALLY")
         db.add_all([admin, partner, reviewer_one, reviewer_two, investor, adm]); db.flush()
         lead = Lead(organization_id=org.id, owner_id=partner.id, name="Cliente Piloto", phone="32999999999", product_interest="MARKETPLACE", status="QUALIFIED")
         db.add(lead); db.flush()

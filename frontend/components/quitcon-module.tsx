@@ -47,6 +47,11 @@ export function QuitConModule() {
           registry_number: f.get("registry_number"),
           registry_office: f.get("registry_office"),
           appraisal_value: f.get("appraisal_value") || undefined,
+          meses_restantes: Number(f.get("meses_restantes") || 48),
+          operational_service: f.get("operational_service") === "on",
+          contemplada: f.get("contemplada") === "on",
+          bem_faturado: f.get("bem_faturado") === "on",
+          parcelas_em_dia: f.get("parcelas_em_dia") === "on",
         }),
       });
       setMessage(`Operação ${item.operacao_code} criada — AGUARDANDO_TAPAF.`);
@@ -136,7 +141,12 @@ export function QuitConModule() {
         method: "POST",
         body: JSON.stringify({
           outstanding_balance: f.get("outstanding_balance"),
-          appraisal_value: f.get("appraisal_value") || undefined,
+          meses_restantes: Number(f.get("meses_restantes") || 48),
+          administrator_name: f.get("administrator_name"),
+          operational_service: f.get("operational_service") === "on",
+          contemplada: f.get("contemplada") === "on",
+          bem_faturado: f.get("bem_faturado") === "on",
+          parcelas_em_dia: f.get("parcelas_em_dia") === "on",
         }),
       }));
     } catch (x) {
@@ -159,13 +169,51 @@ export function QuitConModule() {
     }
   }
 
+  async function paySuccessFee() {
+    if (!selected) return;
+    try {
+      const item = await api<QuitConOperacao>("/finops/quitcon/success-fee-payment-webhook", {
+        method: "POST",
+        body: JSON.stringify({
+          operacao_id: selected.id,
+          event_id: `fee-qc-${Date.now()}`,
+          amount: selected.success_fee_escrow_amount,
+        }),
+      });
+      setSelected(item);
+      setMessage("Taxa de sucesso 10% depositada em Escrow.");
+      await load();
+    } catch (x) {
+      setMessage(x instanceof Error ? x.message : "Falha taxa sucesso");
+    }
+  }
+
+  async function payCedenteEscrow() {
+    if (!selected?.cedente_payment_amount) return;
+    try {
+      const item = await api<QuitConOperacao>("/finops/quitcon/cedente-payment-webhook", {
+        method: "POST",
+        body: JSON.stringify({
+          operacao_id: selected.id,
+          event_id: `cedente-qc-${Date.now()}`,
+          amount: selected.cedente_payment_amount,
+        }),
+      });
+      setSelected(item);
+      setMessage("Pagamento cedente registrado em Escrow até conclusão.");
+      await load();
+    } catch (x) {
+      setMessage(x instanceof Error ? x.message : "Falha pagamento cedente");
+    }
+  }
+
   return (
     <>
       <div className="page-heading">
         <div>
           <span className="eyebrow dark">QUITCON ENGINE V1</span>
           <h1>QuitCon — quitação de consórcio</h1>
-          <p>TAPAF R$ 1.500, base = saldo devedor da cota, multas 10%, SLA 45 dias e tokenização RWA. Sem LTV assimétrico nem 0,4% — exclusivos Lease Equity.</p>
+          <p>Manual doc253: VP 1% a.m., taxas 3%/2%/5%/10%, whitelist administradoras, TAPAF R$ 1.500, Escrow e SLA 45 dias.</p>
         </div>
         <div className="operational-icon"><Building2 /></div>
       </div>
@@ -180,9 +228,14 @@ export function QuitConModule() {
               {proposals.map((p) => <option key={p.id} value={p.id}>{p.product} · {p.id.slice(0, 8)}</option>)}
             </select>
             <input name="outstanding_balance" type="number" defaultValue="250000" placeholder="Saldo devedor bruto da cota" required />
+            <input name="meses_restantes" type="number" defaultValue="12" min="1" placeholder="Meses restantes" required />
             <input name="appraisal_value" type="number" placeholder="Avaliação referência (opcional)" />
             <input name="registry_number" placeholder="Matrícula / ref. garantia" defaultValue="44901" required />
-            <input name="registry_office" placeholder="Cartório ou administradora" defaultValue="Administradora Demo" required />
+            <input name="registry_office" placeholder="Administradora whitelist" defaultValue="Embracon" required />
+            <label><input type="checkbox" name="contemplada" defaultChecked /> Contemplada + bem faturado</label>
+            <label><input type="checkbox" name="bem_faturado" defaultChecked /> Bem faturado</label>
+            <label><input type="checkbox" name="parcelas_em_dia" defaultChecked /> Parcelas em dia</label>
+            <label><input type="checkbox" name="operational_service" /> Serviço operacional LETTER (+2%)</label>
             <button type="submit">Abrir operação AGUARDANDO_TAPAF</button>
           </form>
         </section>
@@ -191,15 +244,17 @@ export function QuitConModule() {
           <h2>Simulador QuitCon</h2>
           <form className="stack-form" onSubmit={simulateFinance}>
             <input name="outstanding_balance" type="number" defaultValue="250000" placeholder="Saldo devedor bruto" required />
-            <input name="appraisal_value" type="number" placeholder="Avaliação referência (opcional)" />
-            <button type="submit">Calcular matriz</button>
+            <input name="meses_restantes" type="number" defaultValue="12" min="1" placeholder="Meses restantes" required />
+            <input name="administrator_name" placeholder="Administradora" defaultValue="Embracon" />
+            <label><input type="checkbox" name="operational_service" /> Serviço operacional (+2%)</label>
+            <button type="submit">Simular doc253</button>
           </form>
           {financePreview && (
             <div className="finops-summary">
-              <article><small>Meta captação (saldo)</small><strong>{brl.format(Number(financePreview.meta_captacao_quitacao))}</strong></article>
-              <article><small>Custo pool/mês (1,6%)</small><strong>{brl.format(Number(financePreview.custo_mensal_remuneracao_pool_investidores))}</strong></article>
-              <article><small>Tokens estimados</small><strong>{Math.floor(Number(financePreview.meta_captacao_quitacao) / 100)}</strong></article>
-              <article><small>SLA estimado</small><strong>{String(financePreview.sla_dias_estimados)} dias</strong></article>
+              <article><small>VP quitação</small><strong>{brl.format(Number((financePreview as Record<string,string>).valor_presente_quitacao ?? financePreview.meta_captacao_quitacao))}</strong></article>
+              <article><small>Intermediação 3%</small><strong>{brl.format(Number((financePreview as Record<string,unknown>).cedente ? (financePreview as Record<string,Record<string,string>>).cedente.taxa_intermediacao_3_porcento : 0))}</strong></article>
+              <article><small>Capital giro cessionário</small><strong>{brl.format(Number((financePreview as Record<string,Record<string,string>>).cessionario?.capital_giro_liquido_estimado ?? financePreview.meta_captacao_quitacao))}</strong></article>
+              <article><small>Escrow 10%</small><strong>{brl.format(Number((financePreview as Record<string,Record<string,string>>).cessionario?.taxa_sucesso_escrow_10_porcento ?? 0))}</strong></article>
             </div>
           )}
         </section>
@@ -228,6 +283,8 @@ export function QuitConModule() {
             </div>
             <div className="tapaf-actions">
               <button type="button" disabled={selected.status !== "AGUARDANDO_TAPAF"} onClick={() => void payTapaf()}>Pagar TAPAF R$ 1.500</button>
+              <button type="button" disabled={selected.status !== "TAPAF_LIQUIDADA" || !!selected.success_fee_escrow_paid_at} onClick={() => void paySuccessFee()}>Depositar taxa sucesso Escrow 10%</button>
+              <button type="button" disabled={!selected.administrator_approved_at || !!selected.cedente_payment_escrow_reference} onClick={() => void payCedenteEscrow()}>Pagar quitação cedente (Escrow)</button>
               <button type="button" disabled={selected.status !== "EM_AUDITORIA_RISCO"} onClick={() => void runStep("/finops/quitcon/compliance-review", "Compliance aprovado", { operacao_id: selected.id, approved: true })}>Aprovar compliance</button>
               <button type="button" disabled={!!selected.administrator_approved_at} onClick={() => void runStep(`/finops/quitcon/administrator-approval?operacao_id=${selected.id}`, "Administradora aprovou cessão")}>Aprovação administradora</button>
               <button type="button" disabled={selected.status !== "AGUARDANDO_ASSINATURA"} onClick={() => void runStep(`/finops/quitcon/sign-contract?operacao_id=${selected.id}`, "Contrato assinado")}>Assinar contrato</button>

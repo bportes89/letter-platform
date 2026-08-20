@@ -171,6 +171,11 @@ def start_quitcon_from_sdc(
         appraisal_value=saldo,
         quota_id=quota_id,
         owner_user_id=user.id,
+        meses_restantes=meses,
+        operational_service=False,
+        contemplada=True,
+        bem_faturado=True,
+        parcelas_em_dia=True,
     )
     vp = quitcon_sdc["card"]["quitacao_vista_quitcon_vp"]
     operacao.compliance_blockers_json = json.dumps(

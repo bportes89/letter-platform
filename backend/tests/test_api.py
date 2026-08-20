@@ -1512,27 +1512,26 @@ def test_nina_distress_auto_links_native_inspection_photos(client, auth_headers)
     assert "collateral-inspections" in nina.json()["photo_storage_reference"]
 
 
-def test_quitcon_engine_canonical_doc252():
+def test_quitcon_engine_canonical_doc253():
     from app.quitcon_engine import EngineQuitConLetter
 
     engine = EngineQuitConLetter()
-    finance = engine.processar_matriz_financeira(Decimal("250000"))
-    assert finance["saldo_devedor_bruto"] == "250000.00"
-    assert finance["meta_captacao_quitacao"] == "250000.00"
-    assert finance["custo_mensal_remuneracao_pool_investidores"] == "4000.00"
-    assert finance["sla_dias_estimados"] == 45
-    assert finance["ltv_assimetrico_aplicavel"] is False
-    assert finance["remuneracao_proprietario_aplicavel"] is False
+    sim = engine.simular_quitcon_doc253(Decimal("250000"), 12, administrator_name="Embracon")
+    assert sim["saldo_devedor_bruto"] == "250000.00"
+    assert sim["valor_presente_quitacao"] == "223214.29"
+    assert sim["cedente"]["taxa_intermediacao_3_porcento"] == "7500.00"
+    assert sim["cessionario"]["taxa_plataforma_5_porcento"] == "11160.71"
+    assert sim["cessionario"]["capital_giro_liquido_estimado"] == "212053.58"
+    assert sim["elegibilidade"]["elegivel"] is True
+    assert engine.administradora_permitida("Embracon") is True
+    assert engine.administradora_permitida("Administradora Demo") is False
 
-    escrow = engine.calcular_taxa_sucesso_escrow(Decimal("250000"))
-    assert escrow == Decimal("25000.00")
-    inad = engine.calcular_multa_inadimplencia_cessionario(escrow)
-    assert inad["taxa_sucesso_escrow_retida_integralmente"] == "25000.00"
-    desist = engine.calcular_multa_desistencia_cedente(Decimal("250000"))
-    assert desist["multa_10_porcento_negocio"] == "25000.00"
+    finance = engine.processar_matriz_financeira(Decimal("250000"), meses_restantes=12)
+    assert finance["meta_captacao_quitacao"] == "223214.29"
+    assert finance["doc_version"] == "LETTER_QUITCON_PRODUTO_2026_DOC253"
 
-    rwa = engine.gerar_fracionamento_securitizado_rwa(Decimal("250000"), "LETTER_QUITCON_0044_2026")
-    assert rwa["total_supply_tokens_mint"] == 2500
+    escrow = engine.calcular_taxa_sucesso_escrow(Decimal("223214.29"))
+    assert escrow == Decimal("22321.43")
 
 
 def test_quitcon_full_pipeline_penalties_and_tokenization(client, auth_headers):
@@ -1544,20 +1543,26 @@ def test_quitcon_full_pipeline_penalties_and_tokenization(client, auth_headers):
         "proposal_id": proposal["id"],
         "outstanding_balance": "250000",
         "registry_number": "44901",
-        "registry_office": "Administradora Demo",
+        "registry_office": "Embracon",
+        "meses_restantes": 12,
     })
     assert created.status_code == 201
     operacao = created.json()
     assert operacao["status"] == "AGUARDANDO_TAPAF"
     assert operacao["sla_dias_estimados"] == 45
-    assert operacao["success_fee_escrow_amount"] == "25000.00"
+    assert operacao["success_fee_escrow_amount"] == "22321.43"
     assert operacao["credit_matrix"]["ltv_assimetrico_aplicavel"] is False
-    assert operacao["credit_matrix"]["meta_captacao_quitacao"] == "250000.00"
+    assert operacao["credit_matrix"]["meta_captacao_quitacao"] == "223214.29"
 
     paid = client.post("/api/v1/finops/quitcon/tapaf-payment-webhook", headers=auth_headers, json={
         "operacao_id": operacao["id"], "event_id": "tapaf-qc-001", "amount": "1500.00",
     })
     assert paid.status_code == 200 and paid.json()["status"] == "TAPAF_LIQUIDADA"
+
+    fee = client.post("/api/v1/finops/quitcon/success-fee-payment-webhook", headers=auth_headers, json={
+        "operacao_id": operacao["id"], "event_id": "fee-qc-001", "amount": "22321.43",
+    })
+    assert fee.status_code == 200 and fee.json()["success_fee_escrow_paid_at"]
 
     photos = _native_photos()
     inspection = client.post("/api/v1/finops/quitcon/inspection-photos", headers=auth_headers, json={
@@ -1572,6 +1577,7 @@ def test_quitcon_full_pipeline_penalties_and_tokenization(client, auth_headers):
 
     admin = client.post(f"/api/v1/finops/quitcon/administrator-approval?operacao_id={operacao['id']}", headers=auth_headers)
     assert admin.status_code == 200 and admin.json()["administrator_approved_at"]
+    assert admin.json()["cedente_payment_amount"] == "223214.29"
     assert admin.json()["penalty_preview"]
 
     client.post(f"/api/v1/finops/quitcon/sign-contract?operacao_id={operacao['id']}", headers=auth_headers)
@@ -1589,18 +1595,31 @@ def test_quitcon_full_pipeline_penalties_and_tokenization(client, auth_headers):
     })
     assert token.status_code == 200
     data = token.json()["data"]
-    assert data["parametrizacao_finops_mesa"]["meta_captacao_quitacao"] == 250000.0
+    assert data["parametrizacao_finops_mesa"]["meta_captacao_quitacao"] == 223214.29
     assert data["parametrizacao_finops_mesa"]["ltv_assimetrico_aplicavel"] is False
     assert data["parametrizacao_finops_mesa"]["remuneracao_proprietario_0_4_porcento"] is False
     assert data["governanca_risco_doc252"]["sla_dias_estimados"] == 45
-    assert data["workflow_securitizacao_rwa"]["tokenizacao_blockchain_metadata"]["total_supply_tokens_emitidos"] == 2500
+    assert data["workflow_securitizacao_rwa"]["tokenizacao_blockchain_metadata"]["total_supply_tokens_emitidos"] == 2232
 
     cancel = client.post("/api/v1/finops/quitcon/cancel-inadimplencia", headers=auth_headers, json={
         "operacao_id": operacao["id"], "days_overdue": 16,
     })
     assert cancel.status_code == 200
     assert cancel.json()["status"] == "CANCELADO_INADIMPLENCIA_CESSIONARIO"
-    assert cancel.json()["penalty_amount"] == "25000.00"
+    assert cancel.json()["penalty_amount"] == "22321.43"
+
+
+def test_quitcon_public_simulator_doc253(client):
+    res = client.post("/api/v1/public/quitcon/simulate", json={
+        "outstanding_balance": "250000",
+        "meses_restantes": 12,
+        "administrator_name": "Embracon",
+    })
+    assert res.status_code == 200
+    body = res.json()
+    assert body["doc_version"] == "LETTER_QUITCON_PRODUTO_2026_DOC253"
+    assert body["valor_presente_quitacao"] == "223214.29"
+    assert body["elegibilidade"]["elegivel"] is True
 
 
 def test_quitcon_sdc_projection_doc256(client, auth_headers):

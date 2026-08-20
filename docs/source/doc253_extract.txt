@@ -1,0 +1,100 @@
+MANUAL DO PRODUTO — 
+QUITCON
+ LETTER
+O que é o 
+QuitCon
+?
+O 
+QuitCon
+ é uma solução financeira inteligente desenvolvida pela Plataforma LETTER para revolucionar o mercado de consórcios e crédito estruturado no Brasil. Como as administradoras de consórcio não oferecem desconto real para a quitação antecipada de parcelas, o 
+QuitCon
+ preenche essa lacuna através de um modelo inovador de 
+Arbitragem e Assunção de Dívida
+.
+Nós conectamos duas pontas com total segurança jurídica:
+O Dono da Cota (Cedente):
+ Quer se livrar do saldo devedor de um consórcio e liberar seu bem alienado, recebendo um desconto financeiro atrativo na quitação.
+O Investidor/Tomador (Cessionário):
+ Precisa de Capital de Giro e, em vez de recorrer aos juros altos dos bancos tradicionais, assume as parcelas restantes daquela cota de consórcio, obtendo um crédito muito mais barato para alavancar seu negócio.
+1. COMO FUNCIONA PARA O DONO DA COTA (CEDENTE)
+Se você possui um bem (imóvel ou veículo) adquirido por consórcio, o 
+QuitCon
+ calcula uma quitação inteligente para o seu bolso:
+Critério de Entrada:
+ A cota deve estar obrigatoriamente 
+contemplada e com o bem já faturado
+ (não aceitamos cotas sem contemplação ou contempladas sem uso). As parcelas devem estar rigorosamente em dia.
+O Desconto (
+Deflacionamento
+):
+ Trazemos o seu saldo devedor bruto para o Valor Presente, aplicando um 
+desconto fixo de 1,0% ao mês
+ sobre o prazo restante do plano.
+Taxas da Plataforma:
+Taxa de Intermediação:
+ 3% sobre o valor do saldo devedor das cotas.
+Taxa de Serviço Operacional (Opcional):
+ 2% sobre o valor líquido para que a LETTER gerencie toda a burocracia junto à administradora. Caso contrate, o cliente assina uma procuração eletrônica. Esta taxa não é reembolsável.
+2. COMO FUNCIONA PARA O TOMADOR DO CRÉDITO (CAPITAL DE GIRO 
+QUITCON
+)
+Para empresários e produtores que buscam capital de giro rápido e barato:
+A Oportunidade:
+ Você assume o saldo devedor deflacionado de uma cota e recebe em conta o valor líquido (deduzida a taxa de 5% da plataforma) como Capital de Giro.
+Garantia Exigida:
+ Você deve apresentar um bem próprio que cubra integralmente o saldo devedor das cotas envolvidas e cumpra as regras de aprovação de renda e alienação da administradora do consórcio.
+Custos de Entrada:
+TAPAF:
+ 
+R$ 1.500,00
+ (Taxa de Avaliação e Auditoria, não reembolsável). Todos os documentos e certidões obtidos são entregues ao cliente.
+Taxa de Sucesso (
+Fee
+):
+ 
+10%
+ sobre o valor liberado. Este valor fica retido na plataforma em conta protegida (
+Escrow
+) e é 
+100% devolvido
+ caso a administradora não aprove o seu cadastro ou o seu bem.
+3. POLÍTICA DE 
+COMPLIANCE
+, REGRAS DE RISCO E MULTAS
+Para garantir a seriedade e a proteção de todos os envolvidos na mesa de negócios, vigoram as seguintes travas e penalidades:
+Whitelist
+ de Administradoras:
+ Operamos inicialmente apenas com as maiores e mais seguras instituições do país: 
+Âncora (e suas marcas parceiras), HS, Embracon, Ademicon, Tradição, 
+Recon
+, Groscon, Roma e Reserva
+.
+Responsabilidade de Pagamento Contínuo:
+ O tomador do crédito (novo cessionário) assume a obrigação de pagar todas as parcelas mensais que vencerem a partir do momento da aprovação da administradora, mesmo antes de o processo de transferência de propriedade ser finalizado.
+Quebra por Inadimplência (Tomador):
+ Se o tomador do crédito atrasar qualquer parcela por mais de 15 dias após o início da operação, o processo é cancelado, e a taxa de 10% retida em 
+Escrow
+ será aplicada como multa em favor da plataforma.
+Quebra por Desistência ou Atraso (Dono da Cota):
+ Após a aprovação da administradora, o dono das cotas tem o prazo máximo de 
+48 horas úteis
+ para efetuar o pagamento do valor devido na plataforma (que ficará retido em conta 
+Escrow
+). Caso desista ou perca o prazo, a operação é cancelada, e o dono da cota será penalizado com 
+multa de 10% sobre o valor total do negócio
+, sendo obrigado a reembolsar o tomador por todos os custos de vistorias e parcelas pagas no período.
+4. JORNADA PASSO A PASSO DA OPERAÇÃO
+Fase 01: Simulação e Envio
+O interessado realiza a simulação na aba 
+QuitCon
+ no Super App ou site. Sendo elegível, abre sua conta digital, envia os extratos atualizados das cotas e as fotos/documentos do novo bem em garantia. O sistema verifica eletronicamente se não há parcelas atrasadas.
+Fase 02: Análise e Pagamentos de Entrada
+O nosso robô realiza a pré-análise cadastral cruzando as regras do Banco Central e o regulamento interno da administradora escolhida. O tomador realiza o pagamento da TAPAF (R$ 1.500,00) e faz o depósito da Taxa de Sucesso (10%) na conta de garantia.
+Fase 03: Tramitação na Administradora
+O processo é formalizado e enviado para a administradora do consórcio para aprovação do novo cadastro e substituição do bem. O 
+prazo médio estimado para a conclusão total desta fase é de 45 (quarenta e cinco) dias
+, devido aos trâmites burocráticos padrões do mercado.
+Fase 04: Desbloqueio e Saque
+Uma vez que a administradora aprova e emite os novos documentos, ocorre a baixa da alienação no bem do antigo dono e a inclusão da nova alienação no bem do tomador do crédito. Com o registro concluído, a plataforma realiza o 
+desbloqueio simultâneo e imediato de todos os valores para saque
+ (crédito do cliente, comissões dos parceiros e taxas do portal).

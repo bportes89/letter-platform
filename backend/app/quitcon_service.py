@@ -49,7 +49,14 @@ def _transition(db: Session, operacao: QuitConOperacao, user: User, to_status: s
 
 def operacao_view(item: QuitConOperacao) -> dict:
     engine = EngineQuitConLetter()
-    finance = engine.processar_matriz_financeira(item.outstanding_balance, item.appraisal_value)
+    meses = item.meses_restantes or engine.prazos_projecao_meses[-1]
+    finance = engine.processar_matriz_financeira(
+        item.outstanding_balance,
+        item.appraisal_value,
+        meses_restantes=meses,
+        operational_service=item.operational_service_enabled,
+    )
+    snapshot = json.loads(item.product_snapshot_json) if item.product_snapshot_json else None
     captured = money(item.funding_captured_amount)
     target = money(item.funding_target_amount or Decimal(str(finance["meta_captacao_quitacao"])))
     capture_pct = money(captured / target * 100) if target > 0 else money(0)
@@ -94,6 +101,15 @@ def operacao_view(item: QuitConOperacao) -> dict:
         "credit_matrix": finance,
         "penalty_preview": penalty_preview,
         "tokenization_json": json.loads(item.tokenization_json) if item.tokenization_json else None,
+        "meses_restantes": meses,
+        "quitacao_vp_amount": str(item.quitacao_vp_amount) if item.quitacao_vp_amount else finance.get("valor_presente_quitacao"),
+        "operational_service_enabled": item.operational_service_enabled,
+        "success_fee_escrow_paid_at": item.success_fee_escrow_paid_at,
+        "success_fee_refunded": item.success_fee_refunded,
+        "cedente_payment_amount": str(item.cedente_payment_amount) if item.cedente_payment_amount else None,
+        "cedente_payment_due_at": item.cedente_payment_due_at,
+        "cedente_payment_escrow_reference": item.cedente_payment_escrow_reference,
+        "product_snapshot": snapshot,
         "created_at": item.created_at,
         "updated_at": item.updated_at,
     }
@@ -111,6 +127,11 @@ def create_operacao(
     appraisal_value=None,
     quota_id: str | None = None,
     owner_user_id: str | None = None,
+    meses_restantes: int = 48,
+    operational_service: bool = False,
+    contemplada: bool = True,
+    bem_faturado: bool = True,
+    parcelas_em_dia: bool = True,
 ) -> QuitConOperacao:
     existing = db.scalar(
         select(QuitConOperacao).where(
@@ -122,7 +143,30 @@ def create_operacao(
         return existing
     engine = EngineQuitConLetter()
     saldo = money(outstanding_balance)
-    finance = engine.processar_matriz_financeira(saldo, appraisal_value or saldo)
+    elegibilidade = engine.validar_elegibilidade_cedente(
+        contemplada=contemplada,
+        bem_faturado=bem_faturado,
+        parcelas_em_dia=parcelas_em_dia,
+        administrator_name=registry_office,
+    )
+    if not elegibilidade["elegivel"]:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Operação não elegível doc253: {', '.join(elegibilidade['blockers'])}",
+        )
+    snapshot = engine.simular_quitcon_doc253(
+        saldo,
+        meses_restantes,
+        operational_service=operational_service,
+        administrator_name=registry_office,
+        contemplada=contemplada,
+        bem_faturado=bem_faturado,
+        parcelas_em_dia=parcelas_em_dia,
+    )
+    finance = engine.processar_matriz_financeira(
+        saldo, appraisal_value or saldo, meses_restantes=meses_restantes, operational_service=operational_service,
+    )
+    vp = money(Decimal(str(snapshot["valor_presente_quitacao"])))
     code = f"LETTER_QUITCON_{proposal.id[:8].upper()}"
     now = datetime.now(UTC)
     item = QuitConOperacao(
@@ -137,13 +181,17 @@ def create_operacao(
         outstanding_balance=saldo,
         registry_number=registry_number,
         registry_office=registry_office,
+        meses_restantes=int(meses_restantes),
+        quitacao_vp_amount=vp,
+        operational_service_enabled=operational_service,
         funding_target_amount=Decimal(str(finance["meta_captacao_quitacao"])),
-        success_fee_escrow_amount=engine.calcular_taxa_sucesso_escrow(saldo),
+        success_fee_escrow_amount=engine.calcular_taxa_sucesso_escrow(vp),
         sla_estimated_completion_at=now + timedelta(days=engine.sla_dias_estimados),
+        product_snapshot_json=json.dumps(snapshot, ensure_ascii=False),
     )
     db.add(item)
     db.flush()
-    _log_transition(db, item, user, "NEW", "AGUARDANDO_TAPAF", "Lead consórcio — checkout TAPAF R$ 1.500,00")
+    _log_transition(db, item, user, "NEW", "AGUARDANDO_TAPAF", "Lead consórcio doc253 — checkout TAPAF R$ 1.500,00")
     return item
 
 
@@ -179,9 +227,108 @@ def confirm_tapaf_payment(db: Session, user: User, operacao: QuitConOperacao, ev
     return operacao
 
 
+def generate_success_fee_checkout(operacao: QuitConOperacao) -> dict:
+    if operacao.status != "TAPAF_LIQUIDADA":
+        raise HTTPException(status_code=409, detail="Taxa de sucesso disponível após TAPAF_LIQUIDADA")
+    if operacao.success_fee_escrow_paid_at:
+        raise HTTPException(status_code=409, detail="Taxa de sucesso já depositada em Escrow")
+    amount = money(operacao.success_fee_escrow_amount)
+    return {
+        "endpoint": "/api/v1/finops/quitcon/success-fee-payment-webhook",
+        "status": "READY",
+        "valor_taxa_sucesso_brl": str(amount),
+        "escrow_conta_protegida": True,
+        "reembolso_integral_se_reprovado_adm": True,
+        "gateway_baas_pix_qrcode": f"00020101021126580014br.gov.bcb.pix0136letter-quitcon-fee-{operacao.id[:8]}",
+        "status_operacao_db": operacao.status,
+        "texto_tooltip": (
+            "Taxa de sucesso 10% sobre valor liberado — retida em Escrow e 100% devolvida se a administradora reprovar."
+        ),
+    }
+
+
+def confirm_success_fee_payment(db: Session, user: User, operacao: QuitConOperacao, event_id: str, amount) -> QuitConOperacao:
+    if operacao.status != "TAPAF_LIQUIDADA":
+        raise HTTPException(status_code=409, detail="Depósito Escrow indisponível neste status")
+    expected = money(operacao.success_fee_escrow_amount)
+    if money(amount) != expected:
+        raise HTTPException(status_code=422, detail=f"Valor da taxa de sucesso deve ser exatamente R$ {expected}")
+    operacao.success_fee_escrow_reference = event_id
+    operacao.success_fee_escrow_paid_at = datetime.now(UTC)
+    db.flush()
+    return operacao
+
+
+def register_administrator_approval(db: Session, user: User, operacao: QuitConOperacao) -> QuitConOperacao:
+    if operacao.status not in {
+        "AGUARDANDO_ASSINATURA", "PRONTO_PARA_CARTORIO", "EM_ANALISE_NO_RGI",
+        "GRAVAME_CONCLUIDO", "ATIVO_OK_EM_PRODUCAO", "LIBERADO_PARA_ANTECIPACAO",
+    }:
+        raise HTTPException(status_code=409, detail="Aprovação administradora indisponível neste status")
+    if not operacao.administrator_approved_at:
+        operacao.administrator_approved_at = datetime.now(UTC)
+        vp = money(operacao.quitacao_vp_amount or operacao.outstanding_balance)
+        operacao.cedente_payment_amount = vp
+        operacao.cedente_payment_due_at = datetime.now(UTC) + timedelta(
+            hours=EngineQuitConLetter.prazo_deposito_quitacao_horas_uteis
+        )
+    db.flush()
+    return operacao
+
+
+def register_administrator_rejection(db: Session, user: User, operacao: QuitConOperacao, *, reason: str = "") -> QuitConOperacao:
+    if operacao.success_fee_escrow_paid_at and not operacao.success_fee_refunded:
+        operacao.success_fee_refunded = True
+    operacao.cancellation_reason = "REPROVADO_ADMINISTRADORA"
+    operacao.penalty_detail_json = json.dumps(
+        {
+            "tipo": "REPROVACAO_ADMINISTRADORA",
+            "taxa_sucesso_reembolsada_integralmente": operacao.success_fee_refunded,
+            "motivo": reason or "Cadastro ou garantia não aprovados",
+        },
+        ensure_ascii=False,
+    )
+    previous = operacao.status
+    operacao.status = "REPROVADO_COMPLIANCE"
+    _log_transition(db, operacao, user, previous, "REPROVADO_COMPLIANCE", "Administradora reprovou — Escrow devolvido 100%")
+    db.flush()
+    return operacao
+
+
+def generate_cedente_payment_checkout(operacao: QuitConOperacao) -> dict:
+    if not operacao.administrator_approved_at:
+        raise HTTPException(status_code=409, detail="Pagamento cedente exige aprovação da administradora")
+    if operacao.cedente_payment_escrow_reference:
+        raise HTTPException(status_code=409, detail="Pagamento cedente já registrado em Escrow")
+    if not operacao.cedente_payment_amount:
+        raise HTTPException(status_code=422, detail="Valor de quitação cedente indisponível")
+    amount = money(operacao.cedente_payment_amount)
+    return {
+        "endpoint": "/api/v1/finops/quitcon/cedente-payment-webhook",
+        "status": "READY",
+        "valor_quitacao_cedente_brl": str(amount),
+        "escrow_retido_ate_conclusao": True,
+        "prazo_limite": operacao.cedente_payment_due_at.isoformat() if operacao.cedente_payment_due_at else None,
+        "gateway_baas_pix_qrcode": f"00020101021126580014br.gov.bcb.pix0136letter-quitcon-cedente-{operacao.id[:8]}",
+    }
+
+
+def confirm_cedente_payment_escrow(db: Session, user: User, operacao: QuitConOperacao, event_id: str, amount) -> QuitConOperacao:
+    if not operacao.administrator_approved_at:
+        raise HTTPException(status_code=409, detail="Pagamento cedente indisponível sem aprovação")
+    expected = money(operacao.cedente_payment_amount or 0)
+    if money(amount) != expected:
+        raise HTTPException(status_code=422, detail=f"Valor de quitação deve ser exatamente R$ {expected}")
+    operacao.cedente_payment_escrow_reference = event_id
+    db.flush()
+    return operacao
+
+
 def register_inspection_photos(db: Session, user: User, operacao: QuitConOperacao, photos: list[dict]) -> QuitConOperacao:
     if operacao.status != "TAPAF_LIQUIDADA":
         raise HTTPException(status_code=409, detail="Vistoria disponível após TAPAF_LIQUIDADA")
+    if not operacao.success_fee_escrow_paid_at:
+        raise HTTPException(status_code=409, detail="Deposite a taxa de sucesso 10% em Escrow antes da vistoria")
     from app.collateral_native_inspection_service import upsert_native_inspection
 
     upsert_native_inspection(
@@ -208,18 +355,6 @@ def run_compliance_review(
     else:
         operacao.compliance_blockers_json = json.dumps(blockers or ["GRAVAME_OU_PRENOTACAO"], ensure_ascii=False)
         _transition(db, operacao, user, "REPROVADO_COMPLIANCE", "Reprovação sumária compliance")
-    db.flush()
-    return operacao
-
-
-def register_administrator_approval(db: Session, user: User, operacao: QuitConOperacao) -> QuitConOperacao:
-    if operacao.status not in {
-        "AGUARDANDO_ASSINATURA", "PRONTO_PARA_CARTORIO", "EM_ANALISE_NO_RGI",
-        "GRAVAME_CONCLUIDO", "ATIVO_OK_EM_PRODUCAO", "LIBERADO_PARA_ANTECIPACAO",
-    }:
-        raise HTTPException(status_code=409, detail="Aprovação administradora indisponível neste status")
-    if not operacao.administrator_approved_at:
-        operacao.administrator_approved_at = datetime.now(UTC)
     db.flush()
     return operacao
 
@@ -320,7 +455,12 @@ def process_tokenization(operacao: QuitConOperacao, owner_uid: str | None = None
     if operacao.status not in {"GRAVAME_CONCLUIDO", "ATIVO_OK_EM_PRODUCAO"}:
         raise HTTPException(status_code=409, detail="Tokenização exige gravame concluído ou produção ativa")
     engine = EngineQuitConLetter()
-    finance = engine.processar_matriz_financeira(operacao.outstanding_balance, operacao.appraisal_value)
+    finance = engine.processar_matriz_financeira(
+        operacao.outstanding_balance,
+        operacao.appraisal_value,
+        meses_restantes=operacao.meses_restantes,
+        operational_service=operacao.operational_service_enabled,
+    )
     lastro = Decimal(finance["meta_captacao_quitacao"])
     pool_cost = Decimal(finance["custo_mensal_remuneracao_pool_investidores"])
     rwa = engine.gerar_fracionamento_securitizado_rwa(lastro, operacao.operacao_code)
