@@ -976,6 +976,20 @@ def test_lss_clickwrap_subscription_allocation_and_cancellation(client,auth_head
 
 
 def test_flash_simulator_four_scenarios_and_settlement_quote(client,auth_headers):
+    params = client.get("/api/v1/finops/flash-capital/simulation-params", headers=auth_headers)
+    assert params.status_code == 200
+    assert "14% a.a. + IPCA" in params.json()["labels"]["funds"]
+
+    updated = client.put("/api/v1/finops/flash-capital/simulation-params", headers=auth_headers, json={
+        "institutional_rate_annual": "15",
+        "retail_rate_monthly": "2.8",
+    })
+    assert updated.status_code == 200
+    assert updated.json()["institutional_rate_annual"] == "15.00"
+
+    simulation=client.post("/api/v1/finops/flash-capital/simulate",headers=auth_headers,json={"asset_value":"1000000","ipca_projected_percent":"4.5"})
+    assert simulation.status_code == 200
+    assert simulation.json()["institutional_rate_annual"] == "15.00"
     simulation=client.post("/api/v1/public/flash-credit/simulate",json={"asset_value":"1000000","ipca_projected_percent":"4.5"})
     assert simulation.status_code==200
     body=simulation.json();assert body["principal"]=="400000.00" and body["ltv_percent"]=="40.00" and len(body["scenarios"])==4
@@ -992,6 +1006,10 @@ def test_flash_simulator_four_scenarios_and_settlement_quote(client,auth_headers
     if contract is None:contract=client.post(f"/api/v1/proposals/{proposal['id']}/contracts",headers=auth_headers,json={"calculation_memory_id":calculation["id"]}).json()
     quote=client.post(f"/api/v1/contracts/{contract['id']}/early-settlement",headers=auth_headers,json={"current_installment":14,"track":"FUNDS","balloon":False,"ipca_projected_percent":"4.5"})
     assert quote.status_code==201 and quote.json()["status"]=="QUOTE_ONLY_SANDBOX" and len(quote.json()["calculation_hash"])==64
+    client.put("/api/v1/finops/flash-capital/simulation-params", headers=auth_headers, json={
+        "institutional_rate_annual": "14",
+        "retail_rate_monthly": "2.5",
+    })
 
 
 def test_finops_signed_events_are_idempotent_and_never_move_funds(client,auth_headers):

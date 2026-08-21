@@ -716,6 +716,22 @@ class ContractSettlementRequest(BaseModel):
     ipca_projected_percent: Decimal = Field(default=Decimal("4.5"),ge=0,le=100)
 
 
+class FlashCapitalSimulationParamsView(BaseModel):
+    institutional_rate_annual: str
+    retail_rate_monthly: str
+    default_ipca_projected_percent: str
+    labels: dict[str, str]
+    source: str
+    policy_id: str | None = None
+    policy_version: int | None = None
+    nota: str
+
+
+class FlashCapitalSimulationParamsUpdate(BaseModel):
+    institutional_rate_annual: Decimal = Field(default=Decimal("14"), ge=0, le=100)
+    retail_rate_monthly: Decimal = Field(default=Decimal("2.5"), ge=0, le=100)
+
+
 class EarlySettlementQuoteView(ORMModel):
     id: str
     contract_id: str

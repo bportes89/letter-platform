@@ -44,6 +44,7 @@ from app.schemas import (
     FlashCreditPolicyCreate, FlashCreditPolicyView, FlashCreditPartiesCreate, FlashCreditRouteView,
     NinaRoutingPolicyCreate, NinaRoutingPolicyView, NinaRoutingAssessmentCreate, NinaRoutingAssessmentView,
     FlashSimulatorRequest, SettlementCurveRequest, ContractSettlementRequest, EarlySettlementQuoteView,
+    FlashCapitalSimulationParamsView, FlashCapitalSimulationParamsUpdate,
     FinOpsEventCreate, FinOpsEventView, SdcBulletPreviewRequest,
     ValidStampCreate, ValidStampView, SaaSTermsCreate, SaaSTermsView, SaaSPlanCreate, SaaSPlanView,
     SaaSSubscribeCreate, SaaSSubscriptionView,
@@ -157,6 +158,7 @@ from app.quitcon_service import (
 from app.storage_service import get_storage
 from app.vehicle_registry_service import query_vehicle_registry
 from app.finops_engine import create_contract_quote, four_scenarios, ingest_event, settlement_curve, sdc_bullet_and_split
+from app.flash_capital_params import get_active_flash_simulation_params, save_flash_simulation_params
 from app.network_service import (
     allocate_commissions, confirm_investment, create_network_node, create_rule,
     downline_summary, release_fiscal_hold, reserve_investment,
@@ -819,6 +821,40 @@ def public_quitcon_simulator(payload: QuitConPublicSimulateRequest, request: Req
     )
 
 
+@router.get("/finops/flash-capital/simulation-params", response_model=FlashCapitalSimulationParamsView)
+def finops_flash_capital_simulation_params(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return FlashCapitalSimulationParamsView(**get_active_flash_simulation_params(db, user.organization_id))
+
+
+@router.put("/finops/flash-capital/simulation-params", response_model=FlashCapitalSimulationParamsView)
+def finops_flash_capital_simulation_params_update(
+    payload: FlashCapitalSimulationParamsUpdate,
+    user: User = Depends(require_scope("admin:users")),
+    db: Session = Depends(get_db),
+):
+    save_flash_simulation_params(
+        db,
+        user,
+        institutional_rate_annual=payload.institutional_rate_annual,
+        retail_rate_monthly=payload.retail_rate_monthly,
+    )
+    audit(db, user, "finops.flash_capital.params_updated", "flash_credit_policy", user.organization_id)
+    db.commit()
+    return FlashCapitalSimulationParamsView(**get_active_flash_simulation_params(db, user.organization_id))
+
+
+@router.post("/finops/flash-capital/simulate")
+def finops_flash_capital_simulate(payload: FlashSimulatorRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    params = get_active_flash_simulation_params(db, user.organization_id)
+    return four_scenarios(
+        payload.asset_value,
+        payload.requested_amount,
+        payload.ipca_projected_percent,
+        Decimal(params["institutional_rate_annual"]),
+        Decimal(params["retail_rate_monthly"]),
+    )
+
+
 @router.post("/public/flash-credit/simulate")
 def public_flash_simulator(payload:FlashSimulatorRequest,request:Request):
     ip=request.client.host if request.client else "unknown";allowed,retry=rate_limiter.allow(f"public-flash:{ip}",settings.public_rate_limit_per_minute)
@@ -840,7 +876,12 @@ def contract_early_settlement(contract_id:str,payload:ContractSettlementRequest,
     calculation=db.scalar(select(CalculationMemory).where(CalculationMemory.id==contract.calculation_memory_id,CalculationMemory.product=="FLASH_CREDIT"))
     if not calculation:raise HTTPException(422,"Contrato não possui memória Flash Capital")
     output=json.loads(calculation.output_json);principal=Decimal(str(output["principal"]))
-    item=create_contract_quote(db,user,contract,principal,payload.track.upper(),payload.ipca_projected_percent,payload.balloon,payload.current_installment)
+    params = get_active_flash_simulation_params(db, user.organization_id)
+    item=create_contract_quote(
+        db, user, contract, principal, payload.track.upper(), payload.ipca_projected_percent,
+        payload.balloon, payload.current_installment,
+        Decimal(params["institutional_rate_annual"]), Decimal(params["retail_rate_monthly"]),
+    )
     audit(db,user,"finops.early_settlement_quoted","early_settlement_quote",item.id,{"contract_id":contract.id,"sandbox_only":True});db.commit();db.refresh(item);return item
 
 

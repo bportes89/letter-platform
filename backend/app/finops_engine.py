@@ -52,11 +52,11 @@ def four_scenarios(asset_value:Decimal,requested_amount:Decimal|None,ipca:Decima
     for track in ("FUNDS","POOL"):
         rate=monthly_rate(track,institutional_annual,retail_monthly)
         for balloon in (False,True):scenarios[f"{track.lower()}_{'balloon' if balloon else 'linear'}"]=price_schedule(principal,rate,ipca,balloon)
-    return {"asset_value":str(money(asset_value)),"principal":str(principal),"ltv_percent":str(money(principal/asset_value*HUNDRED)),"coverage_factor":"2.5x","ipca_projected_percent":str(ipca),"platform_fee_percent":str(platform_fee_percent),"platform_fee":str(platform_fee),"itbi_percent":str(itbi_percent),"itbi_provision":str(itbi_provision),"net_payout":str(net_payout),"partner_commission_base":str(net_payout),"interest_basis":"NOMINAL_PRINCIPAL","execution":"SIMULATION_ONLY","scenarios":scenarios}
+    return {"asset_value":str(money(asset_value)),"principal":str(principal),"ltv_percent":str(money(principal/asset_value*HUNDRED)),"coverage_factor":"2.5x","ipca_projected_percent":str(ipca),"institutional_rate_annual":str(institutional_annual),"retail_rate_monthly":str(retail_monthly),"rate_basis_funds":"a.a. + IPCA (reajuste nos meses 13 e 25)","platform_fee_percent":str(platform_fee_percent),"platform_fee":str(platform_fee),"itbi_percent":str(itbi_percent),"itbi_provision":str(itbi_provision),"net_payout":str(net_payout),"partner_commission_base":str(net_payout),"interest_basis":"NOMINAL_PRINCIPAL","execution":"SIMULATION_ONLY","scenarios":scenarios}
 
-def settlement_curve(principal:Decimal,track:str,ipca:Decimal,balloon:bool)->dict:
-    rows=price_schedule(principal,monthly_rate(track),ipca,balloon)
-    return {"principal":str(money(principal)),"track":track,"balloon":balloon,"execution":"SIMULATION_ONLY","curve":[{"installment":r["month"],"settlement_amount":r["opening_balance"]} for r in rows if r["month"]>=6]}
+def settlement_curve(principal:Decimal,track:str,ipca:Decimal,balloon:bool,institutional_annual:Decimal=Decimal("14"),retail_monthly:Decimal=Decimal("2.5"))->dict:
+    rows=price_schedule(principal,monthly_rate(track,institutional_annual,retail_monthly),ipca,balloon)
+    return {"principal":str(money(principal)),"track":track,"balloon":balloon,"institutional_rate_annual":str(institutional_annual),"retail_rate_monthly":str(retail_monthly),"execution":"SIMULATION_ONLY","curve":[{"installment":r["month"],"settlement_amount":r["opening_balance"]} for r in rows if r["month"]>=6]}
 
 def sdc_bullet_and_split(capital:Decimal,turnover_days:int,commission_pool:Decimal,level3_available:bool)->dict:
     if turnover_days not in {45,90}:raise HTTPException(422,"Prazo SDC deve ser 45 ou 90 dias")
@@ -67,9 +67,9 @@ def sdc_bullet_and_split(capital:Decimal,turnover_days:int,commission_pool:Decim
     if not level3_available:split["holding_residual"]=split.pop("upline_level_3")
     return {"capital":str(money(capital)),"turnover_days":turnover_days,"simple_interest_rate_percent":str(money(Decimal("2.5")*Decimal(turnover_days)/Decimal(30))),"bullet_interest":str(interest),"investor_total":str(total),"commission_pool":str(money(commission_pool)),"split":{"master_franchisee":str(master),**{k:str(v) for k,v in split.items()}},"split_basis":"MASTER_50_PERCENT_PLUS_REMAINDER_NORMALIZED_35_7_5_3","fiscal_status":"PENDING_FISCAL","execution":"PREVIEW_ONLY_NO_FUNDS"}
 
-def create_contract_quote(db:Session,user:User,contract:Contract,principal:Decimal,track:str,ipca:Decimal,balloon:bool,current_installment:int)->EarlySettlementQuote:
+def create_contract_quote(db:Session,user:User,contract:Contract,principal:Decimal,track:str,ipca:Decimal,balloon:bool,current_installment:int,institutional_annual:Decimal=Decimal("14"),retail_monthly:Decimal=Decimal("2.5"))->EarlySettlementQuote:
     if not 1<=current_installment<=36:raise HTTPException(422,"Parcela corrente deve estar entre 1 e 36")
-    rows=price_schedule(principal,monthly_rate(track),ipca,balloon);amount=Decimal(rows[current_installment-1]["opening_balance"])
+    rows=price_schedule(principal,monthly_rate(track,institutional_annual,retail_monthly),ipca,balloon);amount=Decimal(rows[current_installment-1]["opening_balance"])
     remaining=sum((Decimal(r["installment"]) for r in rows[current_installment-1:]),Decimal(0));discount=max(Decimal(0),remaining-amount)
     evidence={"contract_id":contract.id,"installment":current_installment,"track":track,"balloon":balloon,"principal":str(money(principal)),"amount":str(money(amount)),"ipca":str(ipca)}
     item=EarlySettlementQuote(organization_id=user.organization_id,contract_id=contract.id,requested_by_id=user.id,installment_number=current_installment,track=track,balloon=balloon,principal=principal,settlement_amount=amount,future_interest_discount=discount,calculation_hash=digest(evidence),expires_at=datetime.now(UTC)+timedelta(minutes=60))

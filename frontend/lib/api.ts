@@ -170,7 +170,17 @@ export type SaaSTerms = {id:string;code:string;version:number;title:string;body:
 export type SaaSSubscription = {id:string;plan_id:string;terms_template_id:string;subscriber_company_name:string;subscriber_document_masked:string;legal_representative_name:string;legal_representative_document_masked:string;status:string;current_period_start:string;current_period_end:string;cancel_at_period_end:boolean;recurring_authorized:boolean;acceptance_hash:string;created_at:string};
 export type ValidStampRecord = {id:string;stamp_code:string;entity_type:string;entity_id:string;purpose:string;algorithm:string;payload_hash:string;previous_hash:string|null;chain_hash:string;signature:string;status:string;issued_at:string};
 export type FlashScheduleRow = {month:number;opening_balance:string;installment:string;interest:string;principal_amortization:string;settlement_balance:string;ipca_adjusted:boolean};
-export type FlashSimulation = {asset_value:string;principal:string;ltv_percent:string;coverage_factor:string;ipca_projected_percent:string;platform_fee_percent?:string;platform_fee?:string;itbi_percent?:string;itbi_provision?:string;net_payout?:string;partner_commission_base?:string;interest_basis?:string;execution:string;scenarios:Record<string,FlashScheduleRow[]>};
+export type FlashSimulation = {asset_value:string;principal:string;ltv_percent:string;coverage_factor:string;ipca_projected_percent:string;institutional_rate_annual?:string;retail_rate_monthly?:string;platform_fee_percent?:string;platform_fee?:string;itbi_percent?:string;itbi_provision?:string;net_payout?:string;partner_commission_base?:string;interest_basis?:string;execution:string;scenarios:Record<string,FlashScheduleRow[]>};
+export type FlashCapitalSimulationParams = {
+  institutional_rate_annual: string;
+  retail_rate_monthly: string;
+  default_ipca_projected_percent: string;
+  labels: { funds: string; pool: string };
+  source: string;
+  policy_id?: string | null;
+  policy_version?: number | null;
+  nota: string;
+};
 export type EarlySettlementQuote = {id:string;contract_id:string;installment_number:number;track:string;balloon:boolean;principal:string;settlement_amount:string;future_interest_discount:string;calculation_hash:string;status:string;expires_at:string;created_at:string};
 export type FinOpsDomainEvent = {id:string;event_id:string;event_type:string;aggregate_id:string;payload_hash:string;signature_valid:boolean;decision:string;execution_mode:string;received_at:string};
 export type NinaRoutingPolicy = {id:string;version:number;population_threshold:number;income_per_capita_threshold:string;tapaf_amount:string;accepted_encumbrances_json:string;rejected_encumbrances_json:string;status:string;approved_at:string|null};
