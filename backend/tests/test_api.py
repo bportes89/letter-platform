@@ -1522,6 +1522,14 @@ def test_quitcon_engine_canonical_doc253():
     assert sim["cedente"]["taxa_intermediacao_3_porcento_sobre_quitacao"] == "6696.43"
     assert sim["cedente"]["pagamento_total_quitacao_mais_intermediacao"] == "229910.72"
     assert sim["cessionario"]["capital_giro_liquido_na_liberacao"] == "212053.58"
+    assert sim["custos_entrada"]["itens"][0]["codigo"] == "TAPAF"
+    assert sim["custos_entrada"]["itens"][0]["valor"] == "1500.00"
+    assert sim["custos_entrada"]["itens"][1]["codigo"] == "SERVICO_OPERACIONAL_2PCT"
+    assert sim["custos_entrada"]["itens"][1]["aplicavel"] is False
+    assert sim["custos_entrada"]["itens"][2]["valor"] == "22321.43"
+    sim_svc = engine.simular_quitcon_doc253(Decimal("400000"), 0, operational_service=True, administrator_name="Embracon")
+    assert sim_svc["custos_entrada"]["itens"][1]["valor"] == "8000.00"
+    assert sim_svc["custos_entrada"]["total_com_servico_operacional"] == "49500.00"
     assert engine.calcular_pagamento_total_cedente(Decimal("400000")) == Decimal("412000.00")
     assert engine.calcular_liberacao_cessionario(Decimal("400000"))["capital_giro_liquido_na_liberacao"] == "380000.00"
     assert engine.calcular_taxa_servico_operacional_inicio(Decimal("400000")) == Decimal("8000.00")
@@ -1622,6 +1630,8 @@ def test_quitcon_public_simulator_doc253(client):
     body = res.json()
     assert body["doc_version"] == "LETTER_QUITCON_PRODUTO_2026_DOC253"
     assert body["valor_presente_quitacao"] == "223214.29"
+    assert body["custos_entrada"]["titulo"] == "Custos pagos pelo cliente no início da operação"
+    assert body["custos_entrada"]["itens"][0]["valor"] == "1500.00"
     assert body["elegibilidade"]["elegivel"] is True
 
 

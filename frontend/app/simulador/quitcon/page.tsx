@@ -2,6 +2,7 @@
 
 import { Building2, Sparkles } from "lucide-react";
 import { FormEvent, useState } from "react";
+import { QuitConCustosEntradaPanel, QuitConCustosEntrada } from "@/components/quitcon-custos-entrada";
 
 const API_URL = (process.env.NEXT_PUBLIC_API_URL?.trim() || "http://localhost:8000/api/v1").replace(/\s+/g, "");
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
@@ -12,6 +13,7 @@ type QuitConSim = {
   meses_restantes: number;
   valor_presente_quitacao: string;
   elegibilidade: { elegivel: boolean; blockers: string[]; administradoras_whitelist: string[] };
+  custos_entrada: QuitConCustosEntrada;
   cedente: Record<string, string | number | boolean>;
   cessionario: Record<string, string | number | boolean>;
   compliance: Record<string, string | number>;
@@ -81,6 +83,7 @@ export default function QuitConPublicSimulatorPage() {
               <small>Saldo bruto {brl.format(Number(result.saldo_devedor_bruto))} · {result.meses_restantes} meses</small>
               <small>Elegível: {result.elegibilidade.elegivel ? "Sim" : `Não (${result.elegibilidade.blockers.join(", ")})`}</small>
             </div>
+            <QuitConCustosEntradaPanel data={result.custos_entrada} />
             <div className="scenario-grid">
               <article><b>Cedente — intermediação 3% (sobre VP)</b><span>{brl.format(Number(result.cedente.taxa_intermediacao_3_porcento_sobre_quitacao))}</span></article>
               <article><b>Cedente — pagamento total (VP + 3%)</b><span>{brl.format(Number(result.cedente.pagamento_total_quitacao_mais_intermediacao))}</span></article>

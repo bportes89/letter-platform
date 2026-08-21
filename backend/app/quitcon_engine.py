@@ -164,6 +164,69 @@ class EngineQuitConLetter:
         vq = money(Decimal(str(valor_quitacao)))
         return money(vq * self.taxa_servico_operacional_percent)
 
+    def montar_custos_entrada(
+        self,
+        valor_quitacao: Decimal,
+        *,
+        operational_service: bool = False,
+    ) -> dict:
+        """Custos pagos pelo cliente no início da operação (doc253)."""
+        vp = money(Decimal(str(valor_quitacao)))
+        taxa_servico = self.calcular_taxa_servico_operacional_inicio(vp) if operational_service else money(Decimal("0"))
+        taxa_sucesso = self.calcular_taxa_sucesso_escrow(vp)
+        tapaf = money(self.taxa_tapaf_nominal)
+        itens = [
+            {
+                "codigo": "TAPAF",
+                "nome": "TAPAF — Taxa de Avaliação e Auditoria",
+                "valor": str(tapaf),
+                "obrigatorio": True,
+                "reembolsavel": False,
+                "momento": "ABERTURA",
+                "descricao": (
+                    "Taxa não reembolsável. Certidões, ONR e laudo AVM são entregues ao cliente."
+                ),
+            },
+            {
+                "codigo": "SERVICO_OPERACIONAL_2PCT",
+                "nome": "Taxa de Serviço LETTER (2% sobre VP)",
+                "valor": str(taxa_servico) if operational_service else None,
+                "obrigatorio": False,
+                "aplicavel": operational_service,
+                "reembolsavel": False,
+                "momento": "ABERTURA",
+                "descricao": (
+                    "Paga na abertura quando a LETTER conduz toda a burocracia junto à administradora. "
+                    "Não se aplica se o cliente preferir conduzir o processo diretamente com a ADM."
+                ),
+            },
+            {
+                "codigo": "TAXA_SUCESSO_ESCROW_10PCT",
+                "nome": "Taxa de Sucesso (10% sobre VP)",
+                "valor": str(taxa_sucesso),
+                "obrigatorio": True,
+                "reembolsavel_se_reprovado_adm": True,
+                "momento": "ABERTURA",
+                "descricao": (
+                    "Retida em conta Escrow protegida. 100% devolvida se a administradora reprovar "
+                    "o cadastro ou a garantia."
+                ),
+            },
+        ]
+        total_obrigatorio = money(tapaf + taxa_sucesso)
+        total_com_servico = money(total_obrigatorio + taxa_servico) if operational_service else total_obrigatorio
+        return {
+            "titulo": "Custos pagos pelo cliente no início da operação",
+            "itens": itens,
+            "total_obrigatorio_abertura": str(total_obrigatorio),
+            "total_com_servico_operacional": str(total_com_servico),
+            "ordem_pagamento": (
+                ["TAPAF", "SERVICO_OPERACIONAL_2PCT", "TAXA_SUCESSO_ESCROW_10PCT"]
+                if operational_service
+                else ["TAPAF", "TAXA_SUCESSO_ESCROW_10PCT"]
+            ),
+        }
+
     def calcular_liberacao_cessionario(self, valor_quitacao: Decimal) -> dict:
         """5% descontados na liberação do capital de giro sobre a base de quitação (VP)."""
         vq = money(Decimal(str(valor_quitacao)))
@@ -195,6 +258,7 @@ class EngineQuitConLetter:
         )
         liberacao = self.calcular_liberacao_cessionario(vp)
         taxa_sucesso_escrow = self.calcular_taxa_sucesso_escrow(vp)
+        custos_entrada = self.montar_custos_entrada(vp, operational_service=operational_service)
         elegibilidade = self.validar_elegibilidade_cedente(
             contemplada=contemplada,
             bem_faturado=bem_faturado,
@@ -208,6 +272,7 @@ class EngineQuitConLetter:
             "valor_presente_quitacao": str(vp),
             "formula_deflacionamento": "VP = SB / (1 + 0.01 * n)",
             "elegibilidade": elegibilidade,
+            "custos_entrada": custos_entrada,
             "cedente": {
                 "quitacao_vista_vp": str(vp),
                 "taxa_intermediacao_3_porcento_sobre_quitacao": str(taxa_intermediacao),

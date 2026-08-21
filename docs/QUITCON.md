@@ -9,6 +9,16 @@ Solução LETTER para **quitação de bens adquiridos via consórcio** com arbit
 - **Cedente:** quita saldo com desconto (VP 1% a.m.) e libera alienação
 - **Cessionário:** capital de giro mais barato assumindo parcelas restantes
 
+## Custos de entrada (início da operação)
+
+| Item | Valor | Observação |
+|------|-------|------------|
+| **TAPAF** | R$ 1.500 | Obrigatório · não reembolsável |
+| **Taxa serviço LETTER** | 2% × VP | **Opcional** — só se a LETTER conduzir junto à administradora |
+| **Taxa sucesso Escrow** | 10% × VP | Obrigatório · 100% reembolsável se ADM reprovar |
+
+A API e o simulador expõem o bloco `custos_entrada` com TAPAF, taxa 2% (quando contratada) e Escrow 10%.
+
 ## Taxas doc253 (regra comercial corrigida)
 
 | Taxa | Base | Momento | Observação |

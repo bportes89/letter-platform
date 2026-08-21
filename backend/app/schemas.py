@@ -1805,6 +1805,7 @@ class QuitConOperacaoView(BaseModel):
     cedente_payment_due_at: datetime | None = None
     cedente_payment_escrow_reference: str | None = None
     product_snapshot: dict | None = None
+    custos_entrada: dict | None = None
     created_at: datetime
     updated_at: datetime
 

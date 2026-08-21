@@ -57,6 +57,10 @@ def operacao_view(item: QuitConOperacao) -> dict:
         operational_service=item.operational_service_enabled,
     )
     snapshot = json.loads(item.product_snapshot_json) if item.product_snapshot_json else None
+    vp_operacao = money(item.quitacao_vp_amount or finance.get("valor_presente_quitacao") or item.outstanding_balance)
+    custos_entrada = engine.montar_custos_entrada(
+        vp_operacao, operational_service=item.operational_service_enabled,
+    )
     captured = money(item.funding_captured_amount)
     target = money(item.funding_target_amount or Decimal(str(finance["meta_captacao_quitacao"])))
     capture_pct = money(captured / target * 100) if target > 0 else money(0)
@@ -112,6 +116,7 @@ def operacao_view(item: QuitConOperacao) -> dict:
         "cedente_payment_due_at": item.cedente_payment_due_at,
         "cedente_payment_escrow_reference": item.cedente_payment_escrow_reference,
         "product_snapshot": snapshot,
+        "custos_entrada": custos_entrada,
         "created_at": item.created_at,
         "updated_at": item.updated_at,
     }
@@ -204,10 +209,16 @@ def generate_tapaf_checkout(operacao: QuitConOperacao) -> dict:
     if operacao.status != "AGUARDANDO_TAPAF":
         raise HTTPException(status_code=409, detail="TAPAF disponível apenas em AGUARDANDO_TAPAF")
     amount = EngineQuitConLetter.taxa_tapaf_nominal
+    engine = EngineQuitConLetter()
+    vp = money(operacao.quitacao_vp_amount or operacao.outstanding_balance)
+    custos_entrada = engine.montar_custos_entrada(
+        vp, operational_service=operacao.operational_service_enabled,
+    )
     return {
         "endpoint": "/api/v1/finops/quitcon/tapaf-checkout",
         "status": "READY",
         "valor_tapaf_brl": str(amount),
+        "custos_entrada": custos_entrada,
         "gateway_baas_pix_qrcode": f"00020101021126580014br.gov.bcb.pix0136letter-quitcon-tapaf-{operacao.id[:8]}",
         "status_operacao_db": "AGUARDANDO_TAPAF",
         "texto_tooltip": (

@@ -3,6 +3,7 @@
 import { Building2, Camera, CheckCircle2, Coins, Lock, Timer, Unlock } from "lucide-react";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { api, Proposal, QuitConOperacao } from "@/lib/api";
+import { QuitConCustosEntradaPanel, QuitConCustosEntrada } from "@/components/quitcon-custos-entrada";
 
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
@@ -269,6 +270,10 @@ export function QuitConModule() {
             <button type="submit">Simular doc253</button>
           </form>
           {financePreview && (
+            <>
+              {(financePreview as Record<string, unknown>).custos_entrada && (
+                <QuitConCustosEntradaPanel data={(financePreview as Record<string, QuitConCustosEntrada>).custos_entrada} />
+              )}
             <div className="finops-summary">
               <article><small>VP quitação</small><strong>{brl.format(Number((financePreview as Record<string,string>).valor_presente_quitacao ?? financePreview.meta_captacao_quitacao))}</strong></article>
               <article><small>Cedente paga (VP + 3%)</small><strong>{brl.format(Number((financePreview as Record<string,Record<string,string>>).cedente?.pagamento_total_quitacao_mais_intermediacao ?? (financePreview as Record<string,string>).pagamento_total_cedente ?? 0))}</strong></article>
@@ -276,6 +281,7 @@ export function QuitConModule() {
               <article><small>Cessionário recebe (VP − 5%)</small><strong>{brl.format(Number((financePreview as Record<string,Record<string,string>>).cessionario?.capital_giro_liquido_na_liberacao ?? (financePreview as Record<string,string>).capital_giro_liquido_cessionario ?? financePreview.meta_captacao_quitacao))}</strong></article>
               <article><small>Escrow 10%</small><strong>{brl.format(Number((financePreview as Record<string,Record<string,string>>).cessionario?.taxa_sucesso_escrow_10_porcento ?? 0))}</strong></article>
             </div>
+            </>
           )}
         </section>
       </div>
@@ -307,6 +313,7 @@ export function QuitConModule() {
               <article><small>Captação</small><strong>{selected.funding_capture_percent}%</strong></article>
               <article><small>Tokens estimados</small><strong>{Math.floor(Number(selected.credit_matrix.meta_captacao_quitacao) / 100)}</strong></article>
             </div>
+            {selected.custos_entrada && <QuitConCustosEntradaPanel data={selected.custos_entrada} />}
             <div className="tapaf-actions">
               <button type="button" disabled={selected.status !== "AGUARDANDO_TAPAF"} onClick={() => void payTapaf()}>Pagar TAPAF R$ 1.500</button>
               <button type="button" disabled={!selected.operational_service_enabled || selected.status !== "TAPAF_LIQUIDADA" || !!selected.operational_service_paid_at} onClick={() => void payOperationalService()}>Pagar taxa serviço 2% (abertura)</button>

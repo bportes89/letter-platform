@@ -89,10 +89,27 @@ export type QuitConOperacao = {
   cedente_payment_due_at?: string | null;
   cedente_payment_escrow_reference?: string | null;
   product_snapshot?: Record<string, unknown> | null;
+  custos_entrada?: QuitConCustosEntrada | null;
   credit_matrix: Record<string, string>;
   penalty_preview: Record<string, unknown> | null;
   tokenization_json: Record<string, unknown> | null;
   created_at: string; updated_at: string;
+};
+export type QuitConCustoEntradaItem = {
+  codigo: string;
+  nome: string;
+  valor: string | null;
+  obrigatorio?: boolean;
+  aplicavel?: boolean;
+  reembolsavel?: boolean;
+  reembolsavel_se_reprovado_adm?: boolean;
+  descricao?: string;
+};
+export type QuitConCustosEntrada = {
+  titulo: string;
+  itens: QuitConCustoEntradaItem[];
+  total_obrigatorio_abertura: string;
+  total_com_servico_operacional: string;
 };
 export type CollateralNativeInspection = {
   id: string; product: string; proposal_id: string; contract_id: string | null;
