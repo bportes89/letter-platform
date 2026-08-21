@@ -19,7 +19,7 @@ export function QuitConModule() {
   const [operacoes, setOperacoes] = useState<QuitConOperacao[]>([]);
   const [selected, setSelected] = useState<QuitConOperacao | null>(null);
   const [message, setMessage] = useState("");
-  const [financePreview, setFinancePreview] = useState<Record<string, string | boolean> | null>(null);
+  const [financePreview, setFinancePreview] = useState<Record<string, unknown> | null>(null);
   const [tokenization, setTokenization] = useState<Record<string, unknown> | null>(null);
   const cameraRef = useRef<HTMLInputElement>(null);
   const [photoMeta, setPhotoMeta] = useState<Array<{ filename: string; exif_timestamp_unix: number; gps_latitude: number; gps_longitude: number }>>([]);
@@ -138,7 +138,7 @@ export function QuitConModule() {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
     try {
-      setFinancePreview(await api<Record<string, string | boolean>>("/finops/quitcon/simulate", {
+      setFinancePreview(await api<Record<string, unknown>>("/finops/quitcon/simulate", {
         method: "POST",
         body: JSON.stringify({
           outstanding_balance: f.get("outstanding_balance"),
@@ -271,15 +271,15 @@ export function QuitConModule() {
           </form>
           {financePreview && (
             <>
-              {(financePreview as Record<string, unknown>).custos_entrada && (
-                <QuitConCustosEntradaPanel data={(financePreview as Record<string, QuitConCustosEntrada>).custos_entrada} />
+              {financePreview.custos_entrada && (
+                <QuitConCustosEntradaPanel data={financePreview.custos_entrada as QuitConCustosEntrada} />
               )}
             <div className="finops-summary">
-              <article><small>VP quitação</small><strong>{brl.format(Number((financePreview as Record<string,string>).valor_presente_quitacao ?? financePreview.meta_captacao_quitacao))}</strong></article>
-              <article><small>Cedente paga (VP + 3%)</small><strong>{brl.format(Number((financePreview as Record<string,Record<string,string>>).cedente?.pagamento_total_quitacao_mais_intermediacao ?? (financePreview as Record<string,string>).pagamento_total_cedente ?? 0))}</strong></article>
-              <article><small>Taxa serviço 2% (abertura)</small><strong>{brl.format(Number((financePreview as Record<string,Record<string,string>>).cedente?.taxa_servico_operacional_2_porcento_inicio ?? (financePreview as Record<string,string>).taxa_servico_operacional_2_porcento ?? 0))}</strong></article>
-              <article><small>Cessionário recebe (VP − 5%)</small><strong>{brl.format(Number((financePreview as Record<string,Record<string,string>>).cessionario?.capital_giro_liquido_na_liberacao ?? (financePreview as Record<string,string>).capital_giro_liquido_cessionario ?? financePreview.meta_captacao_quitacao))}</strong></article>
-              <article><small>Escrow 10%</small><strong>{brl.format(Number((financePreview as Record<string,Record<string,string>>).cessionario?.taxa_sucesso_escrow_10_porcento ?? 0))}</strong></article>
+              <article><small>VP quitação</small><strong>{brl.format(Number(financePreview.valor_presente_quitacao ?? financePreview.meta_captacao_quitacao ?? 0))}</strong></article>
+              <article><small>Cedente paga (VP + 3%)</small><strong>{brl.format(Number((financePreview.cedente as Record<string, string> | undefined)?.pagamento_total_quitacao_mais_intermediacao ?? financePreview.pagamento_total_cedente ?? 0))}</strong></article>
+              <article><small>Taxa serviço 2% (abertura)</small><strong>{brl.format(Number((financePreview.cedente as Record<string, string> | undefined)?.taxa_servico_operacional_2_porcento_inicio ?? financePreview.taxa_servico_operacional_2_porcento ?? 0))}</strong></article>
+              <article><small>Cessionário recebe (VP − 5%)</small><strong>{brl.format(Number((financePreview.cessionario as Record<string, string> | undefined)?.capital_giro_liquido_na_liberacao ?? financePreview.capital_giro_liquido_cessionario ?? financePreview.meta_captacao_quitacao ?? 0))}</strong></article>
+              <article><small>Escrow 10%</small><strong>{brl.format(Number((financePreview.cessionario as Record<string, string> | undefined)?.taxa_sucesso_escrow_10_porcento ?? 0))}</strong></article>
             </div>
             </>
           )}
