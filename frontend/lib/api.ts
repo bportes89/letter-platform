@@ -196,10 +196,17 @@ export function getToken() {
 
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getToken();
-  const response = await fetch(`${API_URL}${path}`, {
-    ...options,
-    headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}), ...options.headers },
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}${path}`, {
+      ...options,
+      headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}), ...options.headers },
+    });
+  } catch {
+    throw new Error(
+      `Não foi possível conectar à API (${API_URL}). Verifique se o backend LETTER está rodando e se NEXT_PUBLIC_API_URL está correto.`,
+    );
+  }
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
     if (response.status === 404) {

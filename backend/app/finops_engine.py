@@ -41,6 +41,64 @@ def price_schedule(principal:Decimal,rate:Decimal,ipca:Decimal,balloon:bool=Fals
         rows.append({"month":month,"opening_balance":str(money(opening)),"installment":str(money(payment)),"interest":str(money(interest)),"principal_amortization":str(money(amortization)),"settlement_balance":str(money(balance)),"ipca_adjusted":month in {13,25}})
     return rows
 
+def pool_public_simulation(asset_value:Decimal,requested_amount:Decimal|None,retail_monthly:Decimal=Decimal("2.5"))->dict:
+    limit=money(asset_value*Decimal("0.40"));principal=money(requested_amount or limit)
+    if principal>limit:raise HTTPException(422,f"LTV máximo de 40% excedido; limite {limit}")
+    platform_fee_percent=Decimal("10");itbi_percent=Decimal("3")
+    platform_fee=money(principal*platform_fee_percent/HUNDRED)
+    itbi_provision=money(principal*itbi_percent/HUNDRED)
+    net_payout=money(principal-platform_fee-itbi_provision)
+    rate=retail_monthly/HUNDRED
+    schedule=price_schedule(principal,rate,Decimal("0"),balloon=False)
+    monthly_payment=schedule[0]["installment"] if schedule else "0.00"
+    return {
+        "track":"POOL","asset_value":str(money(asset_value)),"principal":str(principal),
+        "ltv_percent":str(money(principal/asset_value*HUNDRED)),"retail_rate_monthly":str(retail_monthly),
+        "amortization":"PRICE","platform_fee_percent":str(platform_fee_percent),"platform_fee":str(platform_fee),
+        "itbi_percent":str(itbi_percent),"itbi_provision":str(itbi_provision),"net_payout":str(net_payout),
+        "partner_commission_base":str(net_payout),"monthly_payment":monthly_payment,"monthly_schedule":schedule,
+        "interest_basis":"NOMINAL_PRINCIPAL","execution":"SIMULATION_ONLY",
+    }
+
+def pool_public_simulation(
+    asset_value: Decimal,
+    requested_amount: Decimal | None,
+    retail_monthly: Decimal = Decimal("2.5"),
+    ipca: Decimal = Decimal("0"),
+) -> dict:
+    """Simulação pública Flash Capital — somente trilha POOL (2,5% a.m. Price)."""
+    limit = money(asset_value * Decimal("0.40"))
+    principal = money(requested_amount or limit)
+    if principal > limit:
+        raise HTTPException(422, f"LTV máximo de 40% excedido; limite {limit}")
+    platform_fee_percent = Decimal("10")
+    itbi_percent = Decimal("3")
+    platform_fee = money(principal * platform_fee_percent / HUNDRED)
+    itbi_provision = money(principal * itbi_percent / HUNDRED)
+    net_payout = money(principal - platform_fee - itbi_provision)
+    rate = monthly_rate("POOL", retail_monthly=retail_monthly)
+    schedule = price_schedule(principal, rate, ipca, balloon=False)
+    payment = schedule[0]["installment"] if schedule else "0.00"
+    return {
+        "track": "POOL",
+        "asset_value": str(money(asset_value)),
+        "principal": str(principal),
+        "ltv_percent": str(money(principal / asset_value * HUNDRED)),
+        "retail_rate_monthly": str(retail_monthly),
+        "rate_basis": "2,5% a.m. Tabela Price (trilha pool)",
+        "platform_fee_percent": str(platform_fee_percent),
+        "platform_fee": str(platform_fee),
+        "itbi_percent": str(itbi_percent),
+        "itbi_provision": str(itbi_provision),
+        "net_payout": str(net_payout),
+        "partner_commission_base": str(net_payout),
+        "monthly_payment": payment,
+        "monthly_schedule": schedule,
+        "interest_basis": "NOMINAL_PRINCIPAL",
+        "execution": "SIMULATION_ONLY",
+    }
+
+
 def four_scenarios(asset_value:Decimal,requested_amount:Decimal|None,ipca:Decimal,institutional_annual:Decimal=Decimal("14"),retail_monthly:Decimal=Decimal("2.5"))->dict:
     limit=money(asset_value*Decimal("0.40"));principal=money(requested_amount or limit)
     if principal>limit:raise HTTPException(422,f"LTV máximo de 40% excedido; limite {limit}")

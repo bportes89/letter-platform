@@ -1709,6 +1709,35 @@ class QuitConPublicSimulateRequest(BaseModel):
     parcelas_em_dia: bool = True
 
 
+class PublicLeadCaptureRequest(BaseModel):
+    razao_social: str = Field(min_length=2, max_length=180)
+    whatsapp: str = Field(min_length=8, max_length=30)
+    produto: str = Field(description="flash ou sdc")
+    valor_base: Decimal | None = Field(default=None, gt=0)
+    autorizacao_scr_bacen: bool = False
+
+
+class PublicFlashPoolRequest(BaseModel):
+    asset_value: Decimal = Field(gt=0)
+    requested_amount: Decimal | None = Field(default=None, gt=0)
+
+
+class PublicSdcSimulateRequest(BaseModel):
+    quota_ids: list[str] = Field(min_length=1)
+    requested_amount: Decimal = Field(gt=0)
+    duration_months: int = Field(ge=1, le=120)
+    capital_source: str = "POOL"
+
+
+class PublicQuotaCatalogItem(BaseModel):
+    id: str
+    group_code: str
+    quota_code: str
+    category: str
+    credit_value: str
+    status: str
+
+
 class QuitConSuccessFeeWebhook(BaseModel):
     operacao_id: str
     event_id: str = Field(min_length=4, max_length=120)

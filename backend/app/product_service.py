@@ -47,17 +47,17 @@ def persist_calculation(
     return calculation
 
 
-def calculate_sdc(
-    db: Session, user: User, proposal: Proposal, quotas: list[Quota], duration_months: int,
+def build_sdc_simulation_output(
+    quotas: list[Quota],
+    requested_amount: float,
+    duration_months: int,
     capital_source: str = "POOL",
     pool_investor_rate_percent: Decimal | None = None,
     pool_investment_amount: Decimal | None = None,
-) -> CalculationMemory:
-    if proposal.product != "SDC":
-        raise HTTPException(status_code=422, detail="A proposta deve ser do produto SDC")
+) -> tuple[str, dict, dict]:
     if capital_source not in {"POOL", "FUND"}:
         raise HTTPException(status_code=422, detail="Fonte SDC deve ser POOL ou FUND")
-    validated = validate_quota_combination(quotas, float(proposal.requested_amount))
+    validated = validate_quota_combination(quotas, requested_amount)
     if not validated["valid"]:
         raise HTTPException(
             status_code=422,
@@ -120,6 +120,21 @@ def calculate_sdc(
         "interest_model": "SIMPLE",
         **pool_meta,
     }
+    return formula_version, input_data, output_data
+
+
+def calculate_sdc(
+    db: Session, user: User, proposal: Proposal, quotas: list[Quota], duration_months: int,
+    capital_source: str = "POOL",
+    pool_investor_rate_percent: Decimal | None = None,
+    pool_investment_amount: Decimal | None = None,
+) -> CalculationMemory:
+    if proposal.product != "SDC":
+        raise HTTPException(status_code=422, detail="A proposta deve ser do produto SDC")
+    formula_version, input_data, output_data = build_sdc_simulation_output(
+        quotas, float(proposal.requested_amount), duration_months, capital_source,
+        pool_investor_rate_percent, pool_investment_amount,
+    )
     return persist_calculation(db, user, proposal, formula_version, input_data, output_data)
 
 

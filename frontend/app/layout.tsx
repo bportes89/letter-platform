@@ -6,8 +6,13 @@ import "./tax-communications.css";
 import "./nina-bi.css";
 
 export const metadata: Metadata = {
-  title: "LETTER | Financial Infrastructure",
-  description: "Plataforma de operações estruturadas, cotas, funding e inteligência NINA",
+  title: "LETTER | Infraestrutura Fiduciária",
+  description:
+    "Engenharia financeira, tecnologia fiduciária e ativos reais para capital empresarial estruturado.",
+  openGraph: {
+    title: "LETTER | Infraestrutura Fiduciária",
+    description: "Capital estruturado para empresas que precisam avançar.",
+  },
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

@@ -1653,6 +1653,52 @@ def test_quitcon_public_simulator_doc253(client):
     assert body["elegibilidade"]["elegivel"] is True
 
 
+def test_public_site_flash_pool_and_lead_capture(client):
+    blocked = client.post("/api/v1/public/site/leads/capture", json={
+        "razao_social": "Empresa Teste LTDA",
+        "whatsapp": "32988887777",
+        "produto": "flash",
+        "valor_base": "1000000",
+        "autorizacao_scr_bacen": False,
+    })
+    assert blocked.status_code == 422
+    lead = client.post("/api/v1/public/site/leads/capture", json={
+        "razao_social": "Empresa Teste LTDA",
+        "whatsapp": "32988887777",
+        "produto": "flash",
+        "valor_base": "1000000",
+        "autorizacao_scr_bacen": True,
+    })
+    assert lead.status_code == 201
+    assert lead.json()["status"] == "LEAD_LOGGED_AND_BACEN_AUTHORIZED"
+    sim = client.post("/api/v1/public/site/flash/simulate", json={"asset_value": "1000000"})
+    assert sim.status_code == 200
+    body = sim.json()
+    assert body["track"] == "POOL"
+    assert body["principal"] == "400000.00"
+    assert body["net_payout"] == "348000.00"
+    assert body["mmn"]["configured"] is True
+    assert body["mmn"]["commission_pool"] == "10440.00"
+    assert body["mmn"]["holding_retained_from_fee"] == "29560.00"
+
+
+def test_public_site_sdc_simulate_with_quotas(client):
+    quotas = client.get("/api/v1/public/site/quotas").json()
+    assert len(quotas) >= 2
+    sim = client.post("/api/v1/public/site/sdc/simulate", json={
+        "quota_ids": [quotas[0]["id"], quotas[1]["id"]],
+        "requested_amount": "800000",
+        "duration_months": 12,
+        "capital_source": "POOL",
+    })
+    assert sim.status_code == 200
+    output = sim.json()["output"]
+    assert output["principal"] == "800000.00"
+    assert output["total_interest"] == "432000.00"
+    assert sim.json()["mmn"]["configured"] is True
+    assert sim.json()["mmn"]["commission_pool"] == "2400.00"
+
+
 def test_quitcon_sdc_projection_doc256(client, auth_headers):
     from app.quitcon_engine import EngineQuitConLetter
 
@@ -1738,4 +1784,55 @@ def test_sdc_start_quitcon_from_simulation_and_contract(client, auth_headers):
     })
     assert from_contract.status_code == 200
     assert from_contract.json()["operacao_id"] == body["operacao_id"]
+
+
+def test_public_site_lead_flash_pool_and_sdc(client, auth_headers):
+    blocked = client.post("/api/v1/public/site/leads/capture", json={
+        "razao_social": "Empresa Teste LTDA",
+        "whatsapp": "11988887777",
+        "produto": "flash",
+        "valor_base": "1000000",
+        "autorizacao_scr_bacen": False,
+    })
+    assert blocked.status_code == 422
+
+    lead = client.post("/api/v1/public/site/leads/capture", json={
+        "razao_social": "Empresa Site LTDA",
+        "whatsapp": "11988887777",
+        "produto": "flash",
+        "valor_base": "1000000",
+        "autorizacao_scr_bacen": True,
+    })
+    assert lead.status_code == 201
+    assert lead.json()["status"] == "LEAD_LOGGED_AND_BACEN_AUTHORIZED"
+
+    flash = client.post("/api/v1/public/site/flash/simulate", json={
+        "asset_value": "1000000",
+        "requested_amount": "400000",
+    })
+    assert flash.status_code == 200
+    body = flash.json()
+    assert body["track"] == "POOL"
+    assert body["principal"] == "400000.00"
+    assert body["net_payout"] == "348000.00"
+    assert body["mmn"]["configured"] is True
+    assert body["mmn"]["commission_pool"] == "10440.00"
+
+    quotas = client.get("/api/v1/public/site/quotas")
+    assert quotas.status_code == 200
+    catalog = quotas.json()
+    assert len(catalog) >= 2
+
+    sdc = client.post("/api/v1/public/site/sdc/simulate", json={
+        "quota_ids": [catalog[0]["id"], catalog[1]["id"]],
+        "requested_amount": "800000",
+        "duration_months": 12,
+        "capital_source": "POOL",
+    })
+    assert sdc.status_code == 200
+    out = sdc.json()["output"]
+    assert out["principal"] == "800000.00"
+    assert out["total_interest"] == "432000.00"
+    assert sdc.json()["mmn"]["configured"] is True
+    assert sdc.json()["mmn"]["commission_pool"] == "2400.00"
 

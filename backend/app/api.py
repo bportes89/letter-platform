@@ -65,6 +65,7 @@ from app.schemas import (
     QuitConComplianceReview, QuitConFundingCapture, QuitConActivateRequest,
     QuitConPublicSimulateRequest, QuitConSuccessFeeWebhook, QuitConCedentePaymentWebhook,
     QuitConOperationalServiceWebhook,
+    PublicFlashPoolRequest, PublicLeadCaptureRequest, PublicQuotaCatalogItem, PublicSdcSimulateRequest,
     QuitConAdminRejectionRequest,
     QuitConSimulateRequest,
     SdcQuitConIntegrationView, SdcQuitConProjectionRequest,
@@ -158,6 +159,9 @@ from app.quitcon_service import (
 from app.storage_service import get_storage
 from app.vehicle_registry_service import query_vehicle_registry
 from app.finops_engine import create_contract_quote, four_scenarios, ingest_event, settlement_curve, sdc_bullet_and_split
+from app.public_site_service import (
+    capture_public_lead, list_public_quotas, simulate_flash_pool_public, simulate_sdc_public,
+)
 from app.flash_capital_params import get_active_flash_simulation_params, save_flash_simulation_params
 from app.network_service import (
     allocate_commissions, confirm_investment, create_network_node, create_rule,
@@ -818,6 +822,55 @@ def public_quitcon_simulator(payload: QuitConPublicSimulateRequest, request: Req
         contemplada=payload.contemplada,
         bem_faturado=payload.bem_faturado,
         parcelas_em_dia=payload.parcelas_em_dia,
+    )
+
+
+@router.post("/public/site/leads/capture", status_code=201)
+def public_site_lead_capture(payload: PublicLeadCaptureRequest, request: Request, db: Session = Depends(get_db)):
+    ip = request.client.host if request.client else "unknown"
+    allowed, retry = rate_limiter.allow(f"public-lead:{ip}", settings.public_rate_limit_per_minute)
+    if not allowed:
+        raise HTTPException(429, "Limite de captura atingido", headers={"Retry-After": str(retry)})
+    result = capture_public_lead(
+        db,
+        razao_social=payload.razao_social,
+        whatsapp=payload.whatsapp,
+        produto=payload.produto,
+        valor_base=payload.valor_base,
+        autorizacao_scr_bacen=payload.autorizacao_scr_bacen,
+    )
+    db.commit()
+    return result
+
+
+@router.get("/public/site/quotas", response_model=list[PublicQuotaCatalogItem])
+def public_site_quotas(request: Request, db: Session = Depends(get_db)):
+    ip = request.client.host if request.client else "unknown"
+    allowed, retry = rate_limiter.allow(f"public-quotas:{ip}", settings.public_rate_limit_per_minute)
+    if not allowed:
+        raise HTTPException(429, "Limite atingido", headers={"Retry-After": str(retry)})
+    return list_public_quotas(db)
+
+
+@router.post("/public/site/flash/simulate")
+def public_site_flash_simulate(payload: PublicFlashPoolRequest, request: Request, db: Session = Depends(get_db)):
+    ip = request.client.host if request.client else "unknown"
+    allowed, retry = rate_limiter.allow(f"public-flash-pool:{ip}", settings.public_rate_limit_per_minute)
+    if not allowed:
+        raise HTTPException(429, "Limite do simulador atingido", headers={"Retry-After": str(retry)})
+    return simulate_flash_pool_public(db, payload.asset_value, payload.requested_amount)
+
+
+@router.post("/public/site/sdc/simulate")
+def public_site_sdc_simulate(payload: PublicSdcSimulateRequest, request: Request, db: Session = Depends(get_db)):
+    ip = request.client.host if request.client else "unknown"
+    allowed, retry = rate_limiter.allow(f"public-sdc:{ip}", settings.public_rate_limit_per_minute)
+    if not allowed:
+        raise HTTPException(429, "Limite do simulador atingido", headers={"Retry-After": str(retry)})
+    if payload.capital_source.upper() not in {"POOL", "FUND"}:
+        raise HTTPException(422, "Fonte SDC deve ser POOL ou FUND")
+    return simulate_sdc_public(
+        db, payload.quota_ids, payload.requested_amount, payload.duration_months, payload.capital_source.upper(),
     )
 
 

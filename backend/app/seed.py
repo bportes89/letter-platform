@@ -1,3 +1,4 @@
+import json
 import os
 from decimal import Decimal
 
@@ -5,7 +6,10 @@ from sqlalchemy import select
 
 from app.core.security import hash_password
 from app.db import Base, SessionLocal, engine
-from app.models import Administrator, Lead, Organization, Proposal, Quota, Role, User
+from app.models import Administrator, CommissionRule, Lead, Organization, Proposal, Quota, Role, User
+
+
+LEVEL_SHARES = ["50", "20", "15", "10", "5"]
 
 
 def _demo_password() -> str:
@@ -50,6 +54,16 @@ def seed():
             Quota(organization_id=org.id, administrator_id=adm.id, seller_id=admin.id, group_code="1001", quota_code="002", category="REAL_ESTATE", credit_value=Decimal("400000"), outstanding_balance=Decimal("250000"), premium_value=Decimal("78000")),
         ])
         db.add(Proposal(organization_id=org.id, lead_id=lead.id, product="MARKETPLACE", requested_amount=Decimal("800000"), status="DRAFT"))
+        db.add_all([
+            CommissionRule(
+                organization_id=org.id, product="FLASH_CREDIT", commission_type="SALES", version=1,
+                base_type="NET_PAYOUT", pool_rate_percent=Decimal("3"), levels_json=json.dumps(LEVEL_SHARES), active=True,
+            ),
+            CommissionRule(
+                organization_id=org.id, product="SDC", commission_type="SALES", version=1,
+                base_type="INTERMEDIATION_FEE", pool_rate_percent=Decimal("3"), levels_json=json.dumps(LEVEL_SHARES), active=True,
+            ),
+        ])
         db.commit()
         print("Seed concluído: admin@letter.com.br / (senha de LETTER_DEMO_PASSWORD ou Letter@123)")
 
