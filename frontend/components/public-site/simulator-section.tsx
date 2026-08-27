@@ -4,6 +4,12 @@ import Link from "next/link";
 import Image from "next/image";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import {
+  capturePublicLead,
+  fetchPublicQuotas,
+  simulateFlashPublic,
+  simulateSdcPublic,
+} from "@/lib/public-site-api";
+import {
   DEMO_QUOTAS,
   mockFlashPool,
   mockSdcPool,
@@ -35,7 +41,13 @@ export function PublicSimulatorSection() {
   const catalog = quotas.length > 0 ? quotas : [...DEMO_QUOTAS];
 
   const loadQuotas = useCallback(async () => {
-    setQuotas([...DEMO_QUOTAS]);
+    try {
+      const rows = await fetchPublicQuotas();
+      if (rows.length > 0) setQuotas(rows);
+      else setQuotas([...DEMO_QUOTAS]);
+    } catch {
+      setQuotas([...DEMO_QUOTAS]);
+    }
   }, []);
 
   useEffect(() => {
@@ -65,25 +77,55 @@ export function PublicSimulatorSection() {
       setLoading(false);
       return;
     }
+    const razao = String(f.get("razao") ?? "").trim();
+    const whatsapp = String(f.get("whatsapp") ?? "").trim();
+    if (!razao || !whatsapp) {
+      setError("Informe razão social e WhatsApp corporativo.");
+      setLoading(false);
+      return;
+    }
     try {
+      let valorBase: number | undefined;
+      if (tab === "flash") {
+        valorBase = Number(f.get("asset_value"));
+      } else {
+        valorBase = Number(f.get("requested_amount"));
+      }
+
+      await capturePublicLead({
+        razao_social: razao,
+        whatsapp,
+        produto: tab,
+        valor_base: Number.isFinite(valorBase) && valorBase > 0 ? valorBase : undefined,
+        autorizacao_scr_bacen: true,
+      });
+
       if (tab === "flash") {
         const assetValue = Number(f.get("asset_value"));
         const requestedRaw = f.get("requested_amount");
         const requested = requestedRaw ? Number(requestedRaw) : null;
         if (!Number.isFinite(assetValue) || assetValue <= 0) throw new Error("Informe um AVM válido.");
-        setFlash(mockFlashPool(assetValue, requested));
+        setFlash(await simulateFlashPublic(assetValue, requested));
         setSdc(null);
       } else {
         const requested = Number(f.get("requested_amount"));
         const durationMonths = Number(f.get("duration_months"));
         const picked = catalog.filter((q) => selectedQuotas.includes(q.id));
+        const quotaIds =
+          picked.length > 0 ? picked.map((q) => q.id) : catalog.length > 0 ? [catalog[0].id] : [];
         const principal =
           picked.length > 0 ? picked.reduce((s, q) => s + Number(q.credit_value), 0) : requested;
+        if (quotaIds.length === 0) throw new Error("Nenhuma cota disponível para simulação.");
         if (!Number.isFinite(principal) || principal <= 0) {
           throw new Error("Selecione cotas ou informe o valor alvo da operação.");
         }
-        const category = picked[0]?.category === "REAL_ESTATE" ? "REAL_ESTATE" : "OTHER";
-        setSdc(mockSdcPool(principal, durationMonths, category));
+        setSdc(
+          await simulateSdcPublic({
+            quota_ids: quotaIds,
+            requested_amount: principal,
+            duration_months: durationMonths,
+          }),
+        );
         setFlash(null);
       }
       setUnlocked(true);
@@ -187,8 +229,10 @@ export function PublicSimulatorSection() {
         <label className="consent">
           <input name="bacen" type="checkbox" required />
           <span>
-            Autorizo a consulta ao histórico de crédito no SCR / Registrato do Banco Central,
-            exclusivamente para fins de análise cadastral desta simulação.
+            Autorizo a consulta ao histórico de crédito no{" "}
+            <strong>SCR / Registrato do Banco Central</strong>, incluindo varredura cadastral
+            automática em background, exclusivamente para análise desta simulação e qualificação
+            comercial pela LETTER.
           </span>
         </label>
         <button className="button full" type="submit" disabled={loading}>
@@ -196,8 +240,8 @@ export function PublicSimulatorSection() {
         </button>
         {error && <p className="form-notice">{error}</p>}
         <small className="legal-copy">
-          Esta simulação não representa proposta de crédito, aprovação ou consulta automática ao Banco
-          Central.
+          Ao calcular, seus dados corporativos são registrados no funil comercial. A simulação é
+          indicativa e não constitui proposta de crédito nem consulta automática imediata ao Bacen.
         </small>
       </form>
 
@@ -224,7 +268,10 @@ export function PublicSimulatorSection() {
           <div className="gate">
             <span className="lock">◆</span>
             <h4>Memória protegida</h4>
-            <p>Complete os dados corporativos para destravar o detalhamento indicativo.</p>
+            <p>
+              Preencha razão social, WhatsApp e autorize a consulta SCR/Registrato para destravar a
+              memória de cálculo e registrar o lead.
+            </p>
           </div>
         )}
       </div>
