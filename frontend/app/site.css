@@ -1479,11 +1479,12 @@
 .attendance-primary {
   padding: 0.85rem 1.1rem;
   border-radius: 12px;
-  background: var(--accent);
+  background: #00d084;
   color: #04140e;
   font-size: 0.84rem;
-  font-weight: 600;
+  font-weight: 700;
   text-decoration: none;
+  box-shadow: 0 4px 14px rgba(0, 208, 132, 0.25);
   transition: transform 0.15s ease, opacity 0.15s ease;
 }
 

@@ -99,11 +99,13 @@ export function AttendanceBotSection() {
 
   const scrollToBottom = useCallback(() => {
     requestAnimationFrame(() => {
-      window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "smooth" });
       if (!blockRef.current) return;
       const items = blockRef.current.querySelectorAll("[data-chat-item]");
       const last = items[items.length - 1] as HTMLElement | undefined;
-      if (last) setMascotTop(Math.max(0, last.offsetTop + last.offsetHeight - 100));
+      if (last) {
+        last.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        setMascotTop(Math.max(0, last.offsetTop + last.offsetHeight - 100));
+      }
     });
   }, []);
 
@@ -242,14 +244,14 @@ export function AttendanceBotSection() {
             key={`${option.id ?? optionIndex}-${optionLabel(option)}`}
             type="button"
             className="attendance-option"
-            disabled={!isCurrent(flowIndex) || busy}
+            disabled={busy}
             onClick={() => void onOption(flowIndex, itemIndex, item, option)}
           >
             {optionLabel(option)}
           </button>
         ))}
         {item.options_empty ? <p className="attendance-empty">{item.options_empty}</p> : null}
-        {waLink ? (
+        {item.options_quotas && waLink ? (
           <a className="attendance-option attendance-option-muted" href={waLink} target="_blank" rel="noreferrer">
             Não encontrou, clique aqui. Atendimento sob medida
           </a>
@@ -257,6 +259,9 @@ export function AttendanceBotSection() {
       </div>
     );
   };
+
+  const showInteractive = (flowIndex: number, itemIndex: number) =>
+    isCurrent(flowIndex) && !echoes.some((x) => x.flowIndex === flowIndex && x.itemIndex === itemIndex);
 
   return (
     <section id="atendimento" className="section attendance-section">
@@ -313,12 +318,12 @@ export function AttendanceBotSection() {
                     </div>
                   ) : null}
 
-                  {item.button ? (
+                  {item.button && showInteractive(flowIndex, itemIndex) ? (
                     <div className="attendance-actions" data-chat-item>
                       <button
                         type="button"
                         className="attendance-primary"
-                        disabled={!isCurrent(flowIndex) || busy}
+                        disabled={busy}
                         onClick={() => void onButton(flowIndex, itemIndex, item)}
                       >
                         {item.button}
@@ -326,11 +331,11 @@ export function AttendanceBotSection() {
                     </div>
                   ) : null}
 
-                  {Array.isArray(item.options) ? (
+                  {Array.isArray(item.options) && showInteractive(flowIndex, itemIndex) ? (
                     <div data-chat-item>{renderOptions(flowIndex, itemIndex, item)}</div>
                   ) : null}
 
-                  {item.input && isCurrent(flowIndex) ? (
+                  {item.input && showInteractive(flowIndex, itemIndex) ? (
                     <div className="attendance-form-wrap" data-chat-item>
                       {(item.title || item.tile) && <p className="attendance-form-title">{item.title || item.tile}</p>}
                       <form className="attendance-form" onSubmit={(e) => void onInput(flowIndex, itemIndex, item, e)}>
@@ -348,7 +353,6 @@ export function AttendanceBotSection() {
                     </div>
                   ) : null}
 
-                  {item.input && !isCurrent(flowIndex) && echo ? <ChatUserEcho value={echo.value} /> : null}
 
                   {item.address && isCurrent(flowIndex) ? (
                     <div className="attendance-actions" data-chat-item>
@@ -441,14 +445,14 @@ export function AttendanceBotSection() {
                     </div>
                   ) : null}
 
-                  {item.faq && Array.isArray(item.items) ? (
+                  {item.faq && Array.isArray(item.items) && showInteractive(flowIndex, itemIndex) ? (
                     <div className="attendance-options" data-chat-item>
                       {item.items.map((faqItem, faqIndex) => (
                         <button
                           key={faqItem.id ?? faqIndex}
                           type="button"
                           className="attendance-option"
-                          disabled={!isCurrent(flowIndex) || busy}
+                          disabled={busy}
                           onClick={() => void advance(95, 0, { flowIndex, itemIndex, value: faqItem.name ?? "Dúvida" })}
                         >
                           {faqItem.name}
@@ -483,7 +487,7 @@ export function AttendanceBotSection() {
                     </div>
                   ) : null}
 
-                  {echo && !item.input ? <ChatUserEcho value={echo.value} /> : null}
+                  {echo ? <ChatUserEcho value={echo.value} /> : null}
                 </div>
               );
             }),
