@@ -10,10 +10,31 @@ from app.models import Administrator, CommissionRule, Lead, Organization, Propos
 
 
 LEVEL_SHARES = ["50", "20", "15", "10", "5"]
+DEMO_USER_EMAILS = (
+    "admin@letter.com.br",
+    "parceiro@letter.com.br",
+    "revisor1@letter.com.br",
+    "revisor2@letter.com.br",
+    "investidor@letter.com.br",
+)
 
 
 def _demo_password() -> str:
     return os.environ.get("LETTER_DEMO_PASSWORD", "Letter@123")
+
+
+def _sync_demo_passwords(db, password: str) -> None:
+    """Em staging/dev, realinha senhas demo com LETTER_DEMO_PASSWORD a cada deploy."""
+    if os.environ.get("LETTER_ENV", "development") not in {"development", "staging"}:
+        return
+    users = list(db.scalars(select(User).where(User.email.in_(DEMO_USER_EMAILS))))
+    if not users:
+        return
+    hashed = hash_password(password)
+    for user in users:
+        user.password_hash = hashed
+    db.commit()
+    print(f"Senhas demo sincronizadas para {len(users)} usuários.")
 
 
 def seed():
@@ -21,6 +42,7 @@ def seed():
     password = _demo_password()
     with SessionLocal() as db:
         if db.scalar(select(User).where(User.email == "admin@letter.com.br")):
+            _sync_demo_passwords(db, password)
             print("Seed já aplicado.")
             return
         org = Organization(name="LETTER Matriz", document="00000000000000", kind="HEADQUARTERS")
