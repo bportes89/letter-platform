@@ -1699,6 +1699,43 @@ def test_public_site_sdc_simulate_with_quotas(client):
     assert sim.json()["mmn"]["commission_pool"] == "2400.00"
 
 
+def test_public_site_chat_home_proxy(client, monkeypatch):
+    import httpx
+
+    payload = {
+        "OBJ": {
+            "chat_next": [{"text": "O que você deseja:", "mascote": 1}],
+            "info": {"whatsapp": "(11) 92175-5065"},
+        }
+    }
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return payload
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def post(self, url, json=None):
+            assert url.endswith("/api/home")
+            return FakeResponse()
+
+    monkeypatch.setattr("app.public_chat_proxy.httpx.Client", FakeClient)
+    response = client.post("/api/v1/public/site/chat/home", json={})
+    assert response.status_code == 200
+    assert response.json()["OBJ"]["chat_next"][0]["text"] == "O que você deseja:"
+
+
 def test_quitcon_sdc_projection_doc256(client, auth_headers):
     from app.quitcon_engine import EngineQuitConLetter
 

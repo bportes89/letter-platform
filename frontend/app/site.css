@@ -1351,6 +1351,320 @@
   margin-top: 1rem;
 }
 
+/* —— Robô de atendimento externo —— */
+.attendance-section {
+  position: relative;
+}
+
+.attendance-shell {
+  margin-top: 2rem;
+  padding: 1.5rem;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: linear-gradient(180deg, rgba(11, 33, 26, 0.95), rgba(6, 19, 15, 0.98));
+}
+
+.attendance-status,
+.attendance-error {
+  margin: 0 0 1rem;
+  font-size: 0.9rem;
+}
+
+.attendance-error {
+  color: #ffb4b4;
+}
+
+.attendance-chat {
+  position: relative;
+  min-height: 420px;
+  padding: 1rem 0 2rem;
+}
+
+.attendance-mascot-wrap {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 80px;
+  transition: margin-top 0.8s ease-out;
+  z-index: 2;
+}
+
+.attendance-mascot {
+  width: 80px;
+  height: auto;
+  filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.35));
+}
+
+.attendance-typing {
+  display: inline-block;
+  width: 28px;
+  height: 8px;
+  margin-left: 6px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #00d084 0 33%, transparent 33% 66%, #00d084 66% 100%);
+  animation: attendance-pulse 1s infinite;
+}
+
+@keyframes attendance-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+
+  50% {
+    opacity: 1;
+  }
+}
+
+.attendance-bot-row,
+.attendance-actions,
+.attendance-form-wrap,
+.attendance-options,
+.attendance-resumo,
+.attendance-sdc-result,
+.attendance-contract {
+  position: relative;
+  padding-left: 5rem;
+  margin-bottom: 0.85rem;
+}
+
+.attendance-bot-bubble {
+  display: inline-block;
+  max-width: min(640px, 100%);
+  padding: 1rem 1.25rem;
+  border-radius: 14px 14px 14px 4px;
+  background: rgba(255, 255, 255, 0.96);
+  color: #102018;
+  font-size: 0.92rem;
+  line-height: 1.55;
+  white-space: pre-line;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+
+.attendance-bot-bubble-wide {
+  width: min(420px, 100%);
+}
+
+.attendance-user-row {
+  display: flex;
+  justify-content: flex-end;
+  margin: 0.75rem 0 1rem;
+}
+
+.attendance-user-bubble {
+  max-width: min(420px, 90%);
+  padding: 0.85rem 1.1rem;
+  border-radius: 14px 14px 4px 14px;
+  background: #b4d0f0;
+  color: #0b1f33;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.attendance-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+
+.attendance-option,
+.attendance-primary,
+.attendance-secondary {
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+}
+
+.attendance-option,
+.attendance-primary {
+  padding: 0.85rem 1.1rem;
+  border-radius: 12px;
+  background: var(--accent);
+  color: #04140e;
+  font-size: 0.84rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+
+.attendance-option:hover,
+.attendance-primary:hover {
+  transform: translateY(-1px);
+}
+
+.attendance-option:disabled,
+.attendance-primary:disabled,
+.attendance-secondary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.attendance-option-muted {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  border: 1px solid var(--line);
+}
+
+.attendance-secondary {
+  padding: 0.85rem 1.1rem;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  border: 1px solid var(--line);
+}
+
+.attendance-form-wrap {
+  max-width: 420px;
+}
+
+.attendance-form-title {
+  margin: 0 0 0.65rem;
+  color: #c8d5cf;
+  font-size: 0.88rem;
+}
+
+.attendance-form {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.5rem;
+}
+
+.attendance-form input {
+  padding: 0.85rem 1rem;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.96);
+  color: #102018;
+}
+
+.attendance-form button {
+  padding: 0.85rem 1rem;
+  border-radius: 10px;
+  border: 0;
+  background: var(--accent);
+  color: #04140e;
+  font-weight: 600;
+}
+
+.attendance-quota-card {
+  margin-bottom: 0.75rem;
+  padding: 1rem;
+  border-radius: 12px;
+  background: rgba(254, 249, 236, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #dce8e2;
+  font-size: 0.84rem;
+}
+
+.attendance-quota-card p {
+  margin: 0.25rem 0;
+}
+
+.attendance-quota-card span {
+  color: #9eb5aa;
+}
+
+.attendance-sdc-result {
+  max-width: 640px;
+  padding: 1rem;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--line);
+}
+
+.attendance-sdc-result h4 {
+  margin: 0 0 0.75rem;
+  font-size: 0.95rem;
+}
+
+.attendance-sdc-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.attendance-sdc-grid div {
+  padding: 0.75rem;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.attendance-sdc-grid span {
+  display: block;
+  color: #9eb5aa;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.attendance-sdc-grid strong {
+  display: block;
+  margin-top: 0.25rem;
+  color: var(--accent);
+  font-size: 1rem;
+}
+
+.attendance-sdc-ok {
+  margin: 0.85rem 0;
+  color: #9ae6c4;
+  font-size: 0.88rem;
+}
+
+.attendance-sdc-block {
+  margin: 0.85rem 0 0.35rem;
+  color: #ffb4b4;
+  font-weight: 600;
+}
+
+.attendance-sdc-result ul {
+  margin: 0 0 0.85rem 1.1rem;
+  color: #f0d4d4;
+  font-size: 0.84rem;
+}
+
+.attendance-contract-body {
+  max-height: 320px;
+  overflow: auto;
+  padding: 1rem;
+  border-radius: 12px;
+  background: #fff;
+  color: #222;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.attendance-reset {
+  margin-top: 0.5rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #9eb5aa;
+  font-size: 0.82rem;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.attendance-whatsapp {
+  position: fixed;
+  right: 1.25rem;
+  bottom: 1.25rem;
+  z-index: 60;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 3.25rem;
+  height: 3.25rem;
+  padding: 0 1rem;
+  border-radius: 999px;
+  background: #25d366;
+  color: #fff;
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-decoration: none;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.28);
+}
+
 /* —— Responsive —— */
 @media (width <= 850px) {
   .nav-links {
@@ -1416,6 +1730,26 @@
   }
 
   .gated-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .attendance-bot-row,
+  .attendance-actions,
+  .attendance-form-wrap,
+  .attendance-options,
+  .attendance-resumo,
+  .attendance-sdc-result,
+  .attendance-contract {
+    padding-left: 0;
+    padding-top: 4.5rem;
+  }
+
+  .attendance-mascot-wrap {
+    left: 50%;
+    transform: translateX(-50%);
+  }
+
+  .attendance-sdc-grid {
     grid-template-columns: 1fr;
   }
 

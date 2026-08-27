@@ -378,6 +378,7 @@ export function SiteNav() {
         />
       </Link>
       <div className="nav-links">
+        <a href="#atendimento">Atendimento</a>
         <a href="#solucoes">Soluções</a>
         <a href="#simulador">Simuladores</a>
         <a href="#nina">Nina Engine</a>

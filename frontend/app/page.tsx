@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import "./site.css";
+import { AttendanceBotSection } from "@/components/public-site/attendance-bot";
 import { AuctionSection, FlashInvestSection } from "@/components/public-site/gated-vitrine-section";
 import { PublicSimulatorSection, SiteNav } from "@/components/public-site/simulator-section";
 
@@ -73,6 +74,8 @@ export default function PublicHomePage() {
             <b>RWA</b>
           </div>
         </header>
+
+        <AttendanceBotSection />
 
         <section id="solucoes" className="section solutions">
           <div className="section-kicker">01 · Ecossistema</div>

@@ -874,6 +874,28 @@ def public_site_sdc_simulate(payload: PublicSdcSimulateRequest, request: Request
     )
 
 
+@router.post("/public/site/chat/home")
+def public_site_chat_home(request: Request, payload: dict | None = None):
+    from app.public_chat_proxy import proxy_legacy_chat
+
+    ip = request.client.host if request.client else "unknown"
+    allowed, retry = rate_limiter.allow(f"public-chat:{ip}", settings.public_rate_limit_per_minute)
+    if not allowed:
+        raise HTTPException(429, "Limite do atendimento atingido", headers={"Retry-After": str(retry)})
+    return proxy_legacy_chat(None, payload or {})
+
+
+@router.post("/public/site/chat/home/{step}")
+def public_site_chat_step(step: str, request: Request, payload: dict | None = None):
+    from app.public_chat_proxy import proxy_legacy_chat
+
+    ip = request.client.host if request.client else "unknown"
+    allowed, retry = rate_limiter.allow(f"public-chat:{ip}", settings.public_rate_limit_per_minute)
+    if not allowed:
+        raise HTTPException(429, "Limite do atendimento atingido", headers={"Retry-After": str(retry)})
+    return proxy_legacy_chat(step, payload or {})
+
+
 @router.get("/finops/flash-capital/simulation-params", response_model=FlashCapitalSimulationParamsView)
 def finops_flash_capital_simulation_params(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     return FlashCapitalSimulationParamsView(**get_active_flash_simulation_params(db, user.organization_id))
