@@ -272,10 +272,6 @@ export function AttendanceBotSection() {
           <br />
           <em>Atendimento externo 24/7.</em>
         </h2>
-        <p>
-          O mesmo robô conversacional do portal Letter.app.br — qualificação de interesse, orientação
-          sobre SDC, carta contemplada e venda de cotas.
-        </p>
       </div>
 
       <div className="attendance-shell">
