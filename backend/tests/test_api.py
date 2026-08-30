@@ -1777,6 +1777,74 @@ def test_escrow_create_uses_asaas_when_configured(client, auth_headers, monkeypa
     assert body["external_account_id"] == "wallet-test-001"
 
 
+def test_signature_zapsign_status_not_configured(client, auth_headers, monkeypatch):
+    monkeypatch.setattr("app.zapsign_signature_service.settings.zapsign_api_token", None)
+    response = client.get("/api/v1/signatures/zapsign/status", headers=auth_headers)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["configured"] is False
+    assert body["connected"] is False
+
+
+def test_signature_create_uses_zapsign_when_configured(client, auth_headers, monkeypatch):
+    class FakeZapSignClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def create_doc_from_pdf(self, **kwargs):
+            return {
+                "token": "doc-token-001",
+                "status": "pending",
+                "signers": [{"email": "cliente@exemplo.com.br", "sign_url": "https://app.zapsign.com.br/verificar/signer-001"}],
+            }
+
+        def get_doc(self, token):
+            return {"token": token, "status": "pending", "signers": [{"email": "cliente@exemplo.com.br", "sign_url": "https://app.zapsign.com.br/verificar/signer-001"}]}
+
+    monkeypatch.setattr("app.zapsign_signature_service.settings.zapsign_api_token", "zapsign-test-token")
+    monkeypatch.setattr("app.zapsign_signature_service.ZapSignClient", FakeZapSignClient)
+
+    proposal = client.get("/api/v1/proposals", headers=auth_headers).json()[0]
+    quotas = [q for q in client.get("/api/v1/quotas", headers=auth_headers).json() if q["category"] == "REAL_ESTATE"][:2]
+    calculation = client.post(
+        f"/api/v1/proposals/{proposal['id']}/calculate",
+        headers=auth_headers,
+        json={"quota_ids": [q["id"] for q in quotas], "fee_percent": "10", "start_fee": "1500"},
+    )
+    assert calculation.status_code == 201
+    contract = client.post(
+        f"/api/v1/proposals/{proposal['id']}/contracts",
+        headers=auth_headers,
+        json={"calculation_memory_id": calculation.json()["id"]},
+    ).json()
+    created = client.post(
+        f"/api/v1/contracts/{contract['id']}/signature",
+        headers=auth_headers,
+        json={"signer_email": "cliente@exemplo.com.br", "signer_name": "Cliente Teste"},
+    )
+    assert created.status_code == 201
+    body = created.json()
+    assert body["provider"] == "ZAPSIGN"
+    assert body["external_id"] == "doc-token-001"
+    assert body["sign_url"].startswith("https://")
+
+    refresh = client.post(f"/api/v1/signatures/{body['id']}/refresh", headers=auth_headers)
+    assert refresh.status_code == 200
+
+    mock_complete = client.post(
+        f"/api/v1/signatures/{body['id']}/mock-complete",
+        headers=auth_headers,
+        json={"confirmation": True, "ip_address": "127.0.0.1"},
+    )
+    assert mock_complete.status_code == 409
+
+
 def test_quitcon_sdc_projection_doc256(client, auth_headers):
     from app.quitcon_engine import EngineQuitConLetter
 

@@ -36,6 +36,11 @@ class Settings(BaseSettings):
     asaas_escrow_enabled: bool = True
     asaas_escrow_days_to_expire: int = 10
     asaas_escrow_fee_payer_subaccount: bool = False
+    zapsign_api_token: str | None = None
+    zapsign_base_url: str = "https://api.zapsign.com.br/api/v1"
+    zapsign_auth_mode: str = "assinaturaTela-tokenEmail"
+    zapsign_send_automatic_email: bool = True
+    zapsign_lang: str = "pt-br"
     vault_bucket: str = "letter-vault-private"
     vault_prefix: str = "company-vault"
     spe_cnpj: str = "00.000.000/0001-00"

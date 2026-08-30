@@ -198,6 +198,25 @@ export type EscrowAsaasStatus = {
   balance: string | null;
   message: string;
 };
+export type SignatureZapSignStatus = {
+  configured: boolean;
+  connected: boolean;
+  provider: string;
+  environment: string;
+  documents_total: number | null;
+  message: string;
+};
+export type SignatureEnvelopeView = {
+  id: string;
+  contract_id: string;
+  provider: string;
+  external_id: string;
+  signer_email: string;
+  status: string;
+  sent_at: string | null;
+  signed_at: string | null;
+  sign_url: string | null;
+};
 export type Payout = { id: string; escrow_account_id: string; beneficiary_name: string; beneficiary_document: string; pix_key_masked: string; amount: string; status: string; provider_transaction_id: string | null; approval_count: number; created_at: string };
 
 export function getToken() {

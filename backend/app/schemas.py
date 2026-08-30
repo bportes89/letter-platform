@@ -1192,11 +1192,21 @@ class DocumentView(ORMModel):
 
 class SignatureCreate(BaseModel):
     signer_email: EmailStr
+    signer_name: str | None = None
 
 
 class SignatureComplete(BaseModel):
     confirmation: bool
     ip_address: str | None = None
+
+
+class SignatureZapSignStatusView(BaseModel):
+    configured: bool
+    connected: bool
+    provider: str = "ZAPSIGN"
+    environment: str
+    documents_total: int | None = None
+    message: str
 
 
 class SignatureView(ORMModel):
@@ -1208,6 +1218,7 @@ class SignatureView(ORMModel):
     status: str
     sent_at: datetime | None
     signed_at: datetime | None
+    sign_url: str | None = None
 
 
 class LedgerPostRequest(BaseModel):

@@ -78,7 +78,7 @@ from app.schemas import (
     ReconciliationBatchView, ReconciliationItemView, ReconciliationResolveRequest,
     ProposalView, QuotaCreate, QuotaUpdate, QuotaView, RecoveredAssetCreate, RecoveredAssetView, RefreshRequest,
     ReservationCreate, ReservationView, SdcCalculationRequest, SessionView, SignatureComplete,
-    SignatureCreate, SignatureView, StepUpRequest, TaxClosingRequest, TaxClosingView,
+    SignatureCreate, SignatureView, SignatureZapSignStatusView, StepUpRequest, TaxClosingRequest, TaxClosingView,
     TaxDocumentCreate, TaxDocumentView, TaxExceptionResolve, TaxExceptionView,
     TokenPair, UnderwritingAssessmentCreate, UnderwritingAssessmentView, OperationalJobCreate, OperationalJobView, JobProcessRequest, TenantQuotaUpdate, TenantQuotaView, SecurityEventView,
     UnderwritingDecisionCreate, UnderwritingDecisionView, UnderwritingPolicyCreate,
@@ -1976,22 +1976,48 @@ def mock_scan_document(document_id: str, user: User = Depends(require_scope("doc
 
 @router.post("/contracts/{contract_id}/signature", response_model=SignatureView, status_code=201)
 def create_signature(contract_id: str, payload: SignatureCreate, user: User = Depends(require_scope("documents:write")), db: Session = Depends(get_db)):
+    from app.zapsign_signature_service import create_mock_envelope, create_zapsign_envelope, envelope_to_view, zapsign_configured
+
     contract=db.scalar(select(Contract).where(Contract.id==contract_id,Contract.organization_id==user.organization_id))
     if not contract: raise HTTPException(status_code=404,detail="Contrato não encontrado")
     if db.scalar(select(SignatureEnvelope).where(SignatureEnvelope.contract_id==contract.id)): raise HTTPException(status_code=409,detail="Envelope já criado")
-    envelope=SignatureEnvelope(organization_id=user.organization_id,contract_id=contract.id,provider="MOCK",external_id=f"mock_sign_{__import__('uuid').uuid4().hex}",signer_email=str(payload.signer_email),status="SENT",sent_at=datetime.now(UTC))
-    db.add(envelope);db.flush();audit(db,user,"signature.sent","signature_envelope",envelope.id);db.commit();db.refresh(envelope);return envelope
+    envelope = create_zapsign_envelope(db, user, contract, payload) if zapsign_configured() else create_mock_envelope(db, user, contract, payload)
+    db.flush();audit(db,user,"signature.sent","signature_envelope",envelope.id,{"provider":envelope.provider});db.commit();db.refresh(envelope)
+    return SignatureView(**envelope_to_view(envelope))
+
+
+@router.get("/signatures/zapsign/status", response_model=SignatureZapSignStatusView)
+def signature_zapsign_status(user: User = Depends(require_scope("documents:write"))):
+    from app.zapsign_signature_service import zapsign_status
+
+    _ = user
+    return zapsign_status()
+
+
+@router.post("/signatures/{envelope_id}/refresh", response_model=SignatureView)
+def refresh_signature(envelope_id: str, user: User = Depends(require_scope("documents:write")), db: Session = Depends(get_db)):
+    from app.zapsign_signature_service import envelope_to_view, refresh_zapsign_envelope
+
+    envelope=db.scalar(select(SignatureEnvelope).where(SignatureEnvelope.id==envelope_id,SignatureEnvelope.organization_id==user.organization_id))
+    if not envelope: raise HTTPException(status_code=404,detail="Envelope não encontrado")
+    envelope = refresh_zapsign_envelope(db, envelope)
+    audit(db,user,"signature.refreshed","signature_envelope",envelope.id,{"status":envelope.status});db.commit();db.refresh(envelope)
+    return SignatureView(**envelope_to_view(envelope))
 
 
 @router.post("/signatures/{envelope_id}/mock-complete", response_model=SignatureView)
 def complete_signature(envelope_id: str, payload: SignatureComplete, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.zapsign_signature_service import envelope_to_view
+
     envelope=db.scalar(select(SignatureEnvelope).where(SignatureEnvelope.id==envelope_id,SignatureEnvelope.organization_id==user.organization_id))
     if not envelope: raise HTTPException(status_code=404,detail="Envelope não encontrado")
+    if envelope.provider != "MOCK": raise HTTPException(status_code=409,detail="Conclusão simulada disponível apenas para envelopes MOCK.")
     if not payload.confirmation: raise HTTPException(status_code=422,detail="Confirmação obrigatória")
     if envelope.status!="SENT": raise HTTPException(status_code=409,detail="Envelope não está pendente")
     envelope.status="SIGNED";envelope.signed_at=datetime.now(UTC);envelope.evidence_json=json.dumps(payload.model_dump())
     contract=db.get(Contract,envelope.contract_id);contract.status="SIGNED"
-    audit(db,user,"signature.completed","signature_envelope",envelope.id,payload.model_dump());db.commit();db.refresh(envelope);return envelope
+    audit(db,user,"signature.completed","signature_envelope",envelope.id,payload.model_dump());db.commit();db.refresh(envelope)
+    return SignatureView(**envelope_to_view(envelope))
 
 
 @router.post("/ledger/transactions", response_model=LedgerTransactionView, status_code=201)
