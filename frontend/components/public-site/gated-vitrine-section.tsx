@@ -49,8 +49,7 @@ function FlashInvestCard({ item }: { item: PublicFlashInvestItem }) {
       </div>
       <h3>{item.title}</h3>
       <p className="gated-card-meta">
-        {item.product === "FLASH_POOL" ? "Flash Invest · Pool" : "Flash Invest · SDC Pool"} ·{" "}
-        {item.term_months} meses
+        {item.product === "FLASH_POOL" ? "Flash Invest · Pool" : "Flash Invest · SDC Pool"}
       </p>
 
       <div className="gated-metrics">
