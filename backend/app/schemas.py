@@ -673,7 +673,7 @@ class SdcCalculationRequest(BaseModel):
     capital_source: str = Field(default="POOL")
     pool_investment_amount: Decimal | None = Field(
         default=None, gt=0,
-        description="Valor aplicado pelo investidor no pool. Até R$ 100 mil: 1,6% a.m.; acima: 2,0% a.m.",
+        description="Valor aplicado pelo investidor no pool (rentabilidade fixa 1,6% a.m.).",
     )
     pool_investor_rate_percent: Decimal | None = Field(
         default=None, ge=0, le=4.5,
@@ -688,7 +688,7 @@ class FlashCreditCalculationRequest(BaseModel):
     ipca_annual_percent: Decimal = Field(default=Decimal("0"), ge=0, le=100)
     pool_investment_amount: Decimal | None = Field(
         default=None, gt=0,
-        description="Valor aplicado pelo investidor no pool. Até R$ 100 mil: 1,6% a.m.; acima: 2,0% a.m.",
+        description="Valor aplicado pelo investidor no pool (rentabilidade fixa 1,6% a.m.).",
     )
     pool_investor_rate_percent: Decimal | None = Field(
         default=None, ge=0, le=2.5,

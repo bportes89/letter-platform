@@ -44,7 +44,7 @@ export const DEMO_FLASH_INVEST: PublicFlashInvestItem[] = [
     target_amount: 1_200_000,
     funded_amount: 780_000,
     min_investment: TOKEN_NOMINAL_BRL,
-    rate_reference: "1,6% a.m. · faixa até R$ 100 mil",
+    rate_reference: "1,6% a.m.",
     sensitive: {
       borrower: "Holdings Alpha Participações Ltda.",
       collateral: "Av. Paulista, 1000 — Bela Vista, São Paulo/SP",
@@ -61,7 +61,7 @@ export const DEMO_FLASH_INVEST: PublicFlashInvestItem[] = [
     target_amount: 800_000,
     funded_amount: 215_000,
     min_investment: TOKEN_NOMINAL_BRL,
-    rate_reference: "2,0% a.m. · faixa acima de R$ 100 mil",
+    rate_reference: "1,6% a.m.",
     sensitive: {
       borrower: "Comércio Beta Distribuição S/A",
       collateral: "Grupo 1847 · Cota 042 — Administradora homologada",

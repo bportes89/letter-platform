@@ -1,13 +1,11 @@
-"""Faixas automáticas de rentabilidade pool e status fiscal do investidor."""
+"""Rentabilidade pool dos investidores (taxa única)."""
 
 from decimal import Decimal, ROUND_HALF_UP
 
 from fastapi import HTTPException
 
 
-POOL_INVESTOR_TIER_THRESHOLD = Decimal("100000")
-POOL_INVESTOR_RATE_UP_TO_THRESHOLD = Decimal("1.6")
-POOL_INVESTOR_RATE_ABOVE_THRESHOLD = Decimal("2.0")
+POOL_INVESTOR_RATE_PERCENT = Decimal("1.6")
 POOL_INVESTOR_TAX_STATUS = "EXEMPT_NOT_WITHHELD"
 POOL_INVESTOR_TAX_NOTE = (
     "Rentabilidade dos investidores do pool isenta de retenção na origem conforme política LETTER."
@@ -34,17 +32,11 @@ def resolve_pool_investor_rate(
         rate = pool_investor_rate_percent
         meta["pool_investor_rate_source"] = "MANUAL_CAMPAIGN_OVERRIDE"
     elif pool_investment_amount is not None:
+        rate = POOL_INVESTOR_RATE_PERCENT
         amount = _money(pool_investment_amount)
-        if amount <= POOL_INVESTOR_TIER_THRESHOLD:
-            rate = POOL_INVESTOR_RATE_UP_TO_THRESHOLD
-            meta["pool_investor_rate_source"] = "TIER_AUTO"
-            meta["pool_investor_tier"] = "UP_TO_100K"
-            meta["pool_investor_tier_label"] = "Até R$ 100.000,00"
-        else:
-            rate = POOL_INVESTOR_RATE_ABOVE_THRESHOLD
-            meta["pool_investor_rate_source"] = "TIER_AUTO"
-            meta["pool_investor_tier"] = "ABOVE_100K"
-            meta["pool_investor_tier_label"] = "A partir de R$ 100.000,00"
+        meta["pool_investor_rate_source"] = "POOL_FLAT"
+        meta["pool_investor_tier"] = "FLAT"
+        meta["pool_investor_tier_label"] = "1,6% a.m. (pool)"
         meta["pool_investment_amount"] = str(amount)
     else:
         rate = default_rate

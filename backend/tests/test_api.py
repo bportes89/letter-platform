@@ -1103,7 +1103,7 @@ def test_flash_pool_investor_tier_up_to_100k(client, auth_headers):
     output = calculated.json()["output"]
     assert output["investor_rate_percent"] == "1.60"
     assert output["platform_spread_rate_percent"] == "0.90"
-    assert output["pool_investor_tier"] == "UP_TO_100K"
+    assert output["pool_investor_tier"] == "FLAT"
     assert output["pool_investor_tax_status"] == "EXEMPT_NOT_WITHHELD"
 
 
@@ -1118,9 +1118,9 @@ def test_flash_pool_investor_tier_above_100k(client, auth_headers):
     })
     assert calculated.status_code == 201
     output = calculated.json()["output"]
-    assert output["investor_rate_percent"] == "2.00"
-    assert output["platform_spread_rate_percent"] == "0.50"
-    assert output["pool_investor_tier"] == "ABOVE_100K"
+    assert output["investor_rate_percent"] == "1.60"
+    assert output["platform_spread_rate_percent"] == "0.90"
+    assert output["pool_investor_tier"] == "FLAT"
     assert output["pool_investor_tax_status"] == "EXEMPT_NOT_WITHHELD"
 
 
@@ -1136,11 +1136,11 @@ def test_sdc_pool_investor_tier_auto(client, auth_headers):
     })
     assert calculated.status_code == 201
     output = calculated.json()["output"]
-    assert output["pool_investor_rate_percent"] == "2.0"
-    assert output["pool_investor_tier"] == "ABOVE_100K"
+    assert output["pool_investor_rate_percent"] == "1.6"
+    assert output["pool_investor_tier"] == "FLAT"
     assert output["pool_investor_tax_status"] == "EXEMPT_NOT_WITHHELD"
-    assert output["investor_interest"] == "192000.00"
-    assert output["platform_spread"] == "240000.00"
+    assert output["investor_interest"] == "153600.00"
+    assert output["platform_spread"] == "278400.00"
 
 
 def test_flash_capital_canonical_fee_and_commission_base(client, auth_headers):

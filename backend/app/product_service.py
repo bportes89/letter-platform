@@ -75,7 +75,7 @@ def build_sdc_simulation_output(
         platform_spread = money(Decimal("0"))
         pool_meta: dict = {}
     else:
-        default_investor = Decimal("2.5")
+        default_investor = Decimal("1.6")
         investor_rate, pool_meta = resolve_pool_investor_rate(
             pool_investment_amount=pool_investment_amount,
             pool_investor_rate_percent=pool_investor_rate_percent,
