@@ -188,6 +188,16 @@ export type NinaRoutingAssessment = {id:string;proposal_id:string;policy_id:stri
 export type AccountBalance = { code: string; name: string; account_type: string; balance: string };
 export type LedgerTransaction = { id: string; reference: string; event_type: string; description: string; amount: string; debit_account: string; credit_account: string; created_at: string };
 export type EscrowAccount = { id: string; operation_id: string | null; provider: string; external_account_id: string; status: string; available_balance: string; locked_balance: string };
+export type EscrowAsaasStatus = {
+  configured: boolean;
+  connected: boolean;
+  provider: string;
+  wallet_id: string | null;
+  wallet_id_masked: string | null;
+  environment: string;
+  balance: string | null;
+  message: string;
+};
 export type Payout = { id: string; escrow_account_id: string; beneficiary_name: string; beneficiary_document: string; pix_key_masked: string; amount: string; status: string; provider_transaction_id: string | null; approval_count: number; created_at: string };
 
 export function getToken() {

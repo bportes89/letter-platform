@@ -1242,6 +1242,17 @@ class EscrowCreate(BaseModel):
     operation_id: str | None = None
 
 
+class EscrowAsaasStatusView(BaseModel):
+    configured: bool
+    connected: bool
+    provider: str = "ASAAS"
+    wallet_id: str | None = None
+    wallet_id_masked: str | None = None
+    environment: str
+    balance: str | None = None
+    message: str
+
+
 class EscrowView(ORMModel):
     id: str
     operation_id: str | None

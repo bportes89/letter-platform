@@ -1736,6 +1736,47 @@ def test_public_site_chat_home_proxy(client, monkeypatch):
     assert response.json()["OBJ"]["chat_next"][0]["text"] == "O que você deseja:"
 
 
+def test_escrow_asaas_status_not_configured(client, auth_headers, monkeypatch):
+    monkeypatch.setattr("app.asaas_escrow_service.settings.asaas_api_key", None)
+    monkeypatch.setattr("app.asaas_escrow_service.settings.asaas_wallet_id", None)
+    response = client.get("/api/v1/escrow/asaas/status", headers=auth_headers)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["configured"] is False
+    assert body["connected"] is False
+
+
+def test_escrow_create_uses_asaas_when_configured(client, auth_headers, monkeypatch):
+    class FakeAsaasClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def get_balance(self):
+            return {"balance": 1000.0}
+
+        def list_wallets(self):
+            return {"data": [{"id": "wallet-test-001"}]}
+
+        def configure_default_escrow(self, **kwargs):
+            return {"enabled": True}
+
+    monkeypatch.setattr("app.asaas_escrow_service.settings.asaas_api_key", "test-key")
+    monkeypatch.setattr("app.asaas_escrow_service.settings.asaas_wallet_id", "wallet-test-001")
+    monkeypatch.setattr("app.asaas_escrow_service.AsaasClient", FakeAsaasClient)
+
+    created = client.post("/api/v1/escrow/accounts", headers=auth_headers, json={})
+    assert created.status_code == 201
+    body = created.json()
+    assert body["provider"] == "ASAAS"
+    assert body["external_account_id"] == "wallet-test-001"
+
+
 def test_quitcon_sdc_projection_doc256(client, auth_headers):
     from app.quitcon_engine import EngineQuitConLetter
 

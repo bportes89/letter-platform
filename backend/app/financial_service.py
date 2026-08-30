@@ -44,6 +44,11 @@ def account_balances(db: Session, user: User) -> list[dict]:
 
 
 def create_mock_escrow(db: Session, user: User, operation_id: str | None) -> EscrowAccount:
+    from app.asaas_escrow_service import asaas_configured, create_asaas_escrow
+
+    if asaas_configured():
+        return create_asaas_escrow(db, user, operation_id)
+
     if operation_id and db.scalar(select(EscrowAccount).where(EscrowAccount.operation_id == operation_id)):
         raise HTTPException(status_code=409, detail="Operação já possui conta escrow")
     account = EscrowAccount(organization_id=user.organization_id, operation_id=operation_id, provider="MOCK", external_account_id=f"mock_escrow_{uuid4().hex}")

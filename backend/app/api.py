@@ -49,7 +49,7 @@ from app.schemas import (
     ValidStampCreate, ValidStampView, SaaSTermsCreate, SaaSTermsView, SaaSPlanCreate, SaaSPlanView,
     SaaSSubscribeCreate, SaaSSubscriptionView,
     BillingGenerateRequest, CollectionActionView, CommissionAllocate, CommissionEntryView, CommissionRuleCreate,
-    CommissionRuleView, DocumentView, EscrowCreate, EscrowView, EscrowWebhook,
+    CommissionRuleView, DocumentView, EscrowAsaasStatusView, EscrowCreate, EscrowView, EscrowWebhook,
     DelinquencyView, FiscalReleaseRequest, FundingOpportunityCreate, FundingOpportunityView, InvitationView,
     NinaApprovalRequest, NinaCriticalApprovalView, NinaDistressCaseCreate, NinaDistressCaseView,
     NinaDistressEventView, NinaDocumentCreate, NinaGateApplyRequest, NinaLegalDocumentView, NinaTimelineEvaluateRequest,
@@ -2020,7 +2020,15 @@ def balances(user: User = Depends(get_current_user), db: Session = Depends(get_d
 
 @router.post("/escrow/accounts", response_model=EscrowView, status_code=201)
 def create_escrow(payload: EscrowCreate, user: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
-    account=create_mock_escrow(db,user,payload.operation_id);db.flush();audit(db,user,"escrow.created","escrow_account",account.id);db.commit();db.refresh(account);return account
+    account=create_mock_escrow(db,user,payload.operation_id);db.flush();audit(db,user,"escrow.created","escrow_account",account.id,{"provider":account.provider});db.commit();db.refresh(account);return account
+
+
+@router.get("/escrow/asaas/status", response_model=EscrowAsaasStatusView)
+def escrow_asaas_status(user: User = Depends(require_scope("payments:review"))):
+    from app.asaas_escrow_service import asaas_status
+
+    _ = user
+    return asaas_status()
 
 
 @router.get("/escrow/accounts", response_model=list[EscrowView])

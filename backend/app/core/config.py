@@ -30,6 +30,12 @@ class Settings(BaseSettings):
     integration_circuit_failure_threshold: int = 3
     integration_circuit_cooldown_seconds: int = 60
     integration_http_timeout_seconds: float = 10.0
+    asaas_api_key: str | None = None
+    asaas_wallet_id: str | None = None
+    asaas_base_url: str = "https://api-sandbox.asaas.com/v3"
+    asaas_escrow_enabled: bool = True
+    asaas_escrow_days_to_expire: int = 10
+    asaas_escrow_fee_payer_subaccount: bool = False
     vault_bucket: str = "letter-vault-private"
     vault_prefix: str = "company-vault"
     spe_cnpj: str = "00.000.000/0001-00"
