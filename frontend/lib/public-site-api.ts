@@ -53,6 +53,41 @@ export async function capturePublicLead(payload: {
   });
 }
 
+export type PublicReferralPreview = {
+  valid: boolean;
+  referral_code: string | null;
+  referrer_name: string | null;
+  message: string | null;
+};
+
+export type PublicClientRegisterResponse = {
+  access_token: string;
+  refresh_token: string;
+  token_type: string;
+  user: { id: string; name: string; email: string; role: string };
+  referrer: PublicReferralPreview | null;
+  lead_id: string;
+};
+
+export async function fetchPublicReferral(referralCode: string): Promise<PublicReferralPreview> {
+  return publicFetch<PublicReferralPreview>(`/public/site/referral/${encodeURIComponent(referralCode)}`);
+}
+
+export async function registerPublicClient(payload: {
+  name: string;
+  email: string;
+  phone: string;
+  password: string;
+  document?: string;
+  referral_code?: string;
+  terms_accepted: boolean;
+}): Promise<PublicClientRegisterResponse> {
+  return publicFetch<PublicClientRegisterResponse>("/public/site/auth/register", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function simulateFlashPublic(
   assetValue: number,
   requestedAmount: number | null,

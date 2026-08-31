@@ -9,7 +9,9 @@ from sqlalchemy.orm import Session
 
 from app.finops_engine import money, pool_public_simulation
 from app.flash_capital_params import get_active_flash_simulation_params
-from app.models import CommissionRule, Lead, Organization, Quota, User
+from app.core.security import hash_password
+from app.identity_service import create_session_tokens
+from app.models import CommissionRule, Lead, NetworkNode, Organization, Quota, Role, User
 from app.product_service import build_sdc_simulation_output
 
 HUNDRED = Decimal("100")
@@ -84,6 +86,117 @@ def preview_mmn(db: Session, organization_id: str, product: str, bases: dict[str
         "holding_retained_from_fee": holding_retained,
         "levels_json": rule.levels_json,
         "note": "Preview com base na regra MMN ativa da plataforma (tipo SALES).",
+    }
+
+
+def mask_person_name(name: str) -> str:
+    parts = [p for p in name.strip().split() if p]
+    if not parts:
+        return "Indicador"
+    if len(parts) == 1:
+        return f"{parts[0][:1].upper()}***"
+    return f"{parts[0]} {parts[-1][:1].upper()}."
+
+
+def lookup_referral_code(db: Session, organization_id: str, referral_code: str | None) -> NetworkNode | None:
+    if not referral_code or not referral_code.strip():
+        return None
+    code = referral_code.strip().upper()
+    return db.scalar(
+        select(NetworkNode).where(
+            NetworkNode.organization_id == organization_id,
+            NetworkNode.referral_code == code,
+            NetworkNode.status == "ACTIVE",
+        )
+    )
+
+
+def preview_referral_code(db: Session, referral_code: str) -> dict:
+    org = headquarters_org(db)
+    node = lookup_referral_code(db, org.id, referral_code)
+    if not node:
+        return {
+            "valid": False,
+            "referral_code": referral_code.strip().upper(),
+            "referrer_name": None,
+            "message": "Código de indicação não encontrado.",
+        }
+    referrer = db.get(User, node.user_id)
+    return {
+        "valid": True,
+        "referral_code": node.referral_code,
+        "referrer_name": mask_person_name(referrer.name) if referrer else None,
+        "message": None,
+    }
+
+
+def register_public_client(
+    db: Session,
+    *,
+    name: str,
+    email: str,
+    phone: str,
+    password: str,
+    document: str | None = None,
+    referral_code: str | None = None,
+    user_agent: str | None = None,
+    ip_address: str | None = None,
+) -> dict:
+    org = headquarters_org(db)
+    normalized_email = email.strip().lower()
+    if db.scalar(select(User).where(User.email == normalized_email)):
+        raise HTTPException(status_code=409, detail="E-mail já cadastrado")
+    normalized_document = document.strip() if document else None
+    if normalized_document and db.scalar(select(User).where(User.document == normalized_document)):
+        raise HTTPException(status_code=409, detail="Documento já cadastrado")
+
+    referrer_node = lookup_referral_code(db, org.id, referral_code)
+    if referral_code and referral_code.strip() and not referrer_node:
+        raise HTTPException(status_code=422, detail="Código de indicação inválido")
+
+    referrer_user_id = referrer_node.user_id if referrer_node else None
+    user = User(
+        organization_id=org.id,
+        name=name.strip(),
+        email=normalized_email,
+        phone=phone.strip(),
+        document=normalized_document,
+        password_hash=hash_password(password),
+        role=Role.CLIENT,
+        referred_by_user_id=referrer_user_id,
+    )
+    db.add(user)
+    db.flush()
+
+    lead_source = "CLIENT_SELF_REGISTER"
+    if referrer_node:
+        lead_source = f"CLIENT_SELF_REGISTER:REF:{referrer_node.referral_code}"
+    lead = Lead(
+        organization_id=org.id,
+        owner_id=referrer_user_id,
+        name=user.name,
+        document=user.document,
+        phone=user.phone or phone.strip(),
+        product_interest="PLATFORM",
+        status="REGISTERED",
+        source=lead_source,
+    )
+    db.add(lead)
+    db.flush()
+
+    access, refresh, _ = create_session_tokens(db, user, user_agent, ip_address)
+    referrer = db.get(User, referrer_user_id) if referrer_user_id else None
+    return {
+        "access_token": access,
+        "refresh_token": refresh,
+        "token_type": "bearer",
+        "user": user,
+        "referrer": {
+            "valid": bool(referrer_node),
+            "referral_code": referrer_node.referral_code if referrer_node else None,
+            "referrer_name": mask_person_name(referrer.name) if referrer else None,
+        } if referrer_node else None,
+        "lead_id": lead.id,
     }
 
 

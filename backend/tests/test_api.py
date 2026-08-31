@@ -2218,3 +2218,67 @@ def test_public_site_lead_flash_pool_and_sdc(client, auth_headers):
     assert sdc.json()["mmn"]["configured"] is True
     assert sdc.json()["mmn"]["commission_pool"] == "2400.00"
 
+def test_public_client_self_registration(client, auth_headers):
+    users = client.get("/api/v1/admin/users", headers=auth_headers).json()
+    partner = next(u for u in users if u["email"] == "parceiro@letter.com.br")
+    node = client.post(
+        "/api/v1/network/nodes",
+        headers=auth_headers,
+        json={"user_id": partner["id"], "tree_type": "SALES"},
+    )
+    assert node.status_code == 201
+    referral_code = node.json()["referral_code"]
+
+    preview = client.get(f"/api/v1/public/site/referral/{referral_code}")
+    assert preview.status_code == 200
+    assert preview.json()["valid"] is True
+    assert preview.json()["referrer_name"]
+
+    registered = client.post("/api/v1/public/site/auth/register", json={
+        "name": "Cliente Site Demo",
+        "email": "cliente.site@letter.com.br",
+        "phone": "11977776666",
+        "password": "ClienteSite1!",
+        "referral_code": referral_code,
+        "terms_accepted": True,
+    })
+    assert registered.status_code == 201
+    body = registered.json()
+    assert body["user"]["role"] == "CLIENT"
+    assert body["user"]["email"] == "cliente.site@letter.com.br"
+    assert body["referrer"]["valid"] is True
+    assert body["referrer"]["referral_code"] == referral_code
+
+    me = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {body['access_token']}"})
+    assert me.status_code == 200
+    assert me.json()["role"] == "CLIENT"
+
+    duplicate = client.post("/api/v1/public/site/auth/register", json={
+        "name": "Outro Cliente",
+        "email": "cliente.site@letter.com.br",
+        "phone": "11966665555",
+        "password": "ClienteSite1!",
+        "terms_accepted": True,
+    })
+    assert duplicate.status_code == 409
+
+    invalid_ref = client.post("/api/v1/public/site/auth/register", json={
+        "name": "Cliente Sem Ref",
+        "email": "cliente2.site@letter.com.br",
+        "phone": "11955554444",
+        "password": "ClienteSite1!",
+        "referral_code": "LTR-SAL-INVALIDO",
+        "terms_accepted": True,
+    })
+    assert invalid_ref.status_code == 422
+
+    direct = client.post("/api/v1/public/site/auth/register", json={
+        "name": "Cliente Direto",
+        "email": "cliente3.site@letter.com.br",
+        "phone": "11944443333",
+        "password": "ClienteSite1!",
+        "terms_accepted": True,
+    })
+    assert direct.status_code == 201
+    assert direct.json()["referrer"] is None
+

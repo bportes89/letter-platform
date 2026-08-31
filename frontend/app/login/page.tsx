@@ -90,6 +90,9 @@ export default function LoginPage() {
           <Link href="/" className="site-login-back">
             ← Voltar ao site institucional
           </Link>
+          <Link href="/cadastro" className="site-login-back">
+            Ainda não tem conta? Abra sua conta →
+          </Link>
         </form>
       </main>
     </div>

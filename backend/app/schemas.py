@@ -1900,6 +1900,32 @@ class PublicLeadCaptureRequest(BaseModel):
     autorizacao_scr_bacen: bool = False
 
 
+class PublicClientRegisterRequest(BaseModel):
+    name: str = Field(min_length=2, max_length=180)
+    email: EmailStr
+    phone: str = Field(min_length=8, max_length=30)
+    password: str = Field(min_length=10, max_length=128)
+    document: str | None = Field(default=None, min_length=11, max_length=20)
+    referral_code: str | None = Field(default=None, min_length=6, max_length=40)
+    terms_accepted: bool = False
+
+
+class PublicReferralPreview(BaseModel):
+    valid: bool
+    referral_code: str | None = None
+    referrer_name: str | None = None
+    message: str | None = None
+
+
+class PublicClientRegisterResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+    user: UserView
+    referrer: PublicReferralPreview | None = None
+    lead_id: str
+
+
 class PublicFlashPoolRequest(BaseModel):
     asset_value: Decimal = Field(gt=0)
     requested_amount: Decimal | None = Field(default=None, gt=0)

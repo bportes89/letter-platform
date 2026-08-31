@@ -117,6 +117,23 @@
   padding: 0 17px;
 }
 
+.nav-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.button-outline {
+  color: #fff;
+  background: transparent;
+  border: 1px solid #00d084;
+  box-shadow: none;
+}
+
+.button-outline:hover {
+  background: rgb(0 208 132 / 0.12);
+}
+
 .button.light {
   color: var(--panel-deep);
   box-shadow: none;
@@ -1352,6 +1369,29 @@
   color: #c8d5cf;
   font-size: 0.75rem;
   margin-top: 1rem;
+}
+
+.site-checkbox-label {
+  display: flex;
+  flex-direction: row !important;
+  align-items: flex-start;
+  gap: 0.65rem !important;
+  font-size: 0.8125rem !important;
+  line-height: 1.5;
+  margin-bottom: 1rem;
+}
+
+.site-checkbox-label input[type="checkbox"] {
+  width: 1rem;
+  height: 1rem;
+  margin-top: 0.15rem;
+  accent-color: #00d084;
+}
+
+.site-referral-ok {
+  color: #00d084;
+  font-size: 0.8125rem;
+  margin: -0.35rem 0 0.75rem;
 }
 
 /* —— Robô de atendimento externo —— */

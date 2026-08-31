@@ -68,6 +68,7 @@ from app.schemas import (
     QuitConPublicSimulateRequest, QuitConSuccessFeeWebhook, QuitConCedentePaymentWebhook,
     QuitConOperationalServiceWebhook,
     PublicFlashPoolRequest, PublicLeadCaptureRequest, PublicQuotaCatalogItem, PublicSdcSimulateRequest,
+    PublicClientRegisterRequest, PublicClientRegisterResponse, PublicReferralPreview,
     QuitConAdminRejectionRequest,
     QuitConSimulateRequest,
     SdcQuitConIntegrationView, SdcQuitConProjectionRequest,
@@ -171,7 +172,8 @@ from app.tapaf_constants import (
     TAPAF_NOMINAL,
 )
 from app.public_site_service import (
-    capture_public_lead, list_public_quotas, simulate_flash_pool_public, simulate_sdc_public,
+    capture_public_lead, list_public_quotas, preview_referral_code, register_public_client,
+    simulate_flash_pool_public, simulate_sdc_public,
 )
 from app.flash_capital_params import get_active_flash_simulation_params, save_flash_simulation_params
 from app.network_service import (
@@ -942,6 +944,39 @@ def public_site_lead_capture(payload: PublicLeadCaptureRequest, request: Request
     )
     db.commit()
     return result
+
+
+@router.get("/public/site/referral/{referral_code}", response_model=PublicReferralPreview)
+def public_site_referral_preview(referral_code: str, request: Request, db: Session = Depends(get_db)):
+    ip = request.client.host if request.client else "unknown"
+    allowed, retry = rate_limiter.allow(f"public-referral:{ip}", settings.public_rate_limit_per_minute)
+    if not allowed:
+        raise HTTPException(429, "Limite atingido", headers={"Retry-After": str(retry)})
+    return preview_referral_code(db, referral_code)
+
+
+@router.post("/public/site/auth/register", response_model=PublicClientRegisterResponse, status_code=201)
+def public_site_client_register(payload: PublicClientRegisterRequest, request: Request, db: Session = Depends(get_db)):
+    ip = request.client.host if request.client else "unknown"
+    allowed, retry = rate_limiter.allow(f"public-register:{ip}", settings.public_rate_limit_per_minute)
+    if not allowed:
+        raise HTTPException(429, "Limite de cadastro atingido", headers={"Retry-After": str(retry)})
+    if not payload.terms_accepted:
+        raise HTTPException(status_code=422, detail="Aceite os termos de uso e privacidade para continuar")
+    result = register_public_client(
+        db,
+        name=payload.name,
+        email=str(payload.email),
+        phone=payload.phone,
+        password=payload.password,
+        document=payload.document,
+        referral_code=payload.referral_code,
+        user_agent=request.headers.get("user-agent"),
+        ip_address=ip,
+    )
+    db.commit()
+    user = result.pop("user")
+    return PublicClientRegisterResponse.model_validate({**result, "user": user})
 
 
 @router.get("/public/site/quotas", response_model=list[PublicQuotaCatalogItem])

@@ -385,9 +385,14 @@ export function SiteNav() {
         <a href="#flash-invest">Flash Invest</a>
         <a href="#leilao">Leilão</a>
       </div>
-      <Link href="/login" className="button button-small">
-        Deal Room <span>→</span>
-      </Link>
+      <div className="nav-actions">
+        <Link href="/cadastro" className="button button-small button-outline">
+          Abra sua conta
+        </Link>
+        <Link href="/login" className="button button-small">
+          Deal Room <span>→</span>
+        </Link>
+      </div>
     </nav>
   );
 }
