@@ -5,7 +5,8 @@ import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 import "../site.css";
 import { SiteNav } from "@/components/public-site/simulator-section";
-import { getToken, login } from "@/lib/api";
+import { getToken, login, api, User } from "@/lib/api";
+import { portalHomeForRole } from "@/lib/portal-routes";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("admin@letter.com.br");
@@ -15,7 +16,15 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (getToken()) window.location.href = "/dashboard";
+    if (!getToken()) return;
+    api<User>("/auth/me")
+      .then((user) => {
+        window.location.href = portalHomeForRole(user.role);
+      })
+      .catch(() => {
+        localStorage.removeItem("letter_access_token");
+        localStorage.removeItem("letter_refresh_token");
+      });
   }, []);
 
   async function submit(event: FormEvent) {
@@ -24,7 +33,8 @@ export default function LoginPage() {
     setLoading(true);
     try {
       await login(email, password, otp);
-      window.location.href = "/dashboard";
+      const user = await api<User>("/auth/me");
+      window.location.href = portalHomeForRole(user.role);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Falha no acesso");
       setLoading(false);

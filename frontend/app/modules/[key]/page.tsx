@@ -21,6 +21,7 @@ import { PreAnalysisModule } from "@/components/pre-analysis-module";
 import { LeaseEquityModule } from "@/components/lease-equity-module";
 import { QuitConModule } from "@/components/quitcon-module";
 import { canAccessModuleRoute, personaLabel } from "@/lib/role-nav";
+import { portalHomeForRole } from "@/lib/portal-routes";
 
 export default function ModulePage() {
   const { key } = useParams<{ key: string }>();
@@ -52,7 +53,7 @@ export default function ModulePage() {
             Seu perfil ({personaLabel(user.role)}) não tem permissão para acessar este módulo.
             Use o menu lateral para ir aos produtos e ferramentas liberados para você.
           </p>
-          <Link className="primary-button" href="/dashboard">
+          <Link className="primary-button" href={portalHomeForRole(user.role)}>
             Voltar à visão geral <ArrowRight />
           </Link>
         </div>

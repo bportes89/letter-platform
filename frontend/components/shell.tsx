@@ -16,6 +16,7 @@ import {
   filterProductNav,
   personaLabel,
 } from "@/lib/role-nav";
+import { isPortalHomePath, portalHomeForRole } from "@/lib/portal-routes";
 
 export function Shell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname(); const [modules, setModules] = useState<Module[]>([]); const [user, setUser] = useState<User | null>(null); const [open, setOpen] = useState(false);
@@ -29,6 +30,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const productNav = user ? filterProductNav(user.role) : [];
   const platformModules = modules;
   const persona = personaLabel(user?.role);
+  const portalHome = user ? portalHomeForRole(user.role) : "/login";
   return <div className="app-shell">
     <aside className={open ? "sidebar open" : "sidebar"}>
       <div className="side-logo">
@@ -39,7 +41,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
       </div>
       <div className="side-context"><small>SEU ACESSO</small><strong>{persona}</strong><ChevronDown size={14}/></div>
       <nav>
-        <Link className={pathname==="/dashboard"?"active":""} href="/dashboard"><LayoutDashboard/>Visão geral</Link>
+        <Link className={isPortalHomePath(pathname, user?.role)?"active":""} href={portalHome}><LayoutDashboard/>Visão geral</Link>
         {productNav.length > 0 && <>
         <div className="nav-label">PRODUTOS</div>
         <div className="nav-products">
