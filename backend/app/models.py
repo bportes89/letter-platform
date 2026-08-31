@@ -749,6 +749,10 @@ class FiscalEvidence(TimestampMixin, Base):
     provider: Mapped[str] = mapped_column(String(40), default="MOCK_PARSER")
     status: Mapped[str] = mapped_column(String(30), default="VALID")
     document_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    access_key: Mapped[str | None] = mapped_column(String(44), index=True)
+    sefaz_status: Mapped[str | None] = mapped_column(String(30))
+    gross_amount: Mapped[float | None] = mapped_column(Numeric(15, 2))
+    detail_json: Mapped[str] = mapped_column(Text, default="{}")
     validated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
 
 

@@ -313,10 +313,20 @@ def test_five_level_commission_allocation_and_fiscal_hold(client, auth_headers):
     partner_headers = {"Authorization":f"Bearer {login['access_token']}"}
     wallet = client.get("/api/v1/wallet/commissions", headers=partner_headers)
     assert wallet.status_code == 200 and wallet.json()[0]["status"] == "PENDING_FISCAL"
+    sefaz_status = client.get("/api/v1/wallet/commissions/sefaz/status", headers=partner_headers)
+    assert sefaz_status.status_code == 200 and sefaz_status.json()["enabled"] is True
+    nf_xml = (
+        '<NFe xmlns="http://www.portalfiscal.inf.br/nfe">'
+        "<chNFe>35250801234567890123456789012345678901234567</chNFe>"
+        "<xNome>Parceiro Demonstracao</xNome></NFe>"
+    )
     released = client.post("/api/v1/wallet/commissions/release-fiscal", headers=partner_headers, json={
-        "reference_month":"2026-08","document_content":"<NFS-e>documento fiscal simulado válido</NFS-e>"
+        "reference_month": "2026-08",
+        "document_content": nf_xml,
+        "gross_amount": "5000.00",
     })
     assert released.status_code == 200 and released.json()["available_balance"] == "5000.00"
+    assert released.json()["access_key"] == "35250801234567890123456789012345678901234567"
     summary = client.get("/api/v1/network/me/summary", headers=partner_headers)
     assert summary.json()["privacy_mode"] == "AGGREGATED"
     assert "names" not in summary.json()

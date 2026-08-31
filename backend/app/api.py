@@ -51,6 +51,7 @@ from app.schemas import (
     SaaSSubscribeCreate, SaaSSubscriptionView,
     BillingGenerateRequest, CollectionActionView, CommissionAllocate, CommissionEntryView, CommissionRuleCreate,
     CommissionRuleView, DocumentView, EscrowAsaasStatusView, EscrowCreate, EscrowSubaccountPreviewView, EscrowView, EscrowWebhook,
+    FiscalEvidenceView, SefazRobotStatusView,
     DelinquencyView, FiscalReleaseRequest, FundingOpportunityCreate, FundingOpportunityView, InvitationView,
     NinaApprovalRequest, NinaCriticalApprovalView, NinaDistressCaseCreate, NinaDistressCaseView,
     NinaDistressEventView, NinaDocumentCreate, NinaGateApplyRequest, NinaLegalDocumentView, NinaTimelineEvaluateRequest,
@@ -174,7 +175,7 @@ from app.public_site_service import (
 from app.flash_capital_params import get_active_flash_simulation_params, save_flash_simulation_params
 from app.network_service import (
     allocate_commissions, confirm_investment, create_network_node, create_rule,
-    downline_summary, release_fiscal_hold, reserve_investment,
+    downline_summary, reserve_investment,
 )
 from app.billing_service import (
     apply_payment, generate_billing_schedule, import_reconciliation_csv,
@@ -403,12 +404,42 @@ def commission_wallet(user: User = Depends(get_current_user), db: Session = Depe
     return list(db.scalars(select(CommissionEntry).where(CommissionEntry.organization_id==user.organization_id,CommissionEntry.beneficiary_id==user.id).order_by(CommissionEntry.created_at.desc())))
 
 
+@router.get("/wallet/commissions/sefaz/status", response_model=SefazRobotStatusView)
+def commission_sefaz_status(user: User = Depends(get_current_user)):
+    from app.sefaz_nf_service import sefaz_robot_status
+
+    _ = user
+    return sefaz_robot_status()
+
+
 @router.post("/wallet/commissions/release-fiscal")
 def commission_fiscal_release(payload: FiscalReleaseRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    evidence=release_fiscal_hold(db,user,payload.reference_month,payload.document_content)
-    audit(db,user,"fiscal.evidence_validated","fiscal_evidence",evidence.id,{"reference_month":payload.reference_month});db.commit()
-    available=db.scalar(select(__import__('sqlalchemy').func.coalesce(__import__('sqlalchemy').func.sum(CommissionEntry.amount),0)).where(CommissionEntry.beneficiary_id==user.id,CommissionEntry.status=="AVAILABLE"))
-    return {"status":"VALID","available_balance":str(Decimal(str(available)).quantize(Decimal('0.01')))}
+    from app.sefaz_nf_service import available_commission_balance, release_commissions_after_sefaz
+
+    evidence = release_commissions_after_sefaz(
+        db,
+        user,
+        reference_month=payload.reference_month,
+        document_content=payload.document_content,
+        access_key=payload.access_key,
+        gross_amount=payload.gross_amount,
+    )
+    audit(
+        db,
+        user,
+        "fiscal.sefaz_validated",
+        "fiscal_evidence",
+        evidence.id,
+        {"reference_month": payload.reference_month, "access_key": evidence.access_key, "sefaz_status": evidence.sefaz_status},
+    )
+    db.commit()
+    available = available_commission_balance(db, user)
+    return {
+        "status": evidence.sefaz_status or "VALID",
+        "available_balance": str(available),
+        "access_key": evidence.access_key,
+        "provider": evidence.provider,
+    }
 
 
 @router.post("/funding/opportunities", response_model=FundingOpportunityView, status_code=201)

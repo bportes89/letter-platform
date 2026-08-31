@@ -371,6 +371,26 @@ class CommissionEntryView(ORMModel):
 class FiscalReleaseRequest(BaseModel):
     reference_month: str = Field(pattern=r"^\d{4}-\d{2}$")
     document_content: str = Field(min_length=10)
+    access_key: str | None = Field(default=None, min_length=44, max_length=44)
+    gross_amount: Decimal | None = Field(default=None, gt=0)
+
+
+class SefazRobotStatusView(BaseModel):
+    enabled: bool
+    provider: str
+    mode: str
+    message: str
+
+
+class FiscalEvidenceView(ORMModel):
+    id: str
+    reference_month: str
+    provider: str
+    status: str
+    access_key: str | None
+    sefaz_status: str | None
+    gross_amount: Decimal | None
+    validated_at: datetime
 
 
 class FundingOpportunityCreate(BaseModel):
