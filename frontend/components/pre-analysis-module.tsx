@@ -256,9 +256,9 @@ export function PreAnalysisModule() {
     <>
       <div className="page-heading">
         <div>
-          <span className="eyebrow dark">OCR + TAPAF + VALID-STAMP</span>
-          <h1>Pré-análise fiduciária V6</h1>
-          <p>Checklist OCR, checkout TAPAF R$ 1.500,00 e motor de auditoria de renda com selo Valid-Stamp.</p>
+          <span className="eyebrow dark">SDC — ESTRUTURA INTERNA</span>
+          <h1>SDC — TAPAF, LTV e Valid-Stamp</h1>
+          <p>Puxa automaticamente a proposta SDC: valida lastro (LTV), cobra TAPAF R$ 1.500,00 e emite selo Valid-Stamp após auditoria de renda.</p>
         </div>
         <div className="operational-icon"><FileSearch /></div>
       </div>
@@ -273,7 +273,7 @@ export function PreAnalysisModule() {
         <h2>Fase 1 — Upload e triagem OCR</h2>
         <select value={proposalId} onChange={(e) => setProposalId(e.target.value)} required>
           <option value="">Selecione a proposta</option>
-          {proposals.map((p) => <option key={p.id} value={p.id}>{p.product} · {brl.format(Number(p.requested_amount))}</option>)}
+          {proposals.filter((p) => p.product === "SDC").map((p) => <option key={p.id} value={p.id}>{p.product} · {brl.format(Number(p.requested_amount))}</option>)}
         </select>
         {pauta && (
           <p className="form-help">Pauta <b>{pauta.pauta_code}</b> · status <span className="pill">{pauta.status}</span></p>
