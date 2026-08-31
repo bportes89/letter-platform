@@ -236,6 +236,11 @@ class InviteCreate(BaseModel):
     branch_id: str | None = None
 
 
+class PartnerInviteCreate(BaseModel):
+    email: EmailStr
+    role: Role = Field(description="MASTER_FRANCHISEE, MANAGER, PARTNER ou QUOTA_SELLER")
+
+
 class InviteAccept(BaseModel):
     token: str
     name: str = Field(min_length=2, max_length=180)

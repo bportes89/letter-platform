@@ -55,7 +55,7 @@ from app.schemas import (
     DelinquencyView, FiscalReleaseRequest, FundingOpportunityCreate, FundingOpportunityView, InvitationView,
     NinaApprovalRequest, NinaCriticalApprovalView, NinaDistressCaseCreate, NinaDistressCaseView,
     NinaDistressEventView, NinaDocumentCreate, NinaGateApplyRequest, NinaLegalDocumentView, NinaTimelineEvaluateRequest,
-    InviteAccept, InviteCreate, KycCreate, KycDecision, KycView, LeadCreate,
+    InviteAccept, InviteCreate, PartnerInviteCreate, KycCreate, KycDecision, KycView, LeadCreate,
     InvestmentPositionView, InvestmentReservationView, InvestmentReserveRequest, InvoicePaymentWebhook, InvoiceProcessorRequest, InvoiceView,
     PaymentReceiptView, PreAnalysisEngineRequest, PreAnalysisPautaView, PreAnalysisProposalRequest,
     PreAnalysisTapafCheckoutAcceptRequest, PreAnalysisTapafPaymentWebhook, PreAnalysisValidateDocumentsRequest,
@@ -117,7 +117,8 @@ from app.flash_valid_lss_service import (
 )
 from app.identity_service import (
     accept_invitation, confirm_password_reset, create_invitation, create_kyc_case,
-    create_password_reset, create_session_tokens, rotate_refresh, setup_mfa,
+    create_partner_invitation, create_password_reset, create_session_tokens,
+    list_partner_invitations, rotate_refresh, setup_mfa,
     token_hash, verify_mfa,
 )
 from app.core.security import decode_token, hash_password, verify_password
@@ -345,6 +346,21 @@ def accept_invite(payload:InviteAccept,db:Session=Depends(get_db)):
 @router.get("/admin/invitations",response_model=list[InvitationView])
 def invitations(user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
     return list(db.scalars(select(UserInvitation).where(UserInvitation.organization_id==user.organization_id).order_by(UserInvitation.created_at.desc())))
+
+
+@router.post("/network/invitations", response_model=InvitationView, status_code=201)
+def partner_invite(payload: PartnerInviteCreate, user: User = Depends(require_scope("network:invite")), db: Session = Depends(get_db)):
+    item, raw = create_partner_invitation(db, user, str(payload.email), payload.role)
+    db.flush()
+    audit(db, user, "invitation.created", "invitation", item.id, {"channel": "partner_network"})
+    db.commit()
+    db.refresh(item)
+    return InvitationView.model_validate(item).model_copy(update={"token": raw})
+
+
+@router.get("/network/invitations", response_model=list[InvitationView])
+def partner_invitations(user: User = Depends(require_scope("network:invite")), db: Session = Depends(get_db)):
+    return list_partner_invitations(db, user)
 
 
 @router.post("/kyc/cases",response_model=KycView,status_code=201)

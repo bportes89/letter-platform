@@ -2282,3 +2282,52 @@ def test_public_client_self_registration(client, auth_headers):
     assert direct.status_code == 201
     assert direct.json()["referrer"] is None
 
+
+def test_partner_can_invite_partner(client, auth_headers):
+    users = client.get("/api/v1/admin/users", headers=auth_headers).json()
+    partner = next(u for u in users if u["email"] == "parceiro@letter.com.br")
+    node = client.post(
+        "/api/v1/network/nodes",
+        headers=auth_headers,
+        json={"user_id": partner["id"], "tree_type": "SALES"},
+    )
+    assert node.status_code == 201
+
+    login = client.post("/api/v1/auth/login", json={
+        "email": "parceiro@letter.com.br",
+        "password": "Letter@123",
+    })
+    assert login.status_code == 200
+    partner_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+    invite = client.post("/api/v1/network/invitations", headers=partner_headers, json={
+        "email": "downline.parceiro@letter.com.br",
+        "role": "PARTNER",
+    })
+    assert invite.status_code == 201
+    token = invite.json()["token"]
+    assert token
+
+    accepted = client.post("/api/v1/auth/invitations/accept", json={
+        "token": token,
+        "name": "Parceiro Downline",
+        "document": "22222222222",
+        "password": "NovaSenha@123",
+    })
+    assert accepted.status_code == 200
+    assert accepted.json()["role"] == "PARTNER"
+
+    nodes = client.get("/api/v1/network/nodes", headers=auth_headers).json()
+    downline_node = next(n for n in nodes if n["user_id"] == accepted.json()["id"])
+    assert downline_node["sponsor_user_id"] == partner["id"]
+    assert downline_node["referral_code"]
+
+    mine = client.get("/api/v1/network/invitations", headers=partner_headers).json()
+    assert len(mine) >= 1
+    assert mine[0]["email"] == "downline.parceiro@letter.com.br"
+
+    blocked = client.post("/api/v1/network/invitations", headers=partner_headers, json={
+        "email": "cliente.convite@letter.com.br",
+        "role": "CLIENT",
+    })
+    assert blocked.status_code == 422

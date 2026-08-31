@@ -1,5 +1,4 @@
 import hashlib
-import json
 import secrets
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
@@ -11,7 +10,8 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.security import create_token, decode_token, hash_password, verify_password
-from app.models import AuthSession, KycCase, PasswordReset, ROLE_SCOPES, User, UserInvitation
+from app.models import AuthSession, KycCase, PasswordReset, ROLE_SCOPES, Role, User, UserInvitation
+from app.network_service import PARTNER_NETWORK_ROLES, attach_partner_under_sponsor
 
 
 def as_utc(value: datetime | None) -> datetime | None:
@@ -61,11 +61,43 @@ def create_invitation(db:Session,user:User,email:str,role,branch_id:str|None):
     raw=secrets.token_urlsafe(32);invite=UserInvitation(organization_id=user.organization_id,branch_id=branch_id,invited_by_id=user.id,email=email.lower(),role=role,token_hash=token_hash(raw),expires_at=datetime.now(UTC)+timedelta(days=3));db.add(invite);return invite,raw
 
 
+def create_partner_invitation(db: Session, inviter: User, email: str, role: Role) -> tuple[UserInvitation, str]:
+    if inviter.role not in PARTNER_NETWORK_ROLES:
+        raise HTTPException(status_code=403, detail="Perfil sem permissão para convidar parceiros")
+    if role not in PARTNER_NETWORK_ROLES:
+        raise HTTPException(status_code=422, detail="Parceiros só podem convidar perfis comerciais da rede")
+    normalized = email.strip().lower()
+    if db.scalar(select(User).where(User.email == normalized)):
+        raise HTTPException(status_code=409, detail="E-mail já cadastrado")
+    pending = db.scalar(select(UserInvitation).where(
+        UserInvitation.organization_id == inviter.organization_id,
+        UserInvitation.email == normalized,
+        UserInvitation.status == "PENDING",
+    ))
+    if pending:
+        raise HTTPException(status_code=409, detail="Já existe convite pendente para este e-mail")
+    return create_invitation(db, inviter, normalized, role, inviter.branch_id)
+
+
+def list_partner_invitations(db: Session, inviter: User) -> list[UserInvitation]:
+    return list(db.scalars(select(UserInvitation).where(
+        UserInvitation.organization_id == inviter.organization_id,
+        UserInvitation.invited_by_id == inviter.id,
+    ).order_by(UserInvitation.created_at.desc())))
+
+
 def accept_invitation(db:Session,raw:str,name:str,document:str|None,password:str):
     invite=db.scalar(select(UserInvitation).where(UserInvitation.token_hash==token_hash(raw),UserInvitation.status=="PENDING"))
     if not invite or as_utc(invite.expires_at)<=datetime.now(UTC): raise HTTPException(status_code=422,detail="Convite inválido ou expirado")
     if db.scalar(select(User).where(User.email==invite.email)): raise HTTPException(status_code=409,detail="E-mail já cadastrado")
-    user=User(organization_id=invite.organization_id,branch_id=invite.branch_id,name=name,email=invite.email,document=document,password_hash=hash_password(password),role=invite.role);invite.status="ACCEPTED";invite.accepted_at=datetime.now(UTC);db.add(user);return user
+    user=User(organization_id=invite.organization_id,branch_id=invite.branch_id,name=name,email=invite.email,document=document,password_hash=hash_password(password),role=invite.role)
+    db.add(user)
+    db.flush()
+    inviter = db.get(User, invite.invited_by_id)
+    if inviter:
+        attach_partner_under_sponsor(db, invite.organization_id, user, inviter)
+    invite.status="ACCEPTED";invite.accepted_at=datetime.now(UTC)
+    return user
 
 
 def create_password_reset(db:Session,user:User):

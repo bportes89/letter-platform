@@ -21,6 +21,54 @@ def money(value: Decimal) -> Decimal:
     return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
+PARTNER_NETWORK_ROLES = frozenset({
+    Role.MASTER_FRANCHISEE,
+    Role.MANAGER,
+    Role.PARTNER,
+    Role.QUOTA_SELLER,
+})
+
+
+def attach_partner_under_sponsor(
+    db: Session,
+    organization_id: str,
+    new_user: User,
+    sponsor: User,
+    tree_type: str = "SALES",
+) -> NetworkNode | None:
+    if new_user.role not in PARTNER_NETWORK_ROLES:
+        return None
+    existing = db.scalar(select(NetworkNode).where(
+        NetworkNode.organization_id == organization_id,
+        NetworkNode.user_id == new_user.id,
+        NetworkNode.tree_type == tree_type,
+    ))
+    if existing:
+        return existing
+    sponsor_node = db.scalar(select(NetworkNode).where(
+        NetworkNode.organization_id == organization_id,
+        NetworkNode.user_id == sponsor.id,
+        NetworkNode.tree_type == tree_type,
+    ))
+    if not sponsor_node:
+        return None
+    code = f"LTR-{tree_type[:3]}-{new_user.id.replace('-', '')[:10].upper()}"
+    node = NetworkNode(
+        organization_id=organization_id,
+        user_id=new_user.id,
+        sponsor_user_id=sponsor.id,
+        tree_type=tree_type,
+        referral_code=code,
+    )
+    db.add(node)
+    try:
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        return None
+    return node
+
+
 def create_network_node(db: Session, user: User, target: User, tree_type: str, sponsor_user_id: str | None) -> NetworkNode:
     if target.organization_id != user.organization_id:
         raise HTTPException(status_code=404, detail="Usuário não encontrado")
