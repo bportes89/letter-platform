@@ -100,3 +100,6 @@ html,body{-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
 @media(prefers-reduced-motion:reduce){.ambient-orb,.nina-card,.metric-card-float,.panel-float,.dashboard-page,.status-dot{animation:none!important}.metric-card:hover,.panel:not(.nina-card):hover,.outline-button:hover{transform:none}}
 .side-logo-link{display:inline-flex;align-items:center;text-decoration:none;line-height:0;flex:1;min-width:0}
 .side-logo-mark,.side-logo-link img{display:block!important;width:auto!important;height:2rem!important;max-width:100%!important;object-fit:contain!important;object-position:left center!important}
+.nav-products{display:flex;flex-direction:column;gap:6px;margin-bottom:4px}
+.nav-products a{border:1px solid rgb(255 255 255 / 0.06);border-radius:8px;background:rgb(255 255 255 / 0.03);padding-top:11px;padding-bottom:11px;line-height:1.35;font-size:11px}
+.nav-products a.active{border-color:rgb(0 208 132 / 0.45);background:rgb(0 208 132 / 0.14)}

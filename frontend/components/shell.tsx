@@ -1,24 +1,25 @@
 "use client";
 
-import { Activity, Bell, BrainCircuit, ChevronDown, LayoutDashboard, LogOut, Menu, Search, Settings, ShieldCheck, X } from "lucide-react";
+import {
+  Activity, Bell, BrainCircuit, Building2, ChevronDown, FileCheck2, Gavel,
+  HandCoins, LayoutDashboard, LogOut, Menu, Search, Settings, ShieldCheck,
+  ShoppingBag, Sparkles, TrendingUp, Wallet, X, Zap,
+} from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { LetterLogo } from "@/components/brand/letter-logo";
 import { api, logout, Module, User } from "@/lib/api";
+import { PLATFORM_HIDDEN_MODULE_KEYS, PRODUCT_NAV } from "@/lib/product-nav";
 
 export function Shell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname(); const [modules, setModules] = useState<Module[]>([]); const [user, setUser] = useState<User | null>(null); const [open, setOpen] = useState(false);
   useEffect(() => {
     Promise.all([api<Module[]>("/modules"), api<User>("/auth/me")]).then(([m,u]) => {
-      const nav = m.some(x => x.key === "finops") ? m : [
-        ...m.slice(0, 9),
-        { key: "finops", name: "FinOps e quitação", description: "Simulador, quitação e pré-análise TAPAF", status: "ACTIVE", route: "/finops", critical: true },
-        ...m.slice(9),
-      ];
-      setModules(nav); setUser(u);
+      setModules(m.filter(x => !PLATFORM_HIDDEN_MODULE_KEYS.has(x.key))); setUser(u);
     }).catch(() => logout());
   }, []);
+  const platformModules = modules;
   return <div className="app-shell">
     <aside className={open ? "sidebar open" : "sidebar"}>
       <div className="side-logo">
@@ -30,10 +31,12 @@ export function Shell({ children }: { children: React.ReactNode }) {
       <div className="side-context"><small>AMBIENTE</small><strong>LETTER Matriz</strong><ChevronDown size={14}/></div>
       <nav>
         <Link className={pathname==="/dashboard"?"active":""} href="/dashboard"><LayoutDashboard/>Visão geral</Link>
-        <div className="nav-label">ECOSSISTEMA</div>
-        {modules.slice(0,15).map(m=><Link className={pathname===`/modules/${m.key}`?"active":""} href={`/modules/${m.key}`} key={m.key}><ModuleIcon keyName={m.key}/>{m.name}</Link>)}
-        <div className="nav-label">GESTÃO</div>
-        {modules.slice(15).map(m=><Link className={pathname===`/modules/${m.key}`?"active":""} href={`/modules/${m.key}`} key={m.key}><ModuleIcon keyName={m.key}/>{m.name}</Link>)}
+        <div className="nav-label">PRODUTOS</div>
+        <div className="nav-products">
+          {PRODUCT_NAV.map(p=><Link className={pathname===`/modules/${p.key}`?"active":""} href={`/modules/${p.key}`} key={p.key}><ProductIcon keyName={p.key}/>{p.name}</Link>)}
+        </div>
+        <div className="nav-label">PLATAFORMA</div>
+        {platformModules.map(m=><Link className={pathname===`/modules/${m.key}`?"active":""} href={`/modules/${m.key}`} key={m.key}><ModuleIcon keyName={m.key}/>{m.name}</Link>)}
       </nav>
       <button className="logout" onClick={logout}><LogOut/>Sair</button>
     </aside>
@@ -47,6 +50,20 @@ export function Shell({ children }: { children: React.ReactNode }) {
       <div className="content">{children}</div>
     </section>
   </div>
+}
+
+function ProductIcon({ keyName }: { keyName: string }) {
+  switch (keyName) {
+    case "marketplace": return <ShoppingBag />;
+    case "sdc": return <Wallet />;
+    case "flash-capital": return <Zap />;
+    case "lease-equity": return <Building2 />;
+    case "flash-invest": return <TrendingUp />;
+    case "quitcon": return <HandCoins />;
+    case "lss": return <FileCheck2 />;
+    case "leilao": return <Gavel />;
+    default: return <Sparkles />;
+  }
 }
 
 function ModuleIcon({keyName}:{keyName:string}) { return keyName==="nina"?<BrainCircuit/>:keyName==="rbac"?<ShieldCheck/>:keyName==="admin"?<Settings/>:<Activity/> }

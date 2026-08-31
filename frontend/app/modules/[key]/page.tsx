@@ -29,9 +29,14 @@ export default function ModulePage() {
       .finally(()=>setLoading(false));
   },[key]);
 
+  if(key==="marketplace"||key==="inventory")return <InventoryModule/>;
+  if(key==="sdc"||key==="proposals")return <ProposalsModule/>;
+  if(key==="flash-capital"||key==="finops")return <FinOpsModule/>;
+  if(key==="lease-equity")return <><LeaseEquityModule/><PreAnalysisModule/></>;
+  if(key==="flash-invest"||key==="funding")return <FundingModule/>;
+  if(key==="quitcon")return <QuitConModule/>;
+  if(key==="leilao"||key==="auctions")return <AuctionsModule/>;
   if(key==="crm")return <LeadsModule/>;
-  if(key==="inventory")return <InventoryModule/>;
-  if(key==="proposals")return <ProposalsModule/>;
   if(key==="contracts")return <ContractsModule/>;
   if(key==="wallet")return <WalletModule/>;
   if(key==="payments")return <PaymentsModule/>;
@@ -39,9 +44,7 @@ export default function ModulePage() {
   if(key==="rbac")return <SecurityModule/>;
   if(key==="admin")return <ComplianceModule/>;
   if(key==="mmn")return <NetworkModule/>;
-  if(key==="funding")return <FundingModule/>;
   if(key==="collections")return <CollectionsModule/>;
-  if(key==="auctions")return <AuctionsModule/>;
   if(key==="taxtech")return <TaxTechModule/>;
   if(key==="communications")return <CommunicationsModule/>;
   if(key==="nina")return <NinaModule/>;
@@ -49,7 +52,6 @@ export default function ModulePage() {
   if(key==="reports")return <BIModule/>;
   if(key==="operations")return <OperationsModule/>;
   if(key==="lss")return <LSSModule/>;
-  if(key==="finops")return <><FinOpsModule/><PreAnalysisModule/><LeaseEquityModule/><QuitConModule/></>;
 
   if(loading)return <div className="loading">Carregando módulo...</div>;
   if(!module)return <div className="error">Módulo &quot;{key}&quot; não encontrado ou indisponível neste ambiente.</div>;
