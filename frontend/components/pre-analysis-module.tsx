@@ -48,7 +48,19 @@ const DOC_CODES = [
 
 const TAPAF_UI_STATUSES = new Set(["DOCUMENTS_OK", "TAPAF_CHECKOUT_ACCEPTED", "TAPAF_PAID"]);
 
-export function PreAnalysisModule() {
+export function PreAnalysisModule({ variant = "sdc" }: { variant?: "sdc" | "flash" }) {
+  const productFilter = variant === "flash" ? "FLASH_CREDIT" : "SDC";
+  const heading = variant === "flash"
+    ? {
+        eyebrow: "FLASH CAPITAL — COMPLIANCE",
+        title: "Flash Capital — TAPAF, LTV e Valid-Stamp",
+        subtitle: "TAPAF R$ 1.500,00 é obrigatória para emissão do Valid-Stamp. Após simular a proposta, valide documentos → TAPAF → selo.",
+      }
+    : {
+        eyebrow: "SDC — ESTRUTURA INTERNA",
+        title: "SDC — TAPAF, LTV e Valid-Stamp",
+        subtitle: "Puxa automaticamente a proposta SDC: valida lastro (LTV), cobra TAPAF R$ 1.500,00 e emite selo Valid-Stamp após auditoria de renda.",
+      };
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [proposalId, setProposalId] = useState("");
   const [pauta, setPauta] = useState<Pauta | null>(null);
@@ -102,7 +114,10 @@ export function PreAnalysisModule() {
     };
   }, [checkout, pauta?.tapaf_scroll_completed, pauta?.tapaf_checkbox_1, pauta?.tapaf_checkbox_2, evaluateManifestScroll]);
 
-  const loadProposals = useCallback(() => api<Proposal[]>("/proposals").then(setProposals), []);
+  const loadProposals = useCallback(
+    () => api<Proposal[]>("/proposals").then((rows) => setProposals(rows.filter((p) => p.product === productFilter))),
+    [productFilter],
+  );
   useEffect(() => { void loadProposals(); }, [loadProposals]);
 
   useEffect(() => {
@@ -226,10 +241,16 @@ export function PreAnalysisModule() {
         { valor: 50000, tipo_credito: "PIX_RECEBIDO", mesmo_titular_TED_bool: false },
       ];
     }
-    try {
-      const res = await api<{ result: Record<string, unknown>; status: string }>("/finops/pre-analysis/run-engine", {
-        method: "POST",
-        body: JSON.stringify({
+    const proposal = proposals.find((p) => p.id === proposalId);
+    const body = variant === "flash"
+      ? {
+          proposal_id: proposalId,
+          asset_type: "REAL_ESTATE",
+          extratos_6_meses_data: sampleExtratos,
+          parcela_simulada: proposal ? String(Number(proposal.requested_amount) / 36) : "8000",
+          valor_avaliacao_bem: proposal ? String(Number(proposal.requested_amount) / 0.35) : "1000000",
+        }
+      : {
           proposal_id: proposalId,
           adm_nome: "ANCORA",
           extratos_6_meses_data: sampleExtratos,
@@ -237,9 +258,15 @@ export function PreAnalysisModule() {
           valor_avaliacao_bem: "200000",
           saldo_devedor_cotas: "150000",
           ano_fabricacao_bem: 2020,
-        }),
+        };
+    try {
+      const res = await api<{ result: Record<string, unknown>; status: string }>("/finops/pre-analysis/run-engine", {
+        method: "POST",
+        body: JSON.stringify(body),
       });
-      setMessage(`Motor V6: ${String(res.result.status_core)}`);
+      setMessage(variant === "flash"
+        ? `Flash Capital: ${String(res.result.status_core)}${res.result.Selo_LETTER_Valid_Stamp ? " — Valid-Stamp emitido" : ""}`
+        : `Motor V6: ${String(res.result.status_core)}`);
       await loadPauta(proposalId);
     } catch (x) {
       setMessage(x instanceof Error ? x.message : "Falha no motor de pré-análise");
@@ -256,9 +283,9 @@ export function PreAnalysisModule() {
     <>
       <div className="page-heading">
         <div>
-          <span className="eyebrow dark">SDC — ESTRUTURA INTERNA</span>
-          <h1>SDC — TAPAF, LTV e Valid-Stamp</h1>
-          <p>Puxa automaticamente a proposta SDC: valida lastro (LTV), cobra TAPAF R$ 1.500,00 e emite selo Valid-Stamp após auditoria de renda.</p>
+          <span className="eyebrow dark">{heading.eyebrow}</span>
+          <h1>{heading.title}</h1>
+          <p>{heading.subtitle}</p>
         </div>
         <div className="operational-icon"><FileSearch /></div>
       </div>
@@ -273,7 +300,7 @@ export function PreAnalysisModule() {
         <h2>Fase 1 — Upload e triagem OCR</h2>
         <select value={proposalId} onChange={(e) => setProposalId(e.target.value)} required>
           <option value="">Selecione a proposta</option>
-          {proposals.filter((p) => p.product === "SDC").map((p) => <option key={p.id} value={p.id}>{p.product} · {brl.format(Number(p.requested_amount))}</option>)}
+          {proposals.map((p) => <option key={p.id} value={p.id}>{p.product} · {brl.format(Number(p.requested_amount))}</option>)}
         </select>
         {pauta && (
           <p className="form-help">Pauta <b>{pauta.pauta_code}</b> · status <span className="pill">{pauta.status}</span></p>
@@ -381,8 +408,8 @@ export function PreAnalysisModule() {
 
       {canRunEngine && (
         <section className="panel">
-          <h2>Fase 3 — Motor Nina (pós-TAPAF)</h2>
-          <button type="button" onClick={() => void runEngine()}>Executar MotorPreAnaliseFiduciariaV6</button>
+          <h2>Fase 3 — {variant === "flash" ? "Valid-Stamp Flash Capital (pós-TAPAF)" : "Motor Nina (pós-TAPAF)"}</h2>
+          <button type="button" onClick={() => void runEngine()}>{variant === "flash" ? "Validar LTV e emitir Valid-Stamp" : "Executar MotorPreAnaliseFiduciariaV6"}</button>
         </section>
       )}
 

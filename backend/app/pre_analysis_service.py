@@ -280,9 +280,118 @@ def confirm_tapaf_payment(db: Session, user: User, pauta: PreAnalysisPauta, even
     return pauta
 
 
+def _flash_documents_from_pauta(pauta: PreAnalysisPauta, asset_type: str) -> dict[str, str]:
+    submitted = json.loads(pauta.documents_json or "{}").get("submitted", [])
+    by_code = {str(d.get("code", "")): str(d.get("filename", d.get("code", ""))) for d in submitted}
+    tapaf_ref = pauta.tapaf_payment_reference or pauta.id
+
+    def doc_hash(code: str, fallback: str) -> str:
+        raw = by_code.get(code, fallback)
+        return hashlib.sha256(raw.encode()).hexdigest()
+
+    if asset_type == "VEHICLE":
+        return {
+            "FIPE_MOLICAR": doc_hash("MATRICULA_OU_CRLV", "fipe"),
+            "LAUDO_AVALIACAO": doc_hash("LAUDO_AVM", "laudo"),
+            "SERASA": tapaf_ref,
+            "BACEN": tapaf_ref,
+            "CRLV": doc_hash("MATRICULA_OU_CRLV", "crlv"),
+        }
+    return {
+        "MATRICULA_ENOTARIADO": doc_hash("MATRICULA_OU_CRLV", "matricula"),
+        "LAUDO_AVALIACAO": doc_hash("LAUDO_AVM", "laudo"),
+        "SERASA": tapaf_ref,
+        "BACEN": tapaf_ref,
+    }
+
+
+def run_flash_capital_engine_phase3(
+    db: Session,
+    user: User,
+    pauta: PreAnalysisPauta,
+    proposal: Proposal,
+    payload: dict,
+) -> dict:
+    """Flash Capital: pós-TAPAF emite Valid-Stamp com LTV 40% e lastro imobiliário/veicular."""
+    if pauta.status != "TAPAF_PAID":
+        raise HTTPException(status_code=409, detail="Pagamento TAPAF confirmado é obrigatório para emissão do Valid-Stamp")
+
+    asset_value = money(Decimal(str(payload.get("valor_avaliacao_bem", "0"))))
+    principal = money(Decimal(str(proposal.requested_amount)))
+    if asset_value <= 0:
+        raise HTTPException(status_code=422, detail="Informe valor_avaliacao_bem (AVM) para Flash Capital")
+
+    ltv = money(principal / asset_value * HUNDRED)
+    asset_type = str(payload.get("asset_type", "REAL_ESTATE")).upper()
+    if asset_type not in {"REAL_ESTATE", "VEHICLE"}:
+        raise HTTPException(status_code=422, detail="asset_type deve ser REAL_ESTATE ou VEHICLE")
+
+    engine = MotorPreAnaliseFiduciariaV6()
+    extratos = payload.get("extratos_6_meses_data") or {}
+    renda_liquida, status_renda = engine.calcular_media_extratos_bancarios_limpos(extratos)
+    parcela = money(Decimal(str(payload.get("parcela_simulada", proposal.requested_amount))))
+    limite_margem = money(renda_liquida * engine.margem_maxima_renda) if status_renda == "CONSOLIDADO_SUCCESS" else Decimal("0")
+
+    result: dict = {
+        "status_core": "APROVADO_COMPLIANCE_NINA",
+        "produto": "FLASH_CAPITAL",
+        "ltv_percent": str(ltv),
+        "max_ltv_percent": "40",
+        "asset_type": asset_type,
+        "tapaf_reference": pauta.tapaf_payment_reference,
+    }
+
+    if ltv > Decimal("40"):
+        result["status_core"] = "REPROVADO_POR_LTV_EXCEDIDO"
+        result["motivo_gatilho"] = f"LTV {ltv}% excede o teto Flash Capital de 40%."
+        pauta.status = "REPROVED"
+    elif status_renda == "CONSOLIDADO_SUCCESS" and parcela > limite_margem:
+        result["status_core"] = "REPROVADO_POR_PARCELA_MAIOR_QUE_30_PERCENT_DA_RENDA"
+        result["motivo_gatilho"] = "Parcela acima de 30% da renda apurada nos extratos."
+        pauta.status = "REPROVED"
+    else:
+        stamp_hash = "sha256_" + hashlib.sha256(
+            f"FLASH_{proposal.id}_{pauta.tapaf_payment_reference}_{datetime.now(UTC).isoformat()}".encode()
+        ).hexdigest()
+        pauta.valid_stamp_hash = stamp_hash
+        pauta.status = "APPROVED_VALID_STAMP"
+        stamp_payload = {
+            "pauta_code": pauta.pauta_code,
+            "proposal_id": proposal.id,
+            "tapaf_evidence_reference": pauta.tapaf_payment_reference,
+            "asset_type": asset_type,
+            "ltv_percent": str(ltv),
+            "documents": _flash_documents_from_pauta(pauta, asset_type),
+        }
+        if asset_type == "VEHICLE" and payload.get("vehicle"):
+            stamp_payload["vehicle"] = payload["vehicle"]
+        issue_stamp(
+            db,
+            user,
+            entity_type="pre_analysis_pauta",
+            entity_id=pauta.id,
+            purpose="FLASH_CAPITAL_PARTIES",
+            payload=stamp_payload,
+        )
+        result["Selo_LETTER_Valid_Stamp"] = {
+            "status": "ISSUED_VALID_STAMP_SUCCESS",
+            "hash_criptografico_rs256": stamp_hash,
+        }
+
+    pauta.engine_result_json = json.dumps(result, ensure_ascii=False)
+    pauta.client_result_json = json.dumps(
+        {k: v for k, v in result.items() if k != "resumo_fiduciario_interno_oculto_para_o_fundo"},
+        ensure_ascii=False,
+    )
+    return json.loads(pauta.client_result_json or "{}")
+
+
 def run_engine_phase3(
     db: Session, user: User, pauta: PreAnalysisPauta, proposal: Proposal, payload: dict,
 ) -> dict:
+    if proposal.product == "FLASH_CREDIT":
+        return run_flash_capital_engine_phase3(db, user, pauta, proposal, payload)
+
     if pauta.status != "TAPAF_PAID":
         raise HTTPException(status_code=409, detail="Pagamento TAPAF confirmado é obrigatório para Fase 3")
 

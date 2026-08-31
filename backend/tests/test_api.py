@@ -1376,6 +1376,44 @@ def test_pre_analysis_v6_documents_tapaf_and_engine(client, auth_headers):
     assert help_flash.status_code == 200 and "Flash Capital" in help_flash.json()["title"]
 
 
+def test_flash_capital_tapaf_and_valid_stamp(client, auth_headers):
+    lead = client.get("/api/v1/leads", headers=auth_headers).json()[0]
+    proposal = client.post("/api/v1/proposals", headers=auth_headers, json={
+        "lead_id": lead["id"], "product": "FLASH_CREDIT", "requested_amount": "400000", "terms": {},
+    }).json()
+
+    validated = client.post("/api/v1/finops/pre-analysis/validate-documents", headers=auth_headers, json={
+        "proposal_id": proposal["id"], "documents": _valid_pre_analysis_documents(),
+    })
+    assert validated.status_code == 200 and validated.json()["status"] == "DOCUMENTS_OK"
+
+    client.post("/api/v1/finops/pre-analysis/tapaf-checkout-accept", headers=auth_headers, json={
+        "proposal_id": proposal["id"], "scroll_completed": True, "checkbox_1": True, "checkbox_2": True,
+    })
+    paid = client.post("/api/v1/finops/pre-analysis/tapaf-payment-webhook", headers=auth_headers, json={
+        "proposal_id": proposal["id"], "event_id": "tapaf-flash-001", "amount": "1500.00",
+    })
+    assert paid.status_code == 200 and paid.json()["status"] == "TAPAF_PAID"
+
+    engine = client.post("/api/v1/finops/pre-analysis/run-engine", headers=auth_headers, json={
+        "proposal_id": proposal["id"],
+        "asset_type": "REAL_ESTATE",
+        "extratos_6_meses_data": _sample_extratos(50000),
+        "parcela_simulada": "10000",
+        "valor_avaliacao_bem": "1000000",
+    })
+    assert engine.status_code == 200
+    assert engine.json()["result"]["status_core"] == "APROVADO_COMPLIANCE_NINA"
+    assert engine.json()["status"] == "APPROVED_VALID_STAMP"
+    assert engine.json()["result"]["ltv_percent"] == "40.00"
+
+    pauta = client.get(f"/api/v1/finops/pre-analysis/{proposal['id']}", headers=auth_headers)
+    assert pauta.status_code == 200 and pauta.json()["valid_stamp_hash"]
+
+    stamps = client.get("/api/v1/valid-stamps", headers=auth_headers).json()
+    assert any(s["purpose"] == "FLASH_CAPITAL_PARTIES" for s in stamps)
+
+
 def test_pre_analysis_v6_income_margin_bifurcation(client, auth_headers):
     lead = client.get("/api/v1/leads", headers=auth_headers).json()[0]
     proposal = client.post("/api/v1/proposals", headers=auth_headers, json={

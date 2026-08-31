@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models import (
-    FlashCreditParty, FlashCreditPolicy, Proposal, SaaSAcceptance,
+    FlashCreditParty, FlashCreditPolicy, PreAnalysisPauta, Proposal, SaaSAcceptance,
     SaaSPlan, SaaSSubscription, SaaSTermsTemplate, User, ValidStamp,
 )
 from app.valid_stamp_requirements import (
@@ -76,6 +76,25 @@ def configure_flash_parties(db:Session,user:User,proposal:Proposal,*,borrower_cn
 
 def issue_stamp(db:Session,user:User,*,entity_type:str,entity_id:str,purpose:str,payload:dict)->ValidStamp:
     if purpose in FLASH_CAPITAL_STAMP_PURPOSES:
+        if not str(payload.get("tapaf_evidence_reference", "")).strip() and entity_type == "proposal":
+            pauta = db.scalar(
+                select(PreAnalysisPauta).where(
+                    PreAnalysisPauta.proposal_id == entity_id,
+                    PreAnalysisPauta.organization_id == user.organization_id,
+                    PreAnalysisPauta.status.in_(("TAPAF_PAID", "APPROVED_VALID_STAMP")),
+                )
+            )
+            if not pauta or not pauta.tapaf_payment_reference:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Valid-Stamp Flash Capital exige TAPAF liquidada (R$ 1.500) na esteira de pré-análise",
+                )
+            payload = {**payload, "tapaf_evidence_reference": pauta.tapaf_payment_reference}
+        if not str(payload.get("tapaf_evidence_reference", "")).strip():
+            raise HTTPException(
+                status_code=422,
+                detail="Valid-Stamp Flash Capital exige pagamento TAPAF (tapaf_evidence_reference)",
+            )
         validate_flash_capital_stamp_payload(payload)
     elif purpose in SDC_VEHICLE_STAMP_PURPOSES:
         validate_sdc_vehicle_stamp_payload(payload)

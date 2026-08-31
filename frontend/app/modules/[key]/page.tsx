@@ -65,7 +65,7 @@ export default function ModulePage() {
   if (routeKey === "inventory") return <InventoryModule />;
   if (routeKey === "proposals") return <ProposalsModule />;
   if (routeKey === "sdc") return <PreAnalysisModule />;
-  if (routeKey === "flash-capital" || routeKey === "finops") return <FinOpsModule />;
+  if (routeKey === "flash-capital" || routeKey === "finops") return <><FinOpsModule /><PreAnalysisModule variant="flash" /></>;
   if (routeKey === "lease-equity") return <><LeaseEquityModule /><PreAnalysisModule /></>;
   if (routeKey === "flash-invest" || routeKey === "funding") return <FundingModule />;
   if (routeKey === "quitcon") return <QuitConModule />;

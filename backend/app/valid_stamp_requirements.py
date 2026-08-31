@@ -74,6 +74,7 @@ def valid_stamp_requirements(asset_type: str, product: str = "FLASH_CAPITAL") ->
         "vehicle_classes": vehicle_classes,
         "vehicle_registry_required": asset_type == "VEHICLE",
         "tapaf_required_for_vehicle": asset_type == "VEHICLE",
+        "tapaf_required": True,
     }
 
 
