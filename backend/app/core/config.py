@@ -102,6 +102,7 @@ class Settings(BaseSettings):
             if self.secret_key=="development-only-secret-key-change-me" or len(self.secret_key)<32: issues.append("SECRET_KEY_WEAK")
             if self.storage_backend=="S3" and not self.s3_bucket: issues.append("S3_BUCKET_MISSING")
             if "http://localhost:3000" in self.cors_origins: issues.append("CORS_LOCALHOST_ENABLED")
+            if not self.infosimples_api_token: issues.append("INFOSIMPLES_API_TOKEN_MISSING")
         return issues
 
 

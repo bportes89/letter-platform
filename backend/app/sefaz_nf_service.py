@@ -47,14 +47,25 @@ def extract_access_key(document_content: str, explicit_key: str | None = None) -
 
 
 def sefaz_robot_status() -> dict:
+    from app.sefaz_client import sefaz_production_required
+
+    configured = infosimples_configured()
+    production = sefaz_production_required()
+    if production and not configured:
+        return {
+            "enabled": False,
+            "provider": "INFOSIMPLES_SEFAZ",
+            "mode": "PRODUCTION",
+            "message": "Configure LETTER_INFOSIMPLES_API_TOKEN no Render para ativar consultas reais na SEFAZ.",
+        }
     return {
         "enabled": True,
-        "provider": "INFOSIMPLES_SEFAZ" if infosimples_configured() else "SEFAZ_SANDBOX",
-        "mode": "PRODUCTION" if infosimples_configured() else "SANDBOX",
+        "provider": "INFOSIMPLES_SEFAZ" if configured else "SEFAZ_SANDBOX",
+        "mode": "PRODUCTION" if configured else "SANDBOX",
         "message": (
-            "Robô SEFAZ ativo em produção (InfoSimples)."
-            if infosimples_configured()
-            else "Robô SEFAZ em sandbox — qualquer chave válida de 44 dígitos é consultada localmente."
+            "Robô SEFAZ ativo em produção (InfoSimples — consulta SEFAZ/NFE unificada)."
+            if configured
+            else "Robô SEFAZ em sandbox local — apenas LETTER_ENV=development."
         ),
     }
 

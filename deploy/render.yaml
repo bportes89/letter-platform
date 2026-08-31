@@ -32,3 +32,5 @@ services:
         sync: false
       - key: LETTER_CORS_ORIGINS
         sync: false
+      - key: LETTER_INFOSIMPLES_API_TOKEN
+        sync: false
