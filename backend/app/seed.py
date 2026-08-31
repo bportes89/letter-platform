@@ -13,9 +13,11 @@ LEVEL_SHARES = ["50", "20", "15", "10", "5"]
 DEMO_USER_EMAILS = (
     "admin@letter.com.br",
     "parceiro@letter.com.br",
+    "cliente@letter.com.br",
     "revisor1@letter.com.br",
     "revisor2@letter.com.br",
     "investidor@letter.com.br",
+    "fundo@letter.com.br",
 )
 
 
@@ -37,11 +39,41 @@ def _sync_demo_passwords(db, password: str) -> None:
     print(f"Senhas demo sincronizadas para {len(users)} usuários.")
 
 
+def _ensure_profile_demo_users(db, org_id, password: str) -> None:
+    """Cria usuários demo de perfis adicionais se ainda não existirem (idempotente)."""
+    specs = (
+        ("cliente@letter.com.br", "Cliente Demonstração", "66666666666", Role.CLIENT),
+        ("fundo@letter.com.br", "Fundo Institucional Demo", "77777777777", Role.INSTITUTIONAL_FUND),
+    )
+    hashed = hash_password(password)
+    created = 0
+    for email, name, document, role in specs:
+        if db.scalar(select(User).where(User.email == email)):
+            continue
+        db.add(
+            User(
+                organization_id=org_id,
+                name=name,
+                email=email,
+                document=document,
+                password_hash=hashed,
+                role=role,
+            )
+        )
+        created += 1
+    if created:
+        db.commit()
+        print(f"Usuários demo de perfil criados: {created}.")
+
+
 def seed():
     Base.metadata.create_all(engine)
     password = _demo_password()
     with SessionLocal() as db:
         if db.scalar(select(User).where(User.email == "admin@letter.com.br")):
+            org = db.scalar(select(Organization).limit(1))
+            if org:
+                _ensure_profile_demo_users(db, org.id, password)
             _sync_demo_passwords(db, password)
             print("Seed já aplicado.")
             return
@@ -67,8 +99,16 @@ def seed():
             organization_id=org.id, name="Investidor Varejo", email="investidor@letter.com.br",
             document="55555555555", password_hash=hash_password(password), role=Role.RETAIL_INVESTOR,
         )
+        client = User(
+            organization_id=org.id, name="Cliente Demonstração", email="cliente@letter.com.br",
+            document="66666666666", password_hash=hash_password(password), role=Role.CLIENT,
+        )
+        fund = User(
+            organization_id=org.id, name="Fundo Institucional Demo", email="fundo@letter.com.br",
+            document="77777777777", password_hash=hash_password(password), role=Role.INSTITUTIONAL_FUND,
+        )
         adm = Administrator(name="Embracon", document="22222222000122", authorization_status="APPROVED_MANUALLY")
-        db.add_all([admin, partner, reviewer_one, reviewer_two, investor, adm]); db.flush()
+        db.add_all([admin, partner, reviewer_one, reviewer_two, investor, client, fund, adm]); db.flush()
         lead = Lead(organization_id=org.id, owner_id=partner.id, name="Cliente Piloto", phone="32999999999", product_interest="MARKETPLACE", status="QUALIFIED")
         db.add(lead); db.flush()
         db.add_all([

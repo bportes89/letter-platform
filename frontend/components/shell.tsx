@@ -10,16 +10,25 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { LetterLogo } from "@/components/brand/letter-logo";
 import { api, logout, Module, User } from "@/lib/api";
-import { PLATFORM_HIDDEN_MODULE_KEYS, PRODUCT_NAV } from "@/lib/product-nav";
+import { PLATFORM_HIDDEN_MODULE_KEYS } from "@/lib/product-nav";
+import {
+  filterPlatformModules,
+  filterProductNav,
+  personaLabel,
+} from "@/lib/role-nav";
 
 export function Shell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname(); const [modules, setModules] = useState<Module[]>([]); const [user, setUser] = useState<User | null>(null); const [open, setOpen] = useState(false);
   useEffect(() => {
-    Promise.all([api<Module[]>("/modules"), api<User>("/auth/me")]).then(([m,u]) => {
-      setModules(m.filter(x => !PLATFORM_HIDDEN_MODULE_KEYS.has(x.key))); setUser(u);
+    Promise.all([api<Module[]>("/modules"), api<User>("/auth/me")]).then(([m, u]) => {
+      const platform = filterPlatformModules(u.role, m.filter((x) => !PLATFORM_HIDDEN_MODULE_KEYS.has(x.key)));
+      setModules(platform);
+      setUser(u);
     }).catch(() => logout());
   }, []);
+  const productNav = user ? filterProductNav(user.role) : [];
   const platformModules = modules;
+  const persona = personaLabel(user?.role);
   return <div className="app-shell">
     <aside className={open ? "sidebar open" : "sidebar"}>
       <div className="side-logo">
@@ -28,15 +37,19 @@ export function Shell({ children }: { children: React.ReactNode }) {
         </Link>
         <button onClick={()=>setOpen(false)}><X/></button>
       </div>
-      <div className="side-context"><small>AMBIENTE</small><strong>LETTER Matriz</strong><ChevronDown size={14}/></div>
+      <div className="side-context"><small>SEU ACESSO</small><strong>{persona}</strong><ChevronDown size={14}/></div>
       <nav>
         <Link className={pathname==="/dashboard"?"active":""} href="/dashboard"><LayoutDashboard/>Visão geral</Link>
+        {productNav.length > 0 && <>
         <div className="nav-label">PRODUTOS</div>
         <div className="nav-products">
-          {PRODUCT_NAV.map(p=><Link className={pathname===`/modules/${p.key}`?"active":""} href={`/modules/${p.key}`} key={p.key}><ProductIcon keyName={p.key}/>{p.name}</Link>)}
+          {productNav.map(p=><Link className={pathname===`/modules/${p.key}`?"active":""} href={`/modules/${p.key}`} key={p.key}><ProductIcon keyName={p.key}/>{p.name}</Link>)}
         </div>
+        </>}
+        {platformModules.length > 0 && <>
         <div className="nav-label">PLATAFORMA</div>
         {platformModules.map(m=><Link className={pathname===`/modules/${m.key}`?"active":""} href={`/modules/${m.key}`} key={m.key}><ModuleIcon keyName={m.key}/>{m.name}</Link>)}
+        </>}
       </nav>
       <button className="logout" onClick={logout}><LogOut/>Sair</button>
     </aside>
