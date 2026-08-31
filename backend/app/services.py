@@ -66,7 +66,7 @@ def dashboard_summary(db: Session, user: User) -> dict:
     }
 
 
-def validate_quota_combination(quotas: list[Quota], target_amount: float) -> dict:
+def validate_quota_combination(quotas: list[Quota], target_amount: float, db: Session | None = None, user_id: str | None = None) -> dict:
     if not quotas:
         raise HTTPException(status_code=422, detail="Selecione ao menos uma cota")
     administrator_ids = {q.administrator_id for q in quotas}
@@ -75,7 +75,14 @@ def validate_quota_combination(quotas: list[Quota], target_amount: float) -> dic
         raise HTTPException(status_code=422, detail="As cotas devem pertencer à mesma administradora")
     if len(categories) != 1:
         raise HTTPException(status_code=422, detail="As cotas devem pertencer à mesma categoria")
-    if any(q.status != "AVAILABLE" for q in quotas):
+    for quota in quotas:
+        if quota.status == "AVAILABLE":
+            continue
+        if quota.status == "RESERVED" and db is not None and user_id:
+            from app.quota_inventory_service import quota_available_for_user
+
+            if quota_available_for_user(db, quota, user_id):
+                continue
         raise HTTPException(status_code=409, detail="Uma ou mais cotas não estão disponíveis")
     total = sum(float(q.credit_value) for q in quotas)
     deviation = ((total - target_amount) / target_amount) * 100 if target_amount else 0
@@ -107,10 +114,14 @@ def release_expired_reservations(db: Session, organization_id: str) -> int:
         quota = db.get(Quota, reservation.quota_id)
         if quota and quota.status == "RESERVED":
             quota.status = "AVAILABLE"
+            quota.nina_scan_status = None
+            quota.nina_scanned_at = None
     return len(expired)
 
 
 def reserve_quota(db: Session, user: User, quota: Quota, proposal_id: str | None, ttl_minutes: int) -> QuotaReservation:
+    from app.quota_inventory_service import ensure_nina_scan_before_lock
+
     release_expired_reservations(db, user.organization_id)
     db.flush()
     active = db.scalar(select(QuotaReservation).where(
@@ -120,6 +131,7 @@ def reserve_quota(db: Session, user: User, quota: Quota, proposal_id: str | None
     ))
     if active or quota.status != "AVAILABLE":
         raise HTTPException(status_code=409, detail="Cota indisponível ou já reservada")
+    ensure_nina_scan_before_lock(quota)
     if proposal_id:
         proposal = db.scalar(select(Proposal).where(
             Proposal.id == proposal_id, Proposal.organization_id == user.organization_id,
@@ -147,6 +159,9 @@ def release_reservation(db: Session, user: User, reservation: QuotaReservation, 
     quota = db.get(Quota, reservation.quota_id)
     if quota and quota.organization_id == user.organization_id:
         quota.status = "AVAILABLE"
+        if reason in {"MANUAL_RELEASE", "TTL_EXPIRED"}:
+            quota.nina_scan_status = None
+            quota.nina_scanned_at = None
 
 
 def money(value: Decimal) -> Decimal:
@@ -154,7 +169,7 @@ def money(value: Decimal) -> Decimal:
 
 
 def calculate_marketplace(db: Session, user: User, proposal: Proposal, quotas: list[Quota], fee_percent: Decimal, start_fee: Decimal) -> CalculationMemory:
-    validated = validate_quota_combination(quotas, float(proposal.requested_amount))
+    validated = validate_quota_combination(quotas, float(proposal.requested_amount), db=db, user_id=user.id)
     if not validated["valid"]:
         raise HTTPException(status_code=422, detail=f"Combinação fora da tolerância de ±10%: {validated['deviation_percent']}%")
     credit_total = money(sum((Decimal(str(q.credit_value)) for q in quotas), Decimal("0")))
@@ -181,6 +196,8 @@ def calculate_marketplace(db: Session, user: User, proposal: Proposal, quotas: l
 
 
 def create_contract(db: Session, user: User, proposal: Proposal, calculation: CalculationMemory) -> Contract:
+    from app.quota_inventory_service import mark_quotas_sold_from_calculation
+
     existing = db.scalar(select(Contract).where(Contract.proposal_id == proposal.id))
     if existing:
         raise HTTPException(status_code=409, detail="Já existe contrato para esta proposta")
@@ -196,6 +213,7 @@ def create_contract(db: Session, user: User, proposal: Proposal, calculation: Ca
     )
     proposal.status = "CONTRACT_DRAFTED"
     db.add(contract)
+    mark_quotas_sold_from_calculation(db, calculation)
     return contract
 
 

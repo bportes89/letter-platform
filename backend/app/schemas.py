@@ -621,12 +621,14 @@ class QuotaCreate(BaseModel):
     credit_value: Decimal = Field(gt=0)
     outstanding_balance: Decimal = Field(ge=0, default=0)
     premium_value: Decimal = Field(ge=0, default=0)
+    installment_due_date: date | None = None
 
 
 class QuotaUpdate(BaseModel):
     credit_value: Decimal | None = Field(default=None, gt=0)
     outstanding_balance: Decimal | None = Field(default=None, ge=0)
     premium_value: Decimal | None = Field(default=None, ge=0)
+    installment_due_date: date | None = None
     status: str | None = None
 
 
@@ -639,14 +641,24 @@ class QuotaView(ORMModel):
     credit_value: Decimal
     outstanding_balance: Decimal
     premium_value: Decimal
+    installment_due_date: date | None
+    nina_scan_status: str | None
+    nina_scanned_at: datetime | None
     status: str
     created_at: datetime
+
+
+class NinaQuotaScanView(BaseModel):
+    quota_id: str
+    status: str
+    scanned_at: datetime
+    message: str
 
 
 class ReservationCreate(BaseModel):
     quota_id: str
     proposal_id: str | None = None
-    ttl_minutes: int = Field(default=30, ge=5, le=2880)
+    ttl_minutes: int = Field(default=60, ge=5, le=2880)
 
 
 class ReservationView(ORMModel):

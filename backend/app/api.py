@@ -78,7 +78,7 @@ from app.schemas import (
     FlashCreditCalculationRequest, MfaSetupView, MfaVerify, ModuleView, PasswordResetConfirm, PasswordResetRequest,
     NetworkNodeCreate, NetworkNodeView, PayoutApprove, PayoutCreate, PayoutView, ProposalCreate, ProposalUpdate,
     ReconciliationBatchView, ReconciliationItemView, ReconciliationResolveRequest,
-    ProposalView, QuotaCreate, QuotaUpdate, QuotaView, RecoveredAssetCreate, RecoveredAssetView, RefreshRequest,
+    ProposalView, QuotaCreate, QuotaUpdate, QuotaView, NinaQuotaScanView, RecoveredAssetCreate, RecoveredAssetView, RefreshRequest,
     ReservationCreate, ReservationView, SdcCalculationRequest, SessionView, SignatureComplete,
     SignatureCreate, SignatureView, SignatureZapSignStatusView, StepUpRequest, TaxClosingRequest, TaxClosingView,
     TaxDocumentCreate, TaxDocumentView, TaxExceptionResolve, TaxExceptionView,
@@ -716,6 +716,29 @@ def update_quota(quota_id: str, payload: QuotaUpdate, user: User = Depends(requi
     return quota
 
 
+@router.post("/quotas/{quota_id}/nina-scan", response_model=NinaQuotaScanView)
+def nina_scan_quota(quota_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.quota_inventory_service import run_nina_quota_scan
+
+    quota = db.scalar(select(Quota).where(Quota.id == quota_id, Quota.organization_id == user.organization_id))
+    if not quota:
+        raise HTTPException(status_code=404, detail="Cota não encontrada")
+    try:
+        result = run_nina_quota_scan(db, user, quota)
+    except HTTPException:
+        db.commit()
+        raise
+    audit(db, user, "quota.nina_scan", "quota", quota.id, {"status": quota.nina_scan_status})
+    db.commit()
+    db.refresh(quota)
+    return {
+        "quota_id": quota.id,
+        "status": result["status"],
+        "scanned_at": quota.nina_scanned_at,
+        "message": result["message"],
+    }
+
+
 @router.post("/reservations", response_model=ReservationView, status_code=201)
 def create_reservation(payload: ReservationCreate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     quota = db.scalar(select(Quota).where(Quota.id == payload.quota_id, Quota.organization_id == user.organization_id))
@@ -747,7 +770,7 @@ def nina_validate_combination(
     quotas = list(db.scalars(select(Quota).where(Quota.id.in_(quota_ids), Quota.organization_id == user.organization_id)))
     if len(quotas) != len(set(quota_ids)):
         raise HTTPException(status_code=404, detail="Uma ou mais cotas não foram encontradas")
-    return validate_quota_combination(quotas, float(target_amount))
+    return validate_quota_combination(quotas, float(target_amount), db=db, user_id=user.id)
 
 
 @router.get("/proposals", response_model=list[ProposalView])

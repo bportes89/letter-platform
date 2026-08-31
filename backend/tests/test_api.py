@@ -40,13 +40,23 @@ def test_nina_blocks_mixed_categories(client, auth_headers):
 
 def test_quota_reservation_blocks_duplicate(client, auth_headers):
     quota = next(q for q in client.get("/api/v1/quotas", headers=auth_headers).json() if q["status"] == "AVAILABLE")
-    first = client.post("/api/v1/reservations", headers=auth_headers, json={"quota_id": quota["id"], "ttl_minutes": 30})
+    patch = client.patch(f"/api/v1/quotas/{quota['id']}", headers=auth_headers, json={"installment_due_date": "2026-09-10"})
+    assert patch.status_code == 200
+    scan = client.post(f"/api/v1/quotas/{quota['id']}/nina-scan", headers=auth_headers)
+    assert scan.status_code == 200 and scan.json()["status"] == "CLEARED"
+    first = client.post("/api/v1/reservations", headers=auth_headers, json={"quota_id": quota["id"], "ttl_minutes": 60})
     assert first.status_code == 201
-    duplicate = client.post("/api/v1/reservations", headers=auth_headers, json={"quota_id": quota["id"], "ttl_minutes": 30})
+    duplicate = client.post("/api/v1/reservations", headers=auth_headers, json={"quota_id": quota["id"], "ttl_minutes": 60})
     assert duplicate.status_code == 409
     released = client.post(f"/api/v1/reservations/{first.json()['id']}/release", headers=auth_headers)
     assert released.status_code == 200
     assert released.json()["status"] == "RELEASED"
+
+
+def test_quota_lock_requires_nina_scan(client, auth_headers):
+    quota = next(q for q in client.get("/api/v1/quotas", headers=auth_headers).json() if q["status"] == "AVAILABLE")
+    blocked = client.post("/api/v1/reservations", headers=auth_headers, json={"quota_id": quota["id"], "ttl_minutes": 60})
+    assert blocked.status_code == 422
 
 
 def test_calculation_contract_and_acceptance(client, auth_headers):

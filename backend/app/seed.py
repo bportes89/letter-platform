@@ -1,5 +1,6 @@
 import json
 import os
+from datetime import date
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -112,8 +113,8 @@ def seed():
         lead = Lead(organization_id=org.id, owner_id=partner.id, name="Cliente Piloto", phone="32999999999", product_interest="MARKETPLACE", status="QUALIFIED")
         db.add(lead); db.flush()
         db.add_all([
-            Quota(organization_id=org.id, administrator_id=adm.id, seller_id=admin.id, group_code="1001", quota_code="001", category="REAL_ESTATE", credit_value=Decimal("400000"), outstanding_balance=Decimal("250000"), premium_value=Decimal("80000")),
-            Quota(organization_id=org.id, administrator_id=adm.id, seller_id=admin.id, group_code="1001", quota_code="002", category="REAL_ESTATE", credit_value=Decimal("400000"), outstanding_balance=Decimal("250000"), premium_value=Decimal("78000")),
+            Quota(organization_id=org.id, administrator_id=adm.id, seller_id=admin.id, group_code="1001", quota_code="001", category="REAL_ESTATE", credit_value=Decimal("400000"), outstanding_balance=Decimal("250000"), premium_value=Decimal("80000"), installment_due_date=date(2026, 9, 10)),
+            Quota(organization_id=org.id, administrator_id=adm.id, seller_id=admin.id, group_code="1001", quota_code="002", category="REAL_ESTATE", credit_value=Decimal("400000"), outstanding_balance=Decimal("250000"), premium_value=Decimal("78000"), installment_due_date=date(2026, 9, 15)),
         ])
         db.add(Proposal(organization_id=org.id, lead_id=lead.id, product="MARKETPLACE", requested_amount=Decimal("800000"), status="DRAFT"))
         db.add_all([

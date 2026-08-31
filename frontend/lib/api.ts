@@ -51,7 +51,7 @@ export type BISummary = { funnel:{leads:number;proposals:number;approved:number}
 export type OperationalJob = { id:string; job_type:string; idempotency_key:string; status:string; attempts:number; max_attempts:number; scheduled_at:string; completed_at:string|null; last_error:string|null; created_at:string };
 export type Lead = { id: string; name: string; phone: string; product_interest: string; status: string; source: string; created_at: string };
 export type Administrator = { id: string; name: string; document: string; authorization_status: string };
-export type Quota = { id: string; administrator_id: string; group_code: string; quota_code: string; category: string; credit_value: string; outstanding_balance: string; premium_value: string; status: string; created_at: string };
+export type Quota = { id: string; administrator_id: string; group_code: string; quota_code: string; category: string; credit_value: string; outstanding_balance: string; premium_value: string; installment_due_date?: string | null; nina_scan_status?: string | null; nina_scanned_at?: string | null; status: string; created_at: string };
 export type Proposal = { id: string; lead_id: string; product: string; requested_amount: string; status: string; calculation_version: string; created_at: string };
 export type LeaseEquityPauta = {
   id: string; proposal_id: string; pauta_code: string; status: string; property_type: string;

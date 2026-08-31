@@ -170,6 +170,10 @@ class Quota(TimestampMixin, Base):
     credit_value: Mapped[float] = mapped_column(Numeric(15, 2))
     outstanding_balance: Mapped[float] = mapped_column(Numeric(15, 2), default=0)
     premium_value: Mapped[float] = mapped_column(Numeric(15, 2), default=0)
+    installment_due_date: Mapped[date | None] = mapped_column(Date)
+    nina_scan_status: Mapped[str | None] = mapped_column(String(30))
+    nina_scanned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    nina_scan_detail_json: Mapped[str] = mapped_column(Text, default="{}")
     status: Mapped[str] = mapped_column(String(40), default="AVAILABLE")
     administrator: Mapped[Administrator] = relationship()
 
