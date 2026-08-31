@@ -1595,8 +1595,70 @@ class UnderwritingDecisionView(ORMModel):
     id: str; assessment_id: str; decision: str; reason: str; decided_by_id: str; decided_at: datetime
 
 class QuotaRankingView(BaseModel):
-    quota_ids: list[str]; total_credit: Decimal; deviation_percent: Decimal; score: int
-    administrator_id: str; explanation: str
+    quota_ids: list[str]
+    total_credit: Decimal
+    deviation_percent: Decimal
+    score: int
+    administrator_id: str
+    explanation: str
+
+
+class MarketplaceClientProfile(BaseModel):
+    monthly_income: Decimal = Field(gt=0)
+    monthly_commitment: Decimal = Field(ge=0, default=0)
+    asset_value: Decimal = Field(gt=0)
+    asset_year: int = Field(ge=1980, le=2100)
+
+
+class MarketplaceEsteira1Request(MarketplaceClientProfile):
+    quota_id: str
+
+
+class MarketplaceQuotaBrief(BaseModel):
+    quota_id: str
+    group_code: str
+    quota_code: str
+    category: str
+    credit_value: str
+    premium_value: str
+    installment_due_date: str | None
+    administrator_name: str | None
+    status: str
+    nina_scan_status: str | None
+
+
+class MarketplaceMatchView(BaseModel):
+    quota_ids: list[str]
+    total_credit: str
+    deviation_percent: str
+    score: int
+    administrator_id: str
+    administrator_name: str | None = None
+    explanation: str
+    message: str | None = None
+    quotas: list[MarketplaceQuotaBrief] = Field(default_factory=list)
+
+
+class MarketplaceEsteira1Response(BaseModel):
+    esteira: str
+    eligible: bool
+    quota: MarketplaceQuotaBrief
+    blockers: list[str] = Field(default_factory=list)
+    alternatives: list[MarketplaceMatchView] = Field(default_factory=list)
+    message: str
+
+
+class MarketplaceEsteira2Request(MarketplaceClientProfile):
+    target_amount: Decimal = Field(gt=0)
+    category: str
+
+
+class MarketplaceEsteira2Response(BaseModel):
+    esteira: str
+    eligible: bool
+    blockers: list[str] = Field(default_factory=list)
+    matches: list[MarketplaceMatchView] = Field(default_factory=list)
+    message: str
 
 class BISummaryView(BaseModel):
     funnel: dict; portfolio: dict; risk: dict; funding: dict; recovery: dict

@@ -78,6 +78,7 @@ from app.schemas import (
     FlashCreditCalculationRequest, MfaSetupView, MfaVerify, ModuleView, PasswordResetConfirm, PasswordResetRequest,
     NetworkNodeCreate, NetworkNodeView, PayoutApprove, PayoutCreate, PayoutView, ProposalCreate, ProposalUpdate,
     ReconciliationBatchView, ReconciliationItemView, ReconciliationResolveRequest,
+    MarketplaceEsteira1Request, MarketplaceEsteira1Response, MarketplaceEsteira2Request, MarketplaceEsteira2Response,
     ProposalView, QuotaCreate, QuotaUpdate, QuotaView, NinaQuotaScanView, RecoveredAssetCreate, RecoveredAssetView, RefreshRequest,
     ReservationCreate, ReservationView, SdcCalculationRequest, SessionView, SignatureComplete,
     SignatureCreate, SignatureView, SignatureZapSignStatusView, StepUpRequest, TaxClosingRequest, TaxClosingView,
@@ -714,6 +715,43 @@ def update_quota(quota_id: str, payload: QuotaUpdate, user: User = Depends(requi
     for field, value in payload.model_dump(exclude_unset=True).items(): setattr(quota, field, value)
     audit(db, user, "quota.updated", "quota", quota.id, payload.model_dump(exclude_unset=True, mode="json")); db.commit(); db.refresh(quota)
     return quota
+
+
+@router.post("/marketplace/esteira-1/assess", response_model=MarketplaceEsteira1Response)
+def marketplace_esteira1(payload: MarketplaceEsteira1Request, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.marketplace_service import esteira1_partner_select
+
+    result = esteira1_partner_select(
+        db,
+        user,
+        quota_id=payload.quota_id,
+        monthly_income=payload.monthly_income,
+        monthly_commitment=payload.monthly_commitment,
+        asset_value=payload.asset_value,
+        asset_year=payload.asset_year,
+    )
+    audit(db, user, "marketplace.esteira1", "quota", payload.quota_id, {"eligible": result["eligible"]})
+    db.commit()
+    return result
+
+
+@router.post("/marketplace/esteira-2/match", response_model=MarketplaceEsteira2Response)
+def marketplace_esteira2(payload: MarketplaceEsteira2Request, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.marketplace_service import esteira2_nina_curated_match
+
+    result = esteira2_nina_curated_match(
+        db,
+        user,
+        target_amount=payload.target_amount,
+        category=payload.category,
+        asset_year=payload.asset_year,
+        monthly_income=payload.monthly_income,
+        monthly_commitment=payload.monthly_commitment,
+        asset_value=payload.asset_value,
+    )
+    audit(db, user, "marketplace.esteira2", "marketplace", "match", {"matches": len(result["matches"])})
+    db.commit()
+    return result
 
 
 @router.post("/quotas/{quota_id}/nina-scan", response_model=NinaQuotaScanView)

@@ -53,6 +53,41 @@ def test_quota_reservation_blocks_duplicate(client, auth_headers):
     assert released.json()["status"] == "RELEASED"
 
 
+def test_marketplace_esteira1_and_esteira2(client, auth_headers):
+    quota = next(q for q in client.get("/api/v1/quotas", headers=auth_headers).json() if q["status"] == "AVAILABLE")
+    client.patch(
+        f"/api/v1/quotas/{quota['id']}",
+        headers=auth_headers,
+        json={"installment_due_date": "2026-09-10"},
+    )
+    profile = {
+        "monthly_income": "50000",
+        "monthly_commitment": "5000",
+        "asset_value": "900000",
+        "asset_year": 2020,
+    }
+    esteira1 = client.post(
+        "/api/v1/marketplace/esteira-1/assess",
+        headers=auth_headers,
+        json={"quota_id": quota["id"], **profile},
+    )
+    assert esteira1.status_code == 200
+    body1 = esteira1.json()
+    assert body1["esteira"] == "SELF_SELECT"
+    assert body1["quota"]["quota_id"] == quota["id"]
+    assert "message" in body1
+
+    esteira2 = client.post(
+        "/api/v1/marketplace/esteira-2/match",
+        headers=auth_headers,
+        json={"target_amount": "800000", "category": "REAL_ESTATE", **profile},
+    )
+    assert esteira2.status_code == 200
+    body2 = esteira2.json()
+    assert body2["esteira"] == "NINA_CURATED"
+    assert isinstance(body2["matches"], list)
+
+
 def test_quota_lock_requires_nina_scan(client, auth_headers):
     quota = next(q for q in client.get("/api/v1/quotas", headers=auth_headers).json() if q["status"] == "AVAILABLE")
     blocked = client.post("/api/v1/reservations", headers=auth_headers, json={"quota_id": quota["id"], "ttl_minutes": 60})

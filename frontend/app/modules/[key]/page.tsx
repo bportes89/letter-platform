@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { api, logout, Module, User } from "@/lib/api";
-import { InventoryModule, LeadsModule, ProposalsModule } from "@/components/operational-modules";
+import { InventoryModule, LeadsModule, MarketplaceModule, ProposalsModule } from "@/components/operational-modules";
 import { ContractsModule, PaymentsModule, WalletModule } from "@/components/financial-modules";
 import { ComplianceModule, IdentityModule, SecurityModule } from "@/components/identity-modules";
 import { FundingModule, NetworkModule } from "@/components/network-funding-modules";
@@ -61,7 +61,8 @@ export default function ModulePage() {
     );
   }
 
-  if (routeKey === "marketplace" || routeKey === "inventory") return <InventoryModule />;
+  if (routeKey === "marketplace") return <MarketplaceModule />;
+  if (routeKey === "inventory") return <InventoryModule />;
   if (routeKey === "sdc" || routeKey === "proposals") return <ProposalsModule />;
   if (routeKey === "flash-capital" || routeKey === "finops") return <FinOpsModule />;
   if (routeKey === "lease-equity") return <><LeaseEquityModule /><PreAnalysisModule /></>;

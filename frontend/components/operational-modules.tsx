@@ -35,6 +35,85 @@ export function InventoryModule() {
   </OperationalLayout>
 }
 
+type MarketplaceMatch = {
+  quota_ids: string[];
+  total_credit: string;
+  deviation_percent: string;
+  score: number;
+  administrator_id: string;
+  administrator_name?: string;
+  explanation: string;
+  message?: string;
+  quotas: { quota_id: string; group_code: string; quota_code: string; category: string; credit_value: string; premium_value: string; installment_due_date?: string | null; administrator_name?: string; status: string; nina_scan_status?: string | null }[];
+};
+
+type MarketplaceEsteira1Result = {
+  esteira: string;
+  eligible: boolean;
+  quota: MarketplaceMatch["quotas"][0];
+  blockers: string[];
+  alternatives: MarketplaceMatch[];
+  message: string;
+};
+
+type MarketplaceEsteira2Result = {
+  esteira: string;
+  eligible: boolean;
+  blockers: string[];
+  matches: MarketplaceMatch[];
+  message: string;
+};
+
+function ClientProfileFields({prefix,values,onChange}:{prefix:string;values:Record<string,string>;onChange:(k:string,v:string)=>void}) {
+  return <>
+    <label>Renda mensal (R$)<input type="number" min="1" step="0.01" value={values[`${prefix}_income`]} onChange={e=>onChange(`${prefix}_income`,e.target.value)} required/></label>
+    <label>Comprometimento atual (R$)<input type="number" min="0" step="0.01" value={values[`${prefix}_commitment`]} onChange={e=>onChange(`${prefix}_commitment`,e.target.value)}/></label>
+    <label>Valor do bem (R$)<input type="number" min="1" step="0.01" value={values[`${prefix}_asset`]} onChange={e=>onChange(`${prefix}_asset`,e.target.value)} required/></label>
+    <label>Ano do bem<input type="number" min="1980" max="2100" value={values[`${prefix}_year`]} onChange={e=>onChange(`${prefix}_year`,e.target.value)} required/></label>
+  </>;
+}
+
+export function MarketplaceModule() {
+  const [quotas,setQuotas]=useState<Quota[]>([]);
+  const [error,setError]=useState("");
+  const [notice,setNotice]=useState("");
+  const [tab,setTab]=useState<"esteira1"|"esteira2">("esteira1");
+  const [profile,setProfile]=useState({e1_income:"30000",e1_commitment:"3000",e1_asset:"600000",e1_year:"2020",e2_income:"30000",e2_commitment:"3000",e2_asset:"600000",e2_year:"2020"});
+  const [selectedQuota,setSelectedQuota]=useState("");
+  const [targetAmount,setTargetAmount]=useState("800000");
+  const [category,setCategory]=useState("REAL_ESTATE");
+  const [result1,setResult1]=useState<MarketplaceEsteira1Result|null>(null);
+  const [result2,setResult2]=useState<MarketplaceEsteira2Result|null>(null);
+  const load=()=>api<Quota[]>("/quotas").then(setQuotas).catch(e=>setError(e.message));
+  useEffect(()=>{void load()},[]);
+  const available=useMemo(()=>quotas.filter(q=>q.status==="AVAILABLE"||q.status==="RESERVED"),[quotas]);
+  const profilePayload=(prefix:"e1"|"e2")=>({monthly_income:profile[`${prefix}_income`],monthly_commitment:profile[`${prefix}_commitment`]||"0",asset_value:profile[`${prefix}_asset`],asset_year:Number(profile[`${prefix}_year`])});
+  async function assessEsteira1(e:FormEvent){e.preventDefault();setError("");setNotice("");try{const data=await api<MarketplaceEsteira1Result>("/marketplace/esteira-1/assess",{method:"POST",body:JSON.stringify({quota_id:selectedQuota,...profilePayload("e1")})});setResult1(data);setNotice(data.message)}catch(err){setError(err instanceof Error?err.message:"Falha na Esteira 1")}}
+  async function matchEsteira2(e:FormEvent){e.preventDefault();setError("");setNotice("");try{const data=await api<MarketplaceEsteira2Result>("/marketplace/esteira-2/match",{method:"POST",body:JSON.stringify({target_amount:targetAmount,category,...profilePayload("e2")})});setResult2(data);setNotice(data.message)}catch(err){setError(err instanceof Error?err.message:"Falha na Esteira 2")}}
+  async function reserveQuota(quotaId:string){setError("");try{await api("/reservations",{method:"POST",body:JSON.stringify({quota_id:quotaId,ttl_minutes:60})});setNotice("Cota travada por 60 minutos. Prossiga em Propostas.");load()}catch(err){setError(err instanceof Error?err.message:"Falha na trava")}}
+  function MatchCard({match,onReserve}:{match:MarketplaceMatch;onReserve:(id:string)=>void}) {
+    return <article className="backlog-item"><div><strong>{match.administrator_name??"Administradora"} · {brl.format(Number(match.total_credit))}</strong><p>{match.explanation}{match.message?` — ${match.message}`:""}</p><small>Score Nina: {match.score} · Desvio {match.deviation_percent}%</small><div>{match.quotas.map(q=><label key={q.quota_id} style={{display:"block",marginTop:"0.5rem"}}><span>{q.group_code}/{q.quota_code} · {brl.format(Number(q.credit_value))} · Nina {q.nina_scan_status??"PENDENTE"}</span>{q.status==="AVAILABLE"&&q.nina_scan_status==="CLEARED"?<button type="button" className="table-action lock" style={{marginLeft:"0.75rem"}} onClick={()=>onReserve(q.quota_id)}><LockKeyhole/>Travar 60 min</button>:null}</label>)}</div></div></article>;
+  }
+  return <OperationalLayout title="Marketplace — Cartas contempladas" subtitle="Esteira 1: parceiro escolhe a carta e Nina valida perfil. Esteira 2: Nina entrega opções por valor e ano do bem." icon={<WalletCards/>}>
+    <div className="notice"><Clock3/>Admin cadastra cotas em <b>Inventário</b>. Aqui o parceiro/cliente opera as duas esteiras do marketplace.</div>
+    <div className="product-parameters"><button type="button" className={tab==="esteira1"?"primary-button":"table-action"} onClick={()=>setTab("esteira1")}>Esteira 1 — Escolha do parceiro</button><button type="button" className={tab==="esteira2"?"primary-button":"table-action"} onClick={()=>setTab("esteira2")}>Esteira 2 — Curadoria Nina</button></div>
+    {notice&&<div className="notice"><CheckCircle2/>{notice}</div>}{error&&<div className="error">{error}</div>}
+    {tab==="esteira1"&&<form className="quick-form quota-form" onSubmit={assessEsteira1}>
+      <select value={selectedQuota} onChange={e=>setSelectedQuota(e.target.value)} required><option value="">Selecione a carta/cota</option>{available.map(q=><option key={q.id} value={q.id}>{q.group_code}/{q.quota_code} · {q.category==="REAL_ESTATE"?"Imóvel":"Veículo"} · {brl.format(Number(q.credit_value))}</option>)}</select>
+      <ClientProfileFields prefix="e1" values={profile} onChange={(k,v)=>setProfile(p=>({...p,[k]:v}))}/>
+      <button><RefreshCw/>Analisar com Nina</button>
+    </form>}
+    {tab==="esteira2"&&<form className="quick-form quota-form" onSubmit={matchEsteira2}>
+      <input type="number" min="1" step="0.01" value={targetAmount} onChange={e=>setTargetAmount(e.target.value)} placeholder="Valor desejado (crédito)" required/>
+      <select value={category} onChange={e=>setCategory(e.target.value)}><option value="REAL_ESTATE">Imóvel</option><option value="VEHICLE">Veículo</option></select>
+      <ClientProfileFields prefix="e2" values={profile} onChange={(k,v)=>setProfile(p=>({...p,[k]:v}))}/>
+      <button><RefreshCw/>Buscar opções Nina</button>
+    </form>}
+    {result1&&tab==="esteira1"&&<section className="panel"><div className="panel-title"><h2>Resultado Esteira 1</h2></div><div className="notice">{result1.message}</div>{result1.blockers.length>0&&<div className="error">{result1.blockers.map(b=><div key={b}>{b}</div>)}</div>}<p><Pill value={result1.eligible?"CLEARED":"BLOCKED"}/> Carta {result1.quota.group_code}/{result1.quota.quota_code} · {brl.format(Number(result1.quota.credit_value))}</p>{result1.eligible&&result1.quota.status==="AVAILABLE"&&result1.quota.nina_scan_status==="CLEARED"?<button className="table-action lock" onClick={()=>reserveQuota(result1.quota.quota_id)}><LockKeyhole/>Travar 60 min</button>:null}{result1.alternatives.length>0&&<><h3>Alternativas Nina</h3>{result1.alternatives.map(m=><MatchCard key={m.quota_ids.join("-")} match={m} onReserve={reserveQuota}/>)}</>}</section>}
+    {result2&&tab==="esteira2"&&<section className="panel"><div className="panel-title"><h2>Opções Nina (Esteira 2)</h2></div><div className="notice">{result2.message}</div>{result2.blockers.map(b=><div className="error" key={b}>{b}</div>)}{result2.matches.map(m=><MatchCard key={m.quota_ids.join("-")} match={m} onReserve={reserveQuota}/>)}</section>}
+  </OperationalLayout>
+}
+
 export function ProposalsModule() {
   const [items,setItems]=useState<Proposal[]>([]);const [leads,setLeads]=useState<Lead[]>([]);const [quotas,setQuotas]=useState<Quota[]>([]);const [contracts,setContracts]=useState<Contract[]>([]);const [selected,setSelected]=useState<string[]>([]);const [notice,setNotice]=useState("");
   const [duration,setDuration]=useState(12);const [sdcCapitalSource,setSdcCapitalSource]=useState("POOL");const [poolInvestmentAmount,setPoolInvestmentAmount]=useState("80000");const [sdcPoolInvestorRate,setSdcPoolInvestorRate]=useState("");const [assetValue,setAssetValue]=useState("500000");const [capitalSource,setCapitalSource]=useState("RETAIL");const [flashPoolInvestorRate,setFlashPoolInvestorRate]=useState("");const [term,setTerm]=useState(36);const [ipca,setIpca]=useState("4.5");const [lastCalculation,setLastCalculation]=useState<Calculation|null>(null);
