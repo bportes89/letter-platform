@@ -1,8 +1,11 @@
 @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap");
 
 .site-root {
-  --ink: #06130f;
-  --panel: #0b211a;
+  --ink: #1e4a3c;
+  --surface: #285848;
+  --panel: #0d231c;
+  --panel-deep: #091a14;
+  --panel-mid: #0f2e24;
   --line: #94a3b82e;
   --blue: #00d084;
   --green: #00d084;
@@ -54,7 +57,7 @@
   border-bottom: 1px solid var(--line);
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
-  background: #06130fd6;
+  background: rgb(30 74 60 / 0.9);
   justify-content: space-between;
   align-items: center;
   height: 76px;
@@ -115,7 +118,7 @@
 }
 
 .button.light {
-  color: #06130f;
+  color: var(--panel-deep);
   box-shadow: none;
   background: #fff;
   border: 0;
@@ -125,7 +128,7 @@
 .hero {
   background:
     radial-gradient(circle at 70% 35%, #00d0842e, #0000 26%),
-    linear-gradient(135deg, #06130f 0%, #0b211a 70%, #06130f 100%);
+    linear-gradient(135deg, var(--ink) 0%, var(--panel) 68%, var(--ink) 100%);
   min-height: 760px;
   position: relative;
   overflow: hidden;
@@ -223,7 +226,7 @@
 }
 
 .ledger-card {
-  background: linear-gradient(150deg, #0b211adb, #06130ff0);
+  background: linear-gradient(150deg, rgb(13 35 28 / 0.96), rgb(9 26 20 / 0.98));
   border: 1px solid #00d08440;
   border-radius: 9px;
   padding: 26px;
@@ -370,7 +373,7 @@
 
 .solution-card {
   border: 1px solid var(--line);
-  background: #0b211a;
+  background: var(--panel);
   border-radius: 7px;
   padding: 36px;
   position: relative;
@@ -378,7 +381,7 @@
 }
 
 .solution-card.featured {
-  background: linear-gradient(145deg, #0d2d23, #0b211a);
+  background: linear-gradient(145deg, var(--panel-mid), var(--panel));
   border-color: #00d08473;
 }
 
@@ -456,14 +459,14 @@
 
 /* —— Simulator —— */
 .simulator-section {
-  background: #071a14;
+  background: var(--surface);
   max-width: none;
   padding-left: max(24px, 50vw - 590px);
   padding-right: max(24px, 50vw - 590px);
 }
 
 .simulator {
-  background: #0b211a;
+  background: var(--panel);
   border: 1px solid #00d08438;
   border-radius: 8px;
   grid-template-columns: 370px 1fr;
@@ -474,12 +477,12 @@
 
 .sim-form {
   border-right: 1px solid var(--line);
-  background: #091d17;
+  background: var(--panel-deep);
   padding: 26px;
 }
 
 .tabs {
-  background: #06130f;
+  background: var(--panel-deep);
   border-radius: 4px;
   grid-template-columns: 1fr 1fr;
   margin-bottom: 24px;
@@ -518,7 +521,7 @@
 .sim-form input:not([type="checkbox"]) {
   border: 1px solid var(--line);
   color: #fff;
-  background: #06130f;
+  background: var(--panel-deep);
   border-radius: 4px;
   outline: none;
   width: 100%;
@@ -639,7 +642,7 @@
 
 .result-grid > div {
   border: 1px solid var(--line);
-  background: #06130f8c;
+  background: rgb(9 26 20 / 0.55);
   padding: 18px;
 }
 
@@ -710,7 +713,7 @@
   border-radius: 4px;
   padding: 0.35rem;
   margin-top: 8px;
-  background: #06130f;
+  background: var(--panel-deep);
 }
 
 .site-quota-list label {
@@ -772,7 +775,7 @@
 
 .nina-core {
   color: #c8d5cf;
-  background: radial-gradient(circle, #0d3b2b, #071a14 68%);
+  background: radial-gradient(circle, var(--panel-mid), var(--panel-deep) 68%);
   border: 1px solid #00d08499;
   border-radius: 50%;
   place-items: center;
@@ -824,13 +827,13 @@
 
 .asset-card {
   border: 1px solid var(--line);
-  background: #0b211a;
+  background: var(--panel);
   grid-template-columns: 0.8fr 1.2fr;
   display: grid;
 }
 
 .asset-visual {
-  background: linear-gradient(160deg, #0d2d23, #06130f);
+  background: linear-gradient(160deg, var(--panel-mid), var(--panel-deep));
   place-items: center;
   min-height: 400px;
   display: grid;
@@ -1013,7 +1016,7 @@
 }
 
 .vitrine-auction {
-  background: #071a14;
+  background: var(--surface);
   max-width: none;
   padding-left: max(24px, 50vw - 590px);
   padding-right: max(24px, 50vw - 590px);
@@ -1032,7 +1035,7 @@
 
 .gated-card {
   border: 1px solid var(--line);
-  background: #0b211a;
+  background: var(--panel);
   border-radius: 7px;
   padding: 28px;
   display: flex;
@@ -1048,7 +1051,7 @@
 }
 
 .gated-card-visual {
-  background: linear-gradient(160deg, #0d2d23, #06130f);
+  background: linear-gradient(160deg, var(--panel-mid), var(--panel-deep));
   place-items: center;
   min-height: 280px;
   display: grid;
@@ -1132,7 +1135,7 @@
 }
 
 .funding-progress {
-  background: #06130f;
+  background: var(--panel-deep);
   border: 1px solid var(--line);
   border-radius: 3px;
   height: 6px;
@@ -1245,7 +1248,7 @@
 
 .site-login-card {
   width: min(26rem, 100%);
-  background: #0b211a;
+  background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 7px;
   padding: 2rem;
@@ -1283,7 +1286,7 @@
   border: 1px solid var(--line);
   border-radius: 4px;
   padding: 0.7rem 0.85rem;
-  background: #06130f;
+  background: var(--panel-deep);
   color: #fff;
   font: inherit;
   outline: none;
@@ -1302,7 +1305,7 @@
   width: 100%;
   border: 1px solid #00d084;
   background: linear-gradient(135deg, #00a968, #00d084);
-  color: #06130f;
+  color: var(--panel-deep);
   font-weight: 800;
   font-size: 0.875rem;
   padding: 0.85rem 1rem;
@@ -1361,7 +1364,7 @@
   padding: 1.5rem;
   border: 1px solid var(--line);
   border-radius: 20px;
-  background: linear-gradient(180deg, rgba(11, 33, 26, 0.95), rgba(6, 19, 15, 0.98));
+  background: linear-gradient(180deg, rgb(13 35 28 / 0.95), rgb(9 26 20 / 0.98));
 }
 
 .attendance-status,
