@@ -472,6 +472,22 @@ class FinOpsDomainEvent(TimestampMixin, Base):
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
 
 
+class TapafSettlement(TimestampMixin, Base):
+    __tablename__ = "tapaf_settlements"
+    __table_args__ = (UniqueConstraint("organization_id", "payment_event_id"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    track: Mapped[str] = mapped_column(String(30), index=True)
+    entity_type: Mapped[str] = mapped_column(String(60), index=True)
+    entity_id: Mapped[str] = mapped_column(String(36), index=True)
+    payment_event_id: Mapped[str] = mapped_column(String(120), index=True)
+    total_amount: Mapped[float] = mapped_column(Numeric(15, 2))
+    lote_a_amount: Mapped[float] = mapped_column(Numeric(15, 2))
+    lote_b_amount: Mapped[float] = mapped_column(Numeric(15, 2))
+    ledger_reference: Mapped[str] = mapped_column(String(120), index=True)
+    inventory_json: Mapped[str] = mapped_column(Text, default="{}")
+
+
 class SaaSTermsTemplate(TimestampMixin, Base):
     __tablename__ = "saas_terms_templates"
     __table_args__ = (UniqueConstraint("organization_id", "code", "version"),)

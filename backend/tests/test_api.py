@@ -1282,6 +1282,22 @@ def test_pre_analysis_v6_documents_tapaf_and_engine(client, auth_headers):
     })
     assert paid.status_code == 200 and paid.json()["status"] == "TAPAF_PAID"
 
+    settlement = client.get(
+        "/api/v1/finops/tapaf/settlements/lookup",
+        headers=auth_headers,
+        params={"entity_type": "pre_analysis_pauta", "entity_id": paid.json()["id"]},
+    )
+    assert settlement.status_code == 200
+    body = settlement.json()
+    assert body["total_brl"] == "1500.00"
+    assert body["lote_a_api_reserve_brl"] == "300.00"
+    assert body["lote_b_franchise_spread_brl"] == "1200.00"
+    assert len(body["inventory"]["providers"]) >= 5
+
+    policy = client.get("/api/v1/finops/tapaf/split-policy", headers=auth_headers)
+    assert policy.status_code == 200
+    assert policy.json()["lote_a_api_reserve_brl"] == "300.00"
+
     engine = client.post("/api/v1/finops/pre-analysis/run-engine", headers=auth_headers, json={
         "proposal_id": proposal["id"],
         "adm_nome": "ANCORA",

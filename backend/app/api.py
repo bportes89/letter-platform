@@ -45,7 +45,8 @@ from app.schemas import (
     NinaRoutingPolicyCreate, NinaRoutingPolicyView, NinaRoutingAssessmentCreate, NinaRoutingAssessmentView,
     FlashSimulatorRequest, SettlementCurveRequest, ContractSettlementRequest, EarlySettlementQuoteView,
     FlashCapitalSimulationParamsView, FlashCapitalSimulationParamsUpdate,
-    FinOpsEventCreate, FinOpsEventView, SdcBulletPreviewRequest,
+    FinOpsEventCreate, FinOpsEventView, InfraProviderCatalogItem, SdcBulletPreviewRequest,
+    TapafSettlementView, TapafSplitPolicyView,
     ValidStampCreate, ValidStampView, SaaSTermsCreate, SaaSTermsView, SaaSPlanCreate, SaaSPlanView,
     SaaSSubscribeCreate, SaaSSubscriptionView,
     BillingGenerateRequest, CollectionActionView, CommissionAllocate, CommissionEntryView, CommissionRuleCreate,
@@ -159,6 +160,14 @@ from app.quitcon_service import (
 from app.storage_service import get_storage
 from app.vehicle_registry_service import query_vehicle_registry
 from app.finops_engine import create_contract_quote, four_scenarios, ingest_event, settlement_curve, sdc_bullet_and_split
+from app.infra_inventory_service import catalog, get_settlement, list_settlements, settlement_view
+from app.tapaf_constants import (
+    TAPAF_ESTIMATED_INFRA_MARGIN,
+    TAPAF_ESTIMATED_TOTAL_API_COST,
+    TAPAF_LOTE_A_API_RESERVE,
+    TAPAF_LOTE_B_FRANCHISE_SPREAD,
+    TAPAF_NOMINAL,
+)
 from app.public_site_service import (
     capture_public_lead, list_public_quotas, simulate_flash_pool_public, simulate_sdc_public,
 )
@@ -977,6 +986,40 @@ def finops_event_ingest(payload:FinOpsEventCreate,x_letter_signature:str=Header(
 @router.get("/finops/events",response_model=list[FinOpsEventView])
 def finops_events(user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
     return list(db.scalars(select(FinOpsDomainEvent).where(FinOpsDomainEvent.organization_id==user.organization_id).order_by(FinOpsDomainEvent.received_at.desc())))
+
+
+@router.get("/finops/tapaf/split-policy", response_model=TapafSplitPolicyView)
+def finops_tapaf_split_policy(_: User = Depends(get_current_user)):
+    return TapafSplitPolicyView(
+        nominal_brl=str(TAPAF_NOMINAL),
+        lote_a_api_reserve_brl=str(TAPAF_LOTE_A_API_RESERVE),
+        lote_b_franchise_spread_brl=str(TAPAF_LOTE_B_FRANCHISE_SPREAD),
+        estimated_api_cost_brl=str(TAPAF_ESTIMATED_TOTAL_API_COST),
+        estimated_infra_margin_brl=str(TAPAF_ESTIMATED_INFRA_MARGIN),
+    )
+
+
+@router.get("/finops/tapaf/infra-catalog", response_model=list[InfraProviderCatalogItem])
+def finops_tapaf_infra_catalog(_: User = Depends(get_current_user)):
+    return [InfraProviderCatalogItem(**item) for item in catalog()]
+
+
+@router.get("/finops/tapaf/settlements", response_model=list[TapafSettlementView])
+def finops_tapaf_settlements(user: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
+    return [TapafSettlementView(**item) for item in list_settlements(db, user)]
+
+
+@router.get("/finops/tapaf/settlements/lookup", response_model=TapafSettlementView)
+def finops_tapaf_settlement_lookup(
+    entity_type: str = Query(...),
+    entity_id: str = Query(...),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    item = get_settlement(db, user.organization_id, entity_type=entity_type, entity_id=entity_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Liquidação TAPAF não encontrada para esta entidade")
+    return TapafSettlementView(**settlement_view(item))
 
 
 @router.post("/finops/sdc/bullet-split-preview")

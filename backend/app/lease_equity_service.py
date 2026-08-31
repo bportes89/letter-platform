@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.lease_equity_engine import EngineLeaseEquityLetter, money
 from app.models import LeaseEquityPauta, LeaseEquityStatusLog, Proposal, User
 from app.storage_service import get_storage
+from app.tapaf_settlement_service import settle_tapaf_payment
 
 
 VALID_TRANSITIONS = {
@@ -154,6 +155,22 @@ def confirm_tapaf_payment(db: Session, user: User, pauta: LeaseEquityPauta, even
     pauta.tapaf_payment_reference = event_id
     pauta.tapaf_paid_at = datetime.now(UTC)
     _transition(db, pauta, user, "TAPAF_LIQUIDADA", "Pix liquidado BaaS D+0")
+    track = "RURAL" if pauta.property_type.upper() == "RURAL" else "REAL_ESTATE"
+    settle_tapaf_payment(
+        db,
+        user,
+        track=track,
+        entity_type="lease_equity_pauta",
+        entity_id=pauta.id,
+        payment_event_id=event_id,
+        total_amount=money(amount),
+        inventory_context={
+            "pauta_code": pauta.pauta_code,
+            "property_type": pauta.property_type,
+            "registry_number": pauta.registry_number,
+            "appraisal_value": str(pauta.appraisal_value),
+        },
+    )
     dossier_key = f"company-vault/partners/{pauta.pauta_code}/compliance/dossie_higienizado.pdf"
     storage = get_storage()
     storage.put(

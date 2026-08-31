@@ -19,6 +19,7 @@ SUPPORTED_EVENTS={
  "sdc.bullet.settlement":"SETTLEMENT_RECORDED_PENDING_RECONCILIATION",
  "sdc.mmn.split":"COMMISSION_PREVIEW_PENDING_FISCAL",
  "sdc.provider.payout":"BLOCKED_PENDING_BIOMETRY_AND_DUAL_APPROVAL",
+ "tapaf.payment.settled":"TAPAF_SPLIT_POSTED_PENDING_RECONCILIATION",
 }
 
 def money(v:Decimal)->Decimal:return v.quantize(CENT,rounding=ROUND_HALF_UP)

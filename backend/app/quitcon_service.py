@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.models import Proposal, QuitConOperacao, QuitConStatusLog, User
 from app.quitcon_engine import EngineQuitConLetter, money
 from app.storage_service import get_storage
+from app.tapaf_settlement_service import settle_tapaf_payment
 
 
 VALID_TRANSITIONS = {
@@ -235,6 +236,22 @@ def confirm_tapaf_payment(db: Session, user: User, operacao: QuitConOperacao, ev
     operacao.tapaf_payment_reference = event_id
     operacao.tapaf_paid_at = datetime.now(UTC)
     _transition(db, operacao, user, "TAPAF_LIQUIDADA", "Pix liquidado BaaS D+0")
+    track = "RURAL" if operacao.property_type.upper() == "RURAL" else "REAL_ESTATE"
+    settle_tapaf_payment(
+        db,
+        user,
+        track=track,
+        entity_type="quitcon_operacao",
+        entity_id=operacao.id,
+        payment_event_id=event_id,
+        total_amount=money(amount),
+        inventory_context={
+            "operacao_code": operacao.operacao_code,
+            "property_type": operacao.property_type,
+            "registry_number": operacao.registry_number,
+            "appraisal_value": str(operacao.appraisal_value),
+        },
+    )
     dossier_key = f"company-vault/partners/{operacao.operacao_code}/compliance/dossie_higienizado.pdf"
     storage = get_storage()
     storage.put(dossier_key, b"%PDF-1.4\n% QuitCon compliance dossier sandbox\n", "application/pdf")

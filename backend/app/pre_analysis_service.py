@@ -21,6 +21,8 @@ from app.pre_analysis_constants import (
     TAPAF_TOOLTIP,
 )
 from app.storage_service import get_storage
+from app.tapaf_constants import TAPAF_NOMINAL
+from app.tapaf_settlement_service import settle_tapaf_payment
 
 
 HUNDRED = Decimal("100")
@@ -33,7 +35,7 @@ def money(value: Decimal) -> Decimal:
 class MotorPreAnaliseFiduciariaV6:
     margem_maxima_renda = Decimal("0.30")
     fee_plataforma_percent = Decimal("0.10")
-    taxa_tapaf_nominal = Decimal("1500.00")
+    taxa_tapaf_nominal = TAPAF_NOMINAL
     administradoras_homologadas = [
         "HS_CONSORCIOS", "EMBRACON", "ADEMICON", "ANCORA", "WHITELABEL_ANCORA",
     ]
@@ -260,6 +262,21 @@ def confirm_tapaf_payment(db: Session, user: User, pauta: PreAnalysisPauta, even
     pauta.tapaf_payment_reference = event_id
     pauta.tapaf_paid_at = datetime.now(UTC)
     pauta.status = "TAPAF_PAID"
+    proposal = db.get(Proposal, pauta.proposal_id)
+    settle_tapaf_payment(
+        db,
+        user,
+        track="REAL_ESTATE",
+        entity_type="pre_analysis_pauta",
+        entity_id=pauta.id,
+        payment_event_id=event_id,
+        total_amount=money(amount),
+        inventory_context={
+            "proposal_id": pauta.proposal_id,
+            "pauta_code": pauta.pauta_code,
+            "appraisal_value": str(proposal.requested_amount if proposal else "0"),
+        },
+    )
     return pauta
 
 

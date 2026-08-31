@@ -766,6 +766,36 @@ class FinOpsEventView(ORMModel):
     received_at: datetime
 
 
+class TapafSplitPolicyView(BaseModel):
+    nominal_brl: str
+    lote_a_api_reserve_brl: str
+    lote_b_franchise_spread_brl: str
+    estimated_api_cost_brl: str
+    estimated_infra_margin_brl: str
+
+
+class TapafSettlementView(BaseModel):
+    id: str
+    track: str
+    entity_type: str
+    entity_id: str
+    payment_event_id: str
+    total_brl: str
+    lote_a_api_reserve_brl: str
+    lote_b_franchise_spread_brl: str
+    ledger_reference: str
+    inventory: dict
+    created_at: str | None = None
+
+
+class InfraProviderCatalogItem(BaseModel):
+    code: str
+    name: str
+    category: str
+    estimated_cost_brl: str
+    configured: bool
+
+
 class SdcBulletPreviewRequest(BaseModel):
     capital: Decimal = Field(gt=0)
     turnover_days: int

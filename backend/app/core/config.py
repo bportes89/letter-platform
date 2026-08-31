@@ -41,6 +41,16 @@ class Settings(BaseSettings):
     zapsign_auth_mode: str = "assinaturaTela-tokenEmail"
     zapsign_send_automatic_email: bool = True
     zapsign_lang: str = "pt-br"
+    onr_client_id: str | None = None
+    onr_client_secret: str | None = None
+    datazap_api_token: str | None = None
+    serasa_api_key: str | None = None
+    judis_api_key: str | None = None
+    infosimples_api_token: str | None = None
+    serpro_api_key: str | None = None
+    fipe_api_token: str | None = None
+    molicar_api_token: str | None = None
+    incra_api_key: str | None = None
     vault_bucket: str = "letter-vault-private"
     vault_prefix: str = "company-vault"
     spe_cnpj: str = "00.000.000/0001-00"

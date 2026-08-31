@@ -17,6 +17,13 @@ type TapafCheckout = {
   botao_label: string;
 };
 
+type TapafSettlement = {
+  total_brl: string;
+  lote_a_api_reserve_brl: string;
+  lote_b_franchise_spread_brl: string;
+  inventory: { providers: Array<{ code: string; name?: string; status: string; mode: string }> };
+};
+
 type Pauta = {
   id: string;
   proposal_id: string;
@@ -55,6 +62,7 @@ export function PreAnalysisModule() {
   const manifestEndRef = useRef<HTMLDivElement>(null);
 
   const [apiReady, setApiReady] = useState<boolean | null>(null);
+  const [settlement, setSettlement] = useState<TapafSettlement | null>(null);
 
   const evaluateManifestScroll = useCallback(() => {
     const el = manifestRef.current;
@@ -103,12 +111,26 @@ export function PreAnalysisModule() {
       .catch(() => setApiReady(false));
   }, []);
 
-  async function loadPauta(id: string) {
-    if (!id) { setPauta(null); return; }
+  async function loadSettlement(pautaId: string) {
     try {
-      setPauta(await api<Pauta>(`/finops/pre-analysis/${id}`));
+      setSettlement(await api<TapafSettlement>(
+        `/finops/tapaf/settlements/lookup?entity_type=pre_analysis_pauta&entity_id=${encodeURIComponent(pautaId)}`,
+      ));
+    } catch {
+      setSettlement(null);
+    }
+  }
+
+  async function loadPauta(id: string) {
+    if (!id) { setPauta(null); setSettlement(null); return; }
+    try {
+      const row = await api<Pauta>(`/finops/pre-analysis/${id}`);
+      setPauta(row);
+      if (row.status === "TAPAF_PAID") await loadSettlement(row.id);
+      else setSettlement(null);
     } catch {
       setPauta(null);
+      setSettlement(null);
     }
   }
 
@@ -190,7 +212,8 @@ export function PreAnalysisModule() {
         body: JSON.stringify({ proposal_id: proposalId, event_id: `tapaf-${Date.now()}`, amount: "1500.00" }),
       });
       setPauta(result);
-      setMessage("TAPAF confirmada D+0 — Fase 3 disponível para o motor Nina.");
+      await loadSettlement(result.id);
+      setMessage("TAPAF confirmada D+0 — split contábil 300/1200 e inventário sandbox executados.");
     } catch (x) {
       setMessage(x instanceof Error ? x.message : "Falha no pagamento TAPAF");
     }
@@ -336,6 +359,23 @@ export function PreAnalysisModule() {
               {canPay && <small className="form-help">Pix sandbox: {checkout.gateway_baas_pix_qrcode.slice(0, 48)}…</small>}
             </div>
           )}
+        </section>
+      )}
+
+      {settlement && (
+        <section className="panel">
+          <h2>Split TAPAF e inventário (NINA v4.0)</h2>
+          <div className="finops-summary">
+            <article><small>Total recebido</small><strong>{brl.format(Number(settlement.total_brl))}</strong></article>
+            <article><small>Lote A — APIs</small><strong>{brl.format(Number(settlement.lote_a_api_reserve_brl))}</strong></article>
+            <article><small>Lote B — spread</small><strong>{brl.format(Number(settlement.lote_b_franchise_spread_brl))}</strong></article>
+            <article><small>Consultas disparadas</small><strong>{settlement.inventory.providers.length}</strong></article>
+          </div>
+          <ul className="form-help">
+            {settlement.inventory.providers.map((p) => (
+              <li key={p.code}>{p.code} · {p.status} · {p.mode}</li>
+            ))}
+          </ul>
         </section>
       )}
 
