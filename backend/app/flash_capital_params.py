@@ -56,9 +56,9 @@ def get_active_flash_simulation_params(db: Session, organization_id: str) -> dic
         "policy_id": policy.id if policy else None,
         "policy_version": policy.version if policy else None,
         "nota": (
-            "Taxas configuradas manualmente na mesa FinOps. "
-            "A simulação usa estes parâmetros automaticamente; "
-            "o IPCA projetado informado na simulação representa o índice esperado para reajuste."
+            "Taxa vigente Flash Capital: fruição fixa de 2,5% a.m. (Tabela Price) para pool e fundo. "
+            "Não compõe 14% a.a. + IPCA. O campo 14% é referência legado de política; "
+            "IPCA não reajusta a fruição."
         ),
     }
 
