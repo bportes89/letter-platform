@@ -10,6 +10,7 @@ from app.models import FlashCreditPolicy, User
 
 DEFAULT_INSTITUTIONAL_RATE_ANNUAL = Decimal("14")
 DEFAULT_RETAIL_RATE_MONTHLY = Decimal("2.5")
+DEFAULT_FRUICAO_RATE_MONTHLY = Decimal("2.5")
 DEFAULT_IPCA_PROJECTED_PERCENT = Decimal("4.5")
 
 
@@ -23,10 +24,10 @@ def _format_br_rate(value: Decimal, suffix: str) -> str:
 
 
 def flash_capital_rate_labels(institutional: Decimal, retail: Decimal) -> dict[str, str]:
-    return {
-        "funds": f"Fundos — {_format_br_rate(institutional, '% a.a. + IPCA')}",
-        "pool": f"Pool — {_format_br_rate(retail, '% a.m.')}",
-    }
+    fruicao = _format_br_rate(retail, "% a.m.")
+    label = f"Fruição — {fruicao} (pool e fundo)"
+    _ = institutional
+    return {"funds": label, "pool": label}
 
 
 def get_active_flash_simulation_params(db: Session, organization_id: str) -> dict:

@@ -214,21 +214,26 @@ def calculate_flash_credit(
         ).order_by(FlashCreditPolicy.version.desc())
     )
     max_ltv = Decimal(str(policy.max_ltv_percent)) if policy else Decimal("40")
-    institutional_base = Decimal(str(policy.institutional_rate_annual)) if policy else Decimal("14")
     retail_rate = Decimal(str(policy.retail_rate_monthly)) if policy else Decimal("2.5")
     default_investor = Decimal(str(policy.investor_rate_monthly)) if policy else Decimal("1.6")
     treasury_spread = Decimal(str(policy.treasury_spread_monthly)) if policy else Decimal("0.9")
     platform_fee_percent = Decimal(str(policy.intermediation_fee_percent)) if policy else Decimal("10")
     itbi_percent = Decimal("3")
     pool_meta: dict = {}
+    fruicao_rate = retail_rate
     if capital_source == "RETAIL":
         investor_rate, pool_meta = resolve_pool_investor_rate(
             pool_investment_amount=pool_investment_amount,
             pool_investor_rate_percent=pool_investor_rate_percent,
-            max_rate=retail_rate,
+            max_rate=fruicao_rate,
             default_rate=default_investor,
         )
-        treasury_spread = money(retail_rate - investor_rate)
+        treasury_spread = money(fruicao_rate - investor_rate)
+    elif capital_source == "INSTITUTIONAL":
+        investor_rate = fruicao_rate
+        treasury_spread = Decimal("0")
+    else:
+        raise HTTPException(status_code=422, detail="Fonte deve ser RETAIL (pool) ou INSTITUTIONAL (fundo)")
     principal = money(Decimal(str(proposal.requested_amount)))
     asset = money(asset_value)
     ltv = money(principal / asset * HUNDRED)
@@ -236,8 +241,6 @@ def calculate_flash_credit(
         raise HTTPException(status_code=422, detail=f"LTV máximo de {max_ltv}% excedido: {ltv}%")
     if term_months not in {36, 60}:
         raise HTTPException(status_code=422, detail="Prazo deve ser de 36 ou 60 meses")
-    if capital_source not in {"RETAIL", "INSTITUTIONAL"}:
-        raise HTTPException(status_code=422, detail="Fonte deve ser RETAIL (pool) ou INSTITUTIONAL (fundo)")
 
     platform_fee = money(principal * platform_fee_percent / HUNDRED)
     itbi_provision = money(principal * itbi_percent / HUNDRED)
@@ -259,49 +262,36 @@ def calculate_flash_credit(
         "interest_basis_note": "Juros e amortização Price calculados sobre o valor nominal alavancado (principal).",
         "partner_commission_basis_note": "Comissão da rede (MMN) calculada sobre o líquido remanescente ao cliente após fee da plataforma e ITBI.",
         "balloon_month": balloon_month,
+        "fruicao_rate_basis": "FIXED_2_5_PERCENT_ALL_TRACKS",
     }
+    monthly_rate = fruicao_rate / HUNDRED
+    investor_rate_m = investor_rate / HUNDRED
+    platform_rate_m = treasury_spread / HUNDRED
+    payment = price_payment(principal, monthly_rate, term_months)
+    schedule_months = min(term_months, 36)
+    schedule = pool_monthly_schedule(
+        principal, payment, monthly_rate, investor_rate_m, platform_rate_m, schedule_months,
+    )
+    balance_at_balloon = Decimal(schedule[-1]["closing_balance"]) if schedule else Decimal("0")
+    total_before_balloon = money(payment * schedule_months)
+    balloon = balance_at_balloon if term_months == 60 else Decimal("0")
+    total_contract = money(total_before_balloon + balloon)
+    output.update({
+        "amortization": "PRICE",
+        "monthly_rate_percent": decimal_string(fruicao_rate),
+        "monthly_payment": decimal_string(payment),
+        "balloon_payment": decimal_string(balloon),
+        "total_contract": decimal_string(total_contract),
+        "investor_rate_percent": decimal_string(investor_rate),
+        "platform_spread_rate_percent": decimal_string(treasury_spread),
+        "monthly_schedule": schedule,
+        "pool_investor_rate_override": str(pool_investor_rate_percent) if pool_investor_rate_percent is not None else None,
+        **pool_meta,
+    })
     if capital_source == "RETAIL":
-        monthly_rate = retail_rate / HUNDRED
-        investor_rate_m = investor_rate / HUNDRED
-        platform_rate_m = treasury_spread / HUNDRED
-        payment = price_payment(principal, monthly_rate, term_months)
-        schedule_months = min(term_months, 36)
-        schedule = pool_monthly_schedule(
-            principal, payment, monthly_rate, investor_rate_m, platform_rate_m, schedule_months,
-        )
-        balance_at_balloon = Decimal(schedule[-1]["closing_balance"]) if schedule else Decimal("0")
-        total_before_balloon = money(payment * schedule_months)
-        balloon = balance_at_balloon if term_months == 60 else Decimal("0")
-        total_contract = money(total_before_balloon + balloon)
-        output.update({
-            "amortization": "PRICE", "monthly_rate_percent": decimal_string(retail_rate),
-            "monthly_payment": decimal_string(payment), "balloon_payment": decimal_string(balloon),
-            "total_contract": decimal_string(total_contract),
-            "investor_rate_percent": decimal_string(investor_rate),
-            "platform_spread_rate_percent": decimal_string(treasury_spread),
-            "monthly_schedule": schedule,
-            "split_basis": f"POOL_MONTHLY: investidor {investor_rate}% + plataforma {treasury_spread}% sobre juros; fundo comum amortiza saldo",
-            "pool_investor_rate_override": str(pool_investor_rate_percent) if pool_investor_rate_percent is not None else None,
-            **pool_meta,
-        })
+        output["split_basis"] = f"POOL_MONTHLY: investidor {investor_rate}% + plataforma {treasury_spread}% sobre juros; fundo comum amortiza saldo"
     else:
-        payment, management_fee, schedule = fund_monthly_schedule(
-            principal, institutional_base, ipca_annual, term_months,
-        )
-        annual_rate = institutional_base + ipca_annual
-        total_interest = money(principal * annual_rate / HUNDRED * Decimal(term_months) / TWELVE)
-        output.update({
-            "amortization": "LINEAR_INDEXED", "base_rate_annual_percent": decimal_string(institutional_base),
-            "ipca_annual_percent": decimal_string(ipca_annual),
-            "combined_rate_annual_percent": decimal_string(annual_rate),
-            "total_interest": decimal_string(total_interest),
-            "monthly_payment": decimal_string(payment),
-            "management_fee_total": decimal_string(management_fee),
-            "total_contract": decimal_string(principal + total_interest),
-            "balloon_payment": "0.00",
-            "monthly_schedule": schedule,
-            "ipca_adjustment": "ANNUAL_AT_MONTHS_13_AND_25",
-        })
+        output["split_basis"] = "FUNDS_PRICE: fruição fixa 2,5% a.m. Tabela Price (independente da esteira)"
     input_data = {
         "asset_value": decimal_string(asset), "capital_source": capital_source,
         "term_months": term_months, "ipca_annual_percent": decimal_string(ipca_annual),

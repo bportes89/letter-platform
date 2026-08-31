@@ -25,7 +25,7 @@ As regras abaixo reproduzem as premissas recebidas na documentação da LETTER. 
 
 - Todo o spread (4,5% × meses) permanece no fundo; spread da plataforma = 0%.
 
-Exemplo canônico pool: R$ 800.000 por 12 meses gera R$ 432.000 de juros, sendo R$ 240.000 para investidores e R$ 192.000 de spread LETTER.
+Exemplo canônico pool: R$ 800.000 por 12 meses gera R$ 432.000 de juros, sendo R$ 153.600 para investidores (1,6% a.m.) e R$ 278.400 de spread LETTER.
 
 ## Flash Capital — `flash-capital-v1` / `flash-capital-v2` / `flash-capital-v3`
 
@@ -61,7 +61,7 @@ Juros: sobre R$ 400.000 (nominal)
 
 ### Origem `INSTITUTIONAL` (fundo)
 
-- Taxa anual: 14% + IPCA informado, com reajuste anual da parcela nos meses 13 e 25.
+- **Fruição fixa:** **2,5% a.m.** Tabela Price — mesma taxa da trilha pool (sem 14% + IPCA).
 - Juros calculados pro rata pelo prazo em meses.
 - Taxa de gestão: 0,5% ao ano sobre o principal, pro rata pelo prazo.
 

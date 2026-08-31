@@ -14,8 +14,8 @@ export const SDC_CAPITAL_SOURCES = [
 ] as const;
 
 export const FLASH_CAPITAL_SOURCES = [
-  { value: "RETAIL", label: "Pool — 2,5% a.m. total (repasse investidor ajustável)" },
-  { value: "INSTITUTIONAL", label: "Fundo — 14% a.a. + IPCA (reajuste anual)" },
+  { value: "RETAIL", label: "Pool — 2,5% a.m. fruição (repasse investidor ajustável)" },
+  { value: "INSTITUTIONAL", label: "Fundo — 2,5% a.m. fruição (Tabela Price)" },
 ] as const;
 
 export const VEHICLE_CLASSES = [

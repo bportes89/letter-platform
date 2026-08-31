@@ -1522,7 +1522,7 @@ def help_what_is_flash_capital():
             "Esteira alternativa de crédito estruturado com compra e pacto de retrovenda imobiliária B2B, "
             "sem exigência de score Bacen tradicional nem comprovação de faturamento PJ no formato SDC."
         ),
-        "rate": "14% a.a. + IPCA (fundos) ou 2,5% a.m. (pool)",
+        "rate": "2,5% a.m. fruição (pool e fundo — Tabela Price)",
         "use_when": [
             "Restrição cadastral identificada na Fase 3",
             "Bem com idade superior a 10 anos",

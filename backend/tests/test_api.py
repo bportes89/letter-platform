@@ -276,10 +276,12 @@ def test_flash_credit_institutional_and_ltv_guard(client, auth_headers):
     })
     assert calculated.status_code == 201
     output = calculated.json()["output"]
-    assert output["combined_rate_annual_percent"] == "18.50"
-    assert output["total_interest"] == "111000.00"
-    assert output["management_fee_total"] == "3000.00"
-    assert output["monthly_schedule"][12]["ipca_adjusted"] is True
+    assert output["monthly_rate_percent"] == "2.50"
+    assert output["amortization"] == "PRICE"
+    assert output["fruicao_rate_basis"] == "FIXED_2_5_PERCENT_ALL_TRACKS"
+    assert output["investor_rate_percent"] == "2.50"
+    assert output["platform_spread_rate_percent"] == "0.00"
+    assert output["monthly_schedule"][0]["interest"] == "5000.00"
     blocked = client.post(f"/api/v1/proposals/{proposal['id']}/calculate-flash-credit", headers=auth_headers, json={
         "asset_value":"400000","capital_source":"RETAIL","term_months":36,"ipca_annual_percent":"0"
     })
@@ -978,7 +980,7 @@ def test_lss_clickwrap_subscription_allocation_and_cancellation(client,auth_head
 def test_flash_simulator_four_scenarios_and_settlement_quote(client,auth_headers):
     params = client.get("/api/v1/finops/flash-capital/simulation-params", headers=auth_headers)
     assert params.status_code == 200
-    assert "14% a.a. + IPCA" in params.json()["labels"]["funds"]
+    assert "2,5% a.m." in params.json()["labels"]["funds"]
 
     updated = client.put("/api/v1/finops/flash-capital/simulation-params", headers=auth_headers, json={
         "institutional_rate_annual": "15",
@@ -996,7 +998,7 @@ def test_flash_simulator_four_scenarios_and_settlement_quote(client,auth_headers
     assert body["platform_fee"]=="40000.00" and body["itbi_provision"]=="12000.00" and body["net_payout"]=="348000.00"
     assert body["partner_commission_base"]=="348000.00" and body["interest_basis"]=="NOMINAL_PRINCIPAL"
     for rows in body["scenarios"].values():
-        assert len(rows)==36 and rows[12]["ipca_adjusted"] is True and rows[24]["ipca_adjusted"] is True and rows[-1]["settlement_balance"]=="0.00"
+        assert len(rows)==36 and rows[-1]["settlement_balance"]=="0.00"
     assert client.post("/api/v1/public/flash-credit/simulate",json={"asset_value":"1000000","requested_amount":"400000.01"}).status_code==422
     curve=client.post("/api/v1/public/flash-credit/settlement-curve",json={"principal":"400000","track":"POOL","balloon":True}).json()
     assert len(curve["curve"])==31 and curve["curve"][0]["installment"]==6 and curve["execution"]=="SIMULATION_ONLY"
