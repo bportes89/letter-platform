@@ -36,6 +36,14 @@ class Settings(BaseSettings):
     asaas_escrow_enabled: bool = True
     asaas_escrow_days_to_expire: int = 10
     asaas_escrow_fee_payer_subaccount: bool = False
+    asaas_subaccount_default_mobile_phone: str = "71999999999"
+    asaas_subaccount_default_income_value: float = 50000.0
+    asaas_subaccount_default_address: str = "Av. Tancredo Neves"
+    asaas_subaccount_default_address_number: str = "620"
+    asaas_subaccount_default_province: str = "Caminho das Arvores"
+    asaas_subaccount_default_postal_code: str = "41820020"
+    asaas_subaccount_default_company_type: str = "LIMITED"
+    asaas_subaccount_default_birth_date: str = "1985-01-15"
     zapsign_api_token: str | None = None
     zapsign_base_url: str = "https://api.zapsign.com.br/api/v1"
     zapsign_auth_mode: str = "assinaturaTela-tokenEmail"

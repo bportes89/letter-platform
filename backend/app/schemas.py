@@ -1279,7 +1279,39 @@ class AccountBalanceView(BaseModel):
     balance: Decimal
 
 
+class EscrowSubaccountProfile(BaseModel):
+    name: str | None = Field(default=None, max_length=180)
+    email: str | None = Field(default=None, max_length=255)
+    cpf_cnpj: str | None = Field(default=None, max_length=20)
+    mobile_phone: str | None = Field(default=None, max_length=20)
+    phone: str | None = Field(default=None, max_length=20)
+    income_value: Decimal | None = Field(default=None, gt=0)
+    address: str | None = Field(default=None, max_length=180)
+    address_number: str | None = Field(default=None, max_length=20)
+    complement: str | None = Field(default=None, max_length=80)
+    province: str | None = Field(default=None, max_length=80)
+    postal_code: str | None = Field(default=None, max_length=12)
+    company_type: str | None = Field(default=None, max_length=30)
+    birth_date: str | None = Field(default=None, max_length=10)
+
+
 class EscrowCreate(BaseModel):
+    operation_id: str | None = None
+    create_subaccount: bool = True
+    profile: EscrowSubaccountProfile | None = None
+
+
+class EscrowSubaccountPreviewView(BaseModel):
+    name: str
+    email: str
+    cpf_cnpj: str
+    mobile_phone: str
+    income_value: str
+    address: str
+    address_number: str
+    province: str
+    postal_code: str
+    person_type: str
     operation_id: str | None = None
 
 
@@ -1291,6 +1323,7 @@ class EscrowAsaasStatusView(BaseModel):
     wallet_id_masked: str | None = None
     environment: str
     balance: str | None = None
+    subaccounts_enabled: bool = False
     message: str
 
 
@@ -1299,6 +1332,8 @@ class EscrowView(ORMModel):
     operation_id: str | None
     provider: str
     external_account_id: str
+    asaas_account_id: str | None = None
+    subaccount_name: str | None = None
     status: str
     available_balance: Decimal
     locked_balance: Decimal

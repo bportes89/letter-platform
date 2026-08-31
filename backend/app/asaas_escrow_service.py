@@ -1,4 +1,4 @@
-"""Abertura de conta Escrow via Asaas (conta principal + configuração Escrow)."""
+"""Abertura de conta Escrow via Asaas (conta principal ou subconta)."""
 
 from __future__ import annotations
 
@@ -7,32 +7,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.asaas_client import AsaasClient
+from app.asaas_common import asaas_configured, mask_wallet, verify_wallet_id
+from app.asaas_subaccount_service import create_asaas_subaccount_escrow, create_mock_subaccount_escrow
 from app.core.config import settings
 from app.financial_service import ensure_chart
 from app.models import EscrowAccount, User
-
-
-def asaas_configured() -> bool:
-    return bool(settings.asaas_api_key and settings.asaas_api_key.strip() and settings.asaas_wallet_id and settings.asaas_wallet_id.strip())
-
-
-def mask_wallet(wallet_id: str) -> str:
-    clean = wallet_id.strip()
-    if len(clean) <= 8:
-        return "***"
-    return f"{clean[:4]}…{clean[-4:]}"
-
-
-def verify_wallet_id(client: AsaasClient) -> None:
-    expected = (settings.asaas_wallet_id or "").strip()
-    payload = client.list_wallets()
-    wallets = payload.get("data") if isinstance(payload.get("data"), list) else []
-    ids = {str(item.get("id", "")).strip() for item in wallets if isinstance(item, dict)}
-    if expected and ids and expected not in ids:
-        raise HTTPException(
-            status_code=422,
-            detail="Wallet ID informado não corresponde à conta autenticada no Asaas.",
-        )
+from app.schemas import EscrowSubaccountProfile
 
 
 def asaas_status() -> dict:
@@ -45,6 +25,7 @@ def asaas_status() -> dict:
             "wallet_id_masked": None,
             "environment": "sandbox" if "sandbox" in settings.asaas_base_url else "production",
             "balance": None,
+            "subaccounts_enabled": False,
             "message": "Configure LETTER_ASAAS_API_KEY e LETTER_ASAAS_WALLET_ID.",
         }
     with AsaasClient() as client:
@@ -59,11 +40,24 @@ def asaas_status() -> dict:
         "wallet_id_masked": mask_wallet(settings.asaas_wallet_id or ""),
         "environment": "sandbox" if "sandbox" in settings.asaas_base_url else "production",
         "balance": str(balance) if balance is not None else None,
-        "message": "Conexão Asaas validada.",
+        "subaccounts_enabled": True,
+        "message": "Conexão Asaas validada. Subcontas Escrow disponíveis em 1 clique.",
     }
 
 
-def create_asaas_escrow(db: Session, user: User, operation_id: str | None) -> EscrowAccount:
+def create_asaas_escrow(
+    db: Session,
+    user: User,
+    operation_id: str | None,
+    *,
+    create_subaccount: bool = True,
+    profile: EscrowSubaccountProfile | None = None,
+) -> EscrowAccount:
+    if create_subaccount:
+        if asaas_configured():
+            return create_asaas_subaccount_escrow(db, user, operation_id, profile)
+        return create_mock_subaccount_escrow(db, user, operation_id, profile)
+
     if operation_id and db.scalar(select(EscrowAccount).where(EscrowAccount.operation_id == operation_id)):
         raise HTTPException(status_code=409, detail="Operação já possui conta escrow")
 

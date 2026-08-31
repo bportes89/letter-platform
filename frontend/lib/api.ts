@@ -187,7 +187,17 @@ export type NinaRoutingPolicy = {id:string;version:number;population_threshold:n
 export type NinaRoutingAssessment = {id:string;proposal_id:string;policy_id:string;version:number;asset_type:string;municipality_code:string;population:number;income_per_capita:string;encumbrances:string[];risk_flags:string[];tapaf_evidence_reference:string|null;physical_appraisal_required:boolean;product_route:string;capital_route:string|null;status:string;blockers:string[];evidence_hash:string;approved_at:string|null;created_at:string};
 export type AccountBalance = { code: string; name: string; account_type: string; balance: string };
 export type LedgerTransaction = { id: string; reference: string; event_type: string; description: string; amount: string; debit_account: string; credit_account: string; created_at: string };
-export type EscrowAccount = { id: string; operation_id: string | null; provider: string; external_account_id: string; status: string; available_balance: string; locked_balance: string };
+export type EscrowAccount = {
+  id: string;
+  operation_id: string | null;
+  provider: string;
+  external_account_id: string;
+  asaas_account_id?: string | null;
+  subaccount_name?: string | null;
+  status: string;
+  available_balance: string;
+  locked_balance: string;
+};
 export type EscrowAsaasStatus = {
   configured: boolean;
   connected: boolean;
@@ -196,7 +206,21 @@ export type EscrowAsaasStatus = {
   wallet_id_masked: string | null;
   environment: string;
   balance: string | null;
+  subaccounts_enabled?: boolean;
   message: string;
+};
+export type EscrowSubaccountPreview = {
+  name: string;
+  email: string;
+  cpf_cnpj: string;
+  mobile_phone: string;
+  income_value: string;
+  address: string;
+  address_number: string;
+  province: string;
+  postal_code: string;
+  person_type: string;
+  operation_id: string | null;
 };
 export type SignatureZapSignStatus = {
   configured: boolean;

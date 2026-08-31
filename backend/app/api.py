@@ -50,7 +50,7 @@ from app.schemas import (
     ValidStampCreate, ValidStampView, SaaSTermsCreate, SaaSTermsView, SaaSPlanCreate, SaaSPlanView,
     SaaSSubscribeCreate, SaaSSubscriptionView,
     BillingGenerateRequest, CollectionActionView, CommissionAllocate, CommissionEntryView, CommissionRuleCreate,
-    CommissionRuleView, DocumentView, EscrowAsaasStatusView, EscrowCreate, EscrowView, EscrowWebhook,
+    CommissionRuleView, DocumentView, EscrowAsaasStatusView, EscrowCreate, EscrowSubaccountPreviewView, EscrowView, EscrowWebhook,
     DelinquencyView, FiscalReleaseRequest, FundingOpportunityCreate, FundingOpportunityView, InvitationView,
     NinaApprovalRequest, NinaCriticalApprovalView, NinaDistressCaseCreate, NinaDistressCaseView,
     NinaDistressEventView, NinaDocumentCreate, NinaGateApplyRequest, NinaLegalDocumentView, NinaTimelineEvaluateRequest,
@@ -2089,7 +2089,25 @@ def balances(user: User = Depends(get_current_user), db: Session = Depends(get_d
 
 @router.post("/escrow/accounts", response_model=EscrowView, status_code=201)
 def create_escrow(payload: EscrowCreate, user: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
-    account=create_mock_escrow(db,user,payload.operation_id);db.flush();audit(db,user,"escrow.created","escrow_account",account.id,{"provider":account.provider});db.commit();db.refresh(account);return account
+    account = create_mock_escrow(
+        db,
+        user,
+        payload.operation_id,
+        create_subaccount=payload.create_subaccount,
+        profile=payload.profile,
+    )
+    db.flush()
+    audit(db, user, "escrow.created", "escrow_account", account.id, {"provider": account.provider, "subaccount": payload.create_subaccount})
+    db.commit()
+    db.refresh(account)
+    return account
+
+
+@router.post("/escrow/subaccount/preview", response_model=EscrowSubaccountPreviewView)
+def escrow_subaccount_preview(payload: EscrowCreate, user: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
+    from app.asaas_subaccount_service import subaccount_profile_preview
+
+    return subaccount_profile_preview(db, user, payload.operation_id, payload.profile)
 
 
 @router.get("/escrow/asaas/status", response_model=EscrowAsaasStatusView)

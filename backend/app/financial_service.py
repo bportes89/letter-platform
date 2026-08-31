@@ -12,6 +12,7 @@ from app.models import (
     ChartAccount, EscrowAccount, EscrowEvent, LedgerEntry, PayoutApproval,
     PayoutRequest, User,
 )
+from app.schemas import EscrowSubaccountProfile
 from app.services import money, post_double_entry
 
 DEFAULT_ACCOUNTS = [
@@ -43,11 +44,25 @@ def account_balances(db: Session, user: User) -> list[dict]:
     return result
 
 
-def create_mock_escrow(db: Session, user: User, operation_id: str | None) -> EscrowAccount:
-    from app.asaas_escrow_service import asaas_configured, create_asaas_escrow
+def create_mock_escrow(
+    db: Session,
+    user: User,
+    operation_id: str | None,
+    *,
+    create_subaccount: bool = True,
+    profile: EscrowSubaccountProfile | None = None,
+) -> EscrowAccount:
+    from app.asaas_common import asaas_configured
+    from app.asaas_escrow_service import create_asaas_escrow
 
-    if asaas_configured():
-        return create_asaas_escrow(db, user, operation_id)
+    if asaas_configured() or create_subaccount:
+        return create_asaas_escrow(
+            db,
+            user,
+            operation_id,
+            create_subaccount=create_subaccount,
+            profile=profile,
+        )
 
     if operation_id and db.scalar(select(EscrowAccount).where(EscrowAccount.operation_id == operation_id)):
         raise HTTPException(status_code=409, detail="Operação já possui conta escrow")

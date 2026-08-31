@@ -96,3 +96,6 @@ class AsaasClient:
                 "daysToExpire": days_to_expire,
             },
         )
+
+    def create_subaccount(self, payload: dict) -> dict:
+        return self.request("POST", "/accounts", json=payload)
