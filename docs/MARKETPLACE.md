@@ -36,5 +36,7 @@ Cadastro (admin/Inventário) → Varredura Nina → Marketplace (Esteira 1 ou 2)
 
 ## UI
 
-- **Marketplace** (`/modules/marketplace`): Esteira 1 e Esteira 2.
-- **Inventário** (`/modules/inventory`): cadastro admin e varredura manual.
+- **COMERCIAL (parceiros)** no menu lateral:
+  - **Cartas contempladas** → Marketplace (esteiras) | Inventário (admin, interno)
+  - **Propostas e simulações** → cadastro comercial unificado (Marketplace, SDC, Flash)
+- **SDC — estrutura interna** (menu PRODUTOS, só admin/staff/franqueadora) → pré-análise fiduciária

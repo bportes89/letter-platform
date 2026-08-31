@@ -1,4 +1,8 @@
-import { PRODUCT_NAV, type ProductNavItem } from "@/lib/product-nav";
+import {
+  PRODUCT_NAV,
+  filterProductNavItem,
+  type ProductNavItem,
+} from "@/lib/product-nav";
 import type { Module, User } from "@/lib/api";
 
 /** Papéis alinhados ao enum Role do backend. */
@@ -33,11 +37,14 @@ const ROLE_PERSONA_LABEL: Record<LetterRole, string> = {
 const ROLE_PRODUCT_KEYS: Record<LetterRole, AccessList> = {
   PLATFORM_ADMIN: "*",
   INTERNAL_STAFF: "*",
-  MASTER_FRANCHISEE: ["marketplace", "sdc", "flash-capital", "lease-equity", "flash-invest", "quitcon", "lss", "leilao"],
-  MANAGER: ["marketplace", "sdc", "flash-capital", "lease-equity", "quitcon", "lss"],
-  PARTNER: ["marketplace", "sdc", "flash-capital", "lease-equity", "quitcon", "lss", "leilao"],
-  CLIENT: ["sdc", "flash-capital", "lease-equity", "quitcon", "lss"],
-  QUOTA_SELLER: ["marketplace", "sdc", "quitcon"],
+  MASTER_FRANCHISEE: [
+    "marketplace", "inventory", "proposals", "sdc",
+    "flash-capital", "lease-equity", "flash-invest", "quitcon", "lss", "leilao",
+  ],
+  MANAGER: ["marketplace", "inventory", "proposals", "flash-capital", "lease-equity", "quitcon", "lss"],
+  PARTNER: ["marketplace", "proposals", "flash-capital", "lease-equity", "quitcon", "lss", "leilao"],
+  CLIENT: ["proposals", "flash-capital", "lease-equity", "quitcon", "lss"],
+  QUOTA_SELLER: ["marketplace", "proposals", "quitcon"],
   RETAIL_INVESTOR: ["flash-invest", "leilao"],
   INSTITUTIONAL_FUND: ["flash-invest"],
   AUDITOR: [],
@@ -92,8 +99,8 @@ export function canAccessPlatformModule(role: string | undefined, moduleKey: str
 const PRODUCT_ROUTE_ALIASES: Record<string, string> = {
   marketplace: "marketplace",
   inventory: "marketplace",
+  proposals: "proposals",
   sdc: "sdc",
-  proposals: "sdc",
   "flash-capital": "flash-capital",
   finops: "flash-capital",
   "lease-equity": "lease-equity",
@@ -115,8 +122,8 @@ export function filterProductNav(role: string | undefined): ProductNavItem[] {
   const r = normalizeRole(role);
   if (!r) return [];
   const list = ROLE_PRODUCT_KEYS[r];
-  if (list === "*") return PRODUCT_NAV;
-  return PRODUCT_NAV.filter((item) => list.includes(item.key));
+  return PRODUCT_NAV.map((item) => filterProductNavItem(item, list, role))
+    .filter((item): item is ProductNavItem => item !== null);
 }
 
 export function filterPlatformModules(role: string | undefined, modules: Module[]): Module[] {

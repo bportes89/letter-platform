@@ -1,13 +1,13 @@
 "use client";
 
 import {
-  Activity, Bell, BrainCircuit, Building2, ChevronDown, FileCheck2, Gavel,
+  Activity, Bell, BrainCircuit, Building2, ChevronDown, FileCheck2, FileText, Gavel,
   HandCoins, LayoutDashboard, LogOut, Menu, Search, Settings, ShieldCheck,
   ShoppingBag, Sparkles, TrendingUp, Wallet, X, Zap,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { LetterLogo } from "@/components/brand/letter-logo";
 import { api, logout, Module, User } from "@/lib/api";
 import { PLATFORM_HIDDEN_MODULE_KEYS } from "@/lib/product-nav";
@@ -28,9 +28,14 @@ export function Shell({ children }: { children: React.ReactNode }) {
     }).catch(() => logout());
   }, []);
   const productNav = user ? filterProductNav(user.role) : [];
+  const commercialNav = useMemo(() => productNav.filter((item) => item.commercial), [productNav]);
+  const structuralNav = useMemo(() => productNav.filter((item) => !item.commercial), [productNav]);
   const platformModules = modules;
   const persona = personaLabel(user?.role);
   const portalHome = user ? portalHomeForRole(user.role) : "/login";
+  const modulePath = (key: string) => `/modules/${key}`;
+  const isActive = (key: string) => pathname === modulePath(key);
+  const isGroupActive = (keys: string[]) => keys.some(isActive);
   return <div className="app-shell">
     <aside className={open ? "sidebar open" : "sidebar"}>
       <div className="side-logo">
@@ -42,10 +47,33 @@ export function Shell({ children }: { children: React.ReactNode }) {
       <div className="side-context"><small>SEU ACESSO</small><strong>{persona}</strong><ChevronDown size={14}/></div>
       <nav>
         <Link className={isPortalHomePath(pathname, user?.role)?"active":""} href={portalHome}><LayoutDashboard/>Visão geral</Link>
-        {productNav.length > 0 && <>
+        {commercialNav.length > 0 && <>
+        <div className="nav-label">COMERCIAL (PARCEIROS)</div>
+        <div className="nav-products">
+          {commercialNav.map((item) => item.children?.length ? (
+            <div className={`nav-group${isGroupActive(item.children.map((c) => c.key)) ? " open" : ""}`} key={item.key}>
+              <div className="nav-group-title"><ProductIcon keyName="marketplace"/>{item.name}</div>
+              {item.children.map((child) => (
+                <Link className={`nav-sub${isActive(child.key) ? " active" : ""}`} href={modulePath(child.key)} key={child.key}>
+                  {child.name}
+                </Link>
+              ))}
+            </div>
+          ) : (
+            <Link className={isActive(item.key) ? "active" : ""} href={modulePath(item.key)} key={item.key}>
+              <ProductIcon keyName={item.key}/>{item.name}
+            </Link>
+          ))}
+        </div>
+        </>}
+        {structuralNav.length > 0 && <>
         <div className="nav-label">PRODUTOS</div>
         <div className="nav-products">
-          {productNav.map(p=><Link className={pathname===`/modules/${p.key}`?"active":""} href={`/modules/${p.key}`} key={p.key}><ProductIcon keyName={p.key}/>{p.name}</Link>)}
+          {structuralNav.map((item) => (
+            <Link className={isActive(item.key) ? "active" : ""} href={modulePath(item.key)} key={item.key}>
+              <ProductIcon keyName={item.key}/>{item.name}
+            </Link>
+          ))}
         </div>
         </>}
         {platformModules.length > 0 && <>
@@ -69,8 +97,13 @@ export function Shell({ children }: { children: React.ReactNode }) {
 
 function ProductIcon({ keyName }: { keyName: string }) {
   switch (keyName) {
-    case "marketplace": return <ShoppingBag />;
-    case "sdc": return <Wallet />;
+    case "marketplace":
+    case "marketplace-group":
+      return <ShoppingBag />;
+    case "proposals":
+      return <FileText />;
+    case "sdc":
+      return <Wallet />;
     case "flash-capital": return <Zap />;
     case "lease-equity": return <Building2 />;
     case "flash-invest": return <TrendingUp />;

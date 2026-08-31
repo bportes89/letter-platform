@@ -103,3 +103,8 @@ html,body{-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
 .nav-products{display:flex;flex-direction:column;gap:6px;margin-bottom:4px}
 .nav-products a{border:1px solid rgb(255 255 255 / 0.06);border-radius:8px;background:rgb(255 255 255 / 0.03);padding-top:11px;padding-bottom:11px;line-height:1.35;font-size:11px}
 .nav-products a.active{border-color:rgb(0 208 132 / 0.45);background:rgb(0 208 132 / 0.14)}
+.nav-group{border:1px solid rgb(255 255 255 / 0.06);border-radius:8px;background:rgb(255 255 255 / 0.02);padding:8px 8px 6px;display:flex;flex-direction:column;gap:4px}
+.nav-group.open{border-color:rgb(0 208 132 / 0.25)}
+.nav-group-title{display:flex;align-items:center;gap:8px;font-size:10px;font-weight:700;letter-spacing:.04em;color:rgb(255 255 255 / 0.72);padding:4px 6px 2px}
+.nav-sub{display:block;border:1px solid rgb(255 255 255 / 0.05)!important;border-radius:6px!important;background:rgb(255 255 255 / 0.02)!important;padding:9px 10px 9px 28px!important;font-size:10px!important;line-height:1.35!important}
+.nav-sub.active{border-color:rgb(0 208 132 / 0.45)!important;background:rgb(0 208 132 / 0.14)!important}
