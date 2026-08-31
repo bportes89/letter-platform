@@ -2125,10 +2125,22 @@ def create_escrow(payload: EscrowCreate, user: User = Depends(require_scope("pay
         user,
         payload.operation_id,
         create_subaccount=payload.create_subaccount,
+        enable_escrow=payload.enable_escrow,
         profile=payload.profile,
     )
     db.flush()
-    audit(db, user, "escrow.created", "escrow_account", account.id, {"provider": account.provider, "subaccount": payload.create_subaccount})
+    audit(
+        db,
+        user,
+        "escrow.created",
+        "escrow_account",
+        account.id,
+        {
+            "provider": account.provider,
+            "subaccount": payload.create_subaccount,
+            "escrow_enabled": account.escrow_enabled,
+        },
+    )
     db.commit()
     db.refresh(account)
     return account

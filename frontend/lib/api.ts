@@ -194,6 +194,7 @@ export type EscrowAccount = {
   external_account_id: string;
   asaas_account_id?: string | null;
   subaccount_name?: string | null;
+  escrow_enabled?: boolean;
   status: string;
   available_balance: string;
   locked_balance: string;

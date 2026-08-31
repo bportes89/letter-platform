@@ -1318,6 +1318,7 @@ class EscrowSubaccountProfile(BaseModel):
 class EscrowCreate(BaseModel):
     operation_id: str | None = None
     create_subaccount: bool = True
+    enable_escrow: bool = True
     profile: EscrowSubaccountProfile | None = None
 
 
@@ -1354,6 +1355,7 @@ class EscrowView(ORMModel):
     external_account_id: str
     asaas_account_id: str | None = None
     subaccount_name: str | None = None
+    escrow_enabled: bool = True
     status: str
     available_balance: Decimal
     locked_balance: Decimal

@@ -638,6 +638,7 @@ class EscrowAccount(TimestampMixin, Base):
     external_account_id: Mapped[str] = mapped_column(String(120), unique=True)
     asaas_account_id: Mapped[str | None] = mapped_column(String(120), index=True)
     subaccount_name: Mapped[str | None] = mapped_column(String(180))
+    escrow_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     status: Mapped[str] = mapped_column(String(30), default="ACTIVE")
     available_balance: Mapped[float] = mapped_column(Numeric(15, 2), default=0)
     locked_balance: Mapped[float] = mapped_column(Numeric(15, 2), default=0)

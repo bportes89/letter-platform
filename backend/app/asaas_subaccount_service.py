@@ -1,4 +1,4 @@
-"""Criação de subcontas Asaas + Escrow em um clique."""
+"""Criação de subcontas Asaas — com ou sem Escrow."""
 
 from __future__ import annotations
 
@@ -104,14 +104,20 @@ def subaccount_profile_preview(
     }
 
 
-def create_mock_subaccount_escrow(
+def _ensure_no_duplicate(db: Session, operation_id: str | None) -> None:
+    if operation_id and db.scalar(select(EscrowAccount).where(EscrowAccount.operation_id == operation_id)):
+        raise HTTPException(status_code=409, detail="Operação já possui conta vinculada")
+
+
+def create_mock_subaccount(
     db: Session,
     user: User,
     operation_id: str | None,
     overrides: EscrowSubaccountProfile | None,
+    *,
+    enable_escrow: bool = True,
 ) -> EscrowAccount:
-    if operation_id and db.scalar(select(EscrowAccount).where(EscrowAccount.operation_id == operation_id)):
-        raise HTTPException(status_code=409, detail="Operação já possui conta escrow")
+    _ensure_no_duplicate(db, operation_id)
 
     preview = build_subaccount_profile(db, user, operation_id, overrides)
     wallet_id = f"mock_sub_{uuid4().hex[:16]}"
@@ -122,6 +128,61 @@ def create_mock_subaccount_escrow(
         external_account_id=wallet_id,
         asaas_account_id=f"mock_acct_{uuid4().hex[:12]}",
         subaccount_name=preview["name"],
+        escrow_enabled=enable_escrow,
+        status="ACTIVE",
+    )
+    db.add(account)
+    ensure_chart(db, user)
+    return account
+
+
+def create_mock_subaccount_escrow(
+    db: Session,
+    user: User,
+    operation_id: str | None,
+    overrides: EscrowSubaccountProfile | None,
+) -> EscrowAccount:
+    return create_mock_subaccount(db, user, operation_id, overrides, enable_escrow=True)
+
+
+def create_asaas_subaccount(
+    db: Session,
+    user: User,
+    operation_id: str | None,
+    overrides: EscrowSubaccountProfile | None,
+    *,
+    enable_escrow: bool = True,
+) -> EscrowAccount:
+    if not asaas_configured():
+        raise HTTPException(status_code=503, detail="Integração Asaas não configurada.")
+
+    _ensure_no_duplicate(db, operation_id)
+    payload = build_subaccount_profile(db, user, operation_id, overrides)
+
+    with AsaasClient() as client:
+        verify_wallet_id(client)
+        created = client.create_subaccount(payload)
+        asaas_account_id = str(created.get("id", "")).strip()
+        wallet_id = str(created.get("walletId", "")).strip()
+        if not asaas_account_id or not wallet_id:
+            raise HTTPException(status_code=502, detail="Asaas não retornou id/walletId da subconta.")
+
+        if enable_escrow:
+            client.configure_subaccount_escrow(
+                asaas_account_id,
+                enabled=settings.asaas_escrow_enabled,
+                days_to_expire=settings.asaas_escrow_days_to_expire,
+                fee_payer_subaccount=settings.asaas_escrow_fee_payer_subaccount,
+            )
+
+    account = EscrowAccount(
+        organization_id=user.organization_id,
+        operation_id=operation_id,
+        provider="ASAAS_SUBACCOUNT",
+        external_account_id=wallet_id,
+        asaas_account_id=asaas_account_id,
+        subaccount_name=payload["name"],
+        escrow_enabled=enable_escrow,
         status="ACTIVE",
     )
     db.add(account)
@@ -135,38 +196,4 @@ def create_asaas_subaccount_escrow(
     operation_id: str | None,
     overrides: EscrowSubaccountProfile | None,
 ) -> EscrowAccount:
-    if not asaas_configured():
-        raise HTTPException(status_code=503, detail="Integração Asaas não configurada.")
-
-    if operation_id and db.scalar(select(EscrowAccount).where(EscrowAccount.operation_id == operation_id)):
-        raise HTTPException(status_code=409, detail="Operação já possui conta escrow")
-
-    payload = build_subaccount_profile(db, user, operation_id, overrides)
-
-    with AsaasClient() as client:
-        verify_wallet_id(client)
-        created = client.create_subaccount(payload)
-        asaas_account_id = str(created.get("id", "")).strip()
-        wallet_id = str(created.get("walletId", "")).strip()
-        if not asaas_account_id or not wallet_id:
-            raise HTTPException(status_code=502, detail="Asaas não retornou id/walletId da subconta.")
-
-        client.configure_subaccount_escrow(
-            asaas_account_id,
-            enabled=settings.asaas_escrow_enabled,
-            days_to_expire=settings.asaas_escrow_days_to_expire,
-            fee_payer_subaccount=settings.asaas_escrow_fee_payer_subaccount,
-        )
-
-    account = EscrowAccount(
-        organization_id=user.organization_id,
-        operation_id=operation_id,
-        provider="ASAAS_SUBACCOUNT",
-        external_account_id=wallet_id,
-        asaas_account_id=asaas_account_id,
-        subaccount_name=payload["name"],
-        status="ACTIVE",
-    )
-    db.add(account)
-    ensure_chart(db, user)
-    return account
+    return create_asaas_subaccount(db, user, operation_id, overrides, enable_escrow=True)

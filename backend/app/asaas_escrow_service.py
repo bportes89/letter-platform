@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.asaas_client import AsaasClient
 from app.asaas_common import asaas_configured, mask_wallet, verify_wallet_id
-from app.asaas_subaccount_service import create_asaas_subaccount_escrow, create_mock_subaccount_escrow
+from app.asaas_subaccount_service import create_asaas_subaccount, create_mock_subaccount
 from app.core.config import settings
 from app.financial_service import ensure_chart
 from app.models import EscrowAccount, User
@@ -41,7 +41,7 @@ def asaas_status() -> dict:
         "environment": "sandbox" if "sandbox" in settings.asaas_base_url else "production",
         "balance": str(balance) if balance is not None else None,
         "subaccounts_enabled": True,
-        "message": "Conexão Asaas validada. Subcontas Escrow disponíveis em 1 clique.",
+        "message": "Conexão Asaas validada. Subcontas com ou sem Escrow disponíveis.",
     }
 
 
@@ -51,12 +51,13 @@ def create_asaas_escrow(
     operation_id: str | None,
     *,
     create_subaccount: bool = True,
+    enable_escrow: bool = True,
     profile: EscrowSubaccountProfile | None = None,
 ) -> EscrowAccount:
     if create_subaccount:
         if asaas_configured():
-            return create_asaas_subaccount_escrow(db, user, operation_id, profile)
-        return create_mock_subaccount_escrow(db, user, operation_id, profile)
+            return create_asaas_subaccount(db, user, operation_id, profile, enable_escrow=enable_escrow)
+        return create_mock_subaccount(db, user, operation_id, profile, enable_escrow=enable_escrow)
 
     if operation_id and db.scalar(select(EscrowAccount).where(EscrowAccount.operation_id == operation_id)):
         raise HTTPException(status_code=409, detail="Operação já possui conta escrow")
@@ -76,6 +77,7 @@ def create_asaas_escrow(
         operation_id=operation_id,
         provider="ASAAS",
         external_account_id=wallet_id,
+        escrow_enabled=True,
         status="ACTIVE",
     )
     db.add(account)

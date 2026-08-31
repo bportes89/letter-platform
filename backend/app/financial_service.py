@@ -50,6 +50,7 @@ def create_mock_escrow(
     operation_id: str | None,
     *,
     create_subaccount: bool = True,
+    enable_escrow: bool = True,
     profile: EscrowSubaccountProfile | None = None,
 ) -> EscrowAccount:
     from app.asaas_common import asaas_configured
@@ -61,12 +62,19 @@ def create_mock_escrow(
             user,
             operation_id,
             create_subaccount=create_subaccount,
+            enable_escrow=enable_escrow,
             profile=profile,
         )
 
     if operation_id and db.scalar(select(EscrowAccount).where(EscrowAccount.operation_id == operation_id)):
-        raise HTTPException(status_code=409, detail="Operação já possui conta escrow")
-    account = EscrowAccount(organization_id=user.organization_id, operation_id=operation_id, provider="MOCK", external_account_id=f"mock_escrow_{uuid4().hex}")
+        raise HTTPException(status_code=409, detail="Operação já possui conta vinculada")
+    account = EscrowAccount(
+        organization_id=user.organization_id,
+        operation_id=operation_id,
+        provider="MOCK",
+        external_account_id=f"mock_escrow_{uuid4().hex}",
+        escrow_enabled=enable_escrow,
+    )
     db.add(account); ensure_chart(db,user); return account
 
 

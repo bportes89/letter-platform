@@ -1775,6 +1775,8 @@ def test_escrow_asaas_status_not_configured(client, auth_headers, monkeypatch):
 
 
 def test_escrow_create_uses_asaas_subaccount_when_configured(client, auth_headers, monkeypatch):
+    escrow_calls: list[dict] = []
+
     class FakeAsaasClient:
         def __init__(self, *args, **kwargs):
             pass
@@ -1797,7 +1799,7 @@ def test_escrow_create_uses_asaas_subaccount_when_configured(client, auth_header
             return {"id": "acct-sub-001", "walletId": "wallet-sub-001", "apiKey": "secret-once"}
 
         def configure_subaccount_escrow(self, account_id, **kwargs):
-            assert account_id == "acct-sub-001"
+            escrow_calls.append({"account_id": account_id, **kwargs})
             return {"enabled": True}
 
         def configure_default_escrow(self, **kwargs):
@@ -1808,13 +1810,62 @@ def test_escrow_create_uses_asaas_subaccount_when_configured(client, auth_header
     monkeypatch.setattr("app.asaas_escrow_service.AsaasClient", FakeAsaasClient)
     monkeypatch.setattr("app.asaas_subaccount_service.AsaasClient", FakeAsaasClient)
 
-    created = client.post("/api/v1/escrow/accounts", headers=auth_headers, json={"create_subaccount": True})
+    created = client.post("/api/v1/escrow/accounts", headers=auth_headers, json={"create_subaccount": True, "enable_escrow": True})
     assert created.status_code == 201
     body = created.json()
     assert body["provider"] == "ASAAS_SUBACCOUNT"
     assert body["external_account_id"] == "wallet-sub-001"
     assert body["asaas_account_id"] == "acct-sub-001"
     assert body["subaccount_name"]
+    assert body["escrow_enabled"] is True
+    assert len(escrow_calls) == 1
+
+
+def test_escrow_create_plain_subaccount_without_escrow(client, auth_headers, monkeypatch):
+    escrow_calls: list[dict] = []
+
+    class FakeAsaasClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def get_balance(self):
+            return {"balance": 1000.0}
+
+        def list_wallets(self):
+            return {"data": [{"id": "wallet-test-001"}]}
+
+        def create_subaccount(self, payload):
+            return {"id": "acct-plain-001", "walletId": "wallet-plain-001", "apiKey": "secret-once"}
+
+        def configure_subaccount_escrow(self, account_id, **kwargs):
+            escrow_calls.append({"account_id": account_id, **kwargs})
+            return {"enabled": True}
+
+        def configure_default_escrow(self, **kwargs):
+            return {"enabled": True}
+
+    monkeypatch.setattr("app.asaas_common.settings.asaas_api_key", "test-key")
+    monkeypatch.setattr("app.asaas_common.settings.asaas_wallet_id", "wallet-test-001")
+    monkeypatch.setattr("app.asaas_escrow_service.AsaasClient", FakeAsaasClient)
+    monkeypatch.setattr("app.asaas_subaccount_service.AsaasClient", FakeAsaasClient)
+
+    created = client.post(
+        "/api/v1/escrow/accounts",
+        headers=auth_headers,
+        json={"create_subaccount": True, "enable_escrow": False},
+    )
+    assert created.status_code == 201
+    body = created.json()
+    assert body["provider"] == "ASAAS_SUBACCOUNT"
+    assert body["external_account_id"] == "wallet-plain-001"
+    assert body["escrow_enabled"] is False
+    assert escrow_calls == []
 
 
 def test_escrow_create_main_wallet_legacy(client, auth_headers, monkeypatch):
@@ -1865,9 +1916,21 @@ def test_escrow_create_mock_subaccount_without_asaas(client, auth_headers, monke
     body = created.json()
     assert body["provider"] == "MOCK_SUBACCOUNT"
     assert body["subaccount_name"]
+    assert body["escrow_enabled"] is True
 
 
-def test_signature_zapsign_status_not_configured(client, auth_headers, monkeypatch):
+def test_escrow_create_mock_plain_subaccount_without_asaas(client, auth_headers, monkeypatch):
+    monkeypatch.setattr("app.asaas_common.settings.asaas_api_key", None)
+    monkeypatch.setattr("app.asaas_common.settings.asaas_wallet_id", None)
+    created = client.post(
+        "/api/v1/escrow/accounts",
+        headers=auth_headers,
+        json={"create_subaccount": True, "enable_escrow": False},
+    )
+    assert created.status_code == 201
+    body = created.json()
+    assert body["provider"] == "MOCK_SUBACCOUNT"
+    assert body["escrow_enabled"] is False
     monkeypatch.setattr("app.zapsign_signature_service.settings.zapsign_api_token", None)
     response = client.get("/api/v1/signatures/zapsign/status", headers=auth_headers)
     assert response.status_code == 200
