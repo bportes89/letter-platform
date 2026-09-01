@@ -78,6 +78,36 @@ def create_mock_escrow(
     db.add(account); ensure_chart(db,user); return account
 
 
+def create_client_plain_subaccount(
+    db: Session,
+    actor: User,
+    client_user: User,
+    *,
+    profile: EscrowSubaccountProfile | None = None,
+) -> EscrowAccount:
+    """Subconta normal (sem Escrow) vinculada ao cliente — usada após KYC aprovado."""
+    from app.asaas_common import asaas_configured
+    from app.asaas_subaccount_service import create_asaas_subaccount, create_mock_subaccount
+
+    if asaas_configured():
+        return create_asaas_subaccount(
+            db,
+            actor,
+            None,
+            profile,
+            enable_escrow=False,
+            user_id=client_user.id,
+        )
+    return create_mock_subaccount(
+        db,
+        actor,
+        None,
+        profile,
+        enable_escrow=False,
+        user_id=client_user.id,
+    )
+
+
 def process_escrow_event(db: Session, user: User, account: EscrowAccount, event_id: str, event_type: str, amount: Decimal, metadata: dict) -> tuple[EscrowEvent, bool]:
     existing = db.scalar(select(EscrowEvent).where(EscrowEvent.provider_event_id == event_id))
     if existing: return existing, False

@@ -57,7 +57,7 @@ from app.schemas import (
     DelinquencyView, FiscalReleaseRequest, FundingOpportunityCreate, FundingOpportunityView, InvitationView,
     NinaApprovalRequest, NinaCriticalApprovalView, NinaDistressCaseCreate, NinaDistressCaseView,
     NinaDistressEventView, NinaDocumentCreate, NinaGateApplyRequest, NinaLegalDocumentView, NinaTimelineEvaluateRequest,
-    InviteAccept, InviteCreate, PartnerInviteCreate, KycCreate, KycDecision, KycView, LeadCreate,
+    InviteAccept, InviteCreate, PartnerInviteCreate, KycCreate, KycDecision, KycSelfCompleteResponse, KycView, LeadCreate,
     InvestmentPositionView, InvestmentReservationView, InvestmentReserveRequest, InvoicePaymentWebhook, InvoiceProcessorRequest, InvoiceView,
     PaymentReceiptView, PreAnalysisEngineRequest, PreAnalysisPautaView, PreAnalysisProposalRequest,
     PreAnalysisTapafCheckoutAcceptRequest, PreAnalysisTapafPaymentWebhook, PreAnalysisValidateDocumentsRequest,
@@ -385,10 +385,50 @@ def kyc_cases(user:User=Depends(get_current_user),db:Session=Depends(get_db)):
 
 @router.post("/kyc/cases/{case_id}/mock-decision",response_model=KycView)
 def decide_kyc(case_id:str,payload:KycDecision,user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    from app.subaccount_auto_service import maybe_provision_after_kyc_decision
+
     item=db.scalar(select(KycCase).where(KycCase.id==case_id,KycCase.organization_id==user.organization_id))
     if not item: raise HTTPException(status_code=404,detail="Caso KYC não encontrado")
     if payload.status not in {"APPROVED","REJECTED","REVIEW"}: raise HTTPException(status_code=422,detail="Status inválido")
-    item.status=payload.status;item.risk_level=payload.risk_level;item.result_json=json.dumps(payload.model_dump());item.reviewed_by_id=user.id;item.reviewed_at=datetime.now(UTC);audit(db,user,"kyc.decided","kyc_case",item.id,payload.model_dump());db.commit();db.refresh(item);return item
+    item.status=payload.status;item.risk_level=payload.risk_level;item.result_json=json.dumps(payload.model_dump());item.reviewed_by_id=user.id;item.reviewed_at=datetime.now(UTC)
+    subaccount = maybe_provision_after_kyc_decision(db, item, user)
+    audit(db,user,"kyc.decided","kyc_case",item.id,{**payload.model_dump(), "subaccount_id": subaccount.id if subaccount else None})
+    db.commit();db.refresh(item);return item
+
+
+@router.post("/kyc/me/complete", response_model=KycSelfCompleteResponse)
+def complete_my_kyc(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.subaccount_auto_service import complete_user_kyc_and_provision
+
+    try:
+        result = complete_user_kyc_and_provision(db, user)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    audit(db, user, "kyc.self_completed", "kyc_case", result["kyc_case_id"], result)
+    db.commit()
+    return result
+
+
+@router.get("/kyc/me")
+def my_kyc_status(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.subaccount_auto_service import find_user_kyc_case, find_user_plain_subaccount, user_eligible_for_auto_subaccount
+
+    case = find_user_kyc_case(db, user)
+    subaccount = find_user_plain_subaccount(db, user)
+    return {
+        "eligible": user_eligible_for_auto_subaccount(user),
+        "kyc_case": {
+            "id": case.id,
+            "status": case.status,
+            "risk_level": case.risk_level,
+        } if case else None,
+        "subaccount": {
+            "id": subaccount.id,
+            "provider": subaccount.provider,
+            "escrow_enabled": subaccount.escrow_enabled,
+            "status": subaccount.status,
+        } if subaccount else None,
+    }
 
 
 @router.post("/network/nodes", response_model=NetworkNodeView, status_code=201)
@@ -2370,6 +2410,13 @@ def escrow_asaas_status(user: User = Depends(require_scope("payments:review"))):
 @router.get("/escrow/accounts", response_model=list[EscrowView])
 def list_escrow(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     return list(db.scalars(select(EscrowAccount).where(EscrowAccount.organization_id==user.organization_id).order_by(EscrowAccount.created_at.desc())))
+
+
+@router.get("/escrow/me", response_model=EscrowView | None)
+def my_escrow_subaccount(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.subaccount_auto_service import find_user_plain_subaccount
+
+    return find_user_plain_subaccount(db, user)
 
 
 @router.post("/escrow/accounts/{account_id}/mock-webhook")

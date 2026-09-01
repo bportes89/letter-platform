@@ -2401,3 +2401,70 @@ def test_bacen_administrator_rules_sync_and_cron(client, auth_headers):
     processed = client.post(f"/api/v1/system/jobs/{job.json()['id']}/process", headers=auth_headers, json={})
     assert processed.status_code == 200
     assert processed.json()["status"] == "COMPLETED"
+
+
+def test_auto_plain_subaccount_on_kyc_complete(client, monkeypatch):
+    monkeypatch.setattr("app.asaas_common.asaas_configured", lambda: False)
+
+    registered = client.post("/api/v1/public/site/auth/register", json={
+        "name": "Cliente KYC Auto",
+        "email": "cliente.kyc.auto@letter.com.br",
+        "phone": "11988887777",
+        "password": "ClienteKyc1!",
+        "document": "52998224725",
+        "terms_accepted": True,
+    })
+    assert registered.status_code == 201
+    client_headers = {"Authorization": f"Bearer {registered.json()['access_token']}"}
+
+    kyc_me = client.get("/api/v1/kyc/me", headers=client_headers)
+    assert kyc_me.status_code == 200
+    assert kyc_me.json()["eligible"] is True
+    assert kyc_me.json()["kyc_case"]["status"] == "PENDING"
+    assert kyc_me.json()["subaccount"] is None
+
+    completed = client.post("/api/v1/kyc/me/complete", headers=client_headers)
+    assert completed.status_code == 200
+    body = completed.json()
+    assert body["kyc_status"] == "APPROVED"
+    assert body["subaccount"]["escrow_enabled"] is False
+
+    escrow_me = client.get("/api/v1/escrow/me", headers=client_headers)
+    assert escrow_me.status_code == 200
+    assert escrow_me.json()["escrow_enabled"] is False
+    assert escrow_me.json()["user_id"] == registered.json()["user"]["id"]
+
+    again = client.post("/api/v1/kyc/me/complete", headers=client_headers)
+    assert again.status_code == 200
+    assert again.json()["subaccount"]["id"] == body["subaccount"]["id"]
+
+
+def test_admin_kyc_approval_provisions_plain_subaccount(client, auth_headers, monkeypatch):
+    monkeypatch.setattr("app.asaas_common.asaas_configured", lambda: False)
+
+    registered = client.post("/api/v1/public/site/auth/register", json={
+        "name": "Cliente Admin KYC",
+        "email": "cliente.admin.kyc@letter.com.br",
+        "phone": "11977776666",
+        "password": "ClienteKyc1!",
+        "document": "39053344705",
+        "terms_accepted": True,
+    })
+    assert registered.status_code == 201
+    user_id = registered.json()["user"]["id"]
+
+    cases = client.get("/api/v1/kyc/cases", headers=auth_headers).json()
+    case = next(item for item in cases if item["subject_type"] == "USER" and item["subject_id"] == user_id)
+
+    decided = client.post(
+        f"/api/v1/kyc/cases/{case['id']}/mock-decision",
+        headers=auth_headers,
+        json={"status": "APPROVED", "risk_level": "LOW", "notes": "Aprovado em homologação"},
+    )
+    assert decided.status_code == 200
+
+    client_headers = {"Authorization": f"Bearer {registered.json()['access_token']}"}
+    escrow_me = client.get("/api/v1/escrow/me", headers=client_headers)
+    assert escrow_me.status_code == 200
+    assert escrow_me.json()["escrow_enabled"] is False
+    assert escrow_me.json()["user_id"] == user_id

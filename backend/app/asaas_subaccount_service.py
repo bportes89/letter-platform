@@ -104,9 +104,11 @@ def subaccount_profile_preview(
     }
 
 
-def _ensure_no_duplicate(db: Session, operation_id: str | None) -> None:
+def _ensure_no_duplicate(db: Session, operation_id: str | None, user_id: str | None = None) -> None:
     if operation_id and db.scalar(select(EscrowAccount).where(EscrowAccount.operation_id == operation_id)):
         raise HTTPException(status_code=409, detail="Operação já possui conta vinculada")
+    if user_id and db.scalar(select(EscrowAccount).where(EscrowAccount.user_id == user_id)):
+        raise HTTPException(status_code=409, detail="Usuário já possui subconta")
 
 
 def create_mock_subaccount(
@@ -116,13 +118,15 @@ def create_mock_subaccount(
     overrides: EscrowSubaccountProfile | None,
     *,
     enable_escrow: bool = True,
+    user_id: str | None = None,
 ) -> EscrowAccount:
-    _ensure_no_duplicate(db, operation_id)
+    _ensure_no_duplicate(db, operation_id, user_id)
 
     preview = build_subaccount_profile(db, user, operation_id, overrides)
     wallet_id = f"mock_sub_{uuid4().hex[:16]}"
     account = EscrowAccount(
         organization_id=user.organization_id,
+        user_id=user_id,
         operation_id=operation_id,
         provider="MOCK_SUBACCOUNT",
         external_account_id=wallet_id,
@@ -152,11 +156,12 @@ def create_asaas_subaccount(
     overrides: EscrowSubaccountProfile | None,
     *,
     enable_escrow: bool = True,
+    user_id: str | None = None,
 ) -> EscrowAccount:
     if not asaas_configured():
         raise HTTPException(status_code=503, detail="Integração Asaas não configurada.")
 
-    _ensure_no_duplicate(db, operation_id)
+    _ensure_no_duplicate(db, operation_id, user_id)
     payload = build_subaccount_profile(db, user, operation_id, overrides)
 
     with AsaasClient() as client:
@@ -177,6 +182,7 @@ def create_asaas_subaccount(
 
     account = EscrowAccount(
         organization_id=user.organization_id,
+        user_id=user_id,
         operation_id=operation_id,
         provider="ASAAS_SUBACCOUNT",
         external_account_id=wallet_id,

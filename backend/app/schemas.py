@@ -314,6 +314,13 @@ class KycView(ORMModel):
     created_at: datetime
 
 
+class KycSelfCompleteResponse(BaseModel):
+    kyc_status: str
+    kyc_case_id: str
+    subaccount: dict | None = None
+    message: str
+
+
 class NetworkNodeCreate(BaseModel):
     user_id: str
     sponsor_user_id: str | None = None
@@ -1418,6 +1425,7 @@ class EscrowAsaasStatusView(BaseModel):
 
 class EscrowView(ORMModel):
     id: str
+    user_id: str | None = None
     operation_id: str | None
     provider: str
     external_account_id: str

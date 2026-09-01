@@ -14,6 +14,7 @@ from app.core.security import hash_password
 from app.identity_service import create_session_tokens
 from app.models import CommissionRule, Lead, NetworkNode, Organization, Quota, Role, User
 from app.product_service import build_sdc_simulation_output
+from app.subaccount_auto_service import ensure_kyc_case_for_user, user_eligible_for_auto_subaccount
 
 HUNDRED = Decimal("100")
 
@@ -168,6 +169,9 @@ def register_public_client(
     )
     db.add(user)
     db.flush()
+
+    if user_eligible_for_auto_subaccount(user):
+        ensure_kyc_case_for_user(db, user)
 
     lead_source = "CLIENT_SELF_REGISTER"
     if referrer_node:

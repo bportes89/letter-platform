@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     asaas_subaccount_default_postal_code: str = "41820020"
     asaas_subaccount_default_company_type: str = "LIMITED"
     asaas_subaccount_default_birth_date: str = "1985-01-15"
+    auto_plain_subaccount_on_kyc: bool = True
     zapsign_api_token: str | None = None
     zapsign_base_url: str = "https://api.zapsign.com.br/api/v1"
     zapsign_auth_mode: str = "assinaturaTela-tokenEmail"

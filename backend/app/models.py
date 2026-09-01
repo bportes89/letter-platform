@@ -649,6 +649,7 @@ class EscrowAccount(TimestampMixin, Base):
     __tablename__ = "escrow_accounts"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), unique=True, index=True)
     operation_id: Mapped[str | None] = mapped_column(ForeignKey("operations.id"), unique=True)
     provider: Mapped[str] = mapped_column(String(40), default="MOCK")
     external_account_id: Mapped[str] = mapped_column(String(120), unique=True)
