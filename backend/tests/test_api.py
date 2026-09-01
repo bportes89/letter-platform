@@ -2555,3 +2555,92 @@ def test_asaas_webhook_endpoint(client, auth_headers, monkeypatch):
     )
     assert accepted.status_code == 200
     assert accepted.json()["status"] == "ok"
+
+
+def test_wallet_pricing_table(client, auth_headers):
+    pricing = client.get("/api/v1/wallet/pricing", headers=auth_headers)
+    assert pricing.status_code == 200
+    rows = pricing.json()
+    assert any(row["code"] == "ESCROW_MONTHLY" for row in rows)
+    assert any(row["code"] == "PIX" and row["customer_amount"] == "1.99" for row in rows)
+
+
+def test_escrow_monthly_billing_charge_and_delinquency(client, auth_headers, monkeypatch):
+    monkeypatch.setattr("app.asaas_common.asaas_configured", lambda: False)
+    monkeypatch.setattr("app.core.config.settings.wallet_billing_cycle_days", 0)
+
+    created = client.post(
+        "/api/v1/escrow/accounts",
+        headers=auth_headers,
+        json={"create_subaccount": True, "enable_escrow": True},
+    )
+    assert created.status_code == 201
+    account_id = created.json()["id"]
+
+    billing = client.get(f"/api/v1/escrow/accounts/{account_id}/billing", headers=auth_headers)
+    assert billing.status_code == 200
+    assert billing.json()["monthly_amount"] == "499.90"
+    assert billing.json()["status"] == "ACTIVE"
+
+    deposit = client.post(
+        f"/api/v1/escrow/accounts/{account_id}/mock-webhook",
+        headers=auth_headers,
+        json={
+            "event_id": "billing_test_deposit_001",
+            "event_type": "FUNDS_CONFIRMED",
+            "amount": "600.00",
+            "metadata": {"source": "TEST"},
+        },
+    )
+    assert deposit.status_code == 200
+
+    cron = client.post("/api/v1/system/cron/wallet-escrow-billing")
+    assert cron.status_code == 200
+    body = cron.json()
+    assert body["processed"] == 1
+    assert body["items"][0]["status"] == "PAID"
+    assert body["items"][0]["amount"] == "499.90"
+
+    accounts = client.get("/api/v1/escrow/accounts", headers=auth_headers)
+    account = next(item for item in accounts.json() if item["id"] == account_id)
+    assert account["available_balance"] == "100.10"
+
+    billing_after = client.get(f"/api/v1/escrow/accounts/{account_id}/billing", headers=auth_headers)
+    assert billing_after.json()["outstanding_amount"] == "0.00"
+    assert billing_after.json()["billing_blocked"] is False
+
+
+def test_escrow_billing_delinquency_retains_incoming(client, auth_headers, monkeypatch):
+    monkeypatch.setattr("app.asaas_common.asaas_configured", lambda: False)
+    monkeypatch.setattr("app.core.config.settings.wallet_billing_cycle_days", 0)
+
+    created = client.post(
+        "/api/v1/escrow/accounts",
+        headers=auth_headers,
+        json={"create_subaccount": True, "enable_escrow": True},
+    )
+    account_id = created.json()["id"]
+
+    cron = client.post("/api/v1/system/cron/wallet-escrow-billing")
+    assert cron.status_code == 200
+    assert cron.json()["items"][0]["status"] == "DELINQUENT"
+
+    deposit = client.post(
+        f"/api/v1/escrow/accounts/{account_id}/mock-webhook",
+        headers=auth_headers,
+        json={
+            "event_id": "billing_test_deposit_002",
+            "event_type": "FUNDS_CONFIRMED",
+            "amount": "600.00",
+            "metadata": {"source": "TEST"},
+        },
+    )
+    assert deposit.status_code == 200
+
+    accounts = client.get("/api/v1/escrow/accounts", headers=auth_headers)
+    account = next(item for item in accounts.json() if item["id"] == account_id)
+    assert account["available_balance"] == "100.10"
+
+    billing = client.get(f"/api/v1/escrow/accounts/{account_id}/billing", headers=auth_headers)
+    assert billing.json()["outstanding_amount"] == "0.00"
+    assert billing.json()["billing_blocked"] is False

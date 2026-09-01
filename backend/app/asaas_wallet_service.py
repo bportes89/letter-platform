@@ -32,6 +32,8 @@ TRANSACTION_LABELS = {
     "CREDIT": "Crédito",
     "INTERNAL_TRANSFER_DEBIT": "Transferência interna (saída)",
     "INTERNAL_TRANSFER_CREDIT": "Transferência interna (entrada)",
+    "ESCROW_MONTHLY_FEE": "Tarifa mensal Escrow",
+    "BILLING_RETENTION": "Retenção por inadimplência",
 }
 
 
@@ -145,8 +147,8 @@ def wallet_view(db: Session, user: User) -> dict:
         "kyc_case": kyc_case,
         "account": _account_payload(account),
         "banking": _banking_payload(account),
-        "capabilities": _capabilities(account),
-        "message": _wallet_message(account),
+        "capabilities": _capabilities(account, db),
+        "message": _wallet_message(account, db),
     }
 
 
@@ -176,18 +178,35 @@ def _banking_payload(account: EscrowAccount) -> dict:
     }
 
 
-def _capabilities(account: EscrowAccount) -> dict:
+def _capabilities(account: EscrowAccount, db: Session | None = None) -> dict:
     approved = (account.asaas_kyc_status or "").upper() in {"APPROVED", "ACTIVE"} or _is_mock_account(account)
+    billing_blocked = False
+    if db is not None and account.escrow_enabled:
+        from app.wallet_billing_service import get_billing_cycle
+
+        cycle = get_billing_cycle(db, account)
+        billing_blocked = bool(cycle and cycle.billing_blocked and Decimal(str(cycle.outstanding_amount or 0)) > 0)
+    withdrawals = approved and not account.escrow_enabled and not billing_blocked
     return {
         "deposits_enabled": True,
-        "withdrawals_enabled": approved and not account.escrow_enabled,
-        "bill_payments_enabled": approved,
+        "withdrawals_enabled": withdrawals,
+        "bill_payments_enabled": approved and not billing_blocked,
         "pix_key_enabled": approved,
         "escrow_locked": account.escrow_enabled,
+        "billing_blocked": billing_blocked,
     }
 
 
-def _wallet_message(account: EscrowAccount) -> str:
+def _wallet_message(account: EscrowAccount, db: Session | None = None) -> str:
+    if db is not None:
+        from app.wallet_billing_service import get_billing_cycle
+
+        cycle = get_billing_cycle(db, account)
+        if cycle and cycle.billing_blocked and Decimal(str(cycle.outstanding_amount or 0)) > 0:
+            return (
+                "Conta inadimplente — entradas retidas até quitar "
+                f"R$ {money(Decimal(str(cycle.outstanding_amount)))} de mensalidade Escrow."
+            )
     if account.escrow_enabled:
         return "Conta com Escrow — saques dependem da liberação operacional."
     status = (account.asaas_kyc_status or "PENDING").upper()
@@ -340,16 +359,22 @@ def get_wallet_pix_qrcode(account: EscrowAccount) -> dict:
 
 
 def request_wallet_transfer(db: Session, user: User, account: EscrowAccount, *, pix_key: str, amount: Decimal, description: str | None) -> dict:
+    from app.wallet_billing_service import assert_withdrawals_allowed
+    from app.wallet_pricing_service import customer_fee_for
+
     if account.escrow_enabled:
         raise HTTPException(status_code=422, detail="Subconta com Escrow — saque via fluxo operacional.")
+    assert_withdrawals_allowed(db, account)
     if (account.asaas_kyc_status or "").upper() not in {"APPROVED", "ACTIVE"} and not _is_mock_account(account):
         raise HTTPException(status_code=422, detail="KYC Asaas pendente — saques bloqueados até aprovação.")
     value = money(amount)
-    if Decimal(str(account.available_balance)) < value:
-        raise HTTPException(status_code=422, detail="Saldo insuficiente.")
+    transfer_fee = customer_fee_for("TRANSFER", value)
+    total_debit = money(value + transfer_fee)
+    if Decimal(str(account.available_balance)) < total_debit:
+        raise HTTPException(status_code=422, detail="Saldo insuficiente (valor + taxa de saque).")
 
     if _is_mock_account(account):
-        account.available_balance = money(Decimal(str(account.available_balance)) - value)
+        account.available_balance = money(Decimal(str(account.available_balance)) - total_debit)
         event_id = f"mock_transfer_{uuid4().hex[:12]}"
         db.add(
             EscrowEvent(
@@ -358,11 +383,22 @@ def request_wallet_transfer(db: Session, user: User, account: EscrowAccount, *, 
                 provider_event_id=event_id,
                 event_type="TRANSFER_SENT",
                 amount=float(value),
-                payload_json=json.dumps({"pix_key": pix_key, "description": description}, ensure_ascii=False),
+                payload_json=json.dumps({"pix_key": pix_key, "description": description, "fee": str(transfer_fee)}, ensure_ascii=False),
             )
         )
+        if transfer_fee > 0:
+            db.add(
+                EscrowEvent(
+                    organization_id=account.organization_id,
+                    escrow_account_id=account.id,
+                    provider_event_id=f"tx_fee_{event_id}",
+                    event_type="PAYMENT_FEE",
+                    amount=float(transfer_fee),
+                    payload_json=json.dumps({"source_event": event_id}, ensure_ascii=False),
+                )
+            )
         db.flush()
-        return {"provider": "MOCK", "transfer_id": event_id, "status": "DONE", "amount": str(value)}
+        return {"provider": "MOCK", "transfer_id": event_id, "status": "DONE", "amount": str(value), "fee": str(transfer_fee)}
 
     with subaccount_client(account) as client:
         result = client.create_transfer(
@@ -372,17 +408,21 @@ def request_wallet_transfer(db: Session, user: User, account: EscrowAccount, *, 
                 "description": description or "Saque LETTER",
             }
         )
-    account.available_balance = money(Decimal(str(account.available_balance)) - value)
+    account.available_balance = money(Decimal(str(account.available_balance)) - total_debit)
     db.flush()
     return {
         "provider": "ASAAS",
         "transfer_id": str(result.get("id") or ""),
         "status": str(result.get("status") or "PENDING"),
         "amount": str(value),
+        "fee": str(transfer_fee),
     }
 
 
 def request_bill_payment(db: Session, account: EscrowAccount, *, barcode: str, amount: Decimal, description: str | None) -> dict:
+    from app.wallet_billing_service import assert_withdrawals_allowed
+
+    assert_withdrawals_allowed(db, account)
     if (account.asaas_kyc_status or "").upper() not in {"APPROVED", "ACTIVE"} and not _is_mock_account(account):
         raise HTTPException(status_code=422, detail="KYC Asaas pendente — pagamento de contas bloqueado.")
     value = money(amount)
@@ -452,7 +492,9 @@ def handle_asaas_webhook(db: Session, payload: dict) -> dict:
             org_user = db.scalar(select(User).where(User.id == account.user_id)) if account.user_id else None
             actor = org_user or db.scalar(select(User).where(User.organization_id == account.organization_id).limit(1))
             if actor:
-                _, processed = process_escrow_event(
+                from app.wallet_billing_service import credit_escrow_incoming
+
+                _, processed = credit_escrow_incoming(
                     db,
                     actor,
                     account,

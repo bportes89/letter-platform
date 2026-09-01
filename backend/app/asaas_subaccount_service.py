@@ -137,10 +137,15 @@ def create_mock_subaccount(
     )
     db.add(account)
     ensure_chart(db, user)
+    db.flush()
     if user_id:
         from app.asaas_wallet_service import ensure_mock_banking
 
         ensure_mock_banking(account)
+    if enable_escrow:
+        from app.wallet_billing_service import ensure_escrow_billing_cycle
+
+        ensure_escrow_billing_cycle(db, account)
     return account
 
 
@@ -212,6 +217,10 @@ def create_asaas_subaccount(
         except HTTPException:
             pass
     ensure_chart(db, user)
+    if enable_escrow:
+        from app.wallet_billing_service import ensure_escrow_billing_cycle
+
+        ensure_escrow_billing_cycle(db, account)
     return account
 
 

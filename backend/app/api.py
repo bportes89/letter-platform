@@ -52,7 +52,7 @@ from app.schemas import (
     ValidStampCreate, ValidStampView, SaaSTermsCreate, SaaSTermsView, SaaSPlanCreate, SaaSPlanView,
     SaaSSubscribeCreate, SaaSSubscriptionView,
     BillingGenerateRequest, CollectionActionView, CommissionAllocate, CommissionEntryView, CommissionRuleCreate,
-    CommissionRuleView, DocumentView, EscrowAsaasStatusView, EscrowCreate, EscrowSubaccountPreviewView, EscrowView, EscrowWebhook, WalletBillPaymentRequest, WalletTransferRequest,
+    CommissionRuleView, DocumentView, EscrowAsaasStatusView, EscrowCreate, EscrowBillingCycleView, EscrowSubaccountPreviewView, EscrowView, EscrowWebhook, WalletBillPaymentRequest, WalletEscrowBillingSyncView, WalletPricingRowView, WalletTransferRequest,
     FiscalEvidenceView, SefazRobotStatusView,
     DelinquencyView, FiscalReleaseRequest, FundingOpportunityCreate, FundingOpportunityView, InvitationView,
     NinaApprovalRequest, NinaCriticalApprovalView, NinaDistressCaseCreate, NinaDistressCaseView,
@@ -839,6 +839,48 @@ def cron_nina_bacen_admin_rules_sync(
     result = run_bacen_rules_sync_job(db, organization_id=org_id)
     db.commit()
     return BacenAdministratorRulesSyncView(**result)
+
+
+@router.post("/system/cron/wallet-escrow-billing", response_model=WalletEscrowBillingSyncView)
+def cron_wallet_escrow_billing(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    secret = settings.cron_secret
+    if secret:
+        provided = request.headers.get("x-cron-secret") or request.headers.get("authorization", "").removeprefix("Bearer ").strip()
+        if provided != secret:
+            raise HTTPException(status_code=401, detail="Cron secret inválido")
+    from app.wallet_billing_service import run_wallet_escrow_billing_job
+
+    result = run_wallet_escrow_billing_job(db)
+    db.commit()
+    return WalletEscrowBillingSyncView(**result)
+
+
+@router.get("/wallet/pricing", response_model=list[WalletPricingRowView])
+def wallet_pricing(_: User = Depends(get_current_user)):
+    from app.wallet_pricing_service import pricing_table
+
+    return [WalletPricingRowView(**row) for row in pricing_table()]
+
+
+@router.get("/escrow/accounts/{account_id}/billing", response_model=EscrowBillingCycleView | None)
+def escrow_account_billing(
+    account_id: str,
+    user: User = Depends(require_scope("payments:review")),
+    db: Session = Depends(get_db),
+):
+    from app.wallet_billing_service import billing_cycle_view, get_billing_cycle
+
+    account = db.scalar(
+        select(EscrowAccount).where(EscrowAccount.id == account_id, EscrowAccount.organization_id == user.organization_id)
+    )
+    if not account:
+        raise HTTPException(status_code=404, detail="Conta escrow não encontrada")
+    cycle = get_billing_cycle(db, account)
+    view = billing_cycle_view(cycle)
+    return EscrowBillingCycleView(**view) if view else None
 
 
 @router.get("/quotas", response_model=list[QuotaView])

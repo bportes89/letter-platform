@@ -669,6 +669,20 @@ class EscrowAccount(TimestampMixin, Base):
     locked_balance: Mapped[float] = mapped_column(Numeric(15, 2), default=0)
 
 
+class EscrowBillingCycle(TimestampMixin, Base):
+    __tablename__ = "escrow_billing_cycles"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    escrow_account_id: Mapped[str] = mapped_column(ForeignKey("escrow_accounts.id"), unique=True, index=True)
+    monthly_amount: Mapped[float] = mapped_column(Numeric(15, 2), default=499.90)
+    next_billing_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_billed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(30), default="ACTIVE")
+    outstanding_amount: Mapped[float] = mapped_column(Numeric(15, 2), default=0)
+    billing_blocked: Mapped[bool] = mapped_column(Boolean, default=False)
+    delinquent_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class EscrowEvent(Base):
     __tablename__ = "escrow_events"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)

@@ -82,4 +82,7 @@ def create_asaas_escrow(
     )
     db.add(account)
     ensure_chart(db, user)
+    from app.wallet_billing_service import ensure_escrow_billing_cycle
+
+    ensure_escrow_billing_cycle(db, account)
     return account

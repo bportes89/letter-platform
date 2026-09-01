@@ -1456,6 +1456,31 @@ class WalletBillPaymentRequest(BaseModel):
     description: str | None = Field(default=None, max_length=200)
 
 
+class WalletPricingRowView(BaseModel):
+    code: str
+    label: str
+    customer_amount: str
+    applies_to: str
+    billing_cycle_days: int | None = None
+
+
+class EscrowBillingCycleView(BaseModel):
+    status: str
+    monthly_amount: str
+    next_billing_at: str | None = None
+    last_billed_at: str | None = None
+    outstanding_amount: str
+    billing_blocked: bool
+    delinquent_since: str | None = None
+
+
+class WalletEscrowBillingSyncView(BaseModel):
+    processed: int
+    items: list[dict]
+    enabled: bool = True
+    synced_at: str | None = None
+
+
 class EscrowWebhook(BaseModel):
     event_id: str = Field(min_length=4, max_length=120)
     event_type: str

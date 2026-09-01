@@ -46,6 +46,15 @@ class Settings(BaseSettings):
     asaas_subaccount_default_birth_date: str = "1985-01-15"
     auto_plain_subaccount_on_kyc: bool = True
     auto_credit_commission_to_partner_wallet: bool = True
+    wallet_escrow_monthly_fee: float = 499.90
+    wallet_fee_pix: float = 1.99
+    wallet_fee_boleto: float = 3.49
+    wallet_fee_card_percent: float = 3.99
+    wallet_fee_card_fixed: float = 0.40
+    wallet_fee_transfer: float = 4.90
+    wallet_fee_bill_payment: float = 0.0
+    wallet_billing_cycle_days: int = 30
+    wallet_escrow_billing_enabled: bool = True
     asaas_webhook_access_token: str | None = None
     asaas_bank_code: str = "461"
     asaas_bank_name: str = "Asaas IP S.A."

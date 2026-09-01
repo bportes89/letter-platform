@@ -109,14 +109,9 @@ def create_client_plain_subaccount(
 
 
 def process_escrow_event(db: Session, user: User, account: EscrowAccount, event_id: str, event_type: str, amount: Decimal, metadata: dict) -> tuple[EscrowEvent, bool]:
-    existing = db.scalar(select(EscrowEvent).where(EscrowEvent.provider_event_id == event_id))
-    if existing: return existing, False
-    if event_type != "FUNDS_CONFIRMED": raise HTTPException(status_code=422, detail="Evento simulado suportado: FUNDS_CONFIRMED")
-    event = EscrowEvent(organization_id=user.organization_id, escrow_account_id=account.id, provider_event_id=event_id, event_type=event_type, amount=money(amount), payload_json=json.dumps(metadata))
-    db.add(event)
-    post_double_entry(db,user,reference=f"ESCROW:{event_id}",event_type=event_type,description="Entrada confirmada em escrow",debit_account="ESCROW_CASH",credit_account="CLIENT_FUNDS_PAYABLE",amount=amount,operation_id=account.operation_id)
-    account.available_balance = money(Decimal(str(account.available_balance))+amount)
-    return event, True
+    from app.wallet_billing_service import credit_escrow_incoming
+
+    return credit_escrow_incoming(db, user, account, event_id, event_type, amount, metadata)
 
 
 def mask_pix(value: str) -> str:
@@ -124,6 +119,9 @@ def mask_pix(value: str) -> str:
 
 
 def create_payout(db: Session, user: User, account: EscrowAccount, *, beneficiary_name: str, beneficiary_document: str, pix_key: str, amount: Decimal, condition_evidence: dict) -> PayoutRequest:
+    from app.wallet_billing_service import assert_withdrawals_allowed
+
+    assert_withdrawals_allowed(db, account)
     value=money(amount)
     if Decimal(str(account.available_balance)) < value: raise HTTPException(status_code=422, detail="Saldo escrow disponível insuficiente")
     if not condition_evidence: raise HTTPException(status_code=422, detail="Evidências das condições precedentes são obrigatórias")
