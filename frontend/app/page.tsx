@@ -6,6 +6,7 @@ import "./site.css";
 import { AttendanceBotSection } from "@/components/public-site/attendance-bot";
 import { AuctionSection, FlashInvestSection } from "@/components/public-site/gated-vitrine-section";
 import { PublicSimulatorSection, SiteNav } from "@/components/public-site/simulator-section";
+import { SiteFooter } from "@/components/public-site/site-footer";
 
 export default function PublicHomePage() {
   return (
@@ -209,21 +210,7 @@ export default function PublicHomePage() {
           </Link>
         </section>
 
-        <footer className="site-footer">
-          <Link href="/" className="logo" aria-label="LETTER — início">
-            <img
-              className="logo-image logo-image-footer"
-              src="/brand/letter-logo-oficial.png"
-              alt="LETTER — O Shopping do Crédito Seguro e Inteligente"
-            />
-          </Link>
-          <p>Infraestrutura fiduciária e tecnologia para operações empresariais.</p>
-          <div>
-            <span>© 2026 LETTER</span>
-            <Link href="/simulador/quitcon">Quitação consórcio</Link>
-            <Link href="/login">Deal Room</Link>
-          </div>
-        </footer>
+        <SiteFooter />
       </main>
     </div>
   );

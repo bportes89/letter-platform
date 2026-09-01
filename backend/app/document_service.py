@@ -13,6 +13,7 @@ from reportlab.lib.units import mm
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from app.core.config import settings
+from app.company_profile_service import company_profile
 from app.models import CalculationMemory, Contract, Document, Proposal, User
 from app.storage_service import get_storage
 
@@ -79,9 +80,11 @@ def contract_pdf(contract: Contract, proposal: Proposal, calculation: Calculatio
             prefix = "" if field == "ltv_percent" else "R$ "
             suffix = "%" if field == "ltv_percent" else ""
             rows.append([label, f"{prefix}{output[field]}{suffix}"])
+    profile = company_profile()
     story = [
         Paragraph("LETTER — Instrumento de Operação", styles["LetterTitle"]),
         Paragraph(f"Contrato nº <b>{contract.contract_number}</b>", styles["LetterBody"]),
+        Paragraph(profile["contract_party_block"], styles["LetterBody"]),
         Paragraph("Este documento é uma minuta técnica gerada pela plataforma e deve utilizar template jurídico homologado antes da produção.", styles["LetterBody"]),
         Spacer(1, 4*mm),
         Table(rows, colWidths=[52*mm, 100*mm], style=TableStyle([

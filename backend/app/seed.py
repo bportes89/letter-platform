@@ -67,6 +67,18 @@ def _ensure_profile_demo_users(db, org_id, password: str) -> None:
         print(f"Usuários demo de perfil criados: {created}.")
 
 
+def _sync_headquarters_org(db) -> None:
+    from app.company_profile_service import company_profile
+
+    profile = company_profile()
+    org = db.scalar(select(Organization).where(Organization.kind == "HEADQUARTERS"))
+    if not org:
+        return
+    org.name = profile["legal_name"]
+    org.document = profile["cnpj_digits"]
+    db.commit()
+
+
 def seed():
     Base.metadata.create_all(engine)
     password = _demo_password()
@@ -75,10 +87,11 @@ def seed():
             org = db.scalar(select(Organization).limit(1))
             if org:
                 _ensure_profile_demo_users(db, org.id, password)
+            _sync_headquarters_org(db)
             _sync_demo_passwords(db, password)
             print("Seed já aplicado.")
             return
-        org = Organization(name="LETTER Matriz", document="00000000000000", kind="HEADQUARTERS")
+        org = Organization(name="LETTER FRANQUEADORA LTDA", document="57255607000130", kind="HEADQUARTERS")
         db.add(org); db.flush()
         admin = User(
             organization_id=org.id, name="Administrador LETTER", email="admin@letter.com.br",

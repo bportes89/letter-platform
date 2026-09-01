@@ -1018,6 +1018,13 @@
   margin: 0;
 }
 
+.site-footer-legal {
+  max-width: 52rem;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
 .site-footer > div {
   gap: 20px;
   display: flex;

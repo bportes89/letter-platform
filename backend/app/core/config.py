@@ -87,6 +87,18 @@ class Settings(BaseSettings):
     spe_cnpj: str = "00.000.000/0001-00"
     spe_municipal_registration: str = "0000000-0"
     spe_city: str = "Salvador - BA"
+    company_legal_name: str = "LETTER FRANQUEADORA LTDA"
+    company_trade_name: str = "LETTER"
+    company_cnpj: str = "57.255.607/0001-30"
+    company_email: str = "comercial@letter.app.br"
+    company_phone: str = "(33) 9198-8170"
+    company_street: str = "R Ruy Pinto Bandeira"
+    company_number: str = "342"
+    company_district: str = "Jardim Camburi"
+    company_city: str = "Vitória"
+    company_state: str = "ES"
+    company_postal_code: str = "29090-130"
+    company_opened_at: str = "2024-09-12"
 
     @field_validator("database_url", mode="before")
     @classmethod

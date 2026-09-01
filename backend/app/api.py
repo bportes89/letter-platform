@@ -245,6 +245,13 @@ def platform_capabilities():
     }
 
 
+@router.get("/platform/company-profile")
+def platform_company_profile():
+    from app.company_profile_service import company_profile
+
+    return company_profile()
+
+
 @router.post("/auth/login", response_model=TokenPair)
 def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)):
     ip=request.client.host if request.client else "unknown";allowed,retry=rate_limiter.allow(f"login:{ip}:{payload.email.lower()}",settings.login_rate_limit_per_minute)
