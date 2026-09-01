@@ -27,6 +27,17 @@ DEFAULT_RULES = {
     "min_commitment_margin": 0.30,
     "bacen_scr_required": True,
     "products_enabled": ["SDC", "QUITCON", "MARKETPLACE"],
+    "approval_rules": {
+        "max_ltv_percent": 40,
+        "min_income_margin": 0.30,
+        "scr_clear_required": True,
+        "homologation_required": True,
+    },
+    "credit_utilization_rules": {
+        "max_combined_quotas": 3,
+        "same_administrator_required": True,
+        "max_credit_per_operation_brl": 1_000_000,
+    },
 }
 
 
@@ -52,6 +63,21 @@ def parse_rules(raw: str | None) -> dict:
     return merged
 
 
+def find_administrator_by_name(db: Session, administrator_name: str) -> Administrator | None:
+    key = normalize_admin_key(administrator_name)
+    for admin in list_administrators(db):
+        if normalize_admin_key(admin.name) == key:
+            return admin
+        if admin.code and normalize_admin_key(admin.code) == key:
+            return admin
+    return None
+
+
+def rules_for_administrator_name(db: Session, administrator_name: str) -> dict:
+    admin = find_administrator_by_name(db, administrator_name)
+    return parse_rules(admin.rules_json if admin else None)
+
+
 def administrator_view(admin: Administrator) -> dict:
     rules = parse_rules(admin.rules_json)
     return {
@@ -62,6 +88,7 @@ def administrator_view(admin: Administrator) -> dict:
         "authorization_status": admin.authorization_status,
         "rules": rules,
         "rules_version": admin.bacen_rules_version,
+        "bacen_rules_synced_at": admin.bacen_rules_synced_at,
         "homologated_at": admin.homologated_at,
         "homologated_by_id": admin.homologated_by_id,
         "homologation_notes": admin.homologation_notes,

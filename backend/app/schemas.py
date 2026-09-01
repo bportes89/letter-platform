@@ -645,11 +645,20 @@ class AdministratorView(BaseModel):
     authorization_status: str
     rules: dict
     rules_version: int
+    bacen_rules_synced_at: datetime | None = None
     homologated_at: datetime | None
     homologated_by_id: str | None
     homologation_notes: str | None
     created_at: datetime
     updated_at: datetime
+
+
+class BacenAdministratorRulesSyncView(BaseModel):
+    total: int
+    changed: int
+    mode: str
+    synced_at: str
+    administrators: list[dict]
 
 
 class BacenScrStatusView(BaseModel):

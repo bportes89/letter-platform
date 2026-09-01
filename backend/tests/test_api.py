@@ -2369,3 +2369,35 @@ def test_administrator_homologation_and_bacen_scr(client, auth_headers):
     leads = client.get("/api/v1/leads", headers=auth_headers).json()
     captured = next(x for x in leads if x["name"] == "Empresa SCR Teste LTDA")
     assert captured["scr_reference"] == body["scr_reference"]
+
+
+def test_bacen_administrator_rules_sync_and_cron(client, auth_headers):
+    before = client.get("/api/v1/administrators", headers=auth_headers).json()
+    assert before[0]["bacen_rules_synced_at"] is None
+
+    synced = client.post("/api/v1/administrators/sync-bacen-rules", headers=auth_headers)
+    assert synced.status_code == 200
+    body = synced.json()
+    assert body["total"] >= 5
+    assert body["mode"] == "SANDBOX"
+    assert body["administrators"][0]["rules_version"] >= 1
+
+    after = client.get("/api/v1/administrators", headers=auth_headers).json()
+    assert after[0]["bacen_rules_synced_at"] is not None
+    assert "approval_rules" in after[0]["rules"]
+    assert "credit_utilization_rules" in after[0]["rules"]
+
+    cron = client.post("/api/v1/system/cron/nina-bacen-admin-rules-sync")
+    assert cron.status_code == 200
+    assert cron.json()["total"] == 0
+
+    job = client.post("/api/v1/system/jobs", headers=auth_headers, json={
+        "job_type": "NINA_BACEN_ADMIN_RULES_SYNC",
+        "idempotency_key": "bacen-rules-sync-test-001",
+        "payload": {},
+        "max_attempts": 2,
+    })
+    assert job.status_code == 201
+    processed = client.post(f"/api/v1/system/jobs/{job.json()['id']}/process", headers=auth_headers, json={})
+    assert processed.status_code == 200
+    assert processed.json()["status"] == "COMPLETED"

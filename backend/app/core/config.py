@@ -62,6 +62,8 @@ class Settings(BaseSettings):
     bacen_scr_api_url: str | None = None
     bacen_scr_institution_code: str | None = None
     bacen_scr_api_key: str | None = None
+    bacen_admin_rules_sync_hours: int = 24
+    cron_secret: str | None = None
     vault_bucket: str = "letter-vault-private"
     vault_prefix: str = "company-vault"
     spe_cnpj: str = "00.000.000/0001-00"

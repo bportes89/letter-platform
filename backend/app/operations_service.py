@@ -9,7 +9,7 @@ from app.models import OperationalJob, ProviderIncident, ProviderIntegration, Us
 from app.core.config import settings
 
 
-ALLOWED_JOBS={"RECONCILIATION_REFRESH","COLLECTION_REFRESH","COMMUNICATION_DELIVERY","EXECUTIVE_REPORT","PROVIDER_HEALTH_MONITOR","DEAD_LETTER_REPROCESS","NINA_ASSET_DAILY_REVIEW","NINA_ASSET_PRICE_REDUCTION","QUOTA_AUDIT_WINDOW_STARTED","QUOTA_AUDIT_REMINDER_12H","QUOTA_AUDIT_REMINDER_2H","PROPERTY_REGISTRATION_90D_STARTED","PROPERTY_REGISTRATION_REMINDER_30D","PROPERTY_REGISTRATION_REMINDER_7D","PROPERTY_REGISTRATION_REMINDER_1D"}
+ALLOWED_JOBS={"RECONCILIATION_REFRESH","COLLECTION_REFRESH","COMMUNICATION_DELIVERY","EXECUTIVE_REPORT","PROVIDER_HEALTH_MONITOR","DEAD_LETTER_REPROCESS","NINA_ASSET_DAILY_REVIEW","NINA_ASSET_PRICE_REDUCTION","QUOTA_AUDIT_WINDOW_STARTED","QUOTA_AUDIT_REMINDER_12H","QUOTA_AUDIT_REMINDER_2H","PROPERTY_REGISTRATION_90D_STARTED","PROPERTY_REGISTRATION_REMINDER_30D","PROPERTY_REGISTRATION_REMINDER_7D","PROPERTY_REGISTRATION_REMINDER_1D","NINA_BACEN_ADMIN_RULES_SYNC"}
 
 
 def enqueue_job(db:Session,user:User,job_type:str,idempotency_key:str,payload:dict,max_attempts:int)->tuple[OperationalJob,bool]:
@@ -22,7 +22,7 @@ def enqueue_job(db:Session,user:User,job_type:str,idempotency_key:str,payload:di
     db.add(item);return item,True
 
 
-def process_job(item:OperationalJob,simulate_failure:bool=False)->OperationalJob:
+def process_job(item:OperationalJob,simulate_failure:bool=False,db:Session|None=None)->OperationalJob:
     if item.status=="COMPLETED": return item
     if item.status=="DEAD_LETTER": raise HTTPException(status_code=409,detail="Job esgotou as tentativas")
     now=datetime.now(UTC);item.status="RUNNING";item.locked_at=now;item.attempts+=1
@@ -32,7 +32,11 @@ def process_job(item:OperationalJob,simulate_failure:bool=False)->OperationalJob
         else:
             item.status="RETRY_SCHEDULED";item.scheduled_at=now+timedelta(seconds=min(300,2**item.attempts))
         return item
-    item.status="COMPLETED";item.completed_at=now;item.last_error=None;item.result_json=json.dumps({"processed":True,"job_type":item.job_type});return item
+    result={"processed":True,"job_type":item.job_type}
+    if item.job_type=="NINA_BACEN_ADMIN_RULES_SYNC" and db is not None:
+        from app.bacen_administrator_rules_sync import run_bacen_rules_sync_job
+        result=run_bacen_rules_sync_job(db,organization_id=item.organization_id)
+    item.status="COMPLETED";item.completed_at=now;item.last_error=None;item.result_json=json.dumps(result,ensure_ascii=False);return item
 
 
 def system_readiness(db:Session)->dict:
@@ -59,7 +63,7 @@ def process_due_jobs(db:Session,batch_size:int=20)->dict:
     if db.bind and db.bind.dialect.name=="postgresql": query=query.with_for_update(skip_locked=True)
     items=list(db.scalars(query));completed=0
     for item in items:
-        process_job(item);completed+=1
+        process_job(item,db=db);completed+=1
     db.commit();return {"selected":len(items),"completed":completed}
 
 

@@ -10,7 +10,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.administrator_service import homologated_codes
+from app.administrator_service import homologated_codes, rules_for_administrator_name
 from app.models import PreAnalysisPauta, Proposal, User
 from app.pre_analysis_constants import (
     DOCUMENT_LABELS,
@@ -66,6 +66,8 @@ class MotorPreAnaliseFiduciariaV6:
         possui_gravame_bool: bool,
         valor_gravame_anterior: Decimal = Decimal("0"),
         homologated_codes: list[str] | None = None,
+        max_asset_age_years: int = 10,
+        min_commitment_margin: Decimal | None = None,
     ) -> dict:
         parcela = money(parcela_simulada)
         val_bem = money(valor_avaliacao_bem)
@@ -110,16 +112,17 @@ class MotorPreAnaliseFiduciariaV6:
             }
 
         idade_bem = ano_atual - int(ano_fabricacao_bem)
-        if idade_bem > 10:
+        if idade_bem > max_asset_age_years:
             return {
                 "status_core": "ROTEAMENTO_OBRIGATORIO_FLASH_CAPITAL",
                 "motivo_gatilho": (
                     f"O ano de fabricação do bem ({ano_fabricacao_bem}) ultrapassa a idade máxima "
-                    f"permitida pelas regras da administradora {adm_nome}."
+                    f"permitida pelas regras da administradora {adm_nome} ({max_asset_age_years} anos)."
                 ),
             }
 
-        limite_margem = money(renda_liquida * self.margem_maxima_renda)
+        margin = min_commitment_margin if min_commitment_margin is not None else self.margem_maxima_renda
+        limite_margem = money(renda_liquida * margin)
         if parcela > limite_margem:
             resumo_oculto = {
                 "media_entradas_mensais_apurada_extratos_6_meses": str(renda_liquida),
@@ -137,7 +140,7 @@ class MotorPreAnaliseFiduciariaV6:
                     "opcao_02_apresentar_renda_extra_adicional": {
                         "mensagem": "Apresentar documentação complementar para somar à renda da empresa.",
                         "faturamento_mensal_adicional_necessario": str(
-                            money(parcela / self.margem_maxima_renda - renda_liquida)
+                            money(parcela / margin - renda_liquida)
                         ),
                         "aviso_travado_text_html": (
                             "COMPLEMENTAÇÕES ADICIONAIS ACEITAS PELO COMITÊ: CONTRATO DE PRESTAÇÃO DE "
@@ -400,8 +403,11 @@ def run_engine_phase3(
 
     engine = MotorPreAnaliseFiduciariaV6()
     codes = homologated_codes(db) or engine.administradoras_homologadas
+    adm_nome = str(payload.get("adm_nome", "ANCORA"))
+    admin_rules = rules_for_administrator_name(db, adm_nome)
+    approval_rules = admin_rules.get("approval_rules") if isinstance(admin_rules.get("approval_rules"), dict) else {}
     result = engine.processar_esteira_score_e_roteamento(
-        adm_nome=str(payload.get("adm_nome", "ANCORA")),
+        adm_nome=adm_nome,
         extratos_6_meses_data=payload.get("extratos_6_meses_data") or {},
         parcela_simulada=Decimal(str(payload.get("parcela_simulada", proposal.requested_amount))),
         valor_avaliacao_bem=Decimal(str(payload.get("valor_avaliacao_bem", "0"))),
@@ -411,6 +417,8 @@ def run_engine_phase3(
         possui_gravame_bool=bool(payload.get("possui_gravame_bool", False)),
         valor_gravame_anterior=Decimal(str(payload.get("valor_gravame_anterior", "0"))),
         homologated_codes=codes,
+        max_asset_age_years=int(admin_rules.get("max_asset_age_years", 10)),
+        min_commitment_margin=Decimal(str(approval_rules.get("min_income_margin", admin_rules.get("min_commitment_margin", "0.30")))),
     )
 
     pauta.engine_result_json = json.dumps(result, ensure_ascii=False)

@@ -165,6 +165,7 @@ class Administrator(TimestampMixin, Base):
     homologated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     homologated_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"))
     bacen_rules_version: Mapped[int] = mapped_column(default=1)
+    bacen_rules_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     homologation_notes: Mapped[str | None] = mapped_column(Text)
 
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { Building2, CheckCircle2, Plus, ShieldCheck } from "lucide-react";
+import { Building2, CheckCircle2, Plus, RefreshCw, ShieldCheck } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { api, User } from "@/lib/api";
 
@@ -12,6 +12,7 @@ type Administrator = {
   authorization_status: string;
   rules: Record<string, unknown>;
   rules_version: number;
+  bacen_rules_synced_at: string | null;
   homologated_at: string | null;
   homologation_notes: string | null;
 };
@@ -81,6 +82,15 @@ export function AdministratorsModule() {
     await load();
   }
 
+  async function syncBacenRules() {
+    if (!canAdmin) return;
+    const result = await api<{ total: number; changed: number; mode: string }>("/administrators/sync-bacen-rules", {
+      method: "POST",
+    });
+    setMessage(`Varredura Bacen concluída (${result.mode}): ${result.changed} administradora(s) atualizada(s).`);
+    await load();
+  }
+
   async function homologate(admin: Administrator, approved: boolean) {
     if (!canAdmin) return;
     const notes = approved
@@ -105,10 +115,19 @@ export function AdministratorsModule() {
         <div>
           <span className="eyebrow dark">MÓDULO LETTER</span>
           <h1>Administradoras</h1>
-          <p>Homologação, regras versionadas e integração SCR/Registrato do Banco Central.</p>
+          <p>Homologação, regras versionadas e varredura Nina no Bacen a cada 24h por administradora.</p>
         </div>
         <div className="operational-icon"><Building2 /></div>
       </div>
+
+      {canAdmin && (
+        <div className="notice">
+          <RefreshCw />
+          A Nina sincroniza o regulamento de cada administradora no Bacen/SCR a cada <b>24 horas</b>,
+          alimentando aprovação (pré-análise) e utilização de crédito (marketplace/inventário).
+          <button type="button" className="table-action" onClick={() => void syncBacenRules()}>Sincronizar agora</button>
+        </div>
+      )}
 
       {message && <div className="notice"><CheckCircle2 />{message}</div>}
       {error && <div className="error">{error}</div>}
@@ -142,6 +161,7 @@ export function AdministratorsModule() {
                 <th>Administradora</th>
                 <th>Status</th>
                 <th>Regras</th>
+                <th>Última varredura Bacen</th>
                 <th>Homologação</th>
                 {canAdmin && <th>Ações</th>}
               </tr>
@@ -152,6 +172,7 @@ export function AdministratorsModule() {
                   <td><b>{a.name}</b><small>{a.code} · {a.document}</small></td>
                   <td><span className={`pill pill-${a.authorization_status.toLowerCase()}`}>{a.authorization_status}</span></td>
                   <td>v{a.rules_version}</td>
+                  <td>{date(a.bacen_rules_synced_at)}</td>
                   <td>{date(a.homologated_at)}</td>
                   {canAdmin && (
                     <td className="actions-cell">

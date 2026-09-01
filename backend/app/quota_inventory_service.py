@@ -9,6 +9,8 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.administrator_service import parse_rules
+from app.bacen_administrator_rules_sync import rules_sync_due, sync_administrator_rules
 from app.models import Administrator, CalculationMemory, Quota, QuotaReservation, User
 from app.services import utcnow
 
@@ -25,6 +27,12 @@ def run_nina_quota_scan(db: Session, user: User, quota: Quota) -> dict:
     if not admin:
         raise HTTPException(status_code=422, detail="Administradora não encontrada para a cota.")
 
+    if rules_sync_due(admin):
+        sync_administrator_rules(db, admin)
+
+    rules = parse_rules(admin.rules_json)
+    credit_rules = rules.get("credit_utilization_rules") if isinstance(rules.get("credit_utilization_rules"), dict) else {}
+
     blockers: list[str] = []
     if not quota.installment_due_date:
         blockers.append("Informe o vencimento da parcela no cadastro da cota.")
@@ -32,6 +40,14 @@ def run_nina_quota_scan(db: Session, user: User, quota: Quota) -> dict:
         blockers.append("Crédito da cota inválido.")
     if admin.authorization_status not in {"AUTHORIZED", "APPROVED", "ACTIVE", "APPROVED_MANUALLY"}:
         blockers.append(f"Administradora com status {admin.authorization_status}.")
+    allowed_categories = rules.get("allowed_categories") or []
+    if allowed_categories and quota.category not in allowed_categories:
+        blockers.append(f"Categoria {quota.category} não permitida pelo regulamento Bacen de {admin.name}.")
+    max_credit = credit_rules.get("max_credit_per_operation_brl")
+    if max_credit and float(quota.credit_value or 0) > float(max_credit):
+        blockers.append(
+            f"Crédito da cota excede o teto de utilização ({max_credit}) da administradora {admin.name}."
+        )
 
     if blockers:
         quota.nina_scan_status = "REJECTED"
@@ -45,6 +61,8 @@ def run_nina_quota_scan(db: Session, user: User, quota: Quota) -> dict:
     quota.nina_scan_detail_json = json.dumps(
         {
             "administrator": admin.name,
+            "rules_version": admin.bacen_rules_version,
+            "bacen_rules_synced_at": admin.bacen_rules_synced_at.isoformat() if admin.bacen_rules_synced_at else None,
             "category": quota.category,
             "credit_value": str(quota.credit_value),
             "installment_due_date": quota.installment_due_date.isoformat() if quota.installment_due_date else None,

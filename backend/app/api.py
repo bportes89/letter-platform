@@ -32,7 +32,7 @@ from app.models import (
 )
 from app.schemas import (
     AccountBalanceView, AdministratorCreate, AdministratorHomologate, AdministratorRulesUpdate,
-    AdministratorView, BacenScrStatusView,
+    AdministratorView, BacenAdministratorRulesSyncView, BacenScrStatusView,
     AuctionBidCreate, AuctionBidView, AuctionLotCreate, AuctionLotView, BISummaryView,
     AuctionQualificationRequest, AuctionQualificationView, AuctionSettlementView,
     BranchCreate, BranchView, CalculationRequest, CommunicationConsentRequest,
@@ -179,6 +179,9 @@ from app.administrator_service import (
     homologated_codes, homologated_name_keys, list_administrators, update_administrator_rules,
 )
 from app.bacen_scr_service import bacen_scr_client
+from app.bacen_administrator_rules_sync import (
+    any_rules_sync_due, default_sync_organization_id, run_bacen_rules_sync_job, sync_all_administrator_rules,
+)
 from app.public_site_service import (
     capture_public_lead, list_public_quotas, preview_referral_code, register_public_client,
     simulate_flash_pool_public, simulate_sdc_public,
@@ -761,6 +764,38 @@ def homologate_administrator_route(
 @router.get("/integrations/bacen-scr/status", response_model=BacenScrStatusView)
 def bacen_scr_status(user: User = Depends(get_current_user)):
     return BacenScrStatusView(**bacen_scr_client.status())
+
+
+@router.post("/administrators/sync-bacen-rules", response_model=BacenAdministratorRulesSyncView)
+def sync_administrators_bacen_rules(
+    user: User = Depends(require_scope("admin:users")),
+    db: Session = Depends(get_db),
+):
+    result = sync_all_administrator_rules(db)
+    audit(db, user, "administrator.bacen_rules_sync", "administrator", "ALL", {"changed": result["changed"]})
+    db.commit()
+    return BacenAdministratorRulesSyncView(**result)
+
+
+@router.post("/system/cron/nina-bacen-admin-rules-sync", response_model=BacenAdministratorRulesSyncView)
+def cron_nina_bacen_admin_rules_sync(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    secret = settings.cron_secret
+    if secret:
+        provided = request.headers.get("x-cron-secret") or request.headers.get("authorization", "").removeprefix("Bearer ").strip()
+        if provided != secret:
+            raise HTTPException(status_code=401, detail="Cron secret inválido")
+    if not any_rules_sync_due(db):
+        return BacenAdministratorRulesSyncView(
+            total=0, changed=0, mode=bacen_scr_client.status()["mode"],
+            synced_at=datetime.now(UTC).isoformat(), administrators=[],
+        )
+    org_id = default_sync_organization_id(db)
+    result = run_bacen_rules_sync_job(db, organization_id=org_id)
+    db.commit()
+    return BacenAdministratorRulesSyncView(**result)
 
 
 @router.get("/quotas", response_model=list[QuotaView])
@@ -2586,7 +2621,7 @@ def jobs(user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_
 def job_process(job_id:str,payload:JobProcessRequest,user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
     item=db.scalar(select(OperationalJob).where(OperationalJob.id==job_id,OperationalJob.organization_id==user.organization_id))
     if not item: raise HTTPException(status_code=404,detail="Job não encontrado")
-    process_job(item,payload.simulate_failure);audit(db,user,"system.job_processed","operational_job",item.id,{"status":item.status,"attempts":item.attempts});db.commit();db.refresh(item);return item
+    process_job(item,payload.simulate_failure,db=db);audit(db,user,"system.job_processed","operational_job",item.id,{"status":item.status,"attempts":item.attempts});db.commit();db.refresh(item);return item
 
 @router.get("/system/metrics")
 def metrics(user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)): return operational_metrics(db,user)
