@@ -4,6 +4,7 @@ import { Building2, Camera, CheckCircle2, Coins, Lock, Timer, Unlock } from "luc
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { api, Proposal, QuitConOperacao } from "@/lib/api";
 import { QuitConCustosEntradaPanel, QuitConCustosEntrada } from "@/components/quitcon-custos-entrada";
+import { CurrencyFormField } from "@/components/currency-input";
 
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
@@ -247,9 +248,9 @@ export function QuitConModule() {
               <option value="">Proposta vinculada</option>
               {proposals.map((p) => <option key={p.id} value={p.id}>{p.product} · {p.id.slice(0, 8)}</option>)}
             </select>
-            <input name="outstanding_balance" type="number" defaultValue="250000" placeholder="Saldo devedor bruto da cota" required />
+            <CurrencyFormField name="outstanding_balance" defaultValue="250000" placeholder="Saldo devedor bruto da cota (R$)" required />
             <input name="meses_restantes" type="number" defaultValue="12" min="1" placeholder="Meses restantes" required />
-            <input name="appraisal_value" type="number" placeholder="Avaliação referência (opcional)" />
+            <CurrencyFormField name="appraisal_value" placeholder="Avaliação referência (R$, opcional)" />
             <input name="registry_number" placeholder="Matrícula / ref. garantia" defaultValue="44901" required />
             <input name="registry_office" placeholder="Administradora whitelist" defaultValue="Embracon" required />
             <label><input type="checkbox" name="contemplada" defaultChecked /> Contemplada + bem faturado</label>
@@ -263,7 +264,7 @@ export function QuitConModule() {
         <section className="panel">
           <h2>Simulador QuitCon</h2>
           <form className="stack-form" onSubmit={simulateFinance}>
-            <input name="outstanding_balance" type="number" defaultValue="250000" placeholder="Saldo devedor bruto" required />
+            <CurrencyFormField name="outstanding_balance" defaultValue="250000" placeholder="Saldo devedor bruto (R$)" required />
             <input name="meses_restantes" type="number" defaultValue="12" min="1" placeholder="Meses restantes" required />
             <input name="administrator_name" placeholder="Administradora" defaultValue="Embracon" />
             <label><input type="checkbox" name="operational_service" /> Serviço operacional (+2% na abertura)</label>

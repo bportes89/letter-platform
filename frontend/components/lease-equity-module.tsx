@@ -3,6 +3,7 @@
 import { Building2, Camera, CheckCircle2, Coins, Lock, Unlock } from "lucide-react";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { api, LeaseEquityPauta, Proposal } from "@/lib/api";
+import { CurrencyFormField } from "@/components/currency-input";
 
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
@@ -188,7 +189,7 @@ export function LeaseEquityModule() {
               <option value="GALPAO">Galpão (LTV 25%)</option>
               <option value="RURAL">Rural (LTV 20%)</option>
             </select>
-            <input name="appraisal_value" type="number" min="1" step="0.01" placeholder="Valor avaliação (AVM)" defaultValue="1000000" required />
+            <CurrencyFormField name="appraisal_value" defaultValue="1000000" placeholder="Valor avaliação AVM (R$)" required />
             <input name="registry_number" placeholder="Matrícula" defaultValue="44901" required />
             <input name="registry_office" placeholder="Cartório RGI" defaultValue="Teixeira de Freitas - BA" required />
             <button type="submit">Abrir pauta AGUARDANDO_TAPAF</button>
@@ -203,7 +204,7 @@ export function LeaseEquityModule() {
               <option value="LOTE_URBANO">Lote / galpão</option>
               <option value="RURAL">Rural</option>
             </select>
-            <input name="appraisal_value" type="number" defaultValue="600000" required />
+            <CurrencyFormField name="appraisal_value" defaultValue="600000" placeholder="Valor avaliação (R$)" required />
             <button type="submit">Calcular matriz</button>
           </form>
           {ltvPreview && (

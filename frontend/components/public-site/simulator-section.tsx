@@ -18,6 +18,7 @@ import {
   type MmnPreview,
   type SdcMockResult,
 } from "@/lib/public-simulator-mock";
+import { CurrencyFormField } from "@/components/currency-input";
 
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
@@ -171,24 +172,11 @@ export function PublicSimulatorSection() {
           <>
             <label>
               Valor do ativo / base de cálculo
-              <input
-                name="asset_value"
-                type="number"
-                min="10000"
-                step="1000"
-                defaultValue="1000000"
-                required
-              />
+              <CurrencyFormField name="asset_value" defaultValue="1000000" placeholder="R$ 0,00" required />
             </label>
             <label>
               Valor pretendido (até 40% do AVM)
-              <input
-                name="requested_amount"
-                type="number"
-                min="1"
-                step="0.01"
-                placeholder="Ex.: 400.000"
-              />
+              <CurrencyFormField name="requested_amount" placeholder="Ex.: R$ 400.000,00" />
             </label>
           </>
         ) : (
@@ -208,14 +196,7 @@ export function PublicSimulatorSection() {
             </div>
             <label>
               Valor alvo da operação
-              <input
-                name="requested_amount"
-                type="number"
-                min="1"
-                step="0.01"
-                defaultValue="800000"
-                required
-              />
+              <CurrencyFormField name="requested_amount" defaultValue="800000" placeholder="R$ 0,00" required />
             </label>
             <label>
               Prazo, em meses

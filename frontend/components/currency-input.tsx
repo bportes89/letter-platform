@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, InputHTMLAttributes } from "react";
+import { ChangeEvent, InputHTMLAttributes, useState } from "react";
 
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
@@ -9,7 +9,7 @@ function digitsToAmount(digits: string): string {
   return (Number(digits) / 100).toString();
 }
 
-type CurrencyInputProps = Omit<InputHTMLAttributes<HTMLInputElement>, "value" | "onChange" | "type"> & {
+type CurrencyInputProps = Omit<InputHTMLAttributes<HTMLInputElement>, "value" | "onChange" | "type" | "defaultValue"> & {
   value: string;
   onChange: (amount: string) => void;
 };
@@ -32,5 +32,21 @@ export function CurrencyInput({ value, onChange, ...props }: CurrencyInputProps)
       onChange={handleChange}
       {...props}
     />
+  );
+}
+
+type CurrencyFormFieldProps = Omit<CurrencyInputProps, "value" | "onChange"> & {
+  name: string;
+  defaultValue?: string;
+};
+
+/** Campo monetário para formulários HTML (envia valor numérico via input hidden). */
+export function CurrencyFormField({ name, defaultValue = "", ...props }: CurrencyFormFieldProps) {
+  const [value, setValue] = useState(defaultValue);
+  return (
+    <>
+      <CurrencyInput value={value} onChange={setValue} {...props} />
+      <input type="hidden" name={name} value={value} />
+    </>
   );
 }

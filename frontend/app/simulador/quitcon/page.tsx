@@ -3,6 +3,7 @@
 import { Building2, Sparkles } from "lucide-react";
 import { FormEvent, useState } from "react";
 import { QuitConCustosEntradaPanel, QuitConCustosEntrada } from "@/components/quitcon-custos-entrada";
+import { CurrencyFormField } from "@/components/currency-input";
 
 const API_URL = (process.env.NEXT_PUBLIC_API_URL?.trim() || "http://localhost:8000/api/v1").replace(/\s+/g, "");
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
@@ -62,7 +63,7 @@ export default function QuitConPublicSimulatorPage() {
       </div>
       <section className="panel operational-panel">
         <form className="stack-form quitcon-public-form" onSubmit={(e) => void submit(e)}>
-          <input name="outstanding_balance" type="number" min="1" step="0.01" placeholder="Saldo devedor bruto (R$)" required />
+          <CurrencyFormField name="outstanding_balance" placeholder="Saldo devedor bruto (R$)" required />
           <input name="meses_restantes" type="number" min="1" max="600" defaultValue={12} placeholder="Meses restantes" required />
           <select name="administrator_name" required defaultValue="Embracon">
             {["Embracon", "Ademicon", "HS", "Tradição", "Roma", "Reserva", "Groscon", "Recon", "Âncora"].map((x) => (

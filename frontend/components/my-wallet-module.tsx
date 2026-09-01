@@ -3,6 +3,7 @@
 import { CheckCircle2, Copy, Landmark, QrCode, RefreshCw, Send, Upload, Wallet } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { API_URL, api, getToken } from "@/lib/api";
+import { CurrencyInput } from "@/components/currency-input";
 
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
@@ -63,6 +64,8 @@ export function MyWalletModule() {
   const [pixQr, setPixQr] = useState<{ payload?: string; encoded_image?: string | null } | null>(null);
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(true);
+  const [transferAmount, setTransferAmount] = useState("");
+  const [billAmount, setBillAmount] = useState("");
 
   const load = useCallback(async () => {
     const [w, tx, docs] = await Promise.all([
@@ -112,11 +115,12 @@ export function MyWalletModule() {
       method: "POST",
       body: JSON.stringify({
         pix_key: fd.get("pix_key"),
-        amount: fd.get("amount"),
+        amount: transferAmount,
         description: fd.get("description") || "Saque LETTER",
       }),
     });
     setNotice(`Transferência ${result.status} — ${brl.format(Number(result.amount))}`);
+    setTransferAmount("");
     e.currentTarget.reset();
     await load();
   }
@@ -128,11 +132,12 @@ export function MyWalletModule() {
       method: "POST",
       body: JSON.stringify({
         barcode: fd.get("barcode"),
-        amount: fd.get("amount"),
+        amount: billAmount,
         description: fd.get("description") || "Pagamento de conta",
       }),
     });
     setNotice(`Pagamento ${result.status} — ${brl.format(Number(result.amount))}`);
+    setBillAmount("");
     e.currentTarget.reset();
     await load();
   }
@@ -280,7 +285,7 @@ export function MyWalletModule() {
               <form className="stack-form" onSubmit={(e) => void transfer(e).catch((err) => setNotice(err.message))}>
                 <h3>Saque via Pix</h3>
                 <input name="pix_key" placeholder="Chave Pix de destino (mesma titularidade)" required />
-                <input name="amount" type="number" min="0.01" step="0.01" placeholder="Valor" required />
+                <CurrencyInput value={transferAmount} onChange={setTransferAmount} placeholder="Valor (R$)" required />
                 <input name="description" placeholder="Descrição (opcional)" />
                 <button><Send />Transferir</button>
               </form>
@@ -290,7 +295,7 @@ export function MyWalletModule() {
               <form className="stack-form" onSubmit={(e) => void payBill(e).catch((err) => setNotice(err.message))}>
                 <h3>Pagamento de contas</h3>
                 <input name="barcode" placeholder="Linha digitável ou código de barras" required />
-                <input name="amount" type="number" min="0.01" step="0.01" placeholder="Valor" required />
+                <CurrencyInput value={billAmount} onChange={setBillAmount} placeholder="Valor (R$)" required />
                 <input name="description" placeholder="Descrição (opcional)" />
                 <button><Send />Pagar boleto</button>
               </form>
