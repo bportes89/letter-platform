@@ -97,16 +97,19 @@ export function MarketplaceModule() {
   }
   return <OperationalLayout title="Marketplace — Cartas contempladas" subtitle="Esteira 1: parceiro escolhe a carta e Nina valida perfil. Esteira 2: Nina entrega opções por valor e ano do bem." icon={<WalletCards/>}>
     <div className="notice"><Clock3/>Admin cadastra cotas em <b>Inventário</b> (submenu Cartas contempladas). Depois opere as esteiras aqui e finalize a venda em <b>Propostas e simulações</b>.</div>
-    <div className="product-parameters"><button type="button" className={tab==="esteira1"?"primary-button":"table-action"} onClick={()=>setTab("esteira1")}>Esteira 1 — Escolha do parceiro</button><button type="button" className={tab==="esteira2"?"primary-button":"table-action"} onClick={()=>setTab("esteira2")}>Esteira 2 — Curadoria Nina</button></div>
+    <div className="marketplace-tabs">
+      <button type="button" className={`marketplace-tab${tab==="esteira1"?" active":""}`} onClick={()=>setTab("esteira1")}>Esteira 1 — Escolha do parceiro</button>
+      <button type="button" className={`marketplace-tab${tab==="esteira2"?" active":""}`} onClick={()=>setTab("esteira2")}>Esteira 2 — Curadoria Nina</button>
+    </div>
     {notice&&<div className="notice"><CheckCircle2/>{notice}</div>}{error&&<div className="error">{error}</div>}
-    {tab==="esteira1"&&<form className="quick-form quota-form" onSubmit={assessEsteira1}>
-      <select value={selectedQuota} onChange={e=>setSelectedQuota(e.target.value)} required><option value="">Selecione a carta/cota</option>{available.map(q=><option key={q.id} value={q.id}>{q.group_code}/{q.quota_code} · {q.category==="REAL_ESTATE"?"Imóvel":"Veículo"} · {brl.format(Number(q.credit_value))}</option>)}</select>
+    {tab==="esteira1"&&<form className="quick-form quota-form marketplace-form" onSubmit={assessEsteira1}>
+      <label>Carta/cota<select value={selectedQuota} onChange={e=>setSelectedQuota(e.target.value)} required><option value="">Selecione a carta/cota</option>{available.map(q=><option key={q.id} value={q.id}>{q.group_code}/{q.quota_code} · {q.category==="REAL_ESTATE"?"Imóvel":"Veículo"} · {brl.format(Number(q.credit_value))}</option>)}</select></label>
       <ClientProfileFields prefix="e1" values={profile} onChange={(k,v)=>setProfile(p=>({...p,[k]:v}))}/>
       <button><RefreshCw/>Analisar com Nina</button>
     </form>}
-    {tab==="esteira2"&&<form className="quick-form quota-form" onSubmit={matchEsteira2}>
-      <input type="number" min="1" step="0.01" value={targetAmount} onChange={e=>setTargetAmount(e.target.value)} placeholder="Valor desejado (crédito)" required/>
-      <select value={category} onChange={e=>setCategory(e.target.value)}><option value="REAL_ESTATE">Imóvel</option><option value="VEHICLE">Veículo</option></select>
+    {tab==="esteira2"&&<form className="quick-form quota-form marketplace-form" onSubmit={matchEsteira2}>
+      <label>Valor desejado (R$)<input type="number" min="1" step="0.01" value={targetAmount} onChange={e=>setTargetAmount(e.target.value)} required/></label>
+      <label>Categoria<select value={category} onChange={e=>setCategory(e.target.value)}><option value="REAL_ESTATE">Imóvel</option><option value="VEHICLE">Veículo</option></select></label>
       <ClientProfileFields prefix="e2" values={profile} onChange={(k,v)=>setProfile(p=>({...p,[k]:v}))}/>
       <button><RefreshCw/>Buscar opções Nina</button>
     </form>}
