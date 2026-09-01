@@ -12,6 +12,10 @@ def asaas_configured() -> bool:
     return bool(settings.asaas_api_key and settings.asaas_api_key.strip() and settings.asaas_wallet_id and settings.asaas_wallet_id.strip())
 
 
+def asaas_api_available() -> bool:
+    return bool(settings.asaas_api_key and settings.asaas_api_key.strip())
+
+
 def mask_wallet(wallet_id: str) -> str:
     clean = wallet_id.strip()
     if len(clean) <= 8:

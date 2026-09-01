@@ -55,6 +55,9 @@ class Settings(BaseSettings):
     wallet_fee_bill_payment: float = 0.0
     wallet_billing_cycle_days: int = 30
     wallet_escrow_billing_enabled: bool = True
+    lss_billing_enabled: bool = True
+    lss_default_billing_type: str = "BOLETO"
+    lss_billing_grace_days: int = 3
     asaas_webhook_access_token: str | None = None
     asaas_bank_code: str = "461"
     asaas_bank_name: str = "Asaas IP S.A."

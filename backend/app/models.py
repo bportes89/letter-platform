@@ -551,6 +551,13 @@ class SaaSSubscription(TimestampMixin, Base):
     payment_method_reference: Mapped[str | None] = mapped_column(String(200))
     recurring_authorized: Mapped[bool] = mapped_column(Boolean, default=False)
     acceptance_hash: Mapped[str] = mapped_column(String(64))
+    asaas_customer_id: Mapped[str | None] = mapped_column(String(80))
+    asaas_subscription_id: Mapped[str | None] = mapped_column(String(80), index=True)
+    billing_type: Mapped[str | None] = mapped_column(String(30))
+    subscriber_email: Mapped[str | None] = mapped_column(String(255))
+    last_payment_id: Mapped[str | None] = mapped_column(String(80))
+    last_payment_status: Mapped[str | None] = mapped_column(String(40))
+    payment_checkout_url: Mapped[str | None] = mapped_column(String(500))
 
 
 class SaaSAcceptance(Base):

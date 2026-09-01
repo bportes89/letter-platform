@@ -1069,6 +1069,9 @@ class SaaSSubscribeCreate(BaseModel):
     recurring_authorized: bool
     verification_reference: str = Field(min_length=3,max_length=200)
     payment_method_reference: str | None = Field(default=None,max_length=200)
+    billing_type: str | None = Field(default=None, max_length=30)
+    subscriber_email: str | None = Field(default=None, max_length=255)
+    subscriber_phone: str | None = Field(default=None, max_length=30)
     ip_address: str | None = None
     user_agent: str | None = None
 
@@ -1088,6 +1091,12 @@ class SaaSSubscriptionView(ORMModel):
     cancelled_at: datetime | None
     recurring_authorized: bool
     acceptance_hash: str
+    billing_type: str | None = None
+    subscriber_email: str | None = None
+    asaas_subscription_id: str | None = None
+    last_payment_id: str | None = None
+    last_payment_status: str | None = None
+    payment_checkout_url: str | None = None
     created_at: datetime
 
 
@@ -1475,6 +1484,13 @@ class EscrowBillingCycleView(BaseModel):
 
 
 class WalletEscrowBillingSyncView(BaseModel):
+    processed: int
+    items: list[dict]
+    enabled: bool = True
+    synced_at: str | None = None
+
+
+class LssBillingSyncView(BaseModel):
     processed: int
     items: list[dict]
     enabled: bool = True

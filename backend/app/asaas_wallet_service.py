@@ -485,6 +485,14 @@ def handle_asaas_webhook(db: Session, payload: dict) -> dict:
 
     event_id = str(payload.get("id") or payload.get("event") or uuid4())
     processed = False
+    lss_subscription_id = None
+
+    from app.lss_billing_service import handle_lss_payment_webhook
+
+    lss_item = handle_lss_payment_webhook(db, event, payment)
+    if lss_item:
+        processed = True
+        lss_subscription_id = lss_item.id
 
     if account and event in {"PAYMENT_RECEIVED", "PAYMENT_CONFIRMED"}:
         amount = Decimal(str(payment.get("value") or payment.get("netValue") or 0))
@@ -526,4 +534,4 @@ def handle_asaas_webhook(db: Session, payload: dict) -> dict:
             )
         )
 
-    return {"event": event, "processed": processed, "account_id": account.id if account else None}
+    return {"event": event, "processed": processed, "account_id": account.id if account else None, "lss_subscription_id": lss_subscription_id}

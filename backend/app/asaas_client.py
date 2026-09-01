@@ -138,3 +138,21 @@ class AsaasClient:
 
     def create_bill_payment(self, payload: dict) -> dict:
         return self.request("POST", "/billPayments", json=payload)
+
+    def create_customer(self, payload: dict) -> dict:
+        return self.request("POST", "/customers", json=payload)
+
+    def create_subscription(self, payload: dict) -> dict:
+        return self.request("POST", "/subscriptions", json=payload)
+
+    def get_subscription(self, subscription_id: str) -> dict:
+        return self.request("GET", f"/subscriptions/{subscription_id}")
+
+    def delete_subscription(self, subscription_id: str) -> dict:
+        return self.request("DELETE", f"/subscriptions/{subscription_id}")
+
+    def list_subscription_payments(self, subscription_id: str, *, limit: int = 5) -> dict:
+        return self.request("GET", f"/subscriptions/{subscription_id}/payments", params={"limit": limit})
+
+    def get_payment(self, payment_id: str) -> dict:
+        return self.request("GET", f"/payments/{payment_id}")

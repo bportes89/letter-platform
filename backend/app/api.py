@@ -52,7 +52,7 @@ from app.schemas import (
     ValidStampCreate, ValidStampView, SaaSTermsCreate, SaaSTermsView, SaaSPlanCreate, SaaSPlanView,
     SaaSSubscribeCreate, SaaSSubscriptionView,
     BillingGenerateRequest, CollectionActionView, CommissionAllocate, CommissionEntryView, CommissionRuleCreate,
-    CommissionRuleView, DocumentView, EscrowAsaasStatusView, EscrowCreate, EscrowBillingCycleView, EscrowSubaccountPreviewView, EscrowView, EscrowWebhook, WalletBillPaymentRequest, WalletEscrowBillingSyncView, WalletPricingRowView, WalletTransferRequest,
+    CommissionRuleView, DocumentView, EscrowAsaasStatusView, EscrowCreate, EscrowBillingCycleView, EscrowSubaccountPreviewView, EscrowView, EscrowWebhook, WalletBillPaymentRequest, WalletEscrowBillingSyncView, LssBillingSyncView, WalletPricingRowView, WalletTransferRequest,
     FiscalEvidenceView, SefazRobotStatusView,
     DelinquencyView, FiscalReleaseRequest, FundingOpportunityCreate, FundingOpportunityView, InvitationView,
     NinaApprovalRequest, NinaCriticalApprovalView, NinaDistressCaseCreate, NinaDistressCaseView,
@@ -856,6 +856,23 @@ def cron_wallet_escrow_billing(
     result = run_wallet_escrow_billing_job(db)
     db.commit()
     return WalletEscrowBillingSyncView(**result)
+
+
+@router.post("/system/cron/lss-billing-evaluation", response_model=LssBillingSyncView)
+def cron_lss_billing_evaluation(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    secret = settings.cron_secret
+    if secret:
+        provided = request.headers.get("x-cron-secret") or request.headers.get("authorization", "").removeprefix("Bearer ").strip()
+        if provided != secret:
+            raise HTTPException(status_code=401, detail="Cron secret inválido")
+    from app.lss_billing_service import run_lss_billing_evaluation_job
+
+    result = run_lss_billing_evaluation_job(db)
+    db.commit()
+    return LssBillingSyncView(**result)
 
 
 @router.get("/wallet/pricing", response_model=list[WalletPricingRowView])
@@ -2121,7 +2138,7 @@ def lss_cancel(subscription_id:str,user:User=Depends(require_step_up),db:Session
 def lss_evaluate(subscription_id:str,user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
     item=db.scalar(select(SaaSSubscription).where(SaaSSubscription.id==subscription_id,SaaSSubscription.organization_id==user.organization_id))
     if not item:raise HTTPException(404,"Assinatura não encontrada")
-    evaluate_subscription(item);audit(db,user,"lss.subscription_evaluated","saas_subscription",item.id,{"sandbox_only":True});db.commit();db.refresh(item);return item
+    evaluate_subscription(item);audit(db,user,"lss.subscription_evaluated","saas_subscription",item.id,{"status":item.status});db.commit();db.refresh(item);return item
 
 
 @router.get("/lss/plans/{plan_id}/allocation-preview")

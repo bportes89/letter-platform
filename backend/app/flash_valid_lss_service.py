@@ -129,30 +129,42 @@ def create_plan(db:Session,user:User,*,code:str,name:str,monthly_price:Decimal,c
 
 def subscribe(db:Session,user:User,plan:SaaSPlan,terms:SaaSTermsTemplate,*,company_name:str,company_cnpj:str,
         representative_name:str,representative_document:str,scroll_completed:bool,terms_accepted:bool,
-        recurring_authorized:bool,verification_reference:str,payment_method_reference:str|None,ip_address:str|None,user_agent:str|None)->SaaSSubscription:
+        recurring_authorized:bool,verification_reference:str,payment_method_reference:str|None,ip_address:str|None,user_agent:str|None,
+        subscriber_email:str|None=None,subscriber_phone:str|None=None,billing_type:str|None=None)->SaaSSubscription:
     if len(clean_doc(company_cnpj))!=14:raise HTTPException(422,"LSS é contratado por Pessoa Jurídica e exige CNPJ")
     if not all([scroll_completed,terms_accepted,recurring_authorized,verification_reference]):raise HTTPException(422,"Rolagem, aceite, autorização recorrente e verificação são obrigatórios")
     if not terms.active or terms.legal_review_status!="APPROVED":raise HTTPException(409,"Termos LSS não possuem versão jurídica ativa")
     now=datetime.now(UTC);evidence={"plan":plan.code,"price":str(plan.monthly_price),"terms_id":terms.id,"terms_version":terms.version,"terms_hash":terms.body_hash,"company":mask_doc(company_cnpj),"representative":mask_doc(representative_document),"scroll_completed":True,"terms_accepted":True,"recurring_authorized":True,"verification_reference":verification_reference,"ip":ip_address,"user_agent":user_agent,"accepted_at":now.isoformat()};evidence_hash=digest(evidence)
-    item=SaaSSubscription(organization_id=user.organization_id,plan_id=plan.id,terms_template_id=terms.id,subscriber_company_name=company_name,subscriber_document_masked=mask_doc(company_cnpj),legal_representative_name=representative_name,legal_representative_document_masked=mask_doc(representative_document),status="ACTIVE_SANDBOX",current_period_start=now,current_period_end=now+timedelta(days=30),payment_method_reference=payment_method_reference,recurring_authorized=True,acceptance_hash=evidence_hash)
+    from app.lss_billing_service import lss_billing_live, provision_asaas_subscription
+
+    initial_status = "PENDING_PAYMENT" if lss_billing_live() else "ACTIVE_SANDBOX"
+    item=SaaSSubscription(organization_id=user.organization_id,plan_id=plan.id,terms_template_id=terms.id,subscriber_company_name=company_name,subscriber_document_masked=mask_doc(company_cnpj),legal_representative_name=representative_name,legal_representative_document_masked=mask_doc(representative_document),status=initial_status,current_period_start=now,current_period_end=now+timedelta(days=30),payment_method_reference=payment_method_reference,recurring_authorized=True,acceptance_hash=evidence_hash,subscriber_email=(subscriber_email or user.email).strip())
     db.add(item);db.flush();db.add(SaaSAcceptance(organization_id=user.organization_id,subscription_id=item.id,user_id=user.id,terms_template_id=terms.id,ip_address=ip_address,user_agent=user_agent,verification_reference=verification_reference,evidence_json=json.dumps(evidence,ensure_ascii=False,sort_keys=True),evidence_hash=evidence_hash))
     issue_stamp(db,user,entity_type="saas_subscription",entity_id=item.id,purpose="LSS_CLICKWRAP_ACCEPTANCE",payload=evidence)
+    if lss_billing_live():
+        provision_asaas_subscription(db,item,plan,company_cnpj=company_cnpj,subscriber_email=item.subscriber_email or user.email,subscriber_phone=subscriber_phone,billing_type=billing_type)
     return item
 
 
 def cancel_subscription(item:SaaSSubscription)->SaaSSubscription:
-    if item.status not in {"ACTIVE_SANDBOX","PAST_DUE"}:raise HTTPException(409,"Assinatura não está cancelável")
-    item.cancel_at_period_end=True;item.cancelled_at=datetime.now(UTC);item.status="CANCELLATION_SCHEDULED";return item
+    cancellable={"ACTIVE_SANDBOX","PAST_DUE","ACTIVE","PENDING_PAYMENT","SUSPENDED","SUSPENDED_PAST_DUE_SANDBOX"}
+    if item.status not in cancellable:raise HTTPException(409,"Assinatura não está cancelável")
+    from app.lss_billing_service import cancel_asaas_subscription
+
+    item.cancel_at_period_end=True;item.cancelled_at=datetime.now(UTC);item.status="CANCELLATION_SCHEDULED"
+    cancel_asaas_subscription(item)
+    return item
 
 
 def evaluate_subscription(item:SaaSSubscription,as_of:datetime|None=None)->SaaSSubscription:
-    now=as_of or datetime.now(UTC);period_end=item.current_period_end
-    if period_end.tzinfo is None:period_end=period_end.replace(tzinfo=UTC)
-    if item.status in {"ACTIVE_SANDBOX","PAST_DUE"} and now>period_end+timedelta(days=3):item.status="SUSPENDED_PAST_DUE_SANDBOX"
-    elif item.status=="ACTIVE_SANDBOX" and now>period_end:item.status="PAST_DUE"
-    return item
+    from app.lss_billing_service import evaluate_subscription_billing
+
+    return evaluate_subscription_billing(item, as_of)
 
 
 def subscription_allocation(plan:SaaSPlan)->dict:
     price=Decimal(str(plan.monthly_price));central=(price*Decimal(str(plan.central_share_percent))/Decimal(100)).quantize(Decimal(".01"),rounding=ROUND_HALF_UP);network=price-central
-    return {"monthly_price":str(price.quantize(Decimal('.01'))),"central_share":str(central),"network_pool":str(network),"execution":"PREVIEW_ONLY"}
+    from app.lss_billing_service import lss_billing_live
+
+    execution = "ASAAS_RECURRING" if lss_billing_live() else "PREVIEW_ONLY"
+    return {"monthly_price":str(price.quantize(Decimal('.01'))),"central_share":str(central),"network_pool":str(network),"execution":execution}

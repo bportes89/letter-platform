@@ -1027,10 +1027,11 @@ def test_flash_credit_pj_route_policy_and_valid_stamp(client,auth_headers):
     assert verified["integrity_valid"] is True and verified["legal_effect"]=="EVIDENCE_RECORD_NOT_DIGITAL_CERTIFICATE"
 
 
-def test_lss_clickwrap_subscription_allocation_and_cancellation(client,auth_headers):
+def test_lss_clickwrap_subscription_allocation_and_cancellation(client,auth_headers,monkeypatch):
+    monkeypatch.setattr("app.core.config.settings.asaas_api_key", None)
     terms=client.post("/api/v1/lss/terms",headers=auth_headers,json={"code":"LSS-B2B","version":51,"title":"Termos SaaS LSS","body":"Termos empresariais versionados do LSS, com recorrência, cancelamento e trilha de aceite sujeita à revisão jurídica."}).json()
     plan=client.post("/api/v1/lss/plans",headers=auth_headers,json={"code":"LSS-PRO","name":"LSS Profissional","monthly_price":"199.90","central_share_percent":"70","network_pool_percent":"30"}).json()
-    payload={"plan_id":plan["id"],"terms_template_id":terms["id"],"company_name":"Empresa Teste Ltda","company_cnpj":"12345678000199","representative_name":"Representante Teste","representative_document":"12345678901","scroll_completed":True,"terms_accepted":True,"recurring_authorized":True,"verification_reference":"otp-sandbox-001"}
+    payload={"plan_id":plan["id"],"terms_template_id":terms["id"],"company_name":"Empresa Teste Ltda","company_cnpj":"12345678000199","representative_name":"Representante Teste","representative_document":"12345678901","subscriber_email":"financeiro@empresa.test","billing_type":"BOLETO","scroll_completed":True,"terms_accepted":True,"recurring_authorized":True,"verification_reference":"otp-sandbox-001"}
     assert client.post("/api/v1/lss/subscriptions",headers=auth_headers,json=payload).status_code==409
     assert client.post("/api/v1/auth/step-up",headers=auth_headers,json={"password":"Letter@123"}).status_code==200
     assert client.post(f"/api/v1/lss/terms/{terms['id']}/approve",headers=auth_headers).json()["legal_review_status"]=="APPROVED"
@@ -1042,6 +1043,124 @@ def test_lss_clickwrap_subscription_allocation_and_cancellation(client,auth_head
     assert allocation=={"monthly_price":"199.90","central_share":"139.93","network_pool":"59.97","execution":"PREVIEW_ONLY"}
     cancelled=client.post(f"/api/v1/lss/subscriptions/{subscribed.json()['id']}/cancel",headers=auth_headers)
     assert cancelled.status_code==200 and cancelled.json()["status"]=="CANCELLATION_SCHEDULED" and cancelled.json()["cancel_at_period_end"] is True
+
+
+def test_lss_asaas_subscription_and_payment_webhook(client, auth_headers, monkeypatch):
+    class FakeAsaasClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def create_customer(self, payload):
+            assert payload["cpfCnpj"] == "12345678000199"
+            return {"id": "cus_lss_001"}
+
+        def create_subscription(self, payload):
+            assert payload["billingType"] == "PIX"
+            assert payload["cycle"] == "MONTHLY"
+            return {"id": "sub_lss_001"}
+
+        def list_subscription_payments(self, subscription_id, *, limit=5):
+            return {
+                "data": [
+                    {
+                        "id": "pay_lss_001",
+                        "status": "PENDING",
+                        "invoiceUrl": "https://sandbox.asaas.com/i/pay_lss_001",
+                    }
+                ]
+            }
+
+        def delete_subscription(self, subscription_id):
+            return {"deleted": True}
+
+    monkeypatch.setattr("app.core.config.settings.asaas_api_key", "test-key")
+    monkeypatch.setattr("app.core.config.settings.lss_billing_enabled", True)
+
+    terms = client.post(
+        "/api/v1/lss/terms",
+        headers=auth_headers,
+        json={
+            "code": "LSS-ASAAS",
+            "version": 1,
+            "title": "Termos LSS Asaas",
+            "body": "Termos empresariais com cobrança recorrente via Asaas e trilha de aceite auditável.",
+        },
+    ).json()
+    plan = client.post(
+        "/api/v1/lss/plans",
+        headers=auth_headers,
+        json={
+            "code": "LSS-PIX",
+            "name": "LSS Pix",
+            "monthly_price": "199.90",
+            "central_share_percent": "70",
+            "network_pool_percent": "30",
+        },
+    ).json()
+    assert client.post("/api/v1/auth/step-up", headers=auth_headers, json={"password": "Letter@123"}).status_code == 200
+    assert client.post(f"/api/v1/lss/terms/{terms['id']}/approve", headers=auth_headers).json()["legal_review_status"] == "APPROVED"
+
+    monkeypatch.setattr("app.lss_billing_service.AsaasClient", FakeAsaasClient)
+    subscribed = client.post(
+        "/api/v1/lss/subscriptions",
+        headers=auth_headers,
+        json={
+            "plan_id": plan["id"],
+            "terms_template_id": terms["id"],
+            "company_name": "Empresa Asaas Ltda",
+            "company_cnpj": "12345678000199",
+            "representative_name": "Representante Teste",
+            "representative_document": "12345678901",
+            "subscriber_email": "financeiro@empresa.test",
+            "billing_type": "PIX",
+            "scroll_completed": True,
+            "terms_accepted": True,
+            "recurring_authorized": True,
+            "verification_reference": "otp-asaas-001",
+        },
+    )
+    assert subscribed.status_code == 201
+    body = subscribed.json()
+    assert body["status"] == "PENDING_PAYMENT"
+    assert body["asaas_subscription_id"] == "sub_lss_001"
+    assert body["payment_checkout_url"] == "https://sandbox.asaas.com/i/pay_lss_001"
+
+    allocation = client.get(f"/api/v1/lss/plans/{plan['id']}/allocation-preview", headers=auth_headers).json()
+    assert allocation["execution"] == "ASAAS_RECURRING"
+
+    monkeypatch.setattr("app.core.config.settings.asaas_webhook_access_token", "test-webhook-token")
+    webhook = client.post(
+        "/api/v1/webhooks/asaas",
+        headers={"asaas-access-token": "test-webhook-token"},
+        json={
+            "event": "PAYMENT_CONFIRMED",
+            "payment": {
+                "id": "pay_lss_001",
+                "subscription": "sub_lss_001",
+                "externalReference": body["id"],
+                "status": "CONFIRMED",
+                "dueDate": "2026-09-01",
+                "value": 199.90,
+            },
+        },
+    )
+    assert webhook.status_code == 200
+    assert webhook.json()["lss_subscription_id"] == body["id"]
+
+    listed = client.get("/api/v1/lss/subscriptions", headers=auth_headers).json()
+    active = next(item for item in listed if item["id"] == body["id"])
+    assert active["status"] == "ACTIVE"
+    assert active["last_payment_status"] == "CONFIRMED"
+
+    cancelled = client.post(f"/api/v1/lss/subscriptions/{body['id']}/cancel", headers=auth_headers)
+    assert cancelled.status_code == 200
+    assert cancelled.json()["status"] == "CANCELLATION_SCHEDULED"
 
 
 def test_flash_simulator_four_scenarios_and_settlement_quote(client,auth_headers):
