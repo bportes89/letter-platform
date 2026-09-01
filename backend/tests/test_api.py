@@ -2603,7 +2603,7 @@ def test_escrow_monthly_billing_charge_and_delinquency(client, auth_headers, mon
 
     accounts = client.get("/api/v1/escrow/accounts", headers=auth_headers)
     account = next(item for item in accounts.json() if item["id"] == account_id)
-    assert account["available_balance"] == "100.10"
+    assert account["available_balance"] == "98.11"
 
     billing_after = client.get(f"/api/v1/escrow/accounts/{account_id}/billing", headers=auth_headers)
     assert billing_after.json()["outstanding_amount"] == "0.00"
@@ -2639,8 +2639,100 @@ def test_escrow_billing_delinquency_retains_incoming(client, auth_headers, monke
 
     accounts = client.get("/api/v1/escrow/accounts", headers=auth_headers)
     account = next(item for item in accounts.json() if item["id"] == account_id)
-    assert account["available_balance"] == "100.10"
+    assert account["available_balance"] == "98.11"
 
     billing = client.get(f"/api/v1/escrow/accounts/{account_id}/billing", headers=auth_headers)
     assert billing.json()["outstanding_amount"] == "0.00"
     assert billing.json()["billing_blocked"] is False
+
+
+def test_escrow_incoming_fees_by_billing_type(client, auth_headers, monkeypatch):
+    monkeypatch.setattr("app.asaas_common.asaas_configured", lambda: False)
+
+    created = client.post(
+        "/api/v1/escrow/accounts",
+        headers=auth_headers,
+        json={"create_subaccount": True, "enable_escrow": True},
+    )
+    account_id = created.json()["id"]
+
+    pix = client.post(
+        f"/api/v1/escrow/accounts/{account_id}/mock-webhook",
+        headers=auth_headers,
+        json={
+            "event_id": "fee_test_pix_001",
+            "event_type": "FUNDS_CONFIRMED",
+            "amount": "100.00",
+            "billing_type": "PIX",
+        },
+    )
+    assert pix.status_code == 200
+
+    boleto = client.post(
+        f"/api/v1/escrow/accounts/{account_id}/mock-webhook",
+        headers=auth_headers,
+        json={
+            "event_id": "fee_test_boleto_001",
+            "event_type": "FUNDS_CONFIRMED",
+            "amount": "100.00",
+            "billing_type": "BOLETO",
+        },
+    )
+    assert boleto.status_code == 200
+
+    card = client.post(
+        f"/api/v1/escrow/accounts/{account_id}/mock-webhook",
+        headers=auth_headers,
+        json={
+            "event_id": "fee_test_card_001",
+            "event_type": "FUNDS_CONFIRMED",
+            "amount": "1000.00",
+            "billing_type": "CREDIT_CARD",
+        },
+    )
+    assert card.status_code == 200
+
+    accounts = client.get("/api/v1/escrow/accounts", headers=auth_headers)
+    account = next(item for item in accounts.json() if item["id"] == account_id)
+    # 100 - 1.99 + 100 - 3.49 + 1000 - 40.30 = 1154.22
+    assert account["available_balance"] == "1154.22"
+
+
+def test_asaas_webhook_applies_boleto_fee(client, auth_headers, monkeypatch):
+    monkeypatch.setattr("app.asaas_common.asaas_configured", lambda: False)
+    monkeypatch.setattr("app.core.config.settings.asaas_webhook_access_token", "test-webhook-token")
+
+    registered = client.post("/api/v1/public/site/auth/register", json={
+        "name": "Cliente Webhook Taxa",
+        "email": "cliente.webhook.taxa@letter.com.br",
+        "phone": "11955554444",
+        "password": "ClienteTax1!",
+        "document": "39053344705",
+        "terms_accepted": True,
+    })
+    headers = {"Authorization": f"Bearer {registered.json()['access_token']}"}
+    client.post("/api/v1/kyc/me/complete", headers=headers)
+
+    escrow = client.get("/api/v1/escrow/me", headers=headers)
+    asaas_account_id = escrow.json()["asaas_account_id"]
+
+    accepted = client.post(
+        "/api/v1/webhooks/asaas",
+        headers={"asaas-access-token": "test-webhook-token"},
+        json={
+            "event": "PAYMENT_RECEIVED",
+            "id": "pay_boleto_fee_001",
+            "payment": {
+                "id": "pay_boleto_fee_001",
+                "value": 200.0,
+                "billingType": "BOLETO",
+                "accountId": asaas_account_id,
+            },
+        },
+    )
+    assert accepted.status_code == 200
+    assert accepted.json()["processed"] is True
+
+    wallet_after = client.get("/api/v1/wallet/me", headers=headers)
+    # 200 - 3.49 boleto fee
+    assert wallet_after.json()["account"]["available_balance"] == "196.51"

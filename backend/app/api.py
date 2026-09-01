@@ -2605,7 +2605,10 @@ async def asaas_webhook(request: Request, db: Session = Depends(get_db)):
 def escrow_webhook(account_id: str, payload: EscrowWebhook, user: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
     account=db.scalar(select(EscrowAccount).where(EscrowAccount.id==account_id,EscrowAccount.organization_id==user.organization_id))
     if not account: raise HTTPException(status_code=404,detail="Conta escrow não encontrada")
-    event,processed=process_escrow_event(db,user,account,payload.event_id,payload.event_type,payload.amount,payload.metadata)
+    metadata=dict(payload.metadata)
+    if payload.billing_type:
+        metadata["billing_type"]=payload.billing_type
+    event,processed=process_escrow_event(db,user,account,payload.event_id,payload.event_type,payload.amount,metadata)
     if processed: audit(db,user,"escrow.webhook_processed","escrow_event",event.id,{"event_id":payload.event_id})
     db.commit();return {"event_id":event.provider_event_id,"processed":processed,"status":"ok"}
 

@@ -56,7 +56,7 @@ def customer_fee_for(event_type: str, gross_amount: Decimal) -> Decimal:
         return money(Decimal(str(settings.wallet_fee_pix)))
     if code == "BOLETO":
         return money(Decimal(str(settings.wallet_fee_boleto)))
-    if code == "CARD":
+    if code in {"CARD", "CREDIT_CARD", "DEBIT_CARD"}:
         percent = Decimal(str(settings.wallet_fee_card_percent)) / Decimal("100")
         fixed = Decimal(str(settings.wallet_fee_card_fixed))
         return money(gross_amount * percent + fixed)
@@ -65,3 +65,28 @@ def customer_fee_for(event_type: str, gross_amount: Decimal) -> Decimal:
     if code == "BILL_PAYMENT":
         return money(Decimal(str(settings.wallet_fee_bill_payment)))
     return Decimal("0")
+
+
+def fee_code_from_billing_type(billing_type: str | None) -> str | None:
+    code = (billing_type or "").upper().strip()
+    if not code:
+        return None
+    if code == "PIX":
+        return "PIX"
+    if code == "BOLETO":
+        return "BOLETO"
+    if code in {"CREDIT_CARD", "DEBIT_CARD", "CARD"}:
+        return "CARD"
+    return None
+
+
+def resolve_incoming_fee_code(event_type: str, metadata: dict | None) -> str:
+    metadata = metadata or {}
+    payment = metadata.get("payment") if isinstance(metadata.get("payment"), dict) else {}
+    billing_type = payment.get("billingType") or metadata.get("billing_type") or metadata.get("billingType")
+    mapped = fee_code_from_billing_type(str(billing_type) if billing_type else None)
+    if mapped:
+        return mapped
+    if (event_type or "").upper() == "FUNDS_CONFIRMED":
+        return str(metadata.get("fee_code") or "PIX").upper()
+    return "PIX"

@@ -1485,6 +1485,7 @@ class EscrowWebhook(BaseModel):
     event_id: str = Field(min_length=4, max_length=120)
     event_type: str
     amount: Decimal = Field(gt=0)
+    billing_type: str | None = Field(default=None, max_length=30)
     metadata: dict = Field(default_factory=dict)
 
 

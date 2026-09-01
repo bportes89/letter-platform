@@ -494,11 +494,12 @@ def handle_asaas_webhook(db: Session, payload: dict) -> dict:
             if actor:
                 from app.wallet_billing_service import credit_escrow_incoming
 
+                payment_event_id = str(payment.get("id") or payload.get("id") or event_id)
                 _, processed = credit_escrow_incoming(
                     db,
                     actor,
                     account,
-                    event_id,
+                    payment_event_id,
                     "PAYMENT_RECEIVED",
                     amount,
                     payload,

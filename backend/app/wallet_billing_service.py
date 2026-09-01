@@ -16,7 +16,7 @@ from app.asaas_wallet_service import subaccount_client
 from app.core.config import settings
 from app.models import EscrowAccount, EscrowBillingCycle, EscrowEvent, User
 from app.services import money, post_double_entry
-from app.wallet_pricing_service import customer_fee_for
+from app.wallet_pricing_service import customer_fee_for, resolve_incoming_fee_code
 
 MONTHLY_FEE_DESCRIPTION = "Tarifa Mensal de Manutenção de Plataforma Escrow"
 
@@ -187,7 +187,8 @@ def credit_escrow_incoming(
         raise HTTPException(status_code=422, detail="Evento suportado: FUNDS_CONFIRMED ou PAYMENT_RECEIVED")
 
     gross = money(amount)
-    fee = customer_fee_for(event_type, gross) if not account.escrow_enabled else Decimal("0")
+    fee_code = resolve_incoming_fee_code(event_type, metadata)
+    fee = customer_fee_for(fee_code, gross)
     net = money(gross - fee)
     cycle = get_billing_cycle(db, account)
     credited = net
@@ -209,6 +210,7 @@ def credit_escrow_incoming(
                 **metadata,
                 "gross_amount": str(gross),
                 "platform_fee": str(fee),
+                "fee_code": fee_code,
                 "retained_for_billing": str(retained),
             },
             ensure_ascii=False,
@@ -229,14 +231,13 @@ def credit_escrow_incoming(
         operation_id=account.operation_id,
     )
     if fee > 0:
-        account.available_balance = money(Decimal(str(account.available_balance)) - fee)
         _record_platform_fee(
             db,
             user,
             account,
             reference=f"TX_FEE:{event_id}",
             event_type="PAYMENT_FEE",
-            description="Taxa de recebimento",
+            description=f"Taxa de recebimento ({fee_code})",
             amount=fee,
         )
         db.add(
@@ -246,9 +247,13 @@ def credit_escrow_incoming(
                 provider_event_id=f"tx_fee_{event_id}",
                 event_type="PAYMENT_FEE",
                 amount=float(fee),
-                payload_json=json.dumps({"source_event": event_id}, ensure_ascii=False),
+                payload_json=json.dumps({"source_event": event_id, "fee_code": fee_code}, ensure_ascii=False),
             )
         )
+        try:
+            _transfer_fee_to_master(account, fee, f"Taxa LETTER ({fee_code})")
+        except Exception:
+            pass
 
     return event, True
 
