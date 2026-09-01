@@ -1163,6 +1163,28 @@ def test_lss_asaas_subscription_and_payment_webhook(client, auth_headers, monkey
     assert cancelled.json()["status"] == "CANCELLATION_SCHEDULED"
 
 
+def test_legal_manuals_public_catalog_and_authenticated_download(client, auth_headers):
+    public = client.get("/api/v1/platform/legal-manuals")
+    assert public.status_code == 200
+    body = public.json()
+    assert len(body) >= 10
+    assert body[0]["requires_login"] is True
+    assert "filename" not in body[0]
+
+    unauthorized = client.get("/api/v1/legal-manuals")
+    assert unauthorized.status_code == 401
+
+    listed = client.get("/api/v1/legal-manuals", headers=auth_headers)
+    assert listed.status_code == 200
+    rows = listed.json()
+    assert any(row["slug"] == "master-franqueado" and row["available"] for row in rows)
+
+    download = client.get("/api/v1/legal-manuals/master-franqueado/download", headers=auth_headers)
+    assert download.status_code == 200
+    assert download.headers["content-type"].startswith("application/vnd.openxmlformats-officedocument")
+    assert len(download.content) > 1000
+
+
 def test_flash_simulator_four_scenarios_and_settlement_quote(client,auth_headers):
     params = client.get("/api/v1/finops/flash-capital/simulation-params", headers=auth_headers)
     assert params.status_code == 200

@@ -113,6 +113,7 @@ const PRODUCT_ROUTE_ALIASES: Record<string, string> = {
 };
 
 export function canAccessModuleRoute(role: string | undefined, routeKey: string): boolean {
+  if (routeKey === "legal-manuals") return normalizeRole(role) !== null;
   const product = PRODUCT_ROUTE_ALIASES[routeKey];
   if (product) return canAccessProduct(role, product);
   return canAccessPlatformModule(role, routeKey);

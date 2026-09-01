@@ -18,6 +18,7 @@ import { BIModule, NinaModule } from "@/components/nina-bi-modules";
 import { OperationsModule } from "@/components/operations-module";
 import { StructuredPropertiesModule } from "@/components/structured-properties-module";
 import { LSSModule } from "@/components/lss-module";
+import { LegalManualsModule } from "@/components/legal-manuals-module";
 import { FinOpsModule } from "@/components/finops-module";
 import { PreAnalysisModule } from "@/components/pre-analysis-module";
 import { LeaseEquityModule } from "@/components/lease-equity-module";
@@ -90,6 +91,7 @@ export default function ModulePage() {
   if (routeKey === "reports") return <BIModule />;
   if (routeKey === "operations") return <OperationsModule />;
   if (routeKey === "lss") return <LSSModule />;
+  if (routeKey === "legal-manuals") return <LegalManualsModule />;
 
   if (!module) {
     return (

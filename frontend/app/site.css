@@ -1025,6 +1025,93 @@
   line-height: 1.5;
 }
 
+.manuals-section {
+  background: linear-gradient(180deg, rgba(6, 19, 15, 0.02), rgba(6, 19, 15, 0.06));
+}
+
+.manuals-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+}
+
+.manuals-group {
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(6, 19, 15, 0.08);
+  border-radius: 18px;
+  padding: 24px;
+}
+
+.manuals-group h3 {
+  margin: 0 0 16px;
+  font-size: 1rem;
+  color: var(--letter-deep);
+}
+
+.manuals-group ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 14px;
+}
+
+.manuals-group li {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  padding-bottom: 14px;
+  border-bottom: 1px solid rgba(6, 19, 15, 0.08);
+}
+
+.manuals-group li:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.manuals-group strong {
+  display: block;
+  color: var(--letter-deep);
+}
+
+.manuals-group small {
+  display: block;
+  color: rgba(6, 19, 15, 0.62);
+  margin-top: 4px;
+}
+
+.manuals-lock-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  font-size: 0.82rem;
+  color: var(--letter-green);
+  font-weight: 600;
+}
+
+.manuals-cta {
+  margin-top: 28px;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 22px 24px;
+  border-radius: 18px;
+  background: var(--letter-deep);
+  color: #fff;
+}
+
+.manuals-cta p {
+  margin: 6px 0 0;
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.manuals-cta .button {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
 .site-footer > div {
   gap: 20px;
   display: flex;

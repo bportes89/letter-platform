@@ -52,7 +52,7 @@ from app.schemas import (
     ValidStampCreate, ValidStampView, SaaSTermsCreate, SaaSTermsView, SaaSPlanCreate, SaaSPlanView,
     SaaSSubscribeCreate, SaaSSubscriptionView,
     BillingGenerateRequest, CollectionActionView, CommissionAllocate, CommissionEntryView, CommissionRuleCreate,
-    CommissionRuleView, DocumentView, EscrowAsaasStatusView, EscrowCreate, EscrowBillingCycleView, EscrowSubaccountPreviewView, EscrowView, EscrowWebhook, WalletBillPaymentRequest, WalletEscrowBillingSyncView, LssBillingSyncView, WalletPricingRowView, WalletTransferRequest,
+    CommissionRuleView, DocumentView, EscrowAsaasStatusView, EscrowCreate, EscrowBillingCycleView, EscrowSubaccountPreviewView, EscrowView, EscrowWebhook, WalletBillPaymentRequest, WalletEscrowBillingSyncView, LssBillingSyncView, LegalManualPublicView, LegalManualView, WalletPricingRowView, WalletTransferRequest,
     FiscalEvidenceView, SefazRobotStatusView,
     DelinquencyView, FiscalReleaseRequest, FundingOpportunityCreate, FundingOpportunityView, InvitationView,
     NinaApprovalRequest, NinaCriticalApprovalView, NinaDistressCaseCreate, NinaDistressCaseView,
@@ -250,6 +250,35 @@ def platform_company_profile():
     from app.company_profile_service import company_profile
 
     return company_profile()
+
+
+@router.get("/platform/legal-manuals", response_model=list[LegalManualPublicView])
+def platform_legal_manuals_public():
+    from app.legal_manuals_service import list_public_manuals
+
+    return list_public_manuals()
+
+
+@router.get("/legal-manuals", response_model=list[LegalManualView])
+def legal_manuals(user: User = Depends(get_current_user)):
+    from app.legal_manuals_service import list_authenticated_manuals
+
+    _ = user
+    return list_authenticated_manuals()
+
+
+@router.get("/legal-manuals/{slug}/download")
+def legal_manual_download(slug: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.legal_manuals_service import read_manual_bytes
+
+    data, filename, content_type = read_manual_bytes(slug)
+    audit(db, user, "legal_manual.downloaded", "legal_manual", slug, {"filename": filename})
+    db.commit()
+    return Response(
+        content=data,
+        media_type=content_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.post("/auth/login", response_model=TokenPair)

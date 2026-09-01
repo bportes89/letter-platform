@@ -7,6 +7,7 @@ import { AttendanceBotSection } from "@/components/public-site/attendance-bot";
 import { AuctionSection, FlashInvestSection } from "@/components/public-site/gated-vitrine-section";
 import { PublicSimulatorSection, SiteNav } from "@/components/public-site/simulator-section";
 import { SiteFooter } from "@/components/public-site/site-footer";
+import { LegalManualsPublicSection } from "@/components/public-site/legal-manuals-section";
 
 export default function PublicHomePage() {
   return (
@@ -195,6 +196,8 @@ export default function PublicHomePage() {
 
         <FlashInvestSection />
         <AuctionSection />
+
+        <LegalManualsPublicSection />
 
         <section id="contato" className="section cta-section">
           <div>

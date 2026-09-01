@@ -1497,6 +1497,22 @@ class LssBillingSyncView(BaseModel):
     synced_at: str | None = None
 
 
+class LegalManualPublicView(BaseModel):
+    slug: str
+    title: str
+    category: str
+    product: str
+    audience: str
+    description: str
+    requires_login: bool = True
+
+
+class LegalManualView(LegalManualPublicView):
+    filename: str
+    available: bool
+    size_bytes: int = 0
+
+
 class EscrowWebhook(BaseModel):
     event_id: str = Field(min_length=4, max_length=120)
     event_type: str
