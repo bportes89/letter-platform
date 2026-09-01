@@ -23,6 +23,7 @@ from app.subaccount_auto_service import find_user_plain_subaccount
 
 TRANSACTION_LABELS = {
     "PAYMENT_RECEIVED": "Cobrança recebida",
+    "COMMISSION_CREDITED": "Comissão creditada",
     "TRANSFER": "Transferência",
     "TRANSFER_SENT": "Saque/transferência realizada",
     "BILL_PAYMENT": "Pagamento de conta",

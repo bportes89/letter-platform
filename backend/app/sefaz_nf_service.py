@@ -189,10 +189,22 @@ def release_commissions_after_sefaz(
     db.add(evidence)
     db.flush()
 
-    now = datetime.now(UTC)
-    for entry in pending:
-        entry.status = "AVAILABLE"
-        entry.released_at = now
+    from app.commission_wallet_service import auto_credit_commissions_to_partner_wallet
+
+    wallet_credit = auto_credit_commissions_to_partner_wallet(
+        db,
+        user,
+        pending,
+        reference=reference_month,
+        access_key=key_used,
+    )
+    evidence.detail_json = json.dumps(
+        {
+            **json.loads(evidence.detail_json),
+            "wallet_credit": wallet_credit,
+        },
+        ensure_ascii=False,
+    )
 
     return evidence
 

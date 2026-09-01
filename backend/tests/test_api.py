@@ -366,12 +366,24 @@ def test_five_level_commission_allocation_and_fiscal_hold(client, auth_headers):
         "<xNome>Parceiro Demonstracao</xNome></NFe>"
     )
     released = client.post("/api/v1/wallet/commissions/release-fiscal", headers=partner_headers, json={
-        "reference_month": "2026-08",
+        "reference_month": datetime.now(UTC).strftime("%Y-%m"),
         "document_content": nf_xml,
         "gross_amount": "5000.00",
     })
-    assert released.status_code == 200 and released.json()["available_balance"] == "5000.00"
-    assert released.json()["access_key"] == "35250801234567890123456789012345678901234567"
+    assert released.status_code == 200
+    body = released.json()
+    assert body["access_key"] == "35250801234567890123456789012345678901234567"
+    assert body["wallet_credit"]["credited"] is True
+    assert body["wallet_credit"]["amount"] == "5000.00"
+
+    partner_wallet = client.get("/api/v1/wallet/me", headers=partner_headers)
+    assert partner_wallet.status_code == 200
+    assert partner_wallet.json()["has_subaccount"] is True
+    assert partner_wallet.json()["account"]["available_balance"] == "5000.00"
+
+    commissions = client.get("/api/v1/wallet/commissions", headers=partner_headers)
+    assert commissions.json()[0]["status"] == "CREDITED_TO_WALLET"
+    assert body["available_balance"] == "0.00"
     summary = client.get("/api/v1/network/me/summary", headers=partner_headers)
     assert summary.json()["privacy_mode"] == "AGGREGATED"
     assert "names" not in summary.json()

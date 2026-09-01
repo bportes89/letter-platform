@@ -503,11 +503,14 @@ def commission_fiscal_release(payload: FiscalReleaseRequest, user: User = Depend
     )
     db.commit()
     available = available_commission_balance(db, user)
+    detail = json.loads(evidence.detail_json or "{}")
+    wallet_credit = detail.get("wallet_credit") or {}
     return {
         "status": evidence.sefaz_status or "VALID",
         "available_balance": str(available),
         "access_key": evidence.access_key,
         "provider": evidence.provider,
+        "wallet_credit": wallet_credit,
     }
 
 
