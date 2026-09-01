@@ -100,6 +100,7 @@ def accept_invitation(
     company_address: str | None = None,
     company_city: str | None = None,
     company_state: str | None = None,
+    phone: str | None = None,
     terms_accepted: bool = False,
     scroll_completed: bool = False,
     verification_reference: str | None = None,
@@ -123,6 +124,7 @@ def accept_invitation(
         terms_accepted=terms_accepted,
         scroll_completed=scroll_completed,
         verification_reference=verification_reference,
+        phone=phone,
     )
     user = User(
         organization_id=invite.organization_id,
@@ -130,6 +132,12 @@ def accept_invitation(
         name=name,
         email=invite.email,
         document=document,
+        phone=(phone or "").strip() or None,
+        company_name=(company_name or "").strip() or None,
+        company_cnpj=(company_cnpj or "").strip() or None,
+        company_address=(company_address or "").strip() or None,
+        company_city=(company_city or "").strip() or None,
+        company_state=(company_state or "").strip().upper()[:2] or None,
         password_hash=hash_password(password),
         role=invite.role,
     )

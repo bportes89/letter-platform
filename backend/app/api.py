@@ -397,6 +397,7 @@ def accept_invite(payload:InviteAccept,request:Request,db:Session=Depends(get_db
         company_address=payload.company_address,
         company_city=payload.company_city,
         company_state=payload.company_state,
+        phone=payload.phone,
         terms_accepted=payload.terms_accepted,
         scroll_completed=payload.scroll_completed,
         verification_reference=payload.verification_reference,

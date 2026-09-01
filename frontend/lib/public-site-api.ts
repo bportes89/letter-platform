@@ -148,6 +148,7 @@ export async function acceptPartnerInvitation(payload: {
   company_address: string;
   company_city: string;
   company_state: string;
+  phone: string;
   terms_accepted: boolean;
   scroll_completed: boolean;
   verification_reference: string;

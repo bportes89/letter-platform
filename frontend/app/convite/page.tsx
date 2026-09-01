@@ -12,7 +12,6 @@ import {
   type InvitationPreview,
 } from "@/lib/public-site-api";
 import { login } from "@/lib/api";
-import { portalHomeForRole } from "@/lib/portal-routes";
 
 function ConviteForm() {
   const searchParams = useSearchParams();
@@ -21,6 +20,7 @@ function ConviteForm() {
   const [preview, setPreview] = useState<InvitationPreview | null>(null);
   const [name, setName] = useState("");
   const [document, setDocument] = useState("");
+  const [phone, setPhone] = useState("");
   const [companyName, setCompanyName] = useState("");
   const [companyCnpj, setCompanyCnpj] = useState("");
   const [companyAddress, setCompanyAddress] = useState("");
@@ -53,7 +53,7 @@ function ConviteForm() {
     setError("");
     setLoading(true);
     try {
-      const user = await acceptPartnerInvitation({
+      await acceptPartnerInvitation({
         token,
         name,
         document,
@@ -63,12 +63,13 @@ function ConviteForm() {
         company_address: companyAddress,
         company_city: companyCity,
         company_state: companyState,
+        phone,
         terms_accepted: termsAccepted,
         scroll_completed: scrollCompleted,
         verification_reference: verificationReference,
       });
       await login(preview.email, password);
-      window.location.href = portalHomeForRole(user.role);
+      window.location.href = "/modules/my-wallet?onboarding=kyc";
     } catch (e) {
       setError(e instanceof Error ? e.message : "Não foi possível concluir o aceite");
       setLoading(false);
@@ -154,6 +155,10 @@ function ConviteForm() {
         <label>
           UF
           <input value={companyState} onChange={(e) => setCompanyState(e.target.value.toUpperCase())} maxLength={2} required />
+        </label>
+        <label>
+          Telefone celular (WhatsApp)
+          <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="27999998888" required />
         </label>
         <label>
           Senha de acesso

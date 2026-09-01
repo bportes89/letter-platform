@@ -75,7 +75,11 @@ export default function ModulePage() {
   if (routeKey === "leilao" || routeKey === "auctions") return <AuctionsModule />;
   if (routeKey === "crm") return <LeadsModule />;
   if (routeKey === "contracts") return <ContractsModule />;
-  if (routeKey === "my-wallet") return <MyWalletModule />;
+  if (routeKey === "my-wallet") return (
+    <Suspense fallback={<div className="loading">Carregando Minha Carteira...</div>}>
+      <MyWalletModule />
+    </Suspense>
+  );
   if (routeKey === "wallet") return <WalletModule />;
   if (routeKey === "payments") return <PaymentsModule />;
   if (routeKey === "identity") return <IdentityModule />;

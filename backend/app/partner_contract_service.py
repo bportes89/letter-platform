@@ -259,6 +259,7 @@ def validate_partner_contract_payload(
     company_address: str | None,
     company_city: str | None,
     company_state: str | None,
+    phone: str | None,
     terms_accepted: bool,
     scroll_completed: bool,
     verification_reference: str | None,
@@ -275,6 +276,7 @@ def validate_partner_contract_payload(
             ("Endereço", company_address),
             ("Cidade", company_city),
             ("UF", company_state),
+            ("Telefone celular", phone),
         )
         if not (value or "").strip()
     ]
@@ -282,6 +284,9 @@ def validate_partner_contract_payload(
         raise HTTPException(status_code=422, detail=f"Campos obrigatórios do contrato: {', '.join(missing)}")
     if len(_clean_doc(company_cnpj or "")) != 14:
         raise HTTPException(status_code=422, detail="CNPJ do parceiro inválido")
+    phone_digits = _clean_doc(phone or "")
+    if len(phone_digits) < 10:
+        raise HTTPException(status_code=422, detail="Telefone celular inválido")
     if not all([terms_accepted, scroll_completed, (verification_reference or "").strip()]):
         raise HTTPException(status_code=422, detail="Leitura do contrato, aceite expresso e referência de verificação são obrigatórios")
 

@@ -251,6 +251,7 @@ class InviteAccept(BaseModel):
     company_address: str | None = Field(default=None, max_length=240)
     company_city: str | None = Field(default=None, max_length=120)
     company_state: str | None = Field(default=None, max_length=2)
+    phone: str | None = Field(default=None, max_length=20)
     terms_accepted: bool = False
     scroll_completed: bool = False
     verification_reference: str | None = Field(default=None, max_length=120)

@@ -1,6 +1,7 @@
 "use client";
 
 import { CheckCircle2, Copy, Landmark, QrCode, RefreshCw, Send, Upload, Wallet } from "lucide-react";
+import { useSearchParams } from "next/navigation";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { API_URL, api, getToken } from "@/lib/api";
 import { CurrencyInput } from "@/components/currency-input";
@@ -58,6 +59,8 @@ type KycDocument = {
 };
 
 export function MyWalletModule() {
+  const searchParams = useSearchParams();
+  const onboarding = searchParams.get("onboarding") === "kyc";
   const [wallet, setWallet] = useState<WalletView | null>(null);
   const [transactions, setTransactions] = useState<WalletTransaction[]>([]);
   const [documents, setDocuments] = useState<KycDocument[]>([]);
@@ -174,6 +177,16 @@ export function MyWalletModule() {
         </div>
         <div className="operational-icon"><Wallet /></div>
       </div>
+
+      {onboarding && !wallet?.has_subaccount && (
+        <div className="notice">
+          <CheckCircle2 />
+          <div>
+            <strong>Ative sua subconta Asaas</strong>
+            <p>Contrato aceito. Conclua o KYC abaixo para abrir a subconta PJ e liberar saldo, extrato e transferências.</p>
+          </div>
+        </div>
+      )}
 
       <section className="panel operational-panel financial-panel">
         <div className="toolbar">

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 
+import re
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -12,6 +13,10 @@ from app.core.config import settings
 from app.identity_service import create_kyc_case
 from app.models import EscrowAccount, KycCase, Role, User
 from app.schemas import EscrowSubaccountProfile
+
+
+def _digits(value: str | None) -> str:
+    return re.sub(r"\D", "", value or "")
 
 
 AUTO_SUBACCOUNT_ROLES = frozenset({
@@ -39,6 +44,31 @@ def find_user_plain_subaccount(db: Session, user: User) -> EscrowAccount | None:
     return db.scalar(select(EscrowAccount).where(EscrowAccount.user_id == user.id))
 
 
+def build_subaccount_profile_for_user(user: User) -> EscrowSubaccountProfile:
+    """Monta perfil Asaas — PJ usa CNPJ/razão social quando cadastrados no convite."""
+    cnpj = _digits(user.company_cnpj)
+    cpf = _digits(user.document)
+    phone = (user.phone or "").strip() or None
+
+    if len(cnpj) == 14:
+        return EscrowSubaccountProfile(
+            name=(user.company_name or user.name).strip(),
+            email=user.email,
+            cpf_cnpj=cnpj,
+            mobile_phone=phone,
+            address=(user.company_address or settings.asaas_subaccount_default_address).strip(),
+            province=(user.company_city or settings.asaas_subaccount_default_province).strip(),
+            company_type=settings.asaas_subaccount_default_company_type,
+        )
+
+    return EscrowSubaccountProfile(
+        name=user.name,
+        email=user.email,
+        cpf_cnpj=cpf or None,
+        mobile_phone=phone,
+    )
+
+
 def ensure_kyc_case_for_user(db: Session, user: User) -> KycCase:
     existing = find_user_kyc_case(db, user)
     if existing:
@@ -58,15 +88,12 @@ def provision_plain_subaccount_for_user(db: Session, user: User, actor: User) ->
     existing = find_user_plain_subaccount(db, user)
     if existing:
         return existing
-    if not (user.document or "").strip():
+    profile = build_subaccount_profile_for_user(user)
+    if len(_digits(profile.cpf_cnpj)) not in {11, 14}:
+        return None
+    if not (profile.mobile_phone or "").strip():
         return None
 
-    profile = EscrowSubaccountProfile(
-        name=user.name,
-        email=user.email,
-        cpf_cnpj=user.document,
-        mobile_phone=user.phone,
-    )
     from app.financial_service import create_client_plain_subaccount
 
     account = create_client_plain_subaccount(db, actor, user, profile=profile)
@@ -78,8 +105,11 @@ def provision_plain_subaccount_for_user(db: Session, user: User, actor: User) ->
 def complete_user_kyc_and_provision(db: Session, user: User) -> dict:
     if not user_eligible_for_auto_subaccount(user):
         raise ValueError("Perfil não elegível para subconta automática")
-    if not (user.document or "").strip():
-        raise ValueError("CPF/CNPJ obrigatório no cadastro para abrir subconta")
+    profile = build_subaccount_profile_for_user(user)
+    if len(_digits(profile.cpf_cnpj)) not in {11, 14}:
+        raise ValueError("CPF ou CNPJ obrigatório no cadastro para abrir subconta")
+    if not (profile.mobile_phone or "").strip():
+        raise ValueError("Telefone celular obrigatório para abrir subconta Asaas")
 
     case = ensure_kyc_case_for_user(db, user)
 

@@ -2482,6 +2482,7 @@ def test_partner_can_invite_partner(client, auth_headers):
         "company_address": "Rua Teste, 100",
         "company_city": "Vitória",
         "company_state": "ES",
+        "phone": "27999998888",
         "terms_accepted": True,
         "scroll_completed": True,
         "verification_reference": "invite-accept-001",
@@ -2503,6 +2504,14 @@ def test_partner_can_invite_partner(client, auth_headers):
     assert contract_doc.status_code == 200
     assert contract_doc.content.startswith(b"PK")
     assert len(contract_doc.content) > 1000
+
+    kyc = client.post("/api/v1/kyc/me/complete", headers=downline_headers)
+    assert kyc.status_code == 200
+    wallet = client.get("/api/v1/wallet/me", headers=downline_headers)
+    assert wallet.status_code == 200
+    assert wallet.json()["has_subaccount"] is True
+    escrow = client.get("/api/v1/escrow/me", headers=downline_headers).json()
+    assert escrow["subaccount_name"] == "Downline Parceiro Ltda"
 
     nodes = client.get("/api/v1/network/nodes", headers=auth_headers).json()
     downline_node = next(n for n in nodes if n["user_id"] == accepted.json()["id"])
