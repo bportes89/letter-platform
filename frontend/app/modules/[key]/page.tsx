@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { api, logout, Module, User } from "@/lib/api";
 import { InventoryModule, LeadsModule, MarketplaceModule, ProposalsModule } from "@/components/operational-modules";
 import { ContractsModule, PaymentsModule, WalletModule } from "@/components/financial-modules";
+import { AdministratorsModule } from "@/components/administrators-module";
 import { ComplianceModule, IdentityModule, SecurityModule } from "@/components/identity-modules";
 import { FundingModule, NetworkModule } from "@/components/network-funding-modules";
 import { CollectionsModule } from "@/components/collections-module";
@@ -77,6 +78,7 @@ export default function ModulePage() {
   if (routeKey === "identity") return <IdentityModule />;
   if (routeKey === "rbac") return <SecurityModule />;
   if (routeKey === "admin") return <ComplianceModule />;
+  if (routeKey === "administrators") return <AdministratorsModule />;
   if (routeKey === "mmn") return <NetworkModule />;
   if (routeKey === "collections") return <CollectionsModule />;
   if (routeKey === "taxtech") return <TaxTechModule />;

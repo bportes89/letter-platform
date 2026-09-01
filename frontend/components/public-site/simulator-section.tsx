@@ -3,6 +3,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { FormEvent, useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   capturePublicLead,
   fetchPublicQuotas,
@@ -30,6 +31,8 @@ type QuotaItem = {
 };
 
 export function PublicSimulatorSection() {
+  const searchParams = useSearchParams();
+  const refFromUrl = searchParams.get("ref")?.trim() ?? "";
   const [tab, setTab] = useState<"flash" | "sdc">("flash");
   const [unlocked, setUnlocked] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -79,6 +82,7 @@ export function PublicSimulatorSection() {
     }
     const razao = String(f.get("razao") ?? "").trim();
     const whatsapp = String(f.get("whatsapp") ?? "").trim();
+    const document = String(f.get("document") ?? "").trim();
     if (!razao || !whatsapp) {
       setError("Informe razão social e WhatsApp corporativo.");
       setLoading(false);
@@ -95,9 +99,11 @@ export function PublicSimulatorSection() {
       await capturePublicLead({
         razao_social: razao,
         whatsapp,
+        document: document || undefined,
         produto: tab,
         valor_base: Number.isFinite(valorBase) && valorBase > 0 ? valorBase : undefined,
         autorizacao_scr_bacen: true,
+        referral_code: refFromUrl || undefined,
       });
 
       if (tab === "flash") {
@@ -219,6 +225,10 @@ export function PublicSimulatorSection() {
         )}
 
         <label>
+          CNPJ
+          <input name="document" type="text" placeholder="00.000.000/0001-00" minLength={14} />
+        </label>
+        <label>
           Razão social
           <input name="razao" type="text" placeholder="Empresa Exemplo Ltda." required />
         </label>
@@ -240,8 +250,8 @@ export function PublicSimulatorSection() {
         </button>
         {error && <p className="form-notice">{error}</p>}
         <small className="legal-copy">
-          Ao calcular, seus dados corporativos são registrados no funil comercial. A simulação é
-          indicativa e não constitui proposta de crédito nem consulta automática imediata ao Bacen.
+          Ao calcular, seus dados corporativos são registrados no funil comercial e a consulta
+          SCR/Registrato é executada conforme autorização (sandbox até credenciamento Bacen).
         </small>
       </form>
 

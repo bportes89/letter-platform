@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { Suspense } from "react";
 import "./site.css";
 import { AttendanceBotSection } from "@/components/public-site/attendance-bot";
 import { AuctionSection, FlashInvestSection } from "@/components/public-site/gated-vitrine-section";
@@ -159,7 +160,9 @@ export default function PublicHomePage() {
               à análise e validação jurídica.
             </p>
           </div>
-          <PublicSimulatorSection />
+          <Suspense fallback={<div className="simulator-shell">Carregando simulador…</div>}>
+            <PublicSimulatorSection />
+          </Suspense>
         </section>
 
         <section id="nina" className="section nina-section">

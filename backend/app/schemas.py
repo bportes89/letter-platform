@@ -615,7 +615,49 @@ class LeadView(ORMModel):
     product_interest: str
     status: str
     source: str
+    scr_status: str | None = None
+    scr_reference: str | None = None
+    scr_consulted_at: datetime | None = None
     created_at: datetime
+
+
+class AdministratorCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=180)
+    document: str = Field(min_length=14, max_length=20)
+    code: str | None = Field(default=None, min_length=2, max_length=40)
+
+
+class AdministratorRulesUpdate(BaseModel):
+    rules: dict
+    bump_version: bool = True
+
+
+class AdministratorHomologate(BaseModel):
+    approved: bool
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class AdministratorView(BaseModel):
+    id: str
+    code: str | None
+    name: str
+    document: str
+    authorization_status: str
+    rules: dict
+    rules_version: int
+    homologated_at: datetime | None
+    homologated_by_id: str | None
+    homologation_notes: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class BacenScrStatusView(BaseModel):
+    provider: str
+    configured: bool
+    mode: str
+    institution_code: str | None
+    message: str
 
 
 class QuotaCreate(BaseModel):
@@ -1903,6 +1945,8 @@ class PublicLeadCaptureRequest(BaseModel):
     produto: str = Field(description="flash ou sdc")
     valor_base: Decimal | None = Field(default=None, gt=0)
     autorizacao_scr_bacen: bool = False
+    document: str | None = Field(default=None, min_length=11, max_length=20)
+    referral_code: str | None = Field(default=None, min_length=6, max_length=40)
 
 
 class PublicClientRegisterRequest(BaseModel):

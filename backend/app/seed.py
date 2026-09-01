@@ -108,8 +108,15 @@ def seed():
             organization_id=org.id, name="Fundo Institucional Demo", email="fundo@letter.com.br",
             document="77777777777", password_hash=hash_password(password), role=Role.INSTITUTIONAL_FUND,
         )
-        adm = Administrator(name="Embracon", document="22222222000122", authorization_status="APPROVED_MANUALLY")
-        db.add_all([admin, partner, reviewer_one, reviewer_two, investor, client, fund, adm]); db.flush()
+        adms = [
+            Administrator(name="Embracon", code="EMBRACON", document="22222222000122", authorization_status="AUTHORIZED", bacen_rules_version=1),
+            Administrator(name="HS Consórcios", code="HS_CONSORCIOS", document="33333333000133", authorization_status="AUTHORIZED", bacen_rules_version=1),
+            Administrator(name="Ademicon", code="ADEMICON", document="44444444000144", authorization_status="AUTHORIZED", bacen_rules_version=1),
+            Administrator(name="Ancora", code="ANCORA", document="55555555000155", authorization_status="AUTHORIZED", bacen_rules_version=1),
+            Administrator(name="Whitelabel Ancora", code="WHITELABEL_ANCORA", document="66666666000166", authorization_status="AUTHORIZED", bacen_rules_version=1),
+        ]
+        db.add_all([admin, partner, reviewer_one, reviewer_two, investor, client, fund, *adms]); db.flush()
+        adm = adms[0]
         lead = Lead(organization_id=org.id, owner_id=partner.id, name="Cliente Piloto", phone="32999999999", product_interest="MARKETPLACE", status="QUALIFIED")
         db.add(lead); db.flush()
         db.add_all([

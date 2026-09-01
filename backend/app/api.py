@@ -31,7 +31,9 @@ from app.models import (
     ProviderRequestLog, SecretReference, WebhookDelivery, WebhookEndpoint,
 )
 from app.schemas import (
-    AccountBalanceView, AuctionBidCreate, AuctionBidView, AuctionLotCreate, AuctionLotView, BISummaryView,
+    AccountBalanceView, AdministratorCreate, AdministratorHomologate, AdministratorRulesUpdate,
+    AdministratorView, BacenScrStatusView,
+    AuctionBidCreate, AuctionBidView, AuctionLotCreate, AuctionLotView, BISummaryView,
     AuctionQualificationRequest, AuctionQualificationView, AuctionSettlementView,
     BranchCreate, BranchView, CalculationRequest, CommunicationConsentRequest,
     CommunicationConsentView, CommunicationDeliveryView, CommunicationSendRequest,
@@ -172,6 +174,11 @@ from app.tapaf_constants import (
     TAPAF_LOTE_B_FRANCHISE_SPREAD,
     TAPAF_NOMINAL,
 )
+from app.administrator_service import (
+    administrator_view, create_administrator, homologate_administrator,
+    homologated_codes, homologated_name_keys, list_administrators, update_administrator_rules,
+)
+from app.bacen_scr_service import bacen_scr_client
 from app.public_site_service import (
     capture_public_lead, list_public_quotas, preview_referral_code, register_public_client,
     simulate_flash_pool_public, simulate_sdc_public,
@@ -703,9 +710,57 @@ def delete_lead(lead_id: str, user: User = Depends(require_scope("leads:write"))
     audit(db, user, "lead.deleted", "lead", lead.id); db.delete(lead); db.commit()
 
 
-@router.get("/administrators")
-def list_administrators(_: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    return [{"id": a.id, "name": a.name, "document": a.document, "authorization_status": a.authorization_status} for a in db.scalars(select(Administrator))]
+@router.get("/administrators", response_model=list[AdministratorView])
+def list_administrators_route(_: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return [administrator_view(a) for a in list_administrators(db)]
+
+
+@router.post("/administrators", response_model=AdministratorView, status_code=201)
+def create_administrator_route(payload: AdministratorCreate, user: User = Depends(require_scope("admin:users")), db: Session = Depends(get_db)):
+    admin = create_administrator(db, name=payload.name, document=payload.document, code=payload.code)
+    audit(db, user, "administrator.created", "administrator", admin.id)
+    db.commit()
+    db.refresh(admin)
+    return administrator_view(admin)
+
+
+@router.patch("/administrators/{administrator_id}/rules", response_model=AdministratorView)
+def update_administrator_rules_route(
+    administrator_id: str,
+    payload: AdministratorRulesUpdate,
+    user: User = Depends(require_scope("admin:users")),
+    db: Session = Depends(get_db),
+):
+    admin = db.get(Administrator, administrator_id)
+    if not admin:
+        raise HTTPException(status_code=404, detail="Administradora não encontrada")
+    update_administrator_rules(db, admin, rules=payload.rules, bump_version=payload.bump_version)
+    audit(db, user, "administrator.rules_updated", "administrator", admin.id, {"version": admin.bacen_rules_version})
+    db.commit()
+    db.refresh(admin)
+    return administrator_view(admin)
+
+
+@router.post("/administrators/{administrator_id}/homologate", response_model=AdministratorView)
+def homologate_administrator_route(
+    administrator_id: str,
+    payload: AdministratorHomologate,
+    user: User = Depends(require_scope("admin:users")),
+    db: Session = Depends(get_db),
+):
+    admin = db.get(Administrator, administrator_id)
+    if not admin:
+        raise HTTPException(status_code=404, detail="Administradora não encontrada")
+    homologate_administrator(db, user, admin, approved=payload.approved, notes=payload.notes)
+    audit(db, user, "administrator.homologated", "administrator", admin.id, {"approved": payload.approved})
+    db.commit()
+    db.refresh(admin)
+    return administrator_view(admin)
+
+
+@router.get("/integrations/bacen-scr/status", response_model=BacenScrStatusView)
+def bacen_scr_status(user: User = Depends(get_current_user)):
+    return BacenScrStatusView(**bacen_scr_client.status())
 
 
 @router.get("/quotas", response_model=list[QuotaView])
@@ -957,6 +1012,8 @@ def public_site_lead_capture(payload: PublicLeadCaptureRequest, request: Request
         produto=payload.produto,
         valor_base=payload.valor_base,
         autorizacao_scr_bacen=payload.autorizacao_scr_bacen,
+        document=payload.document,
+        referral_code=payload.referral_code,
     )
     db.commit()
     return result
@@ -1622,9 +1679,11 @@ def quitcon_simulate(payload: QuitConSimulateRequest, user: User = Depends(get_c
 
 
 @router.get("/finops/quitcon/administradoras-whitelist")
-def quitcon_administradoras_whitelist(user: User = Depends(get_current_user)):
+def quitcon_administradoras_whitelist(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     engine = EngineQuitConLetter()
-    return {"administradoras": list(engine.administradoras_whitelist)}
+    db_keys = homologated_name_keys(db)
+    combined = sorted(set(list(engine.administradoras_whitelist) + db_keys))
+    return {"administradoras": combined}
 
 
 @router.post("/finops/quitcon/operational-service-checkout")

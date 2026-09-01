@@ -40,7 +40,9 @@ export async function capturePublicLead(payload: {
   produto: "flash" | "sdc";
   valor_base?: number;
   autorizacao_scr_bacen: boolean;
-}): Promise<{ status: string; id: string }> {
+  document?: string;
+  referral_code?: string;
+}): Promise<{ status: string; id: string; scr_status?: string; scr_reference?: string; scr_mode?: string }> {
   return publicFetch("/public/site/leads/capture", {
     method: "POST",
     body: JSON.stringify({
@@ -49,6 +51,8 @@ export async function capturePublicLead(payload: {
       produto: payload.produto,
       valor_base: payload.valor_base != null ? String(payload.valor_base) : undefined,
       autorizacao_scr_bacen: payload.autorizacao_scr_bacen,
+      document: payload.document,
+      referral_code: payload.referral_code,
     }),
   });
 }

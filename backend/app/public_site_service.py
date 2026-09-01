@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.finops_engine import money, pool_public_simulation
 from app.flash_capital_params import get_active_flash_simulation_params
+from app.bacen_scr_service import attach_scr_to_lead, bacen_scr_client
 from app.core.security import hash_password
 from app.identity_service import create_session_tokens
 from app.models import CommissionRule, Lead, NetworkNode, Organization, Quota, Role, User
@@ -208,25 +209,45 @@ def capture_public_lead(
     produto: str,
     valor_base: Decimal | None = None,
     autorizacao_scr_bacen: bool = False,
+    document: str | None = None,
+    referral_code: str | None = None,
 ) -> dict:
     if not autorizacao_scr_bacen:
         raise HTTPException(422, "Autorização SCR/Registrato é obrigatória")
     org = headquarters_org(db)
-    owner = db.scalar(
-        select(User).where(User.organization_id == org.id, User.active.is_(True)).order_by(User.created_at)
-    )
+    referrer_node = lookup_referral_code(db, org.id, referral_code)
+    referrer_user_id = referrer_node.user_id if referrer_node else None
+    if referral_code and referral_code.strip() and not referrer_node:
+        raise HTTPException(status_code=422, detail="Código de indicação inválido")
+    if not referrer_user_id:
+        owner = db.scalar(
+            select(User).where(User.organization_id == org.id, User.active.is_(True)).order_by(User.created_at)
+        )
+        referrer_user_id = owner.id if owner else None
     product_map = {"flash": "FLASH_CREDIT", "sdc": "SDC", "quitcon": "QUITCON"}
+    lead_source = "SITE_BACEN_AUTHORIZED"
+    if referrer_node:
+        lead_source = f"SITE_BACEN_AUTHORIZED:REF:{referrer_node.referral_code}"
     lead = Lead(
         organization_id=org.id,
-        owner_id=owner.id if owner else None,
+        owner_id=referrer_user_id,
         name=razao_social.strip(),
+        document=document.strip() if document else None,
         phone=whatsapp.strip(),
         product_interest=product_map.get(produto.lower(), produto.upper()),
         status="NEW",
-        source="SITE_BACEN_AUTHORIZED",
+        source=lead_source,
     )
     db.add(lead)
     db.flush()
+
+    scr = bacen_scr_client.consult(
+        company_name=razao_social.strip(),
+        document=document,
+        authorization_accepted=autorizacao_scr_bacen,
+    )
+    attach_scr_to_lead(lead, scr)
+
     lead_hash = hashlib.md5(f"{razao_social}-{whatsapp}".encode()).hexdigest()
     return {
         "status": "LEAD_LOGGED_AND_BACEN_AUTHORIZED",
@@ -234,6 +255,9 @@ def capture_public_lead(
         "lead_hash": lead_hash,
         "produto": lead.product_interest,
         "valor_base": str(valor_base) if valor_base is not None else None,
+        "scr_status": lead.scr_status,
+        "scr_reference": lead.scr_reference,
+        "scr_mode": scr.mode,
     }
 
 

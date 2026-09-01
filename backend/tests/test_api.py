@@ -2331,3 +2331,41 @@ def test_partner_can_invite_partner(client, auth_headers):
         "role": "CLIENT",
     })
     assert blocked.status_code == 422
+
+
+def test_administrator_homologation_and_bacen_scr(client, auth_headers):
+    created = client.post("/api/v1/administrators", headers=auth_headers, json={
+        "name": "Tradicao Consorcios",
+        "document": "12121212000121",
+        "code": "TRADICAO",
+    })
+    assert created.status_code == 201
+    admin_id = created.json()["id"]
+    assert created.json()["authorization_status"] == "PENDING_REVIEW"
+
+    homologated = client.post(f"/api/v1/administrators/{admin_id}/homologate", headers=auth_headers, json={
+        "approved": True,
+        "notes": "Homologada em sandbox",
+    })
+    assert homologated.status_code == 200
+    assert homologated.json()["authorization_status"] == "AUTHORIZED"
+
+    scr_status = client.get("/api/v1/integrations/bacen-scr/status", headers=auth_headers)
+    assert scr_status.status_code == 200
+    assert scr_status.json()["provider"] == "BACEN_SCR_REGISTRATO"
+
+    lead = client.post("/api/v1/public/site/leads/capture", json={
+        "razao_social": "Empresa SCR Teste LTDA",
+        "whatsapp": "11988880000",
+        "document": "12345678000199",
+        "produto": "flash",
+        "autorizacao_scr_bacen": True,
+    })
+    assert lead.status_code == 201
+    body = lead.json()
+    assert body["scr_status"] in {"CLEAR", "RESTRICTIONS_FOUND"}
+    assert body["scr_reference"]
+
+    leads = client.get("/api/v1/leads", headers=auth_headers).json()
+    captured = next(x for x in leads if x["name"] == "Empresa SCR Teste LTDA")
+    assert captured["scr_reference"] == body["scr_reference"]

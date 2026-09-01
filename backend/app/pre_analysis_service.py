@@ -10,7 +10,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.flash_valid_lss_service import issue_stamp
+from app.administrator_service import homologated_codes
 from app.models import PreAnalysisPauta, Proposal, User
 from app.pre_analysis_constants import (
     DOCUMENT_LABELS,
@@ -65,6 +65,7 @@ class MotorPreAnaliseFiduciariaV6:
         restricoes_cadastrais_bool: bool,
         possui_gravame_bool: bool,
         valor_gravame_anterior: Decimal = Decimal("0"),
+        homologated_codes: list[str] | None = None,
     ) -> dict:
         parcela = money(parcela_simulada)
         val_bem = money(valor_avaliacao_bem)
@@ -72,7 +73,9 @@ class MotorPreAnaliseFiduciariaV6:
         val_gravame = money(valor_gravame_anterior)
         ano_atual = datetime.now(UTC).year
 
-        if adm_nome not in self.administradoras_homologadas:
+        allowed = homologated_codes or self.administradoras_homologadas
+        adm_key = adm_nome.upper().replace(" ", "_")
+        if adm_key not in [c.upper() for c in allowed] and adm_nome.upper() not in [c.upper() for c in allowed]:
             return {"status_core": "REPROVADO_ADMINISTRADORA_NAO_CONVENIADA"}
 
         renda_liquida, status_renda = self.calcular_media_extratos_bancarios_limpos(extratos_6_meses_data)
@@ -396,6 +399,7 @@ def run_engine_phase3(
         raise HTTPException(status_code=409, detail="Pagamento TAPAF confirmado é obrigatório para Fase 3")
 
     engine = MotorPreAnaliseFiduciariaV6()
+    codes = homologated_codes(db) or engine.administradoras_homologadas
     result = engine.processar_esteira_score_e_roteamento(
         adm_nome=str(payload.get("adm_nome", "ANCORA")),
         extratos_6_meses_data=payload.get("extratos_6_meses_data") or {},
@@ -406,6 +410,7 @@ def run_engine_phase3(
         restricoes_cadastrais_bool=bool(payload.get("restricoes_cadastrais_bool", False)),
         possui_gravame_bool=bool(payload.get("possui_gravame_bool", False)),
         valor_gravame_anterior=Decimal(str(payload.get("valor_gravame_anterior", "0"))),
+        homologated_codes=codes,
     )
 
     pauta.engine_result_json = json.dumps(result, ensure_ascii=False)

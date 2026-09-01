@@ -148,15 +148,24 @@ class Lead(TimestampMixin, Base):
     product_interest: Mapped[str] = mapped_column(String(60))
     status: Mapped[str] = mapped_column(String(40), default="NEW")
     source: Mapped[str] = mapped_column(String(80), default="DIRECT")
+    scr_status: Mapped[str | None] = mapped_column(String(40))
+    scr_reference: Mapped[str | None] = mapped_column(String(80))
+    scr_consulted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    scr_detail_json: Mapped[str] = mapped_column(Text, default="{}")
 
 
 class Administrator(TimestampMixin, Base):
     __tablename__ = "administrators"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    code: Mapped[str | None] = mapped_column(String(40), unique=True, index=True)
     name: Mapped[str] = mapped_column(String(180), unique=True)
     document: Mapped[str] = mapped_column(String(20), unique=True)
     authorization_status: Mapped[str] = mapped_column(String(40), default="PENDING_REVIEW")
     rules_json: Mapped[str] = mapped_column(Text, default="{}")
+    homologated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    homologated_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"))
+    bacen_rules_version: Mapped[int] = mapped_column(default=1)
+    homologation_notes: Mapped[str | None] = mapped_column(Text)
 
 
 class Quota(TimestampMixin, Base):
