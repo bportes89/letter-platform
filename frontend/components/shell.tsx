@@ -40,7 +40,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
     <aside className={open ? "sidebar open" : "sidebar"}>
       <div className="side-logo">
         <Link href="/" className="side-logo-link" aria-label="LETTER — início">
-          <LetterLogo variant="horizontal" theme="dark" className="side-logo-mark" />
+          <LetterLogo variant="official" theme="dark" className="side-logo-mark" priority />
         </Link>
         <button onClick={()=>setOpen(false)}><X/></button>
       </div>

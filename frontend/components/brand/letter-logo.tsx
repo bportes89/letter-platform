@@ -1,7 +1,7 @@
 import Image from "next/image";
 
 type LetterLogoProps = {
-  variant?: "horizontal" | "icon" | "full";
+  variant?: "horizontal" | "icon" | "full" | "official";
   /** Fundo escuro (nav do site / sidebar) ou claro (materiais em white mode). */
   theme?: "dark" | "light";
   className?: string;
@@ -19,6 +19,18 @@ const SOURCES = {
       src: "/brand/letter-logo-nav-light-bg.png",
       width: 1150,
       height: 326,
+    },
+  },
+  official: {
+    dark: {
+      src: "/brand/letter-logo-full-transparent.png",
+      width: 1150,
+      height: 526,
+    },
+    light: {
+      src: "/brand/letter-logo-oficial.png",
+      width: 1200,
+      height: 550,
     },
   },
   full: {
