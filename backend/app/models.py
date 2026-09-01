@@ -94,6 +94,25 @@ class UserInvitation(TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(30), default="PENDING")
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    partner_contract_required: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class PartnerContractAcceptance(TimestampMixin, Base):
+    __tablename__ = "partner_contract_acceptances"
+    __table_args__ = (UniqueConstraint("user_id"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    invitation_id: Mapped[str] = mapped_column(ForeignKey("user_invitations.id"), index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    template_slug: Mapped[str] = mapped_column(String(80), default="parceiros")
+    template_version: Mapped[str] = mapped_column(String(120), default="LETTER_PARTNER_AGREEMENT_2026_V51.0_UNIVERSAL")
+    storage_key: Mapped[str] = mapped_column(String(500))
+    document_sha256: Mapped[str] = mapped_column(String(64))
+    evidence_json: Mapped[str] = mapped_column(Text)
+    evidence_hash: Mapped[str] = mapped_column(String(64))
+    ip_address: Mapped[str | None] = mapped_column(String(64))
+    user_agent: Mapped[str | None] = mapped_column(String(500))
+    accepted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
 
 
 class AuthSession(Base):

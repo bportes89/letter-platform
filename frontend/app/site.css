@@ -1489,6 +1489,70 @@
   margin: -0.35rem 0 0.75rem;
 }
 
+.site-invite-main {
+  max-width: 920px;
+}
+
+.site-invite-card {
+  max-width: 920px;
+}
+
+.site-invite-lead {
+  color: #c8d5cf;
+  font-size: 0.9rem;
+  line-height: 1.6;
+  margin-bottom: 1.25rem;
+}
+
+.site-contract-panel {
+  border: 1px solid rgba(0, 208, 132, 0.25);
+  border-radius: 12px;
+  padding: 1rem 1.1rem 0.35rem;
+  margin-bottom: 1.25rem;
+  background: rgba(9, 26, 20, 0.45);
+}
+
+.site-contract-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.site-contract-head strong {
+  display: block;
+  color: #fff;
+}
+
+.site-contract-head small {
+  color: #c8d5cf;
+}
+
+.site-contract-scroll {
+  max-height: 220px;
+  overflow: auto;
+  padding: 0.85rem 1rem;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #091a14;
+  font-size: 0.78rem;
+  line-height: 1.55;
+  margin-bottom: 0.85rem;
+}
+
+.site-invite-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem 1rem;
+}
+
+@media (max-width: 720px) {
+  .site-invite-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* —— Robô de atendimento externo —— */
 .attendance-section {
   position: relative;

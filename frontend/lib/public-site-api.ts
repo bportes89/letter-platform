@@ -120,3 +120,44 @@ export async function simulateSdcPublic(payload: {
     }),
   });
 }
+
+export type InvitationPreview = {
+  email: string;
+  role: string;
+  expires_at: string;
+  contract_required: boolean;
+  contract_title: string;
+  contract_version: string;
+  contract_excerpt: string;
+  inviter_name: string | null;
+  company_legal_name: string;
+  company_cnpj: string;
+};
+
+export async function fetchInvitationPreview(token: string): Promise<InvitationPreview> {
+  return publicFetch<InvitationPreview>(`/auth/invitations/preview?token=${encodeURIComponent(token)}`);
+}
+
+export async function acceptPartnerInvitation(payload: {
+  token: string;
+  name: string;
+  document: string;
+  password: string;
+  company_name: string;
+  company_cnpj: string;
+  company_address: string;
+  company_city: string;
+  company_state: string;
+  terms_accepted: boolean;
+  scroll_completed: boolean;
+  verification_reference: string;
+}): Promise<{ id: string; email: string; role: string; name: string }> {
+  return publicFetch("/auth/invitations/accept", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function invitationContractPreviewUrl(token: string): string {
+  return `${API_URL}/auth/invitations/preview/contract?token=${encodeURIComponent(token)}`;
+}

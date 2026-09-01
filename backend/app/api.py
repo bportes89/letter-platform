@@ -57,7 +57,7 @@ from app.schemas import (
     DelinquencyView, FiscalReleaseRequest, FundingOpportunityCreate, FundingOpportunityView, InvitationView,
     NinaApprovalRequest, NinaCriticalApprovalView, NinaDistressCaseCreate, NinaDistressCaseView,
     NinaDistressEventView, NinaDocumentCreate, NinaGateApplyRequest, NinaLegalDocumentView, NinaTimelineEvaluateRequest,
-    InviteAccept, InviteCreate, PartnerInviteCreate, KycCreate, KycDecision, KycSelfCompleteResponse, KycView, LeadCreate,
+    InviteAccept, InviteCreate, PartnerInviteCreate, InvitationPreviewView, PartnerContractAcceptanceView, KycCreate, KycDecision, KycSelfCompleteResponse, KycView, LeadCreate,
     InvestmentPositionView, InvestmentReservationView, InvestmentReserveRequest, InvoicePaymentWebhook, InvoiceProcessorRequest, InvoiceView,
     PaymentReceiptView, PreAnalysisEngineRequest, PreAnalysisPautaView, PreAnalysisProposalRequest,
     PreAnalysisTapafCheckoutAcceptRequest, PreAnalysisTapafPaymentWebhook, PreAnalysisValidateDocumentsRequest,
@@ -385,8 +385,58 @@ def invite(payload:InviteCreate,user:User=Depends(require_scope("admin:users")),
 
 
 @router.post("/auth/invitations/accept",response_model=UserView)
-def accept_invite(payload:InviteAccept,db:Session=Depends(get_db)):
-    user=accept_invitation(db,payload.token,payload.name,payload.document,payload.password);db.commit();db.refresh(user);return user
+def accept_invite(payload:InviteAccept,request:Request,db:Session=Depends(get_db)):
+    user=accept_invitation(
+        db,
+        payload.token,
+        payload.name,
+        payload.document,
+        payload.password,
+        company_name=payload.company_name,
+        company_cnpj=payload.company_cnpj,
+        company_address=payload.company_address,
+        company_city=payload.company_city,
+        company_state=payload.company_state,
+        terms_accepted=payload.terms_accepted,
+        scroll_completed=payload.scroll_completed,
+        verification_reference=payload.verification_reference,
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@router.get("/auth/invitations/preview", response_model=InvitationPreviewView)
+def invitation_preview(token: str = Query(..., min_length=8), db: Session = Depends(get_db)):
+    from app.partner_contract_service import preview_invitation
+    return preview_invitation(db, token)
+
+
+@router.get("/auth/invitations/preview/contract")
+def invitation_preview_contract(token: str = Query(..., min_length=8), db: Session = Depends(get_db)):
+    from app.partner_contract_service import preview_contract_bytes
+    content = preview_contract_bytes(db, token)
+    return Response(content=content, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document", headers={"Content-Disposition": 'attachment; filename="contrato-parceiro-preview.docx"'})
+
+
+@router.get("/network/me/partner-contract", response_model=PartnerContractAcceptanceView)
+def my_partner_contract(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.partner_contract_service import get_user_partner_contract
+    item = get_user_partner_contract(db, user)
+    if not item:
+        raise HTTPException(status_code=404, detail="Contrato de parceiro não encontrado")
+    return item
+
+
+@router.get("/network/me/partner-contract/download")
+def my_partner_contract_download(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.partner_contract_service import read_user_partner_contract_bytes
+    content, filename = read_user_partner_contract_bytes(db, user)
+    audit(db, user, "partner_contract.downloaded", "partner_contract", user.id, {"filename": filename})
+    db.commit()
+    return Response(content=content, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document", headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 
 @router.get("/admin/invitations",response_model=list[InvitationView])

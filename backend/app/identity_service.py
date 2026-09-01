@@ -76,7 +76,9 @@ def create_partner_invitation(db: Session, inviter: User, email: str, role: Role
     ))
     if pending:
         raise HTTPException(status_code=409, detail="Já existe convite pendente para este e-mail")
-    return create_invitation(db, inviter, normalized, role, inviter.branch_id)
+    invite, raw = create_invitation(db, inviter, normalized, role, inviter.branch_id)
+    invite.partner_contract_required = True
+    return invite, raw
 
 
 def list_partner_invitations(db: Session, inviter: User) -> list[UserInvitation]:
@@ -86,17 +88,74 @@ def list_partner_invitations(db: Session, inviter: User) -> list[UserInvitation]
     ).order_by(UserInvitation.created_at.desc())))
 
 
-def accept_invitation(db:Session,raw:str,name:str,document:str|None,password:str):
-    invite=db.scalar(select(UserInvitation).where(UserInvitation.token_hash==token_hash(raw),UserInvitation.status=="PENDING"))
-    if not invite or as_utc(invite.expires_at)<=datetime.now(UTC): raise HTTPException(status_code=422,detail="Convite inválido ou expirado")
-    if db.scalar(select(User).where(User.email==invite.email)): raise HTTPException(status_code=409,detail="E-mail já cadastrado")
-    user=User(organization_id=invite.organization_id,branch_id=invite.branch_id,name=name,email=invite.email,document=document,password_hash=hash_password(password),role=invite.role)
+def accept_invitation(
+    db: Session,
+    raw: str,
+    name: str,
+    document: str | None,
+    password: str,
+    *,
+    company_name: str | None = None,
+    company_cnpj: str | None = None,
+    company_address: str | None = None,
+    company_city: str | None = None,
+    company_state: str | None = None,
+    terms_accepted: bool = False,
+    scroll_completed: bool = False,
+    verification_reference: str | None = None,
+    ip_address: str | None = None,
+    user_agent: str | None = None,
+):
+    from app.partner_contract_service import record_partner_contract_acceptance, validate_partner_contract_payload
+
+    invite = db.scalar(select(UserInvitation).where(UserInvitation.token_hash == token_hash(raw), UserInvitation.status == "PENDING"))
+    if not invite or as_utc(invite.expires_at) <= datetime.now(UTC):
+        raise HTTPException(status_code=422, detail="Convite inválido ou expirado")
+    if db.scalar(select(User).where(User.email == invite.email)):
+        raise HTTPException(status_code=409, detail="E-mail já cadastrado")
+    validate_partner_contract_payload(
+        invite,
+        company_name=company_name,
+        company_cnpj=company_cnpj,
+        company_address=company_address,
+        company_city=company_city,
+        company_state=company_state,
+        terms_accepted=terms_accepted,
+        scroll_completed=scroll_completed,
+        verification_reference=verification_reference,
+    )
+    user = User(
+        organization_id=invite.organization_id,
+        branch_id=invite.branch_id,
+        name=name,
+        email=invite.email,
+        document=document,
+        password_hash=hash_password(password),
+        role=invite.role,
+    )
     db.add(user)
     db.flush()
     inviter = db.get(User, invite.invited_by_id)
     if inviter:
         attach_partner_under_sponsor(db, invite.organization_id, user, inviter)
-    invite.status="ACCEPTED";invite.accepted_at=datetime.now(UTC)
+    if invite.partner_contract_required:
+        record_partner_contract_acceptance(
+            db,
+            invite=invite,
+            user=user,
+            company_name=company_name or name,
+            company_cnpj=company_cnpj or "",
+            company_address=company_address or "",
+            company_city=company_city or "",
+            company_state=company_state or "",
+            representative_name=name,
+            representative_document=document or "",
+            verification_reference=verification_reference or "",
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+    invite.status = "ACCEPTED"
+    invite.accepted_at = datetime.now(UTC)
     return user
 
 

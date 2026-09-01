@@ -246,6 +246,36 @@ class InviteAccept(BaseModel):
     name: str = Field(min_length=2, max_length=180)
     document: str | None = None
     password: str = Field(min_length=10)
+    company_name: str | None = Field(default=None, max_length=180)
+    company_cnpj: str | None = Field(default=None, max_length=20)
+    company_address: str | None = Field(default=None, max_length=240)
+    company_city: str | None = Field(default=None, max_length=120)
+    company_state: str | None = Field(default=None, max_length=2)
+    terms_accepted: bool = False
+    scroll_completed: bool = False
+    verification_reference: str | None = Field(default=None, max_length=120)
+
+
+class InvitationPreviewView(BaseModel):
+    email: EmailStr
+    role: Role
+    expires_at: datetime
+    contract_required: bool
+    contract_title: str
+    contract_version: str
+    contract_excerpt: str
+    inviter_name: str | None = None
+    company_legal_name: str
+    company_cnpj: str
+
+
+class PartnerContractAcceptanceView(ORMModel):
+    id: str
+    template_slug: str
+    template_version: str
+    document_sha256: str
+    evidence_hash: str
+    accepted_at: datetime
 
 
 class InvitationView(ORMModel):

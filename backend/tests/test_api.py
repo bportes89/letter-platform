@@ -2461,14 +2461,48 @@ def test_partner_can_invite_partner(client, auth_headers):
     token = invite.json()["token"]
     assert token
 
+    preview = client.get(f"/api/v1/auth/invitations/preview?token={token}")
+    assert preview.status_code == 200
+    body = preview.json()
+    assert body["contract_required"] is True
+    assert body["email"] == "downline.parceiro@letter.com.br"
+    assert len(body["contract_excerpt"]) > 500
+
+    preview_doc = client.get(f"/api/v1/auth/invitations/preview/contract?token={token}")
+    assert preview_doc.status_code == 200
+    assert preview_doc.content.startswith(b"PK")
+
     accepted = client.post("/api/v1/auth/invitations/accept", json={
         "token": token,
         "name": "Parceiro Downline",
         "document": "22222222222",
         "password": "NovaSenha@123",
+        "company_name": "Downline Parceiro Ltda",
+        "company_cnpj": "12345678000199",
+        "company_address": "Rua Teste, 100",
+        "company_city": "Vitória",
+        "company_state": "ES",
+        "terms_accepted": True,
+        "scroll_completed": True,
+        "verification_reference": "invite-accept-001",
     })
     assert accepted.status_code == 200
     assert accepted.json()["role"] == "PARTNER"
+
+    downline_login = client.post("/api/v1/auth/login", json={
+        "email": "downline.parceiro@letter.com.br",
+        "password": "NovaSenha@123",
+    })
+    assert downline_login.status_code == 200
+    downline_headers = {"Authorization": f"Bearer {downline_login.json()['access_token']}"}
+    contract_meta = client.get("/api/v1/network/me/partner-contract", headers=downline_headers)
+    assert contract_meta.status_code == 200
+    assert contract_meta.json()["template_slug"] == "parceiros"
+    assert len(contract_meta.json()["evidence_hash"]) == 64
+    contract_doc = client.get("/api/v1/network/me/partner-contract/download", headers=downline_headers)
+    assert contract_doc.status_code == 200
+    assert contract_doc.content.startswith(b"PK")
+    assert len(contract_doc.content) > 1000
 
     nodes = client.get("/api/v1/network/nodes", headers=auth_headers).json()
     downline_node = next(n for n in nodes if n["user_id"] == accepted.json()["id"])
