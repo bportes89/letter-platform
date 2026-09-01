@@ -66,12 +66,12 @@ type MarketplaceEsteira2Result = {
 };
 
 function ClientProfileFields({prefix,values,onChange}:{prefix:string;values:Record<string,string>;onChange:(k:string,v:string)=>void}) {
-  return <>
-    <label>Renda mensal (R$)<input type="number" min="1" step="0.01" value={values[`${prefix}_income`]} onChange={e=>onChange(`${prefix}_income`,e.target.value)} required/></label>
-    <label>Comprometimento atual (R$)<input type="number" min="0" step="0.01" value={values[`${prefix}_commitment`]} onChange={e=>onChange(`${prefix}_commitment`,e.target.value)}/></label>
-    <label>Valor do bem (R$)<input type="number" min="1" step="0.01" value={values[`${prefix}_asset`]} onChange={e=>onChange(`${prefix}_asset`,e.target.value)} required/></label>
-    <label>Ano do bem<input type="number" min="1980" max="2100" value={values[`${prefix}_year`]} onChange={e=>onChange(`${prefix}_year`,e.target.value)} required/></label>
-  </>;
+  return <div className="marketplace-profile-fields">
+    <label className="marketplace-field">Renda mensal (R$)<input type="number" min="1" step="0.01" value={values[`${prefix}_income`]} onChange={e=>onChange(`${prefix}_income`,e.target.value)} required/></label>
+    <label className="marketplace-field">Comprometimento atual (R$)<input type="number" min="0" step="0.01" value={values[`${prefix}_commitment`]} onChange={e=>onChange(`${prefix}_commitment`,e.target.value)}/></label>
+    <label className="marketplace-field">Valor do bem (R$)<input type="number" min="1" step="0.01" value={values[`${prefix}_asset`]} onChange={e=>onChange(`${prefix}_asset`,e.target.value)} required/></label>
+    <label className="marketplace-field marketplace-field-compact">Ano do bem<input type="number" min="1980" max="2100" value={values[`${prefix}_year`]} onChange={e=>onChange(`${prefix}_year`,e.target.value)} required/></label>
+  </div>;
 }
 
 export function MarketplaceModule() {
@@ -102,16 +102,20 @@ export function MarketplaceModule() {
       <button type="button" className={`marketplace-tab${tab==="esteira2"?" active":""}`} onClick={()=>setTab("esteira2")}>Esteira 2 — Curadoria Nina</button>
     </div>
     {notice&&<div className="notice"><CheckCircle2/>{notice}</div>}{error&&<div className="error">{error}</div>}
-    {tab==="esteira1"&&<form className="quick-form quota-form marketplace-form" onSubmit={assessEsteira1}>
-      <label>Carta/cota<select value={selectedQuota} onChange={e=>setSelectedQuota(e.target.value)} required><option value="">Selecione a carta/cota</option>{available.map(q=><option key={q.id} value={q.id}>{q.group_code}/{q.quota_code} · {q.category==="REAL_ESTATE"?"Imóvel":"Veículo"} · {brl.format(Number(q.credit_value))}</option>)}</select></label>
-      <ClientProfileFields prefix="e1" values={profile} onChange={(k,v)=>setProfile(p=>({...p,[k]:v}))}/>
-      <button><RefreshCw/>Analisar com Nina</button>
+    {tab==="esteira1"&&<form className="marketplace-form" onSubmit={assessEsteira1}>
+      <div className="marketplace-form-row">
+        <label className="marketplace-field marketplace-field-wide">Carta/cota<select value={selectedQuota} onChange={e=>setSelectedQuota(e.target.value)} required><option value="">Selecione a carta/cota</option>{available.map(q=><option key={q.id} value={q.id}>{q.group_code}/{q.quota_code} · {q.category==="REAL_ESTATE"?"Imóvel":"Veículo"} · {brl.format(Number(q.credit_value))}</option>)}</select></label>
+        <ClientProfileFields prefix="e1" values={profile} onChange={(k,v)=>setProfile(p=>({...p,[k]:v}))}/>
+        <button type="submit" className="marketplace-submit"><RefreshCw/>Analisar com Nina</button>
+      </div>
     </form>}
-    {tab==="esteira2"&&<form className="quick-form quota-form marketplace-form" onSubmit={matchEsteira2}>
-      <label>Valor desejado (R$)<input type="number" min="1" step="0.01" value={targetAmount} onChange={e=>setTargetAmount(e.target.value)} required/></label>
-      <label>Categoria<select value={category} onChange={e=>setCategory(e.target.value)}><option value="REAL_ESTATE">Imóvel</option><option value="VEHICLE">Veículo</option></select></label>
-      <ClientProfileFields prefix="e2" values={profile} onChange={(k,v)=>setProfile(p=>({...p,[k]:v}))}/>
-      <button><RefreshCw/>Buscar opções Nina</button>
+    {tab==="esteira2"&&<form className="marketplace-form" onSubmit={matchEsteira2}>
+      <div className="marketplace-form-row">
+        <label className="marketplace-field">Valor desejado (R$)<input type="number" min="1" step="0.01" value={targetAmount} onChange={e=>setTargetAmount(e.target.value)} required/></label>
+        <label className="marketplace-field marketplace-field-compact">Categoria<select value={category} onChange={e=>setCategory(e.target.value)}><option value="REAL_ESTATE">Imóvel</option><option value="VEHICLE">Veículo</option></select></label>
+        <ClientProfileFields prefix="e2" values={profile} onChange={(k,v)=>setProfile(p=>({...p,[k]:v}))}/>
+        <button type="submit" className="marketplace-submit"><RefreshCw/>Buscar opções Nina</button>
+      </div>
     </form>}
     {result1&&tab==="esteira1"&&<section className="panel"><div className="panel-title"><h2>Resultado Esteira 1</h2></div><div className="notice">{result1.message}</div>{result1.blockers.length>0&&<div className="error">{result1.blockers.map(b=><div key={b}>{b}</div>)}</div>}<p><Pill value={result1.eligible?"CLEARED":"BLOCKED"}/> Carta {result1.quota.group_code}/{result1.quota.quota_code} · {brl.format(Number(result1.quota.credit_value))}</p>{result1.eligible&&result1.quota.status==="AVAILABLE"&&result1.quota.nina_scan_status==="CLEARED"?<button className="table-action lock" onClick={()=>reserveQuota(result1.quota.quota_id)}><LockKeyhole/>Travar 60 min</button>:null}{result1.alternatives.length>0&&<><h3>Alternativas Nina</h3>{result1.alternatives.map(m=><MatchCard key={m.quota_ids.join("-")} match={m} onReserve={reserveQuota}/>)}</>}</section>}
     {result2&&tab==="esteira2"&&<section className="panel"><div className="panel-title"><h2>Opções Nina (Esteira 2)</h2></div><div className="notice">{result2.message}</div>{result2.blockers.map(b=><div className="error" key={b}>{b}</div>)}{result2.matches.map(m=><MatchCard key={m.quota_ids.join("-")} match={m} onReserve={reserveQuota}/>)}</section>}
