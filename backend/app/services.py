@@ -29,6 +29,7 @@ MODULES = [
     ("finops", "FinOps e quitação", "Cenários Price/IPCA, balão, quitação antecipada e eventos assinados", "ACTIVE", "/finops", True),
     ("contracts", "Contratos e documentos", "Templates, assinatura e evidências", "FOUNDATION", "/contracts", True),
     ("payments", "Pagamentos e escrow", "Pix, locks, payouts, estornos e conciliação", "ADAPTER_REQUIRED", "/payments", True),
+    ("my-wallet", "Minha Carteira", "Dados bancários Asaas, Pix, extrato, KYC e pagamentos", "ACTIVE", "/my-wallet", False),
     ("wallet", "Wallet e ledger", "Razão de dupla entrada, saldos e extratos", "FOUNDATION", "/wallet", True),
     ("funding", "Funding e investimentos", "Oportunidades, reservas, posições e resgates", "ACTIVE", "/investments", True),
     ("collections", "Cobrança e inadimplência", "Faturas, régua, mora e recuperação", "ACTIVE", "/collections", True),

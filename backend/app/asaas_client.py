@@ -41,9 +41,10 @@ class AsaasClient:
     def __exit__(self, *args) -> None:
         self.close()
 
-    def request(self, method: str, path: str, *, json: dict | None = None) -> dict:
+    def request(self, method: str, path: str, *, json: dict | None = None, params: dict | None = None, content: bytes | None = None, headers: dict | None = None) -> dict:
+        req_headers = dict(headers or {})
         try:
-            response = self._client.request(method, path, json=json)
+            response = self._client.request(method, path, json=json, params=params, content=content, headers=req_headers or None)
         except httpx.HTTPError as exc:
             raise HTTPException(status_code=502, detail=f"Asaas indisponível: {exc}") from exc
         if response.status_code == 401:
@@ -99,3 +100,41 @@ class AsaasClient:
 
     def create_subaccount(self, payload: dict) -> dict:
         return self.request("POST", "/accounts", json=payload)
+
+    def get_account(self, account_id: str) -> dict:
+        return self.request("GET", f"/accounts/{account_id}")
+
+    def get_commercial_info(self) -> dict:
+        return self.request("GET", "/myAccount/commercialInfo/")
+
+    def get_account_number(self) -> dict:
+        return self.request("GET", "/myAccount/accountNumber")
+
+    def list_documents(self) -> dict:
+        return self.request("GET", "/myAccount/documents")
+
+    def upload_document(self, document_group_id: str, *, file_bytes: bytes, filename: str, content_type: str) -> dict:
+        return self.request(
+            "POST",
+            f"/myAccount/documents/{document_group_id}",
+            content=file_bytes,
+            headers={"Content-Type": content_type, "filename": filename},
+        )
+
+    def list_financial_transactions(self, *, offset: int = 0, limit: int = 50) -> dict:
+        return self.request("GET", "/financialTransactions", params={"offset": offset, "limit": limit})
+
+    def list_pix_keys(self) -> dict:
+        return self.request("GET", "/pix/addressKeys")
+
+    def create_pix_key(self, *, key_type: str = "EVP") -> dict:
+        return self.request("POST", "/pix/addressKeys", json={"type": key_type})
+
+    def get_pix_qrcode(self, key: str) -> dict:
+        return self.request("GET", f"/pix/addressKeys/{key}/qrCode")
+
+    def create_transfer(self, payload: dict) -> dict:
+        return self.request("POST", "/transfers", json=payload)
+
+    def create_bill_payment(self, payload: dict) -> dict:
+        return self.request("POST", "/billPayments", json=payload)

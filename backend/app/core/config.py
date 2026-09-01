@@ -45,6 +45,10 @@ class Settings(BaseSettings):
     asaas_subaccount_default_company_type: str = "LIMITED"
     asaas_subaccount_default_birth_date: str = "1985-01-15"
     auto_plain_subaccount_on_kyc: bool = True
+    asaas_webhook_access_token: str | None = None
+    asaas_bank_code: str = "461"
+    asaas_bank_name: str = "Asaas IP S.A."
+    asaas_default_agency: str = "0001"
     zapsign_api_token: str | None = None
     zapsign_base_url: str = "https://api.zapsign.com.br/api/v1"
     zapsign_auth_mode: str = "assinaturaTela-tokenEmail"

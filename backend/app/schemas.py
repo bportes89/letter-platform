@@ -1431,10 +1431,29 @@ class EscrowView(ORMModel):
     external_account_id: str
     asaas_account_id: str | None = None
     subaccount_name: str | None = None
+    bank_code: str | None = None
+    bank_agency: str | None = None
+    bank_account_number: str | None = None
+    pix_key: str | None = None
+    asaas_kyc_status: str | None = None
+    asaas_commercial_status: str | None = None
+    asaas_onboarding_url: str | None = None
     escrow_enabled: bool = True
     status: str
     available_balance: Decimal
     locked_balance: Decimal
+
+
+class WalletTransferRequest(BaseModel):
+    pix_key: str = Field(min_length=3, max_length=180)
+    amount: Decimal = Field(gt=0)
+    description: str | None = Field(default=None, max_length=200)
+
+
+class WalletBillPaymentRequest(BaseModel):
+    barcode: str = Field(min_length=10, max_length=120)
+    amount: Decimal = Field(gt=0)
+    description: str | None = Field(default=None, max_length=200)
 
 
 class EscrowWebhook(BaseModel):

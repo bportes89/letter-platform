@@ -2468,3 +2468,78 @@ def test_admin_kyc_approval_provisions_plain_subaccount(client, auth_headers, mo
     assert escrow_me.status_code == 200
     assert escrow_me.json()["escrow_enabled"] is False
     assert escrow_me.json()["user_id"] == user_id
+
+
+def test_my_wallet_view_and_operations(client, auth_headers, monkeypatch):
+    monkeypatch.setattr("app.asaas_common.asaas_configured", lambda: False)
+
+    registered = client.post("/api/v1/public/site/auth/register", json={
+        "name": "Cliente Carteira",
+        "email": "cliente.carteira@letter.com.br",
+        "phone": "11966665555",
+        "password": "ClienteCart1!",
+        "document": "15350946056",
+        "terms_accepted": True,
+    })
+    assert registered.status_code == 201
+    headers = {"Authorization": f"Bearer {registered.json()['access_token']}"}
+
+    completed = client.post("/api/v1/kyc/me/complete", headers=headers)
+    assert completed.status_code == 200
+
+    wallet = client.get("/api/v1/wallet/me", headers=headers)
+    assert wallet.status_code == 200
+    body = wallet.json()
+    assert body["has_subaccount"] is True
+    assert body["banking"]["bank_code"] == "461"
+    assert body["banking"]["agency"] == "0001"
+    assert body["banking"]["pix_key"]
+
+    sync = client.post("/api/v1/wallet/me/sync", headers=headers)
+    assert sync.status_code == 200
+
+    docs = client.get("/api/v1/wallet/me/kyc/documents", headers=headers)
+    assert docs.status_code == 200
+    assert docs.json()["items"]
+
+    account_id = body["account"]["id"]
+    deposit = client.post(
+        f"/api/v1/escrow/accounts/{account_id}/mock-webhook",
+        headers=auth_headers,
+        json={"event_id": "wallet_test_deposit_001", "event_type": "FUNDS_CONFIRMED", "amount": "500.00", "metadata": {"source": "TEST"}},
+    )
+    assert deposit.status_code == 200
+
+    tx = client.get("/api/v1/wallet/me/transactions", headers=headers)
+    assert tx.status_code == 200
+    assert len(tx.json()["items"]) >= 1
+
+    transfer = client.post("/api/v1/wallet/me/transfer", headers=headers, json={
+        "pix_key": "cliente.carteira@letter.com.br",
+        "amount": "100.00",
+        "description": "Saque teste",
+    })
+    assert transfer.status_code == 200
+    assert transfer.json()["status"] == "DONE"
+
+    bill = client.post("/api/v1/wallet/me/bill-payment", headers=headers, json={
+        "barcode": "23793381286008301352856000063307701000063307",
+        "amount": "50.00",
+    })
+    assert bill.status_code == 200
+    assert bill.json()["status"] == "DONE"
+
+
+def test_asaas_webhook_endpoint(client, auth_headers, monkeypatch):
+    monkeypatch.setattr("app.core.config.settings.asaas_webhook_access_token", "test-webhook-token")
+
+    rejected = client.post("/api/v1/webhooks/asaas", json={"event": "PAYMENT_RECEIVED"})
+    assert rejected.status_code == 401
+
+    accepted = client.post(
+        "/api/v1/webhooks/asaas",
+        headers={"asaas-access-token": "test-webhook-token"},
+        json={"event": "UNKNOWN_EVENT", "id": "evt_test_001"},
+    )
+    assert accepted.status_code == 200
+    assert accepted.json()["status"] == "ok"

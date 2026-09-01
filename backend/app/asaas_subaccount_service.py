@@ -137,6 +137,10 @@ def create_mock_subaccount(
     )
     db.add(account)
     ensure_chart(db, user)
+    if user_id:
+        from app.asaas_wallet_service import ensure_mock_banking
+
+        ensure_mock_banking(account)
     return account
 
 
@@ -172,6 +176,8 @@ def create_asaas_subaccount(
         if not asaas_account_id or not wallet_id:
             raise HTTPException(status_code=502, detail="Asaas não retornou id/walletId da subconta.")
 
+        sub_api_key = str(created.get("apiKey", "")).strip() or None
+
         if enable_escrow:
             client.configure_subaccount_escrow(
                 asaas_account_id,
@@ -187,11 +193,24 @@ def create_asaas_subaccount(
         provider="ASAAS_SUBACCOUNT",
         external_account_id=wallet_id,
         asaas_account_id=asaas_account_id,
+        asaas_subaccount_api_key=sub_api_key,
         subaccount_name=payload["name"],
+        bank_code=settings.asaas_bank_code,
+        bank_agency=settings.asaas_default_agency,
+        asaas_kyc_status="PENDING",
+        asaas_commercial_status="PENDING",
         escrow_enabled=enable_escrow,
         status="ACTIVE",
     )
     db.add(account)
+    db.flush()
+    if sub_api_key:
+        try:
+            from app.asaas_wallet_service import sync_account_from_asaas
+
+            sync_account_from_asaas(db, account)
+        except HTTPException:
+            pass
     ensure_chart(db, user)
     return account
 

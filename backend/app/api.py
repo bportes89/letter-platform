@@ -52,7 +52,7 @@ from app.schemas import (
     ValidStampCreate, ValidStampView, SaaSTermsCreate, SaaSTermsView, SaaSPlanCreate, SaaSPlanView,
     SaaSSubscribeCreate, SaaSSubscriptionView,
     BillingGenerateRequest, CollectionActionView, CommissionAllocate, CommissionEntryView, CommissionRuleCreate,
-    CommissionRuleView, DocumentView, EscrowAsaasStatusView, EscrowCreate, EscrowSubaccountPreviewView, EscrowView, EscrowWebhook,
+    CommissionRuleView, DocumentView, EscrowAsaasStatusView, EscrowCreate, EscrowSubaccountPreviewView, EscrowView, EscrowWebhook, WalletBillPaymentRequest, WalletTransferRequest,
     FiscalEvidenceView, SefazRobotStatusView,
     DelinquencyView, FiscalReleaseRequest, FundingOpportunityCreate, FundingOpportunityView, InvitationView,
     NinaApprovalRequest, NinaCriticalApprovalView, NinaDistressCaseCreate, NinaDistressCaseView,
@@ -2417,6 +2417,143 @@ def my_escrow_subaccount(user: User = Depends(get_current_user), db: Session = D
     from app.subaccount_auto_service import find_user_plain_subaccount
 
     return find_user_plain_subaccount(db, user)
+
+
+@router.get("/wallet/me")
+def my_wallet(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.asaas_wallet_service import wallet_view
+
+    return wallet_view(db, user)
+
+
+@router.post("/wallet/me/sync")
+def sync_my_wallet(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.asaas_wallet_service import sync_account_from_asaas, wallet_view
+    from app.subaccount_auto_service import find_user_plain_subaccount
+
+    account = find_user_plain_subaccount(db, user)
+    if not account:
+        raise HTTPException(status_code=404, detail="Subconta não encontrada")
+    sync_account_from_asaas(db, account)
+    audit(db, user, "wallet.synced", "escrow_account", account.id)
+    db.commit()
+    return wallet_view(db, user)
+
+
+@router.get("/wallet/me/transactions")
+def my_wallet_transactions(
+    offset: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=100),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.asaas_wallet_service import list_wallet_transactions
+    from app.subaccount_auto_service import find_user_plain_subaccount
+
+    account = find_user_plain_subaccount(db, user)
+    if not account:
+        raise HTTPException(status_code=404, detail="Subconta não encontrada")
+    return list_wallet_transactions(db, account, offset=offset, limit=limit)
+
+
+@router.get("/wallet/me/kyc/documents")
+def my_wallet_kyc_documents(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.asaas_wallet_service import list_kyc_documents
+    from app.subaccount_auto_service import find_user_plain_subaccount
+
+    account = find_user_plain_subaccount(db, user)
+    if not account:
+        raise HTTPException(status_code=404, detail="Subconta não encontrada")
+    return list_kyc_documents(db, account)
+
+
+@router.post("/wallet/me/kyc/documents/{document_id}")
+async def upload_my_wallet_kyc_document(
+    document_id: str,
+    file: UploadFile = File(...),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.asaas_wallet_service import upload_kyc_document
+    from app.subaccount_auto_service import find_user_plain_subaccount
+
+    account = find_user_plain_subaccount(db, user)
+    if not account:
+        raise HTTPException(status_code=404, detail="Subconta não encontrada")
+    result = await upload_kyc_document(db, account, document_id, file)
+    audit(db, user, "wallet.kyc_document_uploaded", "escrow_account", account.id, {"document_id": document_id})
+    db.commit()
+    return result
+
+
+@router.post("/wallet/me/pix-key")
+def create_my_wallet_pix_key(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.asaas_wallet_service import create_wallet_pix_key
+    from app.subaccount_auto_service import find_user_plain_subaccount
+
+    account = find_user_plain_subaccount(db, user)
+    if not account:
+        raise HTTPException(status_code=404, detail="Subconta não encontrada")
+    result = create_wallet_pix_key(db, account)
+    audit(db, user, "wallet.pix_key_created", "escrow_account", account.id)
+    db.commit()
+    return result
+
+
+@router.get("/wallet/me/pix-qrcode")
+def my_wallet_pix_qrcode(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.asaas_wallet_service import get_wallet_pix_qrcode
+    from app.subaccount_auto_service import find_user_plain_subaccount
+
+    account = find_user_plain_subaccount(db, user)
+    if not account:
+        raise HTTPException(status_code=404, detail="Subconta não encontrada")
+    return get_wallet_pix_qrcode(account)
+
+
+@router.post("/wallet/me/transfer")
+def transfer_from_my_wallet(payload: WalletTransferRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.asaas_wallet_service import request_wallet_transfer
+    from app.subaccount_auto_service import find_user_plain_subaccount
+
+    account = find_user_plain_subaccount(db, user)
+    if not account:
+        raise HTTPException(status_code=404, detail="Subconta não encontrada")
+    result = request_wallet_transfer(db, user, account, pix_key=payload.pix_key, amount=payload.amount, description=payload.description)
+    audit(db, user, "wallet.transfer_requested", "escrow_account", account.id, result)
+    db.commit()
+    return result
+
+
+@router.post("/wallet/me/bill-payment")
+def pay_bill_from_my_wallet(payload: WalletBillPaymentRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.asaas_wallet_service import request_bill_payment
+    from app.subaccount_auto_service import find_user_plain_subaccount
+
+    account = find_user_plain_subaccount(db, user)
+    if not account:
+        raise HTTPException(status_code=404, detail="Subconta não encontrada")
+    result = request_bill_payment(db, account, barcode=payload.barcode, amount=payload.amount, description=payload.description)
+    audit(db, user, "wallet.bill_payment_requested", "escrow_account", account.id, result)
+    db.commit()
+    return result
+
+
+@router.post("/webhooks/asaas")
+async def asaas_webhook(request: Request, db: Session = Depends(get_db)):
+    from app.asaas_wallet_service import handle_asaas_webhook
+
+    token = request.headers.get("asaas-access-token") or request.query_params.get("token")
+    expected = (settings.asaas_webhook_access_token or "").strip()
+    if expected and token != expected:
+        raise HTTPException(status_code=401, detail="Webhook Asaas não autorizado")
+    try:
+        payload = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail="Payload JSON inválido") from exc
+    result = handle_asaas_webhook(db, payload)
+    db.commit()
+    return {"status": "ok", **result}
 
 
 @router.post("/escrow/accounts/{account_id}/mock-webhook")

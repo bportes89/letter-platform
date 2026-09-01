@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { api, logout, Module, User } from "@/lib/api";
 import { InventoryModule, LeadsModule, MarketplaceModule, ProposalsModule } from "@/components/operational-modules";
 import { ContractsModule, PaymentsModule, WalletModule } from "@/components/financial-modules";
+import { MyWalletModule } from "@/components/my-wallet-module";
 import { AdministratorsModule } from "@/components/administrators-module";
 import { ComplianceModule, IdentityModule, SecurityModule } from "@/components/identity-modules";
 import { FundingModule, NetworkModule } from "@/components/network-funding-modules";
@@ -73,6 +74,7 @@ export default function ModulePage() {
   if (routeKey === "leilao" || routeKey === "auctions") return <AuctionsModule />;
   if (routeKey === "crm") return <LeadsModule />;
   if (routeKey === "contracts") return <ContractsModule />;
+  if (routeKey === "my-wallet") return <MyWalletModule />;
   if (routeKey === "wallet") return <WalletModule />;
   if (routeKey === "payments") return <PaymentsModule />;
   if (routeKey === "identity") return <IdentityModule />;
