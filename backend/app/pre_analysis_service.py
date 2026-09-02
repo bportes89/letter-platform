@@ -12,6 +12,8 @@ from sqlalchemy.orm import Session
 
 from app.administrator_service import homologated_codes, rules_for_administrator_name
 from app.flash_valid_lss_service import issue_stamp
+from app.company_profile_service import company_profile
+from app.infra_http import digits
 from app.models import PreAnalysisPauta, Proposal, User
 from app.pre_analysis_constants import (
     DOCUMENT_LABELS,
@@ -270,6 +272,24 @@ def confirm_tapaf_payment(db: Session, user: User, pauta: PreAnalysisPauta, even
     pauta.tapaf_paid_at = datetime.now(UTC)
     pauta.status = "TAPAF_PAID"
     proposal = db.get(Proposal, pauta.proposal_id)
+    submitted = json.loads(pauta.documents_json or "{}").get("submitted", [])
+    registry_number = next(
+        (
+            str(item.get("reference") or item.get("filename") or "")
+            for item in submitted
+            if str(item.get("code", "")).upper() in {"MATRICULA_ENOTARIADO", "MATRICULA", "LAUDO_AVALIACAO"}
+            and (item.get("reference") or item.get("filename"))
+        ),
+        None,
+    )
+    company_document = company_profile()["cnpj_digits"]
+    if proposal and proposal.terms_json:
+        try:
+            terms = json.loads(proposal.terms_json)
+            if isinstance(terms, dict):
+                company_document = digits(terms.get("company_cnpj")) or company_document
+        except json.JSONDecodeError:
+            pass
     settle_tapaf_payment(
         db,
         user,
@@ -282,6 +302,8 @@ def confirm_tapaf_payment(db: Session, user: User, pauta: PreAnalysisPauta, even
             "proposal_id": pauta.proposal_id,
             "pauta_code": pauta.pauta_code,
             "appraisal_value": str(proposal.requested_amount if proposal else "0"),
+            "company_document": company_document,
+            "registry_number": registry_number,
         },
     )
     return pauta

@@ -9,6 +9,8 @@ from datetime import UTC, datetime
 from typing import Any
 
 from app.core.config import settings
+from app.onr_client import consult_registry, onr_production_ready
+from app.serasa_client import consult_qsa, serasa_configured
 from app.infra_http import (
     FIPE_PLATE_API_BASE,
     InfraHttpError,
@@ -103,9 +105,10 @@ class OnrSerpClient(InfraProviderClient):
     code = "ONR_SERP"
     name = "ONR / SERP"
     estimated_cost_brl = "60.00"
+    production_ready = True
 
     def is_configured(self) -> bool:
-        return bool(settings.onr_client_id and settings.onr_client_secret)
+        return onr_production_ready()
 
     def query_sandbox(self, *, context: dict[str, Any]) -> InfraQueryResult:
         registry = context.get("registry_number") or "SANDBOX-MATRICULA"
@@ -119,6 +122,21 @@ class OnrSerpClient(InfraProviderClient):
                 "registry_number": registry,
                 "encumbrances": [],
                 "certificate_status": "CLEAR",
+                "queried_at": datetime.now(UTC).isoformat(),
+            },
+        )
+
+    def query_production(self, *, context: dict[str, Any]) -> InfraQueryResult:
+        data = consult_registry(context=context)
+        registry = str(data.get("registry_number") or context.get("registry_number") or "unknown")
+        return InfraQueryResult(
+            provider_code=self.code,
+            status="PRODUCTION_OK",
+            mode="PRODUCTION",
+            external_reference=_ref(self.code, registry),
+            estimated_cost_brl=self.estimated_cost_brl,
+            payload={
+                **data,
                 "queried_at": datetime.now(UTC).isoformat(),
             },
         )
@@ -153,9 +171,10 @@ class SerasaQsaClient(InfraProviderClient):
     code = "SERASA_QSA"
     name = "Serasa Experian QSA"
     estimated_cost_brl = "40.00"
+    production_ready = True
 
     def is_configured(self) -> bool:
-        return bool(settings.serasa_api_key)
+        return serasa_configured()
 
     def query_sandbox(self, *, context: dict[str, Any]) -> InfraQueryResult:
         doc = context.get("company_document") or "00000000000000"
@@ -171,6 +190,23 @@ class SerasaQsaClient(InfraProviderClient):
                 "partners_screened": len(partners),
                 "restrictions_found": 0,
                 "score_band": "LOW_RISK_SANDBOX",
+                "queried_at": datetime.now(UTC).isoformat(),
+            },
+        )
+
+    def query_production(self, *, context: dict[str, Any]) -> InfraQueryResult:
+        from app.company_profile_service import company_profile
+
+        cnpj = digits(context.get("company_document")) or company_profile()["cnpj_digits"]
+        data = consult_qsa(cnpj=cnpj)
+        return InfraQueryResult(
+            provider_code=self.code,
+            status="PRODUCTION_OK",
+            mode="PRODUCTION",
+            external_reference=_ref(self.code, cnpj),
+            estimated_cost_brl=self.estimated_cost_brl,
+            payload={
+                **data,
                 "queried_at": datetime.now(UTC).isoformat(),
             },
         )

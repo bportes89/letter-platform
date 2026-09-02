@@ -12,10 +12,12 @@
 |------------|--------|--------|
 | Split TAPAF R$ 300 + R$ 1.200 | `tapaf_settlement_service.py` | Implementado (ledger sandbox) |
 | Inventário pós-TAPAF | `infra_inventory_service.py` | Implementado |
-| **InfoSimples CNDs (PGFN + FGTS + TST)** | `infra_clients.py` | **HTTP produção** (mesmo token SEFAZ) |
-| **Fipe API Cloud (placa)** | `infra_clients.py` | **HTTP produção** |
+| **ONR / SERP** | `infra_clients.py` + `onr_client.py` | **HTTP produção** via InfoSimples (`onr/mapa-registro-imoveis`) ou OAuth direto |
+| **Serasa QSA** | `infra_clients.py` + `serasa_client.py` | **HTTP produção** (IAM + Relatório Avançado PJ) |
+| InfoSimples CNDs (PGFN + FGTS + TST) | `infra_clients.py` | **HTTP produção** (mesmo token SEFAZ) |
+| Fipe API Cloud (placa) | `infra_clients.py` | **HTTP produção** |
 | InfoSimples SEFAZ/NF-e | `sefaz_client.py` | HTTP produção |
-| ONR, DataZap, Serasa, Judis, SERPRO, Molicar, INCRA | `infra_clients.py` | Sandbox + credencial → `PRODUCTION_PENDING` |
+| DataZap, Judis, SERPRO, Molicar, INCRA | `infra_clients.py` | Sandbox + credencial → `PRODUCTION_PENDING` |
 | Política split | `GET /finops/tapaf/split-policy` | Implementado |
 | Catálogo provedores | `GET /finops/tapaf/infra-catalog` | Implementado (`production_ready`) |
 | Liquidações | `GET /finops/tapaf/settlements` | Implementado |

@@ -69,8 +69,16 @@ class Settings(BaseSettings):
     zapsign_lang: str = "pt-br"
     onr_client_id: str | None = None
     onr_client_secret: str | None = None
+    onr_token_url: str = "https://id.onr.org.br/connect/token"
+    onr_api_scope: str = "api"
+    onr_registry_api_url: str | None = None
+    onr_infosimples_camada: str = "matriculas"
     datazap_api_token: str | None = None
     serasa_api_key: str | None = None
+    serasa_api_base_url: str | None = None
+    serasa_report_name: str = "RELATORIO_AVANCADO_PJ"
+    serasa_optional_features: str = "QSA_AVANCADO"
+    serasa_retailer_document: str | None = None
     judis_api_key: str | None = None
     infosimples_api_token: str | None = None
     serpro_api_key: str | None = None

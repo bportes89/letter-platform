@@ -2,7 +2,7 @@ import json
 
 import httpx
 
-from app.infra_clients import FipeCloudClient, InfoSimplesCndClient, OnrSerpClient
+from app.infra_clients import FipeCloudClient, InfoSimplesCndClient, OnrSerpClient, SerasaQsaClient
 
 
 def test_infosimples_cnd_production_bundle(monkeypatch):
@@ -65,10 +65,47 @@ def test_fipe_production_by_plate(monkeypatch):
     assert result.payload["fipe_value_brl"] == "45000.00"
 
 
-def test_onr_configured_returns_production_pending(monkeypatch):
-    monkeypatch.setattr("app.infra_clients.settings.onr_client_id", "id")
-    monkeypatch.setattr("app.infra_clients.settings.onr_client_secret", "secret")
+def test_onr_production_via_infosimples(monkeypatch):
+    monkeypatch.setattr("app.infra_clients.settings.infosimples_api_token", "test-token")
+
+    def fake_consult_registry(*, context):
+        assert context.get("registry_number") == "12345"
+        return {
+            "registry_number": "12345",
+            "encumbrances": [],
+            "certificate_status": "CLEAR",
+            "provider": "INFOSIMPLES_ONR",
+        }
+
+    monkeypatch.setattr("app.infra_clients.consult_registry", fake_consult_registry)
     client = OnrSerpClient()
     result = client.query(context={"registry_number": "12345"})
-    assert result.mode == "PRODUCTION_PENDING"
-    assert result.payload["integration_status"] == "credential_present_http_pending"
+    assert result.mode == "PRODUCTION"
+    assert result.payload["provider"] == "INFOSIMPLES_ONR"
+
+
+def test_serasa_production_qsa(monkeypatch):
+    monkeypatch.setattr("app.infra_clients.settings.serasa_api_key", "Basic abc")
+
+    def fake_consult_qsa(*, cnpj: str):
+        assert len(cnpj) == 14
+        return {
+            "company_document": cnpj,
+            "partners_screened": 2,
+            "partners": [{"name": "Socio A", "document": "11111111111", "role": "ADMIN"}],
+            "restrictions_found": 0,
+            "score_band": "SCORE_750",
+            "provider": "SERASA_EXPERIAN",
+        }
+
+    monkeypatch.setattr("app.infra_clients.consult_qsa", fake_consult_qsa)
+    client = SerasaQsaClient()
+    result = client.query(context={"company_document": "57255607000130"})
+    assert result.mode == "PRODUCTION"
+    assert result.payload["partners_screened"] == 2
+
+
+def test_onr_without_credentials_uses_sandbox():
+    client = OnrSerpClient()
+    result = client.query(context={"registry_number": "999"})
+    assert result.mode == "SANDBOX"
