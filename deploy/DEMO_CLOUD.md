@@ -117,10 +117,10 @@ No Render → letter-api → Environment:
 LETTER_CORS_ORIGINS=https://seu-app.vercel.app
 ```
 
-Se tiver domínio customizado na Vercel, inclua ambos separados por vírgula:
+Se tiver domínio customizado na Vercel, inclua todos separados por vírgula:
 
 ```text
-LETTER_CORS_ORIGINS=https://seu-app.vercel.app,https://demo.letter.app.br
+LETTER_CORS_ORIGINS=https://letter-platform.vercel.app,https://letter.app.br,https://www.letter.app.br,https://plataformaletter.com.br,https://www.plataformaletter.com.br
 ```
 
 Salve e faça **Manual Deploy** da API (para recarregar env).
