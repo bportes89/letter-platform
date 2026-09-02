@@ -236,6 +236,37 @@ def test_branch_invitation_and_acceptance(client, auth_headers):
     assert wallet.json()["has_subaccount"] is True
 
 
+def test_all_profiles_eligible_for_digital_wallet(client, monkeypatch):
+    monkeypatch.setattr("app.asaas_common.asaas_configured", lambda: False)
+
+    profiles = (
+        "investidor@letter.com.br",
+        "fundo@letter.com.br",
+        "revisor1@letter.com.br",
+        "admin@letter.com.br",
+    )
+    for email in profiles:
+        login = client.post("/api/v1/auth/login", json={"email": email, "password": "Letter@123"})
+        assert login.status_code == 200, email
+        headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+        kyc = client.get("/api/v1/kyc/me", headers=headers)
+        assert kyc.status_code == 200
+        assert kyc.json()["eligible"] is True, email
+
+    investor = client.post("/api/v1/auth/login", json={
+        "email": "investidor@letter.com.br",
+        "password": "Letter@123",
+    })
+    headers = {"Authorization": f"Bearer {investor.json()['access_token']}"}
+    completed = client.post("/api/v1/kyc/me/complete", headers=headers)
+    assert completed.status_code == 200
+    assert completed.json()["subaccount"]["escrow_enabled"] is False
+
+    wallet = client.get("/api/v1/wallet/me", headers=headers)
+    assert wallet.status_code == 200
+    assert wallet.json()["has_subaccount"] is True
+
+
 def test_mfa_activation_and_login_challenge(client, auth_headers):
     import pyotp
     setup = client.post("/api/v1/auth/mfa/setup", headers=auth_headers)

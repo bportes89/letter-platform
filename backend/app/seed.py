@@ -26,6 +26,36 @@ def _demo_password() -> str:
     return os.environ.get("LETTER_DEMO_PASSWORD", "Letter@123")
 
 
+DEMO_USER_PHONES = {
+    "admin@letter.com.br": "11900000001",
+    "parceiro@letter.com.br": "11900000002",
+    "revisor1@letter.com.br": "11900000003",
+    "revisor2@letter.com.br": "11900000004",
+    "investidor@letter.com.br": "11900000005",
+    "cliente@letter.com.br": "11900000006",
+    "fundo@letter.com.br": "11900000007",
+}
+
+
+def _sync_demo_phones(db) -> None:
+    """Preenche telefone dos usuários demo quando ausente (KYC / Minha Carteira)."""
+    if os.environ.get("LETTER_ENV", "development") not in {"development", "staging"}:
+        return
+    updated = 0
+    for email, phone in DEMO_USER_PHONES.items():
+        user = db.scalar(select(User).where(User.email == email))
+        if user and not (user.phone or "").strip():
+            user.phone = phone
+            updated += 1
+    if updated:
+        db.commit()
+        print(f"Telefones demo sincronizados para {updated} usuários.")
+
+
+def _demo_phone(email: str) -> str | None:
+    return DEMO_USER_PHONES.get(email)
+
+
 def _sync_demo_passwords(db, password: str) -> None:
     """Em staging/dev, realinha senhas demo com LETTER_DEMO_PASSWORD a cada deploy."""
     if os.environ.get("LETTER_ENV", "development") not in {"development", "staging"}:
@@ -57,6 +87,7 @@ def _ensure_profile_demo_users(db, org_id, password: str) -> None:
                 name=name,
                 email=email,
                 document=document,
+                phone=_demo_phone(email),
                 password_hash=hashed,
                 role=role,
             )
@@ -88,6 +119,7 @@ def seed():
             if org:
                 _ensure_profile_demo_users(db, org.id, password)
             _sync_headquarters_org(db)
+            _sync_demo_phones(db)
             _sync_demo_passwords(db, password)
             print("Seed já aplicado.")
             return
@@ -95,31 +127,38 @@ def seed():
         db.add(org); db.flush()
         admin = User(
             organization_id=org.id, name="Administrador LETTER", email="admin@letter.com.br",
-            document="00000000000", password_hash=hash_password(password), role=Role.PLATFORM_ADMIN,
+            document="00000000000", phone=_demo_phone("admin@letter.com.br"),
+            password_hash=hash_password(password), role=Role.PLATFORM_ADMIN,
         )
         partner = User(
             organization_id=org.id, name="Parceiro Demonstração", email="parceiro@letter.com.br",
-            document="11111111111", password_hash=hash_password(password), role=Role.PARTNER,
+            document="11111111111", phone=_demo_phone("parceiro@letter.com.br"),
+            password_hash=hash_password(password), role=Role.PARTNER,
         )
         reviewer_one = User(
             organization_id=org.id, name="Revisor Financeiro 1", email="revisor1@letter.com.br",
-            document="33333333333", password_hash=hash_password(password), role=Role.INTERNAL_STAFF,
+            document="33333333333", phone=_demo_phone("revisor1@letter.com.br"),
+            password_hash=hash_password(password), role=Role.INTERNAL_STAFF,
         )
         reviewer_two = User(
             organization_id=org.id, name="Revisor Financeiro 2", email="revisor2@letter.com.br",
-            document="44444444444", password_hash=hash_password(password), role=Role.INTERNAL_STAFF,
+            document="44444444444", phone=_demo_phone("revisor2@letter.com.br"),
+            password_hash=hash_password(password), role=Role.INTERNAL_STAFF,
         )
         investor = User(
             organization_id=org.id, name="Investidor Varejo", email="investidor@letter.com.br",
-            document="55555555555", password_hash=hash_password(password), role=Role.RETAIL_INVESTOR,
+            document="55555555555", phone=_demo_phone("investidor@letter.com.br"),
+            password_hash=hash_password(password), role=Role.RETAIL_INVESTOR,
         )
         client = User(
             organization_id=org.id, name="Cliente Demonstração", email="cliente@letter.com.br",
-            document="66666666666", password_hash=hash_password(password), role=Role.CLIENT,
+            document="66666666666", phone=_demo_phone("cliente@letter.com.br"),
+            password_hash=hash_password(password), role=Role.CLIENT,
         )
         fund = User(
             organization_id=org.id, name="Fundo Institucional Demo", email="fundo@letter.com.br",
-            document="77777777777", password_hash=hash_password(password), role=Role.INSTITUTIONAL_FUND,
+            document="77777777777", phone=_demo_phone("fundo@letter.com.br"),
+            password_hash=hash_password(password), role=Role.INSTITUTIONAL_FUND,
         )
         adms = [
             Administrator(name="Embracon", code="EMBRACON", document="22222222000122", authorization_status="AUTHORIZED", bacen_rules_version=1),

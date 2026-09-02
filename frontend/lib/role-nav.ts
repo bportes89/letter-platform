@@ -55,7 +55,7 @@ const ROLE_PLATFORM_MODULE_KEYS: Record<LetterRole, AccessList> = {
   PLATFORM_ADMIN: "*",
   INTERNAL_STAFF: [
     "identity", "rbac", "crm", "administrators", "nina", "structured-properties",
-    "contracts", "payments", "wallet", "collections", "mmn", "taxtech",
+    "contracts", "payments", "my-wallet", "wallet", "collections", "mmn", "taxtech",
     "communications", "reports", "operations", "admin",
   ],
   MASTER_FRANCHISEE: ["crm", "mmn", "reports", "contracts", "my-wallet", "wallet", "communications"],
@@ -63,9 +63,9 @@ const ROLE_PLATFORM_MODULE_KEYS: Record<LetterRole, AccessList> = {
   PARTNER: ["crm", "contracts", "my-wallet", "wallet", "mmn", "structured-properties", "communications"],
   CLIENT: ["contracts", "my-wallet", "payments", "communications"],
   QUOTA_SELLER: ["crm", "contracts", "my-wallet", "wallet", "communications"],
-  RETAIL_INVESTOR: ["wallet", "reports", "communications"],
-  INSTITUTIONAL_FUND: ["reports", "communications"],
-  AUDITOR: ["reports", "operations", "rbac"],
+  RETAIL_INVESTOR: ["my-wallet", "wallet", "reports", "communications"],
+  INSTITUTIONAL_FUND: ["my-wallet", "reports", "communications"],
+  AUDITOR: ["my-wallet", "reports", "operations", "rbac"],
 };
 
 function normalizeRole(role: string | undefined): LetterRole | null {

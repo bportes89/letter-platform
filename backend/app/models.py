@@ -27,15 +27,15 @@ class Role(StrEnum):
 
 ROLE_SCOPES = {
     Role.PLATFORM_ADMIN: ["*"],
-    Role.INTERNAL_STAFF: ["dashboard:read", "operations:write", "documents:write", "payments:review"],
+    Role.INTERNAL_STAFF: ["dashboard:read", "operations:write", "documents:write", "payments:review", "wallet:read"],
     Role.MASTER_FRANCHISEE: ["dashboard:read", "network:read", "network:invite", "proposals:read", "wallet:read"],
     Role.MANAGER: ["dashboard:read", "leads:read", "network:invite", "proposals:read", "wallet:read"],
     Role.PARTNER: ["dashboard:read", "leads:write", "proposals:write", "wallet:read", "network:invite"],
-    Role.QUOTA_SELLER: ["dashboard:read", "inventory:write", "payments:read", "network:invite"],
-    Role.CLIENT: ["dashboard:read", "proposals:read", "contracts:read", "payments:read"],
-    Role.RETAIL_INVESTOR: ["dashboard:read", "investments:read", "investments:reserve"],
-    Role.INSTITUTIONAL_FUND: ["dashboard:read", "institutional:read", "investments:write"],
-    Role.AUDITOR: ["dashboard:read", "audit:read"],
+    Role.QUOTA_SELLER: ["dashboard:read", "inventory:write", "payments:read", "network:invite", "wallet:read"],
+    Role.CLIENT: ["dashboard:read", "proposals:read", "contracts:read", "payments:read", "wallet:read"],
+    Role.RETAIL_INVESTOR: ["dashboard:read", "investments:read", "investments:reserve", "wallet:read"],
+    Role.INSTITUTIONAL_FUND: ["dashboard:read", "institutional:read", "investments:write", "wallet:read"],
+    Role.AUDITOR: ["dashboard:read", "audit:read", "wallet:read"],
 }
 
 
