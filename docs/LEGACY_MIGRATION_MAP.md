@@ -154,10 +154,20 @@ Staff admin (`users` legado) pode entrar em paralelo após `organizations/branch
 
 ## Formato de exportação (já suportado pelo dry-run)
 
-Script alvo: `backend/scripts/export_legacy_v1.py` (a implementar)
+Script alvo: `backend/scripts/export_legacy_v1.py` ✅ implementado
 
-Entrada: `legacy/letter_banco_new.sql` ou MariaDB importado localmente  
-Saída: `legacy/export/bundle.json`
+Entrada: `legacy/letter_banco_new.sql`  
+Saída: `legacy/export/bundle.json` (não versionado — contém PII)
+
+Última exportação local (02/09/2026):
+
+| Entidade | Exportados | Ignorados |
+|----------|----------:|----------|
+| administrators | 30 | — |
+| users (affiliates+suppliers+staff) | 213 | — |
+| leads (customers) | 4.186 | — |
+| quotas | 20.696 | 366 (admin não resolvido) |
+| proposals | 440 | — |
 
 ---
 
@@ -177,6 +187,13 @@ Saída: `legacy/export/bundle.json`
 ```bash
 # Análise rápida do dump
 py backend/scripts/analyze_legacy_sql.py
+
+# Export SQL → bundle JSON
+cd backend
+py -c "from scripts.export_legacy_v1 import main; raise SystemExit(main())"
+
+# Export parcial (teste)
+py -c "import sys; sys.path.insert(0,'.'); from scripts.export_legacy_v1 import *; import argparse; ..."
 
 # Dry-run (após export)
 py backend/scripts/migrate_legacy.py --file legacy/export/bundle.json --dry-run

@@ -32,9 +32,13 @@ Os arquivos são grandes (~43 MB) e podem conter **dados sensíveis** (CPF, e-ma
 ## Comandos úteis (depois da análise)
 
 ```bash
-# Dry-run via CLI (bundle gerado pelo exportador)
+# 1. Exportar SQL → JSON
+cd backend
+py -c "from scripts.export_legacy_v1 import main; raise SystemExit(main())"
+
+# 2. Dry-run via CLI
 py backend/scripts/migrate_legacy.py --file legacy/export/bundle.json --dry-run
 
-# Dry-run via API (admin logado)
+# 3. Dry-run via API (admin logado)
 POST /api/v1/admin/migration/dry-run
 ```
