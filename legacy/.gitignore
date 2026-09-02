@@ -1,0 +1,4 @@
+# Dados sensíveis / grandes — não versionar
+*
+!.gitignore
+!README.md
