@@ -44,8 +44,9 @@ py backend\scripts\export_legacy_v1.py
 
 # Dry-run após export
 .\dry-run-migration.ps1
-# ou
-py backend\scripts\migrate_legacy.py --file legacy\export\bundle.json --dry-run
+
+# Apply parcial (administrators + users; senha exige reset)
+.\apply-migration.ps1
 ```
 
 Export parcial (teste):

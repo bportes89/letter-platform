@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import secrets
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -11,6 +12,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.security import hash_password
 from app.models import (
     Administrator,
     Branch,
@@ -20,6 +22,8 @@ from app.models import (
     Role,
     User,
 )
+
+IMPLEMENTED_APPLY_ENTITIES = frozenset({"organizations", "branches", "administrators", "users"})
 
 MIGRATION_ENTITY_ORDER: tuple[str, ...] = (
     "organizations",
@@ -267,7 +271,11 @@ def validate_bundle(db: Session, organization_id: str, bundle: dict[str, Any]) -
                 )
             )
 
-    unsupported = [name for name in MIGRATION_ENTITY_ORDER if name not in {"organizations", "branches"} and entities.get(name)]
+    unsupported = [
+        name
+        for name in MIGRATION_ENTITY_ORDER
+        if name not in IMPLEMENTED_APPLY_ENTITIES and entities.get(name)
+    ]
     if unsupported:
         report.warnings.append(
             MigrationIssue(
@@ -332,6 +340,200 @@ def _remember_map(
     cache[_legacy_key(entity_type, legacy_id)] = new_id
 
 
+def _migration_password_hash() -> str:
+    return hash_password(secrets.token_urlsafe(24))
+
+
+def _resolve_branch_id(
+    db: Session,
+    *,
+    actor: User,
+    row: dict[str, Any],
+    organization_id: str,
+    legacy_source: str,
+    cache: dict[str, str],
+) -> str | None:
+    branch_legacy = str(row.get("branch_legacy_id") or "").strip()
+    if branch_legacy:
+        resolved = _resolve_mapped_id(
+            db,
+            organization_id=organization_id,
+            legacy_source=legacy_source,
+            entity_type="branches",
+            legacy_id=branch_legacy,
+            cache=cache,
+        )
+        if resolved:
+            return resolved
+    return actor.branch_id
+
+
+def _apply_administrators(
+    db: Session,
+    *,
+    actor: User,
+    rows: list[dict[str, Any]],
+    legacy_source: str,
+    migration_run_id: str,
+    cache: dict[str, str],
+    created: dict[str, int],
+    reused: dict[str, int],
+) -> None:
+    for row in rows:
+        legacy_id = str(row["legacy_id"])
+        if _resolve_mapped_id(
+            db,
+            organization_id=actor.organization_id,
+            legacy_source=legacy_source,
+            entity_type="administrators",
+            legacy_id=legacy_id,
+            cache=cache,
+        ):
+            reused["administrators"] = reused.get("administrators", 0) + 1
+            continue
+
+        code = str(row.get("code") or "").strip().upper() or None
+        name = str(row.get("name") or "").strip()
+        document = _digits(row.get("document")) or f"99{int(legacy_id):012d}"[:14]
+
+        existing = None
+        if code:
+            existing = db.scalar(select(Administrator).where(Administrator.code == code))
+        if not existing:
+            existing = db.scalar(select(Administrator).where(Administrator.document == document))
+        if not existing:
+            existing = db.scalar(select(Administrator).where(Administrator.name == name))
+
+        if existing:
+            reused["administrators"] = reused.get("administrators", 0) + 1
+            target = existing
+        else:
+            target = Administrator(
+                name=name,
+                code=code,
+                document=document,
+                authorization_status="AUTHORIZED",
+            )
+            db.add(target)
+            db.flush()
+            created["administrators"] = created.get("administrators", 0) + 1
+
+        _remember_map(
+            db,
+            organization_id=actor.organization_id,
+            legacy_source=legacy_source,
+            entity_type="administrators",
+            legacy_id=legacy_id,
+            new_id=target.id,
+            migration_run_id=migration_run_id,
+            payload=row,
+            cache=cache,
+        )
+
+
+def _apply_users(
+    db: Session,
+    *,
+    actor: User,
+    rows: list[dict[str, Any]],
+    legacy_source: str,
+    migration_run_id: str,
+    cache: dict[str, str],
+    created: dict[str, int],
+    reused: dict[str, int],
+) -> None:
+    pending_sponsors: list[tuple[str, str]] = []
+
+    for row in rows:
+        legacy_id = str(row["legacy_id"])
+        if _resolve_mapped_id(
+            db,
+            organization_id=actor.organization_id,
+            legacy_source=legacy_source,
+            entity_type="users",
+            legacy_id=legacy_id,
+            cache=cache,
+        ):
+            reused["users"] = reused.get("users", 0) + 1
+            continue
+
+        email = str(row.get("email") or "").strip().lower()
+        existing = db.scalar(select(User).where(User.email == email))
+        if existing:
+            reused["users"] = reused.get("users", 0) + 1
+            _remember_map(
+                db,
+                organization_id=actor.organization_id,
+                legacy_source=legacy_source,
+                entity_type="users",
+                legacy_id=legacy_id,
+                new_id=existing.id,
+                migration_run_id=migration_run_id,
+                payload=row,
+                cache=cache,
+            )
+            continue
+
+        document = _digits(row.get("document")) or None
+        if document and db.scalar(select(User.id).where(User.document == document)):
+            document = None
+
+        role = Role[str(row.get("role")).strip().upper()]
+        item = User(
+            organization_id=actor.organization_id,
+            branch_id=_resolve_branch_id(
+                db,
+                actor=actor,
+                row=row,
+                organization_id=actor.organization_id,
+                legacy_source=legacy_source,
+                cache=cache,
+            ),
+            name=str(row.get("name") or "").strip(),
+            email=email,
+            document=document,
+            phone=(str(row.get("phone")).strip() if row.get("phone") else None),
+            company_name=(str(row.get("company_name")).strip() if row.get("company_name") else None),
+            company_cnpj=_digits(row.get("company_cnpj")) or None,
+            password_hash=_migration_password_hash(),
+            role=role,
+            active=bool(row.get("active", True)),
+        )
+        db.add(item)
+        db.flush()
+        _remember_map(
+            db,
+            organization_id=actor.organization_id,
+            legacy_source=legacy_source,
+            entity_type="users",
+            legacy_id=legacy_id,
+            new_id=item.id,
+            migration_run_id=migration_run_id,
+            payload=row,
+            cache=cache,
+        )
+        created["users"] = created.get("users", 0) + 1
+
+        sponsor_legacy = str(row.get("sponsor_legacy_id") or "").strip()
+        if sponsor_legacy:
+            pending_sponsors.append((item.id, sponsor_legacy))
+
+    for user_id, sponsor_legacy in pending_sponsors:
+        sponsor_id = _resolve_mapped_id(
+            db,
+            organization_id=actor.organization_id,
+            legacy_source=legacy_source,
+            entity_type="users",
+            legacy_id=sponsor_legacy,
+            cache=cache,
+        )
+        if not sponsor_id:
+            continue
+        target = db.get(User, user_id)
+        if target and target.referred_by_user_id is None:
+            target.referred_by_user_id = sponsor_id
+
+
 def apply_bundle(
     db: Session,
     user,
@@ -369,10 +571,12 @@ def apply_bundle(
         db.flush()
         return run, report
 
+    report.mode = "APPLY"
     cache: dict[str, str] = {}
     source = bundle["legacy_source"]
     entities = bundle["entities"]
     created: dict[str, int] = {}
+    reused: dict[str, int] = {}
 
     try:
         for row in entities.get("organizations") or []:
@@ -457,14 +661,47 @@ def apply_bundle(
             )
             created["branches"] = created.get("branches", 0) + 1
 
-        if any(entities.get(name) for name in MIGRATION_ENTITY_ORDER if name not in {"organizations", "branches"}):
-            raise ValueError(
-                "Apply parcial: apenas organizations e branches estão implementados nesta versão"
+        _apply_administrators(
+            db,
+            actor=user,
+            rows=entities.get("administrators") or [],
+            legacy_source=source,
+            migration_run_id=run.id,
+            cache=cache,
+            created=created,
+            reused=reused,
+        )
+        _apply_users(
+            db,
+            actor=user,
+            rows=entities.get("users") or [],
+            legacy_source=source,
+            migration_run_id=run.id,
+            cache=cache,
+            created=created,
+            reused=reused,
+        )
+
+        remaining = [
+            name
+            for name in MIGRATION_ENTITY_ORDER
+            if name not in IMPLEMENTED_APPLY_ENTITIES and entities.get(name)
+        ]
+        if remaining:
+            report.warnings.append(
+                MigrationIssue(
+                    "WARNING",
+                    "migration",
+                    None,
+                    f"Carga parcial concluída; pendente apply para: {', '.join(remaining)}",
+                )
             )
 
         report.ready = True
         summary = report.to_dict()
         summary["created"] = created
+        summary["reused"] = reused
+        summary["password_policy"] = "Migrated users receive a random password hash; reset required on first login."
         run.status = "COMPLETED"
         run.summary_json = json.dumps(summary, ensure_ascii=False)
         run.finished_at = datetime.now(UTC)
