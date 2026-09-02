@@ -245,6 +245,110 @@ def test_legacy_migration_apply_quotas(client, auth_headers):
     assert len(maps.json()) == 1
 
 
+def test_legacy_migration_apply_network_nodes(client, auth_headers):
+    payload = {
+        "legacy_source": "letter_v1_apply_nodes",
+        "entities": {
+            "users": [
+                {
+                    "legacy_id": "affiliate-sponsor-1",
+                    "name": "Patrocinador Legacy",
+                    "email": "sponsor.node.apply@example.com",
+                    "role": "PARTNER",
+                },
+                {
+                    "legacy_id": "affiliate-downline-2",
+                    "name": "Indicado Legacy",
+                    "email": "downline.node.apply@example.com",
+                    "role": "PARTNER",
+                    "sponsor_legacy_id": "affiliate-sponsor-1",
+                },
+            ],
+            "network_nodes": [
+                {
+                    "legacy_id": "node-sponsor-1",
+                    "user_legacy_id": "affiliate-sponsor-1",
+                    "tree_type": "SALES",
+                    "referral_code": "SPONSORLEGACY",
+                },
+                {
+                    "legacy_id": "node-downline-2",
+                    "user_legacy_id": "affiliate-downline-2",
+                    "tree_type": "SALES",
+                    "sponsor_user_legacy_id": "affiliate-sponsor-1",
+                    "referral_code": "DOWNLINELEGACY",
+                },
+            ],
+        },
+    }
+    response = client.post("/api/v1/admin/migration/apply", headers=auth_headers, json=payload)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "COMPLETED"
+    assert body["summary"]["created"]["users"] == 2
+    assert body["summary"]["created"]["network_nodes"] == 2
+
+    nodes = client.get("/api/v1/network/nodes", headers=auth_headers, params={"tree_type": "SALES"}).json()
+    sponsor_node = next(item for item in nodes if item["referral_code"] == "SPONSORLEGACY")
+    downline_node = next(item for item in nodes if item["referral_code"] == "DOWNLINELEGACY")
+    assert sponsor_node["sponsor_user_id"] is None
+    assert downline_node["sponsor_user_id"] == sponsor_node["user_id"]
+
+    maps = client.get(
+        "/api/v1/admin/migration/id-map",
+        headers=auth_headers,
+        params={
+            "legacy_source": "letter_v1_apply_nodes",
+            "entity_type": "network_nodes",
+            "legacy_id": "node-downline-2",
+        },
+    )
+    assert maps.status_code == 200
+    assert len(maps.json()) == 1
+
+
+def test_legacy_migration_apply_network_nodes_reuses_user_with_duplicate_email(client, auth_headers):
+    payload = {
+        "legacy_source": "letter_v1_apply_nodes_dup",
+        "entities": {
+            "users": [
+                {
+                    "legacy_id": "supplier-dup-1",
+                    "name": "Fornecedor Dup",
+                    "email": "dup.network@example.com",
+                    "role": "QUOTA_SELLER",
+                },
+                {
+                    "legacy_id": "affiliate-dup-2",
+                    "name": "Afiliado Dup",
+                    "email": "dup.network@example.com",
+                    "role": "PARTNER",
+                },
+            ],
+            "network_nodes": [
+                {
+                    "legacy_id": "node-supplier-dup-1",
+                    "user_legacy_id": "supplier-dup-1",
+                    "referral_code": "SUPPLIERDUP",
+                },
+                {
+                    "legacy_id": "node-affiliate-dup-2",
+                    "user_legacy_id": "affiliate-dup-2",
+                    "referral_code": "AFFILIATEDUP",
+                },
+            ],
+        },
+    }
+    response = client.post("/api/v1/admin/migration/apply", headers=auth_headers, json=payload)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "COMPLETED"
+    assert body["summary"]["created"]["users"] == 1
+    assert body["summary"]["reused"]["users"] == 1
+    assert body["summary"]["created"]["network_nodes"] == 1
+    assert body["summary"]["reused"]["network_nodes"] == 1
+
+
 def test_legacy_migration_apply_proposals(client, auth_headers):
     payload = {
         "legacy_source": "letter_v1_apply_proposals",

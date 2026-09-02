@@ -20,6 +20,7 @@ from app.models import (
     Lead,
     LegacyIdMap,
     LegacyMigrationRun,
+    NetworkNode,
     Organization,
     Proposal,
     Quota,
@@ -28,7 +29,16 @@ from app.models import (
 )
 
 IMPLEMENTED_APPLY_ENTITIES = frozenset(
-    {"organizations", "branches", "administrators", "users", "leads", "quotas", "proposals"}
+    {
+        "organizations",
+        "branches",
+        "administrators",
+        "users",
+        "network_nodes",
+        "leads",
+        "quotas",
+        "proposals",
+    }
 )
 MIGRATION_APPLY_BATCH_SIZE = 500
 
@@ -267,8 +277,18 @@ def validate_bundle(db: Session, organization_id: str, bundle: dict[str, Any]) -
             require_ref("users", "sponsor_legacy_id", row)
     for row in entities.get("network_nodes") or []:
         require_ref("network_nodes", "user_legacy_id", row)
-        if row.get("sponsor_user_legacy_id"):
-            require_ref("network_nodes", "sponsor_user_legacy_id", row)
+        sponsor_legacy = str(row.get("sponsor_user_legacy_id") or "").strip()
+        if sponsor_legacy:
+            key = _legacy_key("users", sponsor_legacy)
+            if key not in index and key not in mapped_keys:
+                report.warnings.append(
+                    MigrationIssue(
+                        "WARNING",
+                        "network_nodes",
+                        str(row.get("legacy_id") or ""),
+                        f"Patrocinador legado não exportado — nó sem sponsor: {sponsor_legacy}",
+                    )
+                )
     for row in entities.get("quotas") or []:
         require_ref("quotas", "administrator_legacy_id", row)
         seller_legacy = str(row.get("seller_user_legacy_id") or "").strip()
@@ -960,6 +980,218 @@ def _apply_proposals(
     flush_batch()
 
 
+def _sanitize_referral_code(value: str) -> str:
+    return re.sub(r"[^A-Z0-9_-]", "", value.upper())[:40]
+
+
+def _unique_referral_code(
+    db: Session,
+    *,
+    preferred: str | None,
+    user_id: str,
+    tree_type: str,
+    reserved: set[str] | None = None,
+) -> str:
+    taken = reserved or set()
+    if preferred:
+        code = _sanitize_referral_code(preferred)
+        if code and code not in taken and not db.scalar(select(NetworkNode.id).where(NetworkNode.referral_code == code)):
+            return code
+    base = f"LTR-{tree_type[:3]}-{user_id.replace('-', '')[:16].upper()}"
+    code = base
+    suffix = 0
+    while code in taken or db.scalar(select(NetworkNode.id).where(NetworkNode.referral_code == code)):
+        suffix += 1
+        code = f"{base[:30]}-{suffix}"[:40]
+    return code
+
+
+def _apply_network_nodes(
+    db: Session,
+    *,
+    actor: User,
+    rows: list[dict[str, Any]],
+    legacy_source: str,
+    migration_run_id: str,
+    cache: dict[str, str],
+    created: dict[str, int],
+    reused: dict[str, int],
+    skipped: dict[str, int],
+) -> None:
+    pending: list[tuple[str, dict[str, Any], NetworkNode]] = []
+    reserved_codes: set[str] = set(
+        db.scalars(select(NetworkNode.referral_code)).all()
+    )
+    reserved_user_trees: set[tuple[str, str]] = {
+        (user_id, tree_type)
+        for user_id, tree_type in db.execute(
+            select(NetworkNode.user_id, NetworkNode.tree_type).where(
+                NetworkNode.organization_id == actor.organization_id
+            )
+        )
+    }
+    pending_by_user_tree: dict[tuple[str, str], NetworkNode] = {}
+    pending_alias_maps: list[tuple[str, dict[str, Any], tuple[str, str]]] = []
+
+    def remember_node_map(legacy_id: str, row: dict[str, Any], node: NetworkNode) -> None:
+        if node.id:
+            _remember_map(
+                db,
+                organization_id=actor.organization_id,
+                legacy_source=legacy_source,
+                entity_type="network_nodes",
+                legacy_id=legacy_id,
+                new_id=node.id,
+                migration_run_id=migration_run_id,
+                payload=row,
+                cache=cache,
+            )
+            return
+        pending_alias_maps.append((legacy_id, row, (node.user_id, node.tree_type)))
+
+    def resolve_pending_aliases(resolved: dict[tuple[str, str], str]) -> None:
+        nonlocal pending_alias_maps
+        remaining: list[tuple[str, dict[str, Any], tuple[str, str]]] = []
+        for legacy_id, row, key in pending_alias_maps:
+            node_id = resolved.get(key)
+            if not node_id:
+                node = db.scalar(
+                    select(NetworkNode).where(
+                        NetworkNode.organization_id == actor.organization_id,
+                        NetworkNode.user_id == key[0],
+                        NetworkNode.tree_type == key[1],
+                    )
+                )
+                node_id = node.id if node else None
+            if node_id:
+                _remember_map(
+                    db,
+                    organization_id=actor.organization_id,
+                    legacy_source=legacy_source,
+                    entity_type="network_nodes",
+                    legacy_id=legacy_id,
+                    new_id=node_id,
+                    migration_run_id=migration_run_id,
+                    payload=row,
+                    cache=cache,
+                )
+            else:
+                remaining.append((legacy_id, row, key))
+        pending_alias_maps = remaining
+
+    def flush_batch() -> None:
+        nonlocal pending
+        if not pending:
+            return
+        db.flush()
+        resolved: dict[tuple[str, str], str] = {}
+        for legacy_id, row, item in pending:
+            resolved[(item.user_id, item.tree_type)] = item.id
+            _remember_map(
+                db,
+                organization_id=actor.organization_id,
+                legacy_source=legacy_source,
+                entity_type="network_nodes",
+                legacy_id=legacy_id,
+                new_id=item.id,
+                migration_run_id=migration_run_id,
+                payload=row,
+                cache=cache,
+            )
+            created["network_nodes"] = created.get("network_nodes", 0) + 1
+        resolve_pending_aliases(resolved)
+        pending.clear()
+
+    for row in rows:
+        legacy_id = str(row["legacy_id"])
+        if _resolve_mapped_id(
+            db,
+            organization_id=actor.organization_id,
+            legacy_source=legacy_source,
+            entity_type="network_nodes",
+            legacy_id=legacy_id,
+            cache=cache,
+        ):
+            reused["network_nodes"] = reused.get("network_nodes", 0) + 1
+            continue
+
+        user_legacy = str(row.get("user_legacy_id") or "").strip()
+        user_id = _resolve_mapped_id(
+            db,
+            organization_id=actor.organization_id,
+            legacy_source=legacy_source,
+            entity_type="users",
+            legacy_id=user_legacy,
+            cache=cache,
+        )
+        if not user_id:
+            skipped["network_nodes_missing_user"] = skipped.get("network_nodes_missing_user", 0) + 1
+            continue
+
+        tree_type = str(row.get("tree_type") or "SALES").strip().upper()
+        if tree_type not in {"SALES", "CAPITAL"}:
+            tree_type = "SALES"
+
+        existing_node = db.scalar(
+            select(NetworkNode).where(
+                NetworkNode.organization_id == actor.organization_id,
+                NetworkNode.user_id == user_id,
+                NetworkNode.tree_type == tree_type,
+            )
+        ) or pending_by_user_tree.get((user_id, tree_type))
+        if existing_node:
+            reused["network_nodes"] = reused.get("network_nodes", 0) + 1
+            remember_node_map(legacy_id, row, existing_node)
+            continue
+
+        sponsor_user_id = None
+        sponsor_legacy = str(row.get("sponsor_user_legacy_id") or "").strip()
+        if sponsor_legacy:
+            sponsor_user_id = _resolve_mapped_id(
+                db,
+                organization_id=actor.organization_id,
+                legacy_source=legacy_source,
+                entity_type="users",
+                legacy_id=sponsor_legacy,
+                cache=cache,
+            )
+            if not sponsor_user_id:
+                skipped["network_nodes_missing_sponsor"] = skipped.get("network_nodes_missing_sponsor", 0) + 1
+        if not sponsor_user_id:
+            target_user = db.get(User, user_id)
+            if target_user and target_user.referred_by_user_id:
+                sponsor_user_id = target_user.referred_by_user_id
+
+        preferred_code = str(row.get("referral_code") or row.get("legacy_url_slug") or "").strip() or None
+        referral_code = _unique_referral_code(
+            db,
+            preferred=preferred_code,
+            user_id=user_id,
+            tree_type=tree_type,
+            reserved=reserved_codes,
+        )
+        reserved_codes.add(referral_code)
+
+        item = NetworkNode(
+            organization_id=actor.organization_id,
+            user_id=user_id,
+            sponsor_user_id=sponsor_user_id,
+            tree_type=tree_type,
+            referral_code=referral_code,
+            status=str(row.get("status") or "ACTIVE").strip().upper() or "ACTIVE",
+        )
+        db.add(item)
+        pending.append((legacy_id, row, item))
+        pending_by_user_tree[(user_id, tree_type)] = item
+        reserved_user_trees.add((user_id, tree_type))
+        if len(pending) >= MIGRATION_APPLY_BATCH_SIZE:
+            flush_batch()
+
+    flush_batch()
+    if pending_alias_maps:
+        resolve_pending_aliases({})
+
+
 def apply_bundle(
     db: Session,
     user,
@@ -1107,6 +1339,17 @@ def apply_bundle(
             cache=cache,
             created=created,
             reused=reused,
+        )
+        _apply_network_nodes(
+            db,
+            actor=user,
+            rows=entities.get("network_nodes") or [],
+            legacy_source=source,
+            migration_run_id=run.id,
+            cache=cache,
+            created=created,
+            reused=reused,
+            skipped=skipped,
         )
         _apply_leads(
             db,

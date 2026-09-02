@@ -283,6 +283,7 @@ def export_legacy_bundle(
                 "legacy_id": f"node-{legacy_id}",
                 "user_legacy_id": legacy_id,
                 "tree_type": "SALES",
+                "referral_code": (str(row.get("url") or "").strip().upper() or None),
             }
         )
 
@@ -318,6 +319,7 @@ def export_legacy_bundle(
                 "user_legacy_id": legacy_id,
                 "tree_type": "SALES",
                 "legacy_qualification_id": row.get("affiliates_qualification"),
+                "referral_code": (str(row.get("url") or "").strip().upper() or None),
             }
         )
 
