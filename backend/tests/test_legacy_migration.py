@@ -186,3 +186,60 @@ def test_legacy_migration_apply_leads(client, auth_headers):
     )
     assert maps.status_code == 200
     assert len(maps.json()) == 1
+
+
+def test_legacy_migration_apply_quotas(client, auth_headers):
+    payload = {
+        "legacy_source": "letter_v1_apply_quotas",
+        "entities": {
+            "administrators": [
+                {
+                    "legacy_id": "legacy-adm-quota",
+                    "name": "Adm Quota Legacy",
+                    "code": "ADM_QUOTA_LEGACY",
+                    "document": "77665544000133",
+                }
+            ],
+            "users": [
+                {
+                    "legacy_id": "supplier-1",
+                    "name": "Fornecedor Quota",
+                    "email": "supplier.quota.apply@example.com",
+                    "role": "QUOTA_SELLER",
+                }
+            ],
+            "quotas": [
+                {
+                    "legacy_id": "quota-9001",
+                    "administrator_legacy_id": "legacy-adm-quota",
+                    "group_code": "4696",
+                    "quota_code": "9001",
+                    "category": "VEHICLE",
+                    "credit_value": "51071.00",
+                    "outstanding_balance": "52140.00",
+                    "premium_value": "18540.00",
+                    "installment_due_date": "2026-09-10",
+                    "status": "AVAILABLE",
+                    "seller_user_legacy_id": "supplier-1",
+                }
+            ],
+        },
+    }
+    response = client.post("/api/v1/admin/migration/apply", headers=auth_headers, json=payload)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "COMPLETED"
+    assert body["summary"]["created"]["quotas"] == 1
+
+    quotas = client.get("/api/v1/quotas", headers=auth_headers).json()
+    migrated = next(item for item in quotas if item["group_code"] == "4696" and item["quota_code"] == "9001")
+    assert migrated["category"] == "VEHICLE"
+    assert float(migrated["credit_value"]) == 51071.0
+
+    maps = client.get(
+        "/api/v1/admin/migration/id-map",
+        headers=auth_headers,
+        params={"legacy_source": "letter_v1_apply_quotas", "entity_type": "quotas", "legacy_id": "quota-9001"},
+    )
+    assert maps.status_code == 200
+    assert len(maps.json()) == 1

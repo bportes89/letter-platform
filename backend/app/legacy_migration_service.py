@@ -6,7 +6,8 @@ import json
 import re
 import secrets
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from sqlalchemy import select
@@ -20,12 +21,15 @@ from app.models import (
     LegacyIdMap,
     LegacyMigrationRun,
     Organization,
+    Quota,
     Role,
     User,
 )
 
-IMPLEMENTED_APPLY_ENTITIES = frozenset({"organizations", "branches", "administrators", "users", "leads"})
-LEAD_APPLY_BATCH_SIZE = 500
+IMPLEMENTED_APPLY_ENTITIES = frozenset(
+    {"organizations", "branches", "administrators", "users", "leads", "quotas"}
+)
+MIGRATION_APPLY_BATCH_SIZE = 500
 
 MIGRATION_ENTITY_ORDER: tuple[str, ...] = (
     "organizations",
@@ -60,6 +64,7 @@ REF_FIELD_TO_ENTITY: dict[str, str] = {
     "administrator_legacy_id": "administrators",
     "lead_legacy_id": "leads",
     "owner_user_legacy_id": "users",
+    "seller_user_legacy_id": "users",
 }
 
 
@@ -259,6 +264,37 @@ def validate_bundle(db: Session, organization_id: str, bundle: dict[str, Any]) -
             require_ref("network_nodes", "sponsor_user_legacy_id", row)
     for row in entities.get("quotas") or []:
         require_ref("quotas", "administrator_legacy_id", row)
+        seller_legacy = str(row.get("seller_user_legacy_id") or "").strip()
+        if seller_legacy:
+            key = _legacy_key("users", seller_legacy)
+            if key not in index and key not in mapped_keys:
+                report.warnings.append(
+                    MigrationIssue(
+                        "WARNING",
+                        "quotas",
+                        str(row.get("legacy_id") or ""),
+                        f"Fornecedor legado não exportado — cota sem seller: {seller_legacy}",
+                    )
+                )
+        try:
+            if Decimal(str(row.get("credit_value") or "0")) <= 0:
+                report.warnings.append(
+                    MigrationIssue(
+                        "WARNING",
+                        "quotas",
+                        str(row.get("legacy_id") or ""),
+                        "credit_value inválido — será ajustado para 1.00 na carga",
+                    )
+                )
+        except (InvalidOperation, ValueError):
+            report.warnings.append(
+                MigrationIssue(
+                    "WARNING",
+                    "quotas",
+                    str(row.get("legacy_id") or ""),
+                    "credit_value inválido — será ajustado para 1.00 na carga",
+                )
+            )
     for row in entities.get("leads") or []:
         owner_legacy = str(row.get("owner_user_legacy_id") or "").strip()
         if owner_legacy:
@@ -634,7 +670,161 @@ def _apply_leads(
         )
         db.add(item)
         pending.append((legacy_id, row, item))
-        if len(pending) >= LEAD_APPLY_BATCH_SIZE:
+        if len(pending) >= MIGRATION_APPLY_BATCH_SIZE:
+            flush_batch()
+
+    flush_batch()
+
+
+def _parse_decimal(value: Any, *, default: str = "0") -> Decimal:
+    try:
+        return Decimal(str(value if value is not None else default))
+    except (InvalidOperation, ValueError):
+        return Decimal(default)
+
+
+def _parse_date_value(value: Any) -> date | None:
+    if not value:
+        return None
+    if isinstance(value, date):
+        return value
+    text = str(value).strip()[:10]
+    if not text:
+        return None
+    try:
+        return date.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+def _apply_quotas(
+    db: Session,
+    *,
+    actor: User,
+    rows: list[dict[str, Any]],
+    legacy_source: str,
+    migration_run_id: str,
+    cache: dict[str, str],
+    created: dict[str, int],
+    reused: dict[str, int],
+    skipped: dict[str, int],
+) -> None:
+    pending: list[tuple[str, dict[str, Any], Quota]] = []
+
+    def flush_batch() -> None:
+        nonlocal pending
+        if not pending:
+            return
+        db.flush()
+        for legacy_id, row, item in pending:
+            _remember_map(
+                db,
+                organization_id=actor.organization_id,
+                legacy_source=legacy_source,
+                entity_type="quotas",
+                legacy_id=legacy_id,
+                new_id=item.id,
+                migration_run_id=migration_run_id,
+                payload=row,
+                cache=cache,
+            )
+            created["quotas"] = created.get("quotas", 0) + 1
+        pending.clear()
+
+    for row in rows:
+        legacy_id = str(row["legacy_id"])
+        if _resolve_mapped_id(
+            db,
+            organization_id=actor.organization_id,
+            legacy_source=legacy_source,
+            entity_type="quotas",
+            legacy_id=legacy_id,
+            cache=cache,
+        ):
+            reused["quotas"] = reused.get("quotas", 0) + 1
+            continue
+
+        admin_legacy = str(row.get("administrator_legacy_id") or "").strip()
+        admin_id = _resolve_mapped_id(
+            db,
+            organization_id=actor.organization_id,
+            legacy_source=legacy_source,
+            entity_type="administrators",
+            legacy_id=admin_legacy,
+            cache=cache,
+        )
+        if not admin_id:
+            skipped["quotas_missing_administrator"] = skipped.get("quotas_missing_administrator", 0) + 1
+            continue
+
+        group_code = str(row.get("group_code") or "").strip()[:60]
+        quota_code = str(row.get("quota_code") or "").strip()[:60]
+        if not group_code or not quota_code:
+            skipped["quotas_missing_codes"] = skipped.get("quotas_missing_codes", 0) + 1
+            continue
+
+        existing_quota = db.scalar(
+            select(Quota).where(
+                Quota.administrator_id == admin_id,
+                Quota.group_code == group_code,
+                Quota.quota_code == quota_code,
+            )
+        )
+        if existing_quota:
+            reused["quotas"] = reused.get("quotas", 0) + 1
+            _remember_map(
+                db,
+                organization_id=actor.organization_id,
+                legacy_source=legacy_source,
+                entity_type="quotas",
+                legacy_id=legacy_id,
+                new_id=existing_quota.id,
+                migration_run_id=migration_run_id,
+                payload=row,
+                cache=cache,
+            )
+            continue
+
+        seller_id = None
+        seller_legacy = str(row.get("seller_user_legacy_id") or "").strip()
+        if seller_legacy:
+            seller_id = _resolve_mapped_id(
+                db,
+                organization_id=actor.organization_id,
+                legacy_source=legacy_source,
+                entity_type="users",
+                legacy_id=seller_legacy,
+                cache=cache,
+            )
+            if not seller_id:
+                skipped["quotas_missing_seller"] = skipped.get("quotas_missing_seller", 0) + 1
+
+        credit_value = _parse_decimal(row.get("credit_value"))
+        if credit_value <= 0:
+            credit_value = Decimal("1")
+
+        category = str(row.get("category") or "VEHICLE").strip().upper()
+        if category not in {"REAL_ESTATE", "VEHICLE"}:
+            category = "VEHICLE"
+
+        status = str(row.get("status") or "AVAILABLE").strip().upper() or "AVAILABLE"
+
+        item = Quota(
+            organization_id=actor.organization_id,
+            administrator_id=admin_id,
+            seller_id=seller_id,
+            group_code=group_code,
+            quota_code=quota_code,
+            category=category,
+            credit_value=credit_value,
+            outstanding_balance=_parse_decimal(row.get("outstanding_balance")),
+            premium_value=_parse_decimal(row.get("premium_value")),
+            installment_due_date=_parse_date_value(row.get("installment_due_date")),
+            status=status,
+        )
+        db.add(item)
+        pending.append((legacy_id, row, item))
+        if len(pending) >= MIGRATION_APPLY_BATCH_SIZE:
             flush_batch()
 
     flush_batch()
@@ -792,6 +982,17 @@ def apply_bundle(
             db,
             actor=user,
             rows=entities.get("leads") or [],
+            legacy_source=source,
+            migration_run_id=run.id,
+            cache=cache,
+            created=created,
+            reused=reused,
+            skipped=skipped,
+        )
+        _apply_quotas(
+            db,
+            actor=user,
+            rows=entities.get("quotas") or [],
             legacy_source=source,
             migration_run_id=run.id,
             cache=cache,
