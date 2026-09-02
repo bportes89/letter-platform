@@ -77,7 +77,7 @@ from app.schemas import (
     SdcStartQuitConRequest, SdcStartQuitConResponse,
     QuitConTokenizationRequest, QuitConCancelInadimplenciaRequest,
     ContractNativeInspectionRequest, CollateralNativeInspectionView,
-    LeadUpdate, LeadView, LedgerPostRequest, LedgerTransactionView, LoginRequest,
+    LeadUpdate, LeadView, LedgerPostRequest, LedgerTransactionView, LegacyIdMapView, LegacyMigrationBundle, LegacyMigrationRunView, LoginRequest,
     FlashCreditCalculationRequest, MfaSetupView, MfaVerify, ModuleView, PasswordResetConfirm, PasswordResetRequest,
     NetworkNodeCreate, NetworkNodeView, PayoutApprove, PayoutCreate, PayoutView, ProposalCreate, ProposalUpdate,
     ReconciliationBatchView, ReconciliationItemView, ReconciliationResolveRequest,
@@ -443,6 +443,75 @@ def my_partner_contract_download(user: User = Depends(get_current_user), db: Ses
 @router.get("/admin/invitations",response_model=list[InvitationView])
 def invitations(user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
     return list(db.scalars(select(UserInvitation).where(UserInvitation.organization_id==user.organization_id).order_by(UserInvitation.created_at.desc())))
+
+
+@router.post("/admin/migration/dry-run", response_model=LegacyMigrationRunView)
+def migration_dry_run(
+    payload: LegacyMigrationBundle,
+    user: User = Depends(require_scope("admin:users")),
+    db: Session = Depends(get_db),
+):
+    from app.legacy_migration_service import apply_bundle, migration_run_view, normalize_bundle
+
+    try:
+        bundle = normalize_bundle(payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    run, _report = apply_bundle(db, user, bundle, dry_run=True)
+    audit(db, user, "migration.dry_run", "legacy_migration_run", run.id, {"legacy_source": bundle["legacy_source"]})
+    db.commit()
+    return migration_run_view(run)
+
+
+@router.post("/admin/migration/apply", response_model=LegacyMigrationRunView)
+def migration_apply(
+    payload: LegacyMigrationBundle,
+    user: User = Depends(require_scope("admin:users")),
+    db: Session = Depends(get_db),
+):
+    from app.legacy_migration_service import apply_bundle, migration_run_view, normalize_bundle
+
+    try:
+        bundle = normalize_bundle(payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    try:
+        run, _report = apply_bundle(db, user, bundle, dry_run=False)
+        audit(db, user, "migration.apply", "legacy_migration_run", run.id, {"legacy_source": bundle["legacy_source"]})
+        db.commit()
+        return migration_run_view(run)
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/admin/migration/runs", response_model=list[LegacyMigrationRunView])
+def migration_runs(user: User = Depends(require_scope("admin:users")), db: Session = Depends(get_db)):
+    from app.legacy_migration_service import list_migration_runs, migration_run_view
+
+    return [migration_run_view(item) for item in list_migration_runs(db, user.organization_id)]
+
+
+@router.get("/admin/migration/id-map", response_model=list[LegacyIdMapView])
+def migration_id_map(
+    legacy_source: str | None = Query(default=None),
+    entity_type: str | None = Query(default=None),
+    legacy_id: str | None = Query(default=None),
+    user: User = Depends(require_scope("admin:users")),
+    db: Session = Depends(get_db),
+):
+    from app.legacy_migration_service import legacy_id_map_view, lookup_legacy_map
+
+    return [
+        legacy_id_map_view(item)
+        for item in lookup_legacy_map(
+            db,
+            user.organization_id,
+            legacy_source=legacy_source,
+            entity_type=entity_type,
+            legacy_id=legacy_id,
+        )
+    ]
 
 
 @router.post("/network/invitations", response_model=InvitationView, status_code=201)

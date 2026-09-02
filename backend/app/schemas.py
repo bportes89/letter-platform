@@ -2238,3 +2238,31 @@ class QuitConOperacaoView(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+
+class LegacyMigrationBundle(BaseModel):
+    legacy_source: str | None = None
+    source_label: str | None = None
+    entities: dict[str, list[dict[str, object]]] = Field(default_factory=dict)
+
+
+class LegacyMigrationRunView(BaseModel):
+    id: str
+    legacy_source: str
+    mode: str
+    status: str
+    error_message: str | None = None
+    summary: dict[str, object] = Field(default_factory=dict)
+    started_by_id: str | None = None
+    started_at: str | None = None
+    finished_at: str | None = None
+
+
+class LegacyIdMapView(BaseModel):
+    id: str
+    legacy_source: str
+    entity_type: str
+    legacy_id: str
+    new_id: str
+    migration_run_id: str | None = None
+    created_at: str | None = None
+

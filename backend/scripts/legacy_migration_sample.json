@@ -1,0 +1,71 @@
+{
+  "legacy_source": "letter_v1",
+  "entities": {
+    "organizations": [
+      {
+        "legacy_id": "org-001",
+        "name": "Letter Franqueadora Legacy",
+        "document": "12345678000199",
+        "kind": "HEADQUARTERS",
+        "active": true
+      }
+    ],
+    "branches": [
+      {
+        "legacy_id": "branch-001",
+        "organization_legacy_id": "org-001",
+        "name": "Filial Legacy Campinas",
+        "code": "LEG-CPS",
+        "region": "SP",
+        "active": true
+      }
+    ],
+    "administrators": [
+      {
+        "legacy_id": "adm-001",
+        "name": "Administradora Legacy",
+        "code": "LEGACY_ADM",
+        "document": "98765432000188"
+      }
+    ],
+    "users": [
+      {
+        "legacy_id": "user-001",
+        "name": "Parceiro Legacy",
+        "email": "parceiro.legacy@example.com",
+        "document": "12345678901",
+        "role": "PARTNER",
+        "branch_legacy_id": "branch-001"
+      }
+    ],
+    "network_nodes": [
+      {
+        "legacy_id": "node-001",
+        "user_legacy_id": "user-001"
+      }
+    ],
+    "leads": [
+      {
+        "legacy_id": "lead-001",
+        "name": "Lead Legacy",
+        "phone": "32988887777",
+        "owner_user_legacy_id": "user-001"
+      }
+    ],
+    "quotas": [
+      {
+        "legacy_id": "quota-001",
+        "administrator_legacy_id": "adm-001",
+        "group_code": "9001",
+        "quota_code": "001"
+      }
+    ],
+    "proposals": [
+      {
+        "legacy_id": "prop-001",
+        "product": "MARKETPLACE",
+        "lead_legacy_id": "lead-001"
+      }
+    ]
+  }
+}

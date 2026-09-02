@@ -1655,3 +1655,38 @@ class WebhookDelivery(TimestampMixin, Base):
     last_error: Mapped[str | None] = mapped_column(String(500))
     next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class LegacyMigrationRun(TimestampMixin, Base):
+    __tablename__ = "legacy_migration_runs"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    legacy_source: Mapped[str] = mapped_column(String(80), index=True)
+    mode: Mapped[str] = mapped_column(String(20))
+    status: Mapped[str] = mapped_column(String(30), default="RUNNING", index=True)
+    summary_json: Mapped[str] = mapped_column(Text, default="{}")
+    error_message: Mapped[str | None] = mapped_column(String(500))
+    started_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"))
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class LegacyIdMap(TimestampMixin, Base):
+    __tablename__ = "legacy_id_maps"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "legacy_source",
+            "entity_type",
+            "legacy_id",
+            name="uq_legacy_id_map_source_entity",
+        ),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    migration_run_id: Mapped[str | None] = mapped_column(ForeignKey("legacy_migration_runs.id"), index=True)
+    legacy_source: Mapped[str] = mapped_column(String(80), index=True)
+    entity_type: Mapped[str] = mapped_column(String(60), index=True)
+    legacy_id: Mapped[str] = mapped_column(String(120))
+    new_id: Mapped[str] = mapped_column(String(36), index=True)
+    payload_json: Mapped[str | None] = mapped_column(Text)
