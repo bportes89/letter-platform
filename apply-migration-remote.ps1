@@ -11,7 +11,7 @@ param(
     [string]$AccessToken = $env:LETTER_ACCESS_TOKEN,
     [switch]$DryRun,
     [int]$MaxRetries = 4,
-    [int]$TimeoutSec = 600,
+    [int]$TimeoutSec = $(if ($DryRun) { 600 } else { 3600 }),
     [string]$OutDir = "artifacts"
 )
 
@@ -33,7 +33,8 @@ function Test-RetryableError {
         $code = [int]$resp.StatusCode
         return $code -in 408, 425, 429, 500, 502, 503, 504
     }
-    if ($Exception -is [Microsoft.PowerShell.Commands.HttpResponseException]) {
+    $httpResponseType = [Type]::GetType("Microsoft.PowerShell.Commands.HttpResponseException")
+    if ($httpResponseType -and ($Exception -is $httpResponseType)) {
         $code = [int]$Exception.Response.StatusCode
         return $code -in 408, 425, 429, 500, 502, 503, 504
     }
