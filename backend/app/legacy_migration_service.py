@@ -21,15 +21,22 @@ from app.models import (
     LegacyIdMap,
     LegacyMigrationRun,
     Organization,
+    Proposal,
     Quota,
     Role,
     User,
 )
 
 IMPLEMENTED_APPLY_ENTITIES = frozenset(
-    {"organizations", "branches", "administrators", "users", "leads", "quotas"}
+    {"organizations", "branches", "administrators", "users", "leads", "quotas", "proposals"}
 )
 MIGRATION_APPLY_BATCH_SIZE = 500
+
+LEGACY_STATUS_TO_PROPOSAL = {
+    2: "SUBMITTED",
+    10: "DRAFT",
+    11: "CANCELLED",
+}
 
 MIGRATION_ENTITY_ORDER: tuple[str, ...] = (
     "organizations",
@@ -311,6 +318,25 @@ def validate_bundle(db: Session, organization_id: str, bundle: dict[str, Any]) -
     for row in entities.get("proposals") or []:
         if row.get("lead_legacy_id"):
             require_ref("proposals", "lead_legacy_id", row)
+        try:
+            if Decimal(str(row.get("requested_amount") or "0")) <= 0:
+                report.warnings.append(
+                    MigrationIssue(
+                        "WARNING",
+                        "proposals",
+                        str(row.get("legacy_id") or ""),
+                        "requested_amount inválido — será ajustado para 1.00 na carga",
+                    )
+                )
+        except (InvalidOperation, ValueError):
+            report.warnings.append(
+                MigrationIssue(
+                    "WARNING",
+                    "proposals",
+                    str(row.get("legacy_id") or ""),
+                    "requested_amount inválido — será ajustado para 1.00 na carga",
+                )
+            )
 
     for entity_type in entities:
         if entity_type not in MIGRATION_ENTITY_ORDER:
@@ -830,6 +856,110 @@ def _apply_quotas(
     flush_batch()
 
 
+def _proposal_status_from_legacy(row: dict[str, Any]) -> str:
+    status_code = row.get("legacy_status_code")
+    if status_code is not None:
+        try:
+            mapped = LEGACY_STATUS_TO_PROPOSAL.get(int(status_code))
+            if mapped:
+                return mapped
+        except (TypeError, ValueError):
+            pass
+    explicit = str(row.get("status") or "").strip().upper()
+    return explicit or "DRAFT"
+
+
+def _apply_proposals(
+    db: Session,
+    *,
+    actor: User,
+    rows: list[dict[str, Any]],
+    legacy_source: str,
+    migration_run_id: str,
+    cache: dict[str, str],
+    created: dict[str, int],
+    reused: dict[str, int],
+    skipped: dict[str, int],
+) -> None:
+    pending: list[tuple[str, dict[str, Any], Proposal]] = []
+
+    def flush_batch() -> None:
+        nonlocal pending
+        if not pending:
+            return
+        db.flush()
+        for legacy_id, row, item in pending:
+            _remember_map(
+                db,
+                organization_id=actor.organization_id,
+                legacy_source=legacy_source,
+                entity_type="proposals",
+                legacy_id=legacy_id,
+                new_id=item.id,
+                migration_run_id=migration_run_id,
+                payload=row,
+                cache=cache,
+            )
+            created["proposals"] = created.get("proposals", 0) + 1
+        pending.clear()
+
+    for row in rows:
+        legacy_id = str(row["legacy_id"])
+        if _resolve_mapped_id(
+            db,
+            organization_id=actor.organization_id,
+            legacy_source=legacy_source,
+            entity_type="proposals",
+            legacy_id=legacy_id,
+            cache=cache,
+        ):
+            reused["proposals"] = reused.get("proposals", 0) + 1
+            continue
+
+        lead_legacy = str(row.get("lead_legacy_id") or "").strip()
+        if not lead_legacy:
+            skipped["proposals_missing_lead"] = skipped.get("proposals_missing_lead", 0) + 1
+            continue
+
+        lead_id = _resolve_mapped_id(
+            db,
+            organization_id=actor.organization_id,
+            legacy_source=legacy_source,
+            entity_type="leads",
+            legacy_id=lead_legacy,
+            cache=cache,
+        )
+        if not lead_id:
+            skipped["proposals_missing_lead"] = skipped.get("proposals_missing_lead", 0) + 1
+            continue
+
+        requested_amount = _parse_decimal(row.get("requested_amount"))
+        if requested_amount <= 0:
+            requested_amount = Decimal("1")
+
+        product = str(row.get("product") or "MARKETPLACE").strip().upper() or "MARKETPLACE"
+        terms = {
+            "legacy_migration": True,
+            "legacy_id": legacy_id,
+            "legacy_status_code": row.get("legacy_status_code"),
+        }
+
+        item = Proposal(
+            organization_id=actor.organization_id,
+            lead_id=lead_id,
+            product=product,
+            requested_amount=requested_amount,
+            status=_proposal_status_from_legacy(row),
+            terms_json=json.dumps(terms, ensure_ascii=False),
+        )
+        db.add(item)
+        pending.append((legacy_id, row, item))
+        if len(pending) >= MIGRATION_APPLY_BATCH_SIZE:
+            flush_batch()
+
+    flush_batch()
+
+
 def apply_bundle(
     db: Session,
     user,
@@ -993,6 +1123,17 @@ def apply_bundle(
             db,
             actor=user,
             rows=entities.get("quotas") or [],
+            legacy_source=source,
+            migration_run_id=run.id,
+            cache=cache,
+            created=created,
+            reused=reused,
+            skipped=skipped,
+        )
+        _apply_proposals(
+            db,
+            actor=user,
+            rows=entities.get("proposals") or [],
             legacy_source=source,
             migration_run_id=run.id,
             cache=cache,

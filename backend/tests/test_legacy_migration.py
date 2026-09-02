@@ -243,3 +243,51 @@ def test_legacy_migration_apply_quotas(client, auth_headers):
     )
     assert maps.status_code == 200
     assert len(maps.json()) == 1
+
+
+def test_legacy_migration_apply_proposals(client, auth_headers):
+    payload = {
+        "legacy_source": "letter_v1_apply_proposals",
+        "entities": {
+            "leads": [
+                {
+                    "legacy_id": "customer-proposal-1",
+                    "name": "Cliente Com Proposta",
+                    "phone": "33999990001",
+                    "status": "QUALIFIED",
+                    "product_interest": "MARKETPLACE",
+                }
+            ],
+            "proposals": [
+                {
+                    "legacy_id": "proposal-customer-1",
+                    "product": "MARKETPLACE",
+                    "lead_legacy_id": "customer-proposal-1",
+                    "requested_amount": "51071.00",
+                    "legacy_status_code": 2,
+                }
+            ],
+        },
+    }
+    response = client.post("/api/v1/admin/migration/apply", headers=auth_headers, json=payload)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "COMPLETED"
+    assert body["summary"]["created"]["leads"] == 1
+    assert body["summary"]["created"]["proposals"] == 1
+
+    proposals = client.get("/api/v1/proposals", headers=auth_headers).json()
+    migrated = next(item for item in proposals if item["product"] == "MARKETPLACE" and float(item["requested_amount"]) == 51071.0)
+    assert migrated["status"] == "SUBMITTED"
+
+    maps = client.get(
+        "/api/v1/admin/migration/id-map",
+        headers=auth_headers,
+        params={
+            "legacy_source": "letter_v1_apply_proposals",
+            "entity_type": "proposals",
+            "legacy_id": "proposal-customer-1",
+        },
+    )
+    assert maps.status_code == 200
+    assert len(maps.json()) == 1
