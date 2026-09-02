@@ -16,6 +16,7 @@ from app.core.security import hash_password
 from app.models import (
     Administrator,
     Branch,
+    Lead,
     LegacyIdMap,
     LegacyMigrationRun,
     Organization,
@@ -23,7 +24,8 @@ from app.models import (
     User,
 )
 
-IMPLEMENTED_APPLY_ENTITIES = frozenset({"organizations", "branches", "administrators", "users"})
+IMPLEMENTED_APPLY_ENTITIES = frozenset({"organizations", "branches", "administrators", "users", "leads"})
+LEAD_APPLY_BATCH_SIZE = 500
 
 MIGRATION_ENTITY_ORDER: tuple[str, ...] = (
     "organizations",
@@ -57,6 +59,7 @@ REF_FIELD_TO_ENTITY: dict[str, str] = {
     "sponsor_user_legacy_id": "users",
     "administrator_legacy_id": "administrators",
     "lead_legacy_id": "leads",
+    "owner_user_legacy_id": "users",
 }
 
 
@@ -256,6 +259,19 @@ def validate_bundle(db: Session, organization_id: str, bundle: dict[str, Any]) -
             require_ref("network_nodes", "sponsor_user_legacy_id", row)
     for row in entities.get("quotas") or []:
         require_ref("quotas", "administrator_legacy_id", row)
+    for row in entities.get("leads") or []:
+        owner_legacy = str(row.get("owner_user_legacy_id") or "").strip()
+        if owner_legacy:
+            key = _legacy_key("users", owner_legacy)
+            if key not in index and key not in mapped_keys:
+                report.warnings.append(
+                    MigrationIssue(
+                        "WARNING",
+                        "leads",
+                        str(row.get("legacy_id") or ""),
+                        f"Parceiro legado não exportado — owner será o admin migrador: {owner_legacy}",
+                    )
+                )
     for row in entities.get("proposals") or []:
         if row.get("lead_legacy_id"):
             require_ref("proposals", "lead_legacy_id", row)
@@ -534,6 +550,96 @@ def _apply_users(
             target.referred_by_user_id = sponsor_id
 
 
+def _normalize_phone(value: Any) -> str:
+    phone = _digits(value)
+    return (phone or "00000000000")[:30]
+
+
+def _apply_leads(
+    db: Session,
+    *,
+    actor: User,
+    rows: list[dict[str, Any]],
+    legacy_source: str,
+    migration_run_id: str,
+    cache: dict[str, str],
+    created: dict[str, int],
+    reused: dict[str, int],
+    skipped: dict[str, int],
+) -> None:
+    pending: list[tuple[str, dict[str, Any], Lead]] = []
+
+    def flush_batch() -> None:
+        nonlocal pending
+        if not pending:
+            return
+        db.flush()
+        for legacy_id, row, item in pending:
+            _remember_map(
+                db,
+                organization_id=actor.organization_id,
+                legacy_source=legacy_source,
+                entity_type="leads",
+                legacy_id=legacy_id,
+                new_id=item.id,
+                migration_run_id=migration_run_id,
+                payload=row,
+                cache=cache,
+            )
+            created["leads"] = created.get("leads", 0) + 1
+        pending.clear()
+
+    for row in rows:
+        legacy_id = str(row["legacy_id"])
+        if _resolve_mapped_id(
+            db,
+            organization_id=actor.organization_id,
+            legacy_source=legacy_source,
+            entity_type="leads",
+            legacy_id=legacy_id,
+            cache=cache,
+        ):
+            reused["leads"] = reused.get("leads", 0) + 1
+            continue
+
+        owner_id = actor.id
+        owner_legacy = str(row.get("owner_user_legacy_id") or "").strip()
+        if owner_legacy:
+            resolved_owner = _resolve_mapped_id(
+                db,
+                organization_id=actor.organization_id,
+                legacy_source=legacy_source,
+                entity_type="users",
+                legacy_id=owner_legacy,
+                cache=cache,
+            )
+            if resolved_owner:
+                owner_id = resolved_owner
+            else:
+                skipped["leads_missing_owner"] = skipped.get("leads_missing_owner", 0) + 1
+
+        status = str(row.get("status") or "NEW").strip().upper() or "NEW"
+        product = str(row.get("product_interest") or "MARKETPLACE").strip().upper() or "MARKETPLACE"
+        document = _digits(row.get("legacy_document") or row.get("document")) or None
+
+        item = Lead(
+            organization_id=actor.organization_id,
+            owner_id=owner_id,
+            name=str(row.get("name") or "").strip() or f"Lead {legacy_id}",
+            document=document,
+            phone=_normalize_phone(row.get("phone")),
+            product_interest=product,
+            status=status,
+            source="LEGACY_MIGRATION",
+        )
+        db.add(item)
+        pending.append((legacy_id, row, item))
+        if len(pending) >= LEAD_APPLY_BATCH_SIZE:
+            flush_batch()
+
+    flush_batch()
+
+
 def apply_bundle(
     db: Session,
     user,
@@ -577,6 +683,7 @@ def apply_bundle(
     entities = bundle["entities"]
     created: dict[str, int] = {}
     reused: dict[str, int] = {}
+    skipped: dict[str, int] = {}
 
     try:
         for row in entities.get("organizations") or []:
@@ -681,6 +788,17 @@ def apply_bundle(
             created=created,
             reused=reused,
         )
+        _apply_leads(
+            db,
+            actor=user,
+            rows=entities.get("leads") or [],
+            legacy_source=source,
+            migration_run_id=run.id,
+            cache=cache,
+            created=created,
+            reused=reused,
+            skipped=skipped,
+        )
 
         remaining = [
             name
@@ -701,6 +819,7 @@ def apply_bundle(
         summary = report.to_dict()
         summary["created"] = created
         summary["reused"] = reused
+        summary["skipped"] = skipped
         summary["password_policy"] = "Migrated users receive a random password hash; reset required on first login."
         run.status = "COMPLETED"
         run.summary_json = json.dumps(summary, ensure_ascii=False)

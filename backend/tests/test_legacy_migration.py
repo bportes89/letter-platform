@@ -139,3 +139,50 @@ def test_legacy_migration_apply_reuses_existing_administrator_code(client, auth_
     body = response.json()
     assert body["summary"]["reused"]["administrators"] == 1
     assert body["summary"]["created"].get("administrators", 0) == 0
+
+
+def test_legacy_migration_apply_leads(client, auth_headers):
+    payload = {
+        "legacy_source": "letter_v1_apply_leads",
+        "entities": {
+            "users": [
+                {
+                    "legacy_id": "affiliate-owner-8",
+                    "name": "Parceiro Owner",
+                    "email": "owner.lead.apply@example.com",
+                    "role": "PARTNER",
+                }
+            ],
+            "leads": [
+                {
+                    "legacy_id": "customer-100",
+                    "name": "Cliente Legacy Lead",
+                    "phone": "33991988170",
+                    "status": "QUALIFIED",
+                    "product_interest": "MARKETPLACE",
+                    "owner_user_legacy_id": "affiliate-owner-8",
+                    "legacy_document": "03825956539",
+                }
+            ],
+        },
+    }
+    response = client.post("/api/v1/admin/migration/apply", headers=auth_headers, json=payload)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "COMPLETED"
+    assert body["summary"]["created"]["users"] == 1
+    assert body["summary"]["created"]["leads"] == 1
+
+    leads = client.get("/api/v1/leads", headers=auth_headers).json()
+    migrated = next(item for item in leads if item["name"] == "Cliente Legacy Lead")
+    assert migrated["status"] == "QUALIFIED"
+    assert migrated["product_interest"] == "MARKETPLACE"
+    assert migrated["phone"] == "33991988170"
+
+    maps = client.get(
+        "/api/v1/admin/migration/id-map",
+        headers=auth_headers,
+        params={"legacy_source": "letter_v1_apply_leads", "entity_type": "leads", "legacy_id": "customer-100"},
+    )
+    assert maps.status_code == 200
+    assert len(maps.json()) == 1
