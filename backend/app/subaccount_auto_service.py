@@ -23,6 +23,8 @@ AUTO_SUBACCOUNT_ROLES = frozenset({
     Role.CLIENT,
     Role.PARTNER,
     Role.QUOTA_SELLER,
+    Role.MASTER_FRANCHISEE,
+    Role.MANAGER,
 })
 
 

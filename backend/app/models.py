@@ -28,8 +28,8 @@ class Role(StrEnum):
 ROLE_SCOPES = {
     Role.PLATFORM_ADMIN: ["*"],
     Role.INTERNAL_STAFF: ["dashboard:read", "operations:write", "documents:write", "payments:review"],
-    Role.MASTER_FRANCHISEE: ["dashboard:read", "network:read", "network:invite", "proposals:read"],
-    Role.MANAGER: ["dashboard:read", "leads:read", "network:invite", "proposals:read"],
+    Role.MASTER_FRANCHISEE: ["dashboard:read", "network:read", "network:invite", "proposals:read", "wallet:read"],
+    Role.MANAGER: ["dashboard:read", "leads:read", "network:invite", "proposals:read", "wallet:read"],
     Role.PARTNER: ["dashboard:read", "leads:write", "proposals:write", "wallet:read", "network:invite"],
     Role.QUOTA_SELLER: ["dashboard:read", "inventory:write", "payments:read", "network:invite"],
     Role.CLIENT: ["dashboard:read", "proposals:read", "contracts:read", "payments:read"],

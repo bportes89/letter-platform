@@ -214,10 +214,26 @@ def test_branch_invitation_and_acceptance(client, auth_headers):
     })
     assert invite.status_code == 201 and invite.json()["token"]
     accepted = client.post("/api/v1/auth/invitations/accept", json={
-        "token":invite.json()["token"],"name":"Gestor Campinas","document":"12345678901","password":"NovaSenha@123"
+        "token": invite.json()["token"],
+        "name": "Gestor Campinas",
+        "document": "12345678901",
+        "password": "NovaSenha@123",
+        "phone": "19988887777",
     })
     assert accepted.status_code == 200
     assert accepted.json()["branch_id"] == branch.json()["id"]
+
+    login = client.post("/api/v1/auth/login", json={
+        "email": "gestor.campinas@letter.com.br",
+        "password": "NovaSenha@123",
+    })
+    assert login.status_code == 200
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    kyc = client.post("/api/v1/kyc/me/complete", headers=headers)
+    assert kyc.status_code == 200
+    wallet = client.get("/api/v1/wallet/me", headers=headers)
+    assert wallet.status_code == 200
+    assert wallet.json()["has_subaccount"] is True
 
 
 def test_mfa_activation_and_login_challenge(client, auth_headers):
