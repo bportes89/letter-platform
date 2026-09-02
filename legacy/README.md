@@ -29,16 +29,27 @@ Os arquivos são grandes (~43 MB) e podem conter **dados sensíveis** (CPF, e-ma
 3. Validar com `POST /api/v1/admin/migration/dry-run`
 4. Apply incremental em staging
 
-## Comandos úteis (depois da análise)
+## Comandos no Windows (PowerShell)
 
-```bash
-# 1. Exportar SQL → JSON
-cd backend
-py -c "from scripts.export_legacy_v1 import main; raise SystemExit(main())"
+O repositório fica em `letter-platform-v0.24.0\letter-platform\` (não existe `backend` na pasta pai).
 
-# 2. Dry-run via CLI
-py backend/scripts/migrate_legacy.py --file legacy/export/bundle.json --dry-run
+```powershell
+# Opção 1 — scripts prontos (a partir de letter-platform/)
+cd C:\Users\user\Downloads\letter-platform-v0.24.0\letter-platform
+.\export-legacy.ps1
 
-# 3. Dry-run via API (admin logado)
-POST /api/v1/admin/migration/dry-run
+# Opção 2 — comando direto
+cd C:\Users\user\Downloads\letter-platform-v0.24.0\letter-platform
+py backend\scripts\export_legacy_v1.py
+
+# Dry-run após export
+.\dry-run-migration.ps1
+# ou
+py backend\scripts\migrate_legacy.py --file legacy\export\bundle.json --dry-run
+```
+
+Export parcial (teste):
+
+```powershell
+py backend\scripts\export_legacy_v1.py --limit-quotas 100 --limit-customers 50
 ```

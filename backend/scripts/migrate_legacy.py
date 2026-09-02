@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """CLI de migração legado — dry-run e apply parcial (organizations/branches)."""
 
 from __future__ import annotations

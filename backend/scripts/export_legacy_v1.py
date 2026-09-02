@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Exporta letter_banco_new.sql para bundle JSON de migração."""
 
 from __future__ import annotations
