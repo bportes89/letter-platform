@@ -77,6 +77,7 @@ class Settings(BaseSettings):
     fipe_api_token: str | None = None
     molicar_api_token: str | None = None
     incra_api_key: str | None = None
+    fipe_plate_api_base_url: str = "https://placas.fipeapi.com.br"
     bacen_scr_api_url: str | None = None
     bacen_scr_institution_code: str | None = None
     bacen_scr_api_key: str | None = None

@@ -22,8 +22,13 @@ from app.tapaf_constants import INFRA_PROVIDER_CATALOG, TAPAF_ESTIMATED_TOTAL_AP
 
 def catalog() -> list[dict]:
     configured = {code: INFRA_CLIENTS[code].is_configured() for code in INFRA_CLIENTS}
+    production_ready = {code: INFRA_CLIENTS[code].production_ready for code in INFRA_CLIENTS}
     return [
-        {**item, "configured": configured.get(item["code"], False)}
+        {
+            **item,
+            "configured": configured.get(item["code"], False),
+            "production_ready": production_ready.get(item["code"], False),
+        }
         for item in INFRA_PROVIDER_CATALOG
     ]
 
@@ -51,6 +56,7 @@ def run_inventory(
         results.append(client.query(context=context))
 
     total_estimated = sum(Decimal(r.estimated_cost_brl) for r in results)
+    production_modes = sum(1 for r in results if r.mode == "PRODUCTION")
     return {
         "track": track,
         "providers": [
@@ -66,7 +72,8 @@ def run_inventory(
         ],
         "estimated_total_cost_brl": str(total_estimated),
         "policy_estimated_cost_brl": str(TAPAF_ESTIMATED_TOTAL_API_COST),
-        "execution": "SANDBOX_UNLESS_CONFIGURED",
+        "execution": "PRODUCTION" if production_modes else "SANDBOX",
+        "production_provider_count": production_modes,
     }
 
 

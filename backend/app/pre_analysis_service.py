@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.administrator_service import homologated_codes, rules_for_administrator_name
+from app.flash_valid_lss_service import issue_stamp
 from app.models import PreAnalysisPauta, Proposal, User
 from app.pre_analysis_constants import (
     DOCUMENT_LABELS,

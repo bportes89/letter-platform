@@ -11,9 +11,13 @@
 | Capacidade | Código | Status |
 |------------|--------|--------|
 | Split TAPAF R$ 300 + R$ 1.200 | `tapaf_settlement_service.py` | Implementado (ledger sandbox) |
-| Inventário pós-TAPAF (sandbox) | `infra_inventory_service.py` | Implementado |
+| Inventário pós-TAPAF | `infra_inventory_service.py` | Implementado |
+| **InfoSimples CNDs (PGFN + FGTS + TST)** | `infra_clients.py` | **HTTP produção** (mesmo token SEFAZ) |
+| **Fipe API Cloud (placa)** | `infra_clients.py` | **HTTP produção** |
+| InfoSimples SEFAZ/NF-e | `sefaz_client.py` | HTTP produção |
+| ONR, DataZap, Serasa, Judis, SERPRO, Molicar, INCRA | `infra_clients.py` | Sandbox + credencial → `PRODUCTION_PENDING` |
 | Política split | `GET /finops/tapaf/split-policy` | Implementado |
-| Catálogo provedores | `GET /finops/tapaf/infra-catalog` | Implementado |
+| Catálogo provedores | `GET /finops/tapaf/infra-catalog` | Implementado (`production_ready`) |
 | Liquidações | `GET /finops/tapaf/settlements` | Implementado |
 | ZapSign | `zapsign_signature_service.py` | Homologado produção |
 | Asaas Escrow | `asaas_escrow_service.py` | Homologado produção |

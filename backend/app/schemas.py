@@ -920,6 +920,7 @@ class InfraProviderCatalogItem(BaseModel):
     category: str
     estimated_cost_brl: str
     configured: bool
+    production_ready: bool = False
 
 
 class SdcBulletPreviewRequest(BaseModel):
