@@ -3,7 +3,7 @@
 import { ArrowRight, CheckCircle2, Clock3, Construction, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { api, logout, Module, User } from "@/lib/api";
 import { InventoryModule, LeadsModule, MarketplaceModule, ProposalsModule } from "@/components/operational-modules";
 import { ContractsModule, PaymentsModule, WalletModule } from "@/components/financial-modules";
