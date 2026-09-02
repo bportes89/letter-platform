@@ -45,8 +45,14 @@ py backend\scripts\export_legacy_v1.py
 # Dry-run após export
 .\dry-run-migration.ps1
 
-# Apply parcial (administrators + users; senha exige reset)
+# Apply local (banco configurado no backend / DATABASE_URL)
 .\apply-migration.ps1
+
+# Dry-run / apply remoto na API de producao (com retry e timeout longo)
+.\apply-migration-remote.ps1 -DryRun
+$env:LETTER_ADMIN_EMAIL = "admin@letter.com.br"
+$env:LETTER_ADMIN_PASSWORD = "..."
+.\apply-migration-remote.ps1
 ```
 
 Export parcial (teste):

@@ -1,4 +1,4 @@
-# Apply parcial da migracao (organizations, branches, administrators, users)
+# Apply local da migracao (banco configurado no backend / DATABASE_URL)
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $Root
