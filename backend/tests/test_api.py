@@ -1,5 +1,6 @@
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from uuid import uuid4
 
 
 def test_health(client):
@@ -2461,6 +2462,7 @@ def test_public_client_self_registration(client, auth_headers):
         "terms_accepted": True,
     })
     assert duplicate.status_code == 409
+    assert "Faça login" in duplicate.json()["detail"]
 
     invalid_ref = client.post("/api/v1/public/site/auth/register", json={
         "name": "Cliente Sem Ref",
@@ -2481,6 +2483,71 @@ def test_public_client_self_registration(client, auth_headers):
     })
     assert direct.status_code == 201
     assert direct.json()["referrer"] is None
+
+
+def test_public_brand_new_client_registration(client):
+    email = f"cliente.novo.{uuid4().hex[:10]}@letter.com.br"
+    registered = client.post("/api/v1/public/site/auth/register", json={
+        "name": "Cliente Totalmente Novo",
+        "email": email,
+        "phone": "11933332222",
+        "password": "ClienteNovo1!",
+        "terms_accepted": True,
+    })
+    assert registered.status_code == 201, registered.text
+    body = registered.json()
+    assert body["user"]["role"] == "CLIENT"
+    assert body["user"]["email"] == email
+    assert body["access_token"]
+    assert body["refresh_token"]
+
+    login = client.post("/api/v1/auth/login", json={
+        "email": email,
+        "password": "ClienteNovo1!",
+    })
+    assert login.status_code == 200
+
+
+def test_public_client_activation_for_migrated_partner(client, auth_headers):
+    from app.core.security import hash_password
+    from app.db import SessionLocal
+    from app.models import Organization, Role, User
+    from sqlalchemy import select
+
+    email = "parceiro.migrado@letter.com.br"
+    with SessionLocal() as db:
+        existing = db.scalar(select(User).where(User.email == email))
+        if existing:
+            db.delete(existing)
+            db.commit()
+        org = db.scalar(select(Organization).order_by(Organization.created_at))
+        user = User(
+            organization_id=org.id,
+            name="Parceiro Legado",
+            email=email,
+            phone="11977776666",
+            password_hash=hash_password("legacy-random"),
+            role=Role.PARTNER,
+            active=True,
+        )
+        db.add(user)
+        db.commit()
+
+    activated = client.post("/api/v1/public/site/auth/register", json={
+        "name": "Parceiro Legado",
+        "email": email,
+        "phone": "11977776666",
+        "password": "ParceiroNovo1!",
+        "terms_accepted": True,
+    })
+    assert activated.status_code == 201, activated.text
+    assert activated.json()["user"]["role"] == "PARTNER"
+
+    login = client.post("/api/v1/auth/login", json={
+        "email": email,
+        "password": "ParceiroNovo1!",
+    })
+    assert login.status_code == 200
 
 
 def test_partner_can_invite_partner(client, auth_headers):

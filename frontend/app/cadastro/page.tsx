@@ -86,8 +86,9 @@ function CadastroForm() {
       <p className="site-kicker">Conta LETTER</p>
       <h1>Abra sua conta</h1>
       <p>
-        Cadastre-se como cliente para acompanhar propostas, contratos e operações. Não é cadastro de parceiro —
-        parceiros continuam sendo convidados pela plataforma.
+        Crie sua conta para acompanhar propostas, contratos e operações. Clientes novos e quem já tinha
+        cadastro no sistema anterior podem usar este formulário — ao concluir, você entra automaticamente na
+        área logada.
       </p>
 
       <label>
@@ -151,7 +152,16 @@ function CadastroForm() {
         <span>Li e aceito os termos de uso e a política de privacidade da LETTER.</span>
       </label>
 
-      {error && <p className="site-error">{error}</p>}
+      {error && (
+        <div className="site-error">
+          <p>{error}</p>
+          {error.toLowerCase().includes("faça login") && (
+            <Link href="/login" className="site-login-back">
+              Ir para o login →
+            </Link>
+          )}
+        </div>
+      )}
 
       <button className="site-submit" type="submit" disabled={loading} style={{ width: "100%" }}>
         {loading ? "Criando conta…" : "Criar minha conta"}

@@ -146,48 +146,68 @@ def register_public_client(
 ) -> dict:
     org = headquarters_org(db)
     normalized_email = email.strip().lower()
-    if db.scalar(select(User).where(User.email == normalized_email)):
-        raise HTTPException(status_code=409, detail="E-mail já cadastrado")
     normalized_document = document.strip() if document else None
-    if normalized_document and db.scalar(select(User).where(User.document == normalized_document)):
-        raise HTTPException(status_code=409, detail="Documento já cadastrado")
+    existing = db.scalar(select(User).where(User.email == normalized_email))
+    if existing:
+        if existing.last_login_at is not None:
+            raise HTTPException(
+                status_code=409,
+                detail="E-mail já cadastrado. Faça login para acessar sua conta.",
+            )
+        if normalized_document:
+            doc_conflict = db.scalar(
+                select(User).where(User.document == normalized_document, User.id != existing.id)
+            )
+            if doc_conflict:
+                raise HTTPException(status_code=409, detail="Documento já cadastrado")
+            existing.document = normalized_document
+        existing.name = name.strip()
+        existing.phone = phone.strip()
+        existing.password_hash = hash_password(password)
+        user = existing
+        db.flush()
+        referrer_node = None
+        referrer_user_id = user.referred_by_user_id
+        lead_id = _ensure_client_self_register_lead(
+            db,
+            org=org,
+            user=user,
+            phone=phone,
+            referrer_node=None,
+            source_prefix="CLIENT_ACCOUNT_ACTIVATION",
+        )
+    else:
+        if normalized_document and db.scalar(select(User).where(User.document == normalized_document)):
+            raise HTTPException(status_code=409, detail="Documento já cadastrado")
 
-    referrer_node = lookup_referral_code(db, org.id, referral_code)
-    if referral_code and referral_code.strip() and not referrer_node:
-        raise HTTPException(status_code=422, detail="Código de indicação inválido")
+        referrer_node = lookup_referral_code(db, org.id, referral_code)
+        if referral_code and referral_code.strip() and not referrer_node:
+            raise HTTPException(status_code=422, detail="Código de indicação inválido")
 
-    referrer_user_id = referrer_node.user_id if referrer_node else None
-    user = User(
-        organization_id=org.id,
-        name=name.strip(),
-        email=normalized_email,
-        phone=phone.strip(),
-        document=normalized_document,
-        password_hash=hash_password(password),
-        role=Role.CLIENT,
-        referred_by_user_id=referrer_user_id,
-    )
-    db.add(user)
-    db.flush()
+        referrer_user_id = referrer_node.user_id if referrer_node else None
+        user = User(
+            organization_id=org.id,
+            name=name.strip(),
+            email=normalized_email,
+            phone=phone.strip(),
+            document=normalized_document,
+            password_hash=hash_password(password),
+            role=Role.CLIENT,
+            referred_by_user_id=referrer_user_id,
+        )
+        db.add(user)
+        db.flush()
+        lead_id = _ensure_client_self_register_lead(
+            db,
+            org=org,
+            user=user,
+            phone=phone,
+            referrer_node=referrer_node,
+            source_prefix="CLIENT_SELF_REGISTER",
+        )
 
     if user_eligible_for_auto_subaccount(user):
         ensure_kyc_case_for_user(db, user)
-
-    lead_source = "CLIENT_SELF_REGISTER"
-    if referrer_node:
-        lead_source = f"CLIENT_SELF_REGISTER:REF:{referrer_node.referral_code}"
-    lead = Lead(
-        organization_id=org.id,
-        owner_id=referrer_user_id,
-        name=user.name,
-        document=user.document,
-        phone=user.phone or phone.strip(),
-        product_interest="PLATFORM",
-        status="REGISTERED",
-        source=lead_source,
-    )
-    db.add(lead)
-    db.flush()
 
     access, refresh, _ = create_session_tokens(db, user, user_agent, ip_address)
     referrer = db.get(User, referrer_user_id) if referrer_user_id else None
@@ -201,8 +221,47 @@ def register_public_client(
             "referral_code": referrer_node.referral_code if referrer_node else None,
             "referrer_name": mask_person_name(referrer.name) if referrer else None,
         } if referrer_node else None,
-        "lead_id": lead.id,
+        "lead_id": lead_id,
     }
+
+
+def _ensure_client_self_register_lead(
+    db: Session,
+    *,
+    org: Organization,
+    user: User,
+    phone: str,
+    referrer_node: NetworkNode | None,
+    source_prefix: str,
+) -> str:
+    if user.role != Role.CLIENT:
+        return ""
+    existing_lead = db.scalar(
+        select(Lead).where(
+            Lead.organization_id == org.id,
+            Lead.name == user.name,
+            Lead.phone == (user.phone or phone.strip()),
+            Lead.status == "REGISTERED",
+        ).order_by(Lead.created_at.desc())
+    )
+    if existing_lead:
+        return existing_lead.id
+    lead_source = source_prefix
+    if referrer_node:
+        lead_source = f"{source_prefix}:REF:{referrer_node.referral_code}"
+    lead = Lead(
+        organization_id=org.id,
+        owner_id=referrer_node.user_id if referrer_node else user.referred_by_user_id,
+        name=user.name,
+        document=user.document,
+        phone=user.phone or phone.strip(),
+        product_interest="PLATFORM",
+        status="REGISTERED",
+        source=lead_source,
+    )
+    db.add(lead)
+    db.flush()
+    return lead.id
 
 
 def capture_public_lead(
