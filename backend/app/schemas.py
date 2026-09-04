@@ -1536,6 +1536,7 @@ class LegalManualPublicView(BaseModel):
     product: str
     audience: str
     description: str
+    document_type: str = "manual"
     requires_login: bool = True
 
 

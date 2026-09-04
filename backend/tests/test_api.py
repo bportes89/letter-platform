@@ -1215,7 +1215,9 @@ def test_legal_manuals_public_catalog_and_authenticated_download(client, auth_he
     public = client.get("/api/v1/platform/legal-manuals")
     assert public.status_code == 200
     body = public.json()
-    assert len(body) >= 10
+    assert len(body) >= 7
+    assert all(row["document_type"] == "manual" for row in body)
+    assert all("Contrato" not in row["title"] for row in body)
     assert body[0]["requires_login"] is True
     assert "filename" not in body[0]
 
@@ -1225,12 +1227,16 @@ def test_legal_manuals_public_catalog_and_authenticated_download(client, auth_he
     listed = client.get("/api/v1/legal-manuals", headers=auth_headers)
     assert listed.status_code == 200
     rows = listed.json()
-    assert any(row["slug"] == "master-franqueado" and row["available"] for row in rows)
+    assert any(row["slug"] == "manual-sdc" and row["available"] for row in rows)
+    assert not any(row["slug"] == "master-franqueado" for row in rows)
 
-    download = client.get("/api/v1/legal-manuals/master-franqueado/download", headers=auth_headers)
+    download = client.get("/api/v1/legal-manuals/manual-sdc/download", headers=auth_headers)
     assert download.status_code == 200
     assert download.headers["content-type"].startswith("application/vnd.openxmlformats-officedocument")
-    assert len(download.content) > 1000
+    assert len(download.content) > 100
+
+    blocked = client.get("/api/v1/legal-manuals/master-franqueado/download", headers=auth_headers)
+    assert blocked.status_code == 403
 
 
 def test_flash_simulator_four_scenarios_and_settlement_quote(client,auth_headers):

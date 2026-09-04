@@ -260,18 +260,17 @@ def platform_legal_manuals_public():
 
 
 @router.get("/legal-manuals", response_model=list[LegalManualView])
-def legal_manuals(user: User = Depends(get_current_user)):
+def legal_manuals(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     from app.legal_manuals_service import list_authenticated_manuals
 
-    _ = user
-    return list_authenticated_manuals()
+    return list_authenticated_manuals(db, user)
 
 
 @router.get("/legal-manuals/{slug}/download")
 def legal_manual_download(slug: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     from app.legal_manuals_service import read_manual_bytes
 
-    data, filename, content_type = read_manual_bytes(slug)
+    data, filename, content_type = read_manual_bytes(db, user, slug)
     audit(db, user, "legal_manual.downloaded", "legal_manual", slug, {"filename": filename})
     db.commit()
     return Response(

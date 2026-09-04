@@ -25,12 +25,13 @@ export function LegalManualsPublicSection() {
       <div className="section-kicker">03 · Documentação</div>
       <div className="section-heading">
         <h2>
-          Manuais e contratos
+          Manuais operacionais
           <br />
-          <em>acesso exclusivo para contas LETTER.</em>
+          <em>consulta pública · download na Deal Room.</em>
         </h2>
         <p>
-          Consulte os templates jurídicos por produto. A visualização e download completos exigem login na Deal Room.
+          Consulte os manuais por produto. O download completo exige login na Deal Room. Contratos ficam disponíveis
+          somente na área logada, após assinatura do serviço contratado.
         </p>
       </div>
       <div className="manuals-grid">
@@ -45,7 +46,7 @@ export function LegalManualsPublicSection() {
                     <small>{item.product} · {item.audience}</small>
                   </div>
                   <Link className="manuals-lock-link" href="/login?next=/modules/legal-manuals">
-                    <LockKeyhole size={14} /> Abrir conta para acessar
+                    <LockKeyhole size={14} /> Entrar para baixar
                   </Link>
                 </li>
               ))}
@@ -56,8 +57,8 @@ export function LegalManualsPublicSection() {
       <div className="manuals-cta">
         <FileText />
         <div>
-          <strong>Biblioteca jurídica na área logada</strong>
-          <p>Após criar sua conta, acesse <b>Plataforma → Manuais e contratos</b> para baixar os arquivos .docx.</p>
+          <strong>Biblioteca na área logada</strong>
+          <p>Após criar sua conta, acesse <b>Plataforma → Manuais e contratos</b> para baixar manuais e contratos assinados.</p>
         </div>
         <Link className="button" href="/login?next=/modules/legal-manuals">
           Entrar na Deal Room <span>→</span>
