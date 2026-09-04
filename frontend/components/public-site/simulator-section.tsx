@@ -172,7 +172,7 @@ export function PublicSimulatorSection() {
           <>
             <label>
               Valor do ativo / base de cálculo
-              <CurrencyFormField name="asset_value" defaultValue="1000000" placeholder="R$ 0,00" required />
+              <CurrencyFormField name="asset_value" placeholder="Ex.: R$ 1.000.000,00" required />
             </label>
             <label>
               Valor pretendido (até 40% do AVM)
@@ -196,7 +196,7 @@ export function PublicSimulatorSection() {
             </div>
             <label>
               Valor alvo da operação
-              <CurrencyFormField name="requested_amount" defaultValue="800000" placeholder="R$ 0,00" required />
+              <CurrencyFormField name="requested_amount" placeholder="Ex.: R$ 800.000,00" required />
             </label>
             <label>
               Prazo, em meses
