@@ -126,17 +126,21 @@ export async function simulateFlashPublic(
 }
 
 export async function simulateSdcPublic(payload: {
-  quota_ids: string[];
   requested_amount: number;
   duration_months: number;
+  asset_category: "REAL_ESTATE" | "VEHICLE" | "OTHER";
+  asset_value?: number;
+  scr_restrictions?: boolean;
 }): Promise<SdcMockResult> {
   return publicFetch<SdcMockResult>("/public/site/sdc/simulate", {
     method: "POST",
     body: JSON.stringify({
-      quota_ids: payload.quota_ids,
       requested_amount: String(payload.requested_amount),
       duration_months: payload.duration_months,
       capital_source: "POOL",
+      asset_category: payload.asset_category,
+      asset_value: payload.asset_value != null ? String(payload.asset_value) : undefined,
+      scr_restrictions: payload.scr_restrictions ?? false,
     }),
   });
 }

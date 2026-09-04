@@ -13,8 +13,11 @@ from app.bacen_scr_service import attach_scr_to_lead, bacen_scr_client
 from app.core.security import hash_password
 from app.identity_service import create_session_tokens
 from app.models import CommissionRule, Lead, NetworkNode, Organization, Quota, Role, User
+from app.nina_bi_service import rank_quota_combinations_for_org
 from app.product_service import build_sdc_simulation_output
 from app.subaccount_auto_service import ensure_kyc_case_for_user, user_eligible_for_auto_subaccount
+
+SDC_ASSET_CATEGORIES = {"REAL_ESTATE", "VEHICLE", "OTHER"}
 
 HUNDRED = Decimal("100")
 
@@ -366,23 +369,58 @@ def simulate_flash_pool_public(
 
 def simulate_sdc_public(
     db: Session,
-    quota_ids: list[str],
+    *,
     requested_amount: Decimal,
     duration_months: int,
     capital_source: str = "POOL",
+    asset_category: str = "REAL_ESTATE",
+    asset_value: Decimal | None = None,
+    quota_ids: list[str] | None = None,
+    scr_restrictions: bool = False,
 ) -> dict:
     org = headquarters_org(db)
+    category = asset_category.strip().upper()
+    if category not in SDC_ASSET_CATEGORIES:
+        raise HTTPException(422, "Tipo de bem inválido. Use REAL_ESTATE, VEHICLE ou OTHER.")
+
+    nina_match: dict | None = None
+    if quota_ids:
+        selected_ids = quota_ids
+    else:
+        ranked = rank_quota_combinations_for_org(
+            db,
+            org.id,
+            requested_amount,
+            category,
+            limit=1 if scr_restrictions else 3,
+        )
+        if not ranked:
+            raise HTTPException(
+                422,
+                "Nina não encontrou cotas compatíveis com o tipo de bem e valor informados após a varredura SCR.",
+            )
+        best = ranked[0]
+        selected_ids = best["quota_ids"]
+        nina_match = {
+            **best,
+            "asset_category": category,
+            "asset_value": str(money(asset_value)) if asset_value is not None else None,
+            "requested_amount": str(money(requested_amount)),
+            "scr_restrictions": scr_restrictions,
+            "engine": "NINA_QUOTA_RANKING",
+        }
+
     quotas = list(
         db.scalars(
             select(Quota).where(
                 Quota.organization_id == org.id,
-                Quota.id.in_(quota_ids),
+                Quota.id.in_(selected_ids),
                 Quota.status == "AVAILABLE",
             )
         )
     )
-    if len(quotas) != len(quota_ids):
-        raise HTTPException(422, "Uma ou mais cotas não estão disponíveis")
+    if len(quotas) != len(selected_ids):
+        raise HTTPException(422, "Uma ou mais cotas selecionadas pela Nina não estão disponíveis")
     formula_version, input_data, output_data = build_sdc_simulation_output(
         quotas, float(requested_amount), duration_months, capital_source,
     )
@@ -397,4 +435,5 @@ def simulate_sdc_public(
         "output": output_data,
         "mmn": preview_mmn(db, org.id, "SDC", bases),
         "execution": "SIMULATION_ONLY",
+        "nina_match": nina_match,
     }

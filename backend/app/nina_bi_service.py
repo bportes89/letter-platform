@@ -54,15 +54,61 @@ def decide(db:Session,user:User,assessment:UnderwritingAssessment,decision:str,r
 
 
 def rank_quota_combinations(db:Session,user:User,target:Decimal,category:str,limit:int=10)->list[dict]:
-    quotas=list(db.scalars(select(Quota).where(Quota.organization_id==user.organization_id,Quota.status=="AVAILABLE",Quota.category==category)))
-    candidates=[]
-    for size in range(1,min(3,len(quotas))+1):
-        for combo in itertools.combinations(quotas,size):
-            if len({x.administrator_id for x in combo})>1: continue
-            total=sum((Decimal(str(x.credit_value)) for x in combo),Decimal("0"));deviation=abs((total-target)/target*100)
-            score=max(0,1000-int(deviation*20)-size*5)
-            candidates.append({"quota_ids":[x.id for x in combo],"total_credit":str(money(total)),"deviation_percent":str(money(deviation)),"score":score,"administrator_id":combo[0].administrator_id,"explanation":f"Desvio de {money(deviation)}% com {size} cota(s)."})
-    return sorted(candidates,key=lambda x:(-x["score"],x["deviation_percent"]))[:limit]
+    return rank_quota_combinations_for_org(db, user.organization_id, target, category, limit)
+
+
+def rank_quota_combinations_for_org(
+    db: Session,
+    organization_id: str,
+    target: Decimal,
+    category: str,
+    limit: int = 10,
+) -> list[dict]:
+    quotas = list(
+        db.scalars(
+            select(Quota).where(
+                Quota.organization_id == organization_id,
+                Quota.status == "AVAILABLE",
+                Quota.category == category,
+            )
+        )
+    )
+    candidates = _build_quota_ranking_candidates(quotas, target)
+    return sorted(candidates, key=lambda x: (-x["score"], x["deviation_percent"]))[:limit]
+
+
+def _build_quota_ranking_candidates(quotas: list[Quota], target: Decimal) -> list[dict]:
+    if not quotas or target <= 0:
+        return []
+    candidates: list[dict] = []
+    for size in range(1, min(3, len(quotas)) + 1):
+        for combo in itertools.combinations(quotas, size):
+            if len({x.administrator_id for x in combo}) > 1:
+                continue
+            total = sum((Decimal(str(x.credit_value)) for x in combo), Decimal("0"))
+            deviation = abs((total - target) / target * 100)
+            score = max(0, 1000 - int(deviation * 20) - size * 5)
+            candidates.append(
+                {
+                    "quota_ids": [x.id for x in combo],
+                    "quotas": [
+                        {
+                            "id": x.id,
+                            "group_code": x.group_code,
+                            "quota_code": x.quota_code,
+                            "category": x.category,
+                            "credit_value": str(money(Decimal(str(x.credit_value)))),
+                        }
+                        for x in combo
+                    ],
+                    "total_credit": str(money(total)),
+                    "deviation_percent": str(money(deviation)),
+                    "score": score,
+                    "administrator_id": combo[0].administrator_id,
+                    "explanation": f"Nina selecionou {size} cota(s) com desvio de {money(deviation)}% sobre o valor alvo.",
+                }
+            )
+    return candidates
 
 
 def bi_summary(db:Session,user:User)->dict:

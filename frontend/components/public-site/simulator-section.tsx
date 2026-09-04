@@ -2,16 +2,14 @@
 
 import Link from "next/link";
 import Image from "next/image";
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   capturePublicLead,
-  fetchPublicQuotas,
   simulateFlashPublic,
   simulateSdcPublic,
 } from "@/lib/public-site-api";
 import {
-  DEMO_QUOTAS,
   mockFlashPool,
   mockSdcPool,
   type FlashMockResult,
@@ -22,13 +20,10 @@ import { CurrencyFormField } from "@/components/currency-input";
 
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
-type QuotaItem = {
-  id: string;
-  group_code: string;
-  quota_code: string;
-  category: string;
-  credit_value: string;
-  status: string;
+const ASSET_CATEGORY_LABELS: Record<string, string> = {
+  REAL_ESTATE: "Imóvel",
+  VEHICLE: "Veículo",
+  OTHER: "Outro bem",
 };
 
 export function PublicSimulatorSection() {
@@ -40,23 +35,6 @@ export function PublicSimulatorSection() {
   const [error, setError] = useState("");
   const [flash, setFlash] = useState<FlashMockResult | null>(null);
   const [sdc, setSdc] = useState<SdcMockResult | null>(null);
-  const [quotas, setQuotas] = useState<QuotaItem[]>([]);
-  const [selectedQuotas, setSelectedQuotas] = useState<string[]>([]);
-  const catalog = quotas.length > 0 ? quotas : [...DEMO_QUOTAS];
-
-  const loadQuotas = useCallback(async () => {
-    try {
-      const rows = await fetchPublicQuotas();
-      if (rows.length > 0) setQuotas(rows);
-      else setQuotas([...DEMO_QUOTAS]);
-    } catch {
-      setQuotas([...DEMO_QUOTAS]);
-    }
-  }, []);
-
-  useEffect(() => {
-    void loadQuotas();
-  }, [loadQuotas]);
 
   function switchTab(next: "flash" | "sdc") {
     setTab(next);
@@ -64,10 +42,6 @@ export function PublicSimulatorSection() {
     setFlash(null);
     setSdc(null);
     setError("");
-  }
-
-  function toggleQuota(id: string) {
-    setSelectedQuotas((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   }
 
   async function submit(e: FormEvent<HTMLFormElement>) {
@@ -97,7 +71,7 @@ export function PublicSimulatorSection() {
         valorBase = Number(f.get("requested_amount"));
       }
 
-      await capturePublicLead({
+      const lead = await capturePublicLead({
         razao_social: razao,
         whatsapp,
         document: document || undefined,
@@ -117,20 +91,25 @@ export function PublicSimulatorSection() {
       } else {
         const requested = Number(f.get("requested_amount"));
         const durationMonths = Number(f.get("duration_months"));
-        const picked = catalog.filter((q) => selectedQuotas.includes(q.id));
-        const quotaIds =
-          picked.length > 0 ? picked.map((q) => q.id) : catalog.length > 0 ? [catalog[0].id] : [];
-        const principal =
-          picked.length > 0 ? picked.reduce((s, q) => s + Number(q.credit_value), 0) : requested;
-        if (quotaIds.length === 0) throw new Error("Nenhuma cota disponível para simulação.");
-        if (!Number.isFinite(principal) || principal <= 0) {
-          throw new Error("Selecione cotas ou informe o valor alvo da operação.");
+        const assetValueRaw = f.get("asset_value");
+        const assetValue = assetValueRaw ? Number(assetValueRaw) : undefined;
+        const assetCategory = String(f.get("asset_category") ?? "REAL_ESTATE") as
+          | "REAL_ESTATE"
+          | "VEHICLE"
+          | "OTHER";
+        if (!Number.isFinite(requested) || requested <= 0) {
+          throw new Error("Informe o valor que deseja alavancar.");
+        }
+        if (!Number.isFinite(durationMonths) || durationMonths <= 0) {
+          throw new Error("Informe um prazo válido em meses.");
         }
         setSdc(
           await simulateSdcPublic({
-            quota_ids: quotaIds,
-            requested_amount: principal,
+            requested_amount: requested,
             duration_months: durationMonths,
+            asset_category: assetCategory,
+            asset_value: assetValue,
+            scr_restrictions: lead.scr_status === "RESTRICTIONS_FOUND",
           }),
         );
         setFlash(null);
@@ -145,7 +124,7 @@ export function PublicSimulatorSection() {
 
   const previewFlash = mockFlashPool(1_000_000, null);
   const displayFlash = flash ?? previewFlash;
-  const previewSdc = mockSdcPool(800_000, 12, "OTHER");
+  const previewSdc = mockSdcPool(800_000, 12, "REAL_ESTATE");
   const displaySdc = sdc ?? previewSdc;
 
   return (
@@ -181,33 +160,36 @@ export function PublicSimulatorSection() {
           </>
         ) : (
           <>
-            <label>Cotas para composição</label>
-            <div className="site-quota-list">
-              {catalog.map((q) => (
-                <label key={q.id}>
-                  <input
-                    type="checkbox"
-                    checked={selectedQuotas.includes(q.id)}
-                    onChange={() => toggleQuota(q.id)}
-                  />
-                  Grupo {q.group_code} · Cota {q.quota_code} — {brl.format(Number(q.credit_value))}
-                </label>
-              ))}
-            </div>
             <label>
-              Valor alvo da operação
+              Tipo do bem
+              <select name="asset_category" defaultValue="REAL_ESTATE" required>
+                <option value="REAL_ESTATE">Imóvel</option>
+                <option value="VEHICLE">Veículo</option>
+                <option value="OTHER">Outro bem</option>
+              </select>
+            </label>
+            <label>
+              Valor do bem / base de garantia
+              <CurrencyFormField name="asset_value" placeholder="Ex.: R$ 1.200.000,00" />
+            </label>
+            <label>
+              Valor que deseja alavancar
               <CurrencyFormField name="requested_amount" placeholder="Ex.: R$ 800.000,00" required />
             </label>
             <label>
               Prazo, em meses
-              <input name="duration_months" type="number" min="1" max="120" defaultValue={12} required />
+              <input name="duration_months" type="number" min="1" max="120" placeholder="12" required />
             </label>
+            <p className="legal-copy">
+              Após autorizar a consulta SCR/Registrato, a Nina buscará automaticamente as cotas compatíveis
+              com o perfil, tipo de bem e valor informados — sem seleção manual pelo cliente.
+            </p>
           </>
         )}
 
         <label>
           CNPJ
-          <input name="document" type="text" placeholder="00.000.000/0001-00" minLength={14} />
+          <input name="document" type="text" placeholder="00.000.000/0001-00" minLength={14} required />
         </label>
         <label>
           Razão social
@@ -227,7 +209,8 @@ export function PublicSimulatorSection() {
           </span>
         </label>
         <button className="button full" type="submit" disabled={loading}>
-          {loading ? "Calculando…" : "Calcular estrutura"} <span>→</span>
+          {loading ? "Calculando…" : tab === "sdc" ? "Buscar cotas e calcular" : "Calcular estrutura"}{" "}
+          <span>→</span>
         </button>
         {error && <p className="form-notice">{error}</p>}
         <small className="legal-copy">
@@ -260,8 +243,8 @@ export function PublicSimulatorSection() {
             <span className="lock">◆</span>
             <h4>Memória protegida</h4>
             <p>
-              Preencha razão social, WhatsApp e autorize a consulta SCR/Registrato para destravar a
-              memória de cálculo e registrar o lead.
+              Preencha os dados da operação, autorize a consulta SCR/Registrato e a Nina buscará as
+              cotas compatíveis para destravar a memória de cálculo.
             </p>
           </div>
         )}
@@ -315,6 +298,22 @@ function FlashOutput({ data }: { data: FlashMockResult }) {
 function SdcOutput({ data }: { data: SdcMockResult }) {
   return (
     <>
+      {data.nina_match?.quotas?.length ? (
+        <div className="result-bar" style={{ marginBottom: 16 }}>
+          <span>Cotas selecionadas pela Nina</span>
+          <b>{data.nina_match.quotas.length} cota(s)</b>
+        </div>
+      ) : null}
+      {data.nina_match?.quotas?.map((quota) => (
+        <p key={quota.id} className="legal-copy">
+          Grupo {quota.group_code} · Cota {quota.quota_code} —{" "}
+          {ASSET_CATEGORY_LABELS[quota.category] ?? quota.category} ·{" "}
+          {brl.format(Number(quota.credit_value))}
+        </p>
+      ))}
+      {data.nina_match?.explanation && (
+        <p className="legal-copy">{data.nina_match.explanation}</p>
+      )}
       <div className="primary-result">
         <span>Principal estruturado</span>
         <strong>{brl.format(Number(data.output.principal))}</strong>

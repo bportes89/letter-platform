@@ -1372,7 +1372,14 @@ def public_site_sdc_simulate(payload: PublicSdcSimulateRequest, request: Request
     if payload.capital_source.upper() not in {"POOL", "FUND"}:
         raise HTTPException(422, "Fonte SDC deve ser POOL ou FUND")
     return simulate_sdc_public(
-        db, payload.quota_ids, payload.requested_amount, payload.duration_months, payload.capital_source.upper(),
+        db,
+        requested_amount=payload.requested_amount,
+        duration_months=payload.duration_months,
+        capital_source=payload.capital_source.upper(),
+        asset_category=payload.asset_category,
+        asset_value=payload.asset_value,
+        quota_ids=payload.quota_ids,
+        scr_restrictions=payload.scr_restrictions,
     )
 
 

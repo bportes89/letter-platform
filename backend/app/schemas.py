@@ -2107,10 +2107,13 @@ class PublicFlashPoolRequest(BaseModel):
 
 
 class PublicSdcSimulateRequest(BaseModel):
-    quota_ids: list[str] = Field(min_length=1)
     requested_amount: Decimal = Field(gt=0)
     duration_months: int = Field(ge=1, le=120)
     capital_source: str = "POOL"
+    asset_category: str = Field(default="REAL_ESTATE", description="REAL_ESTATE, VEHICLE ou OTHER")
+    asset_value: Decimal | None = Field(default=None, gt=0)
+    quota_ids: list[str] | None = None
+    scr_restrictions: bool = False
 
 
 class PublicQuotaCatalogItem(BaseModel):

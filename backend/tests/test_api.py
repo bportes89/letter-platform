@@ -1995,6 +1995,26 @@ def test_public_site_flash_pool_and_lead_capture(client):
 
 
 def test_public_site_sdc_simulate_with_quotas(client):
+    sim = client.post("/api/v1/public/site/sdc/simulate", json={
+        "requested_amount": "800000",
+        "duration_months": 12,
+        "capital_source": "POOL",
+        "asset_category": "REAL_ESTATE",
+        "asset_value": "1200000",
+    })
+    assert sim.status_code == 200
+    body = sim.json()
+    output = body["output"]
+    assert output["principal"] == "800000.00"
+    assert output["total_interest"] == "432000.00"
+    assert body["mmn"]["configured"] is True
+    assert body["mmn"]["commission_pool"] == "2400.00"
+    assert body["nina_match"] is not None
+    assert len(body["nina_match"]["quotas"]) >= 1
+    assert body["nina_match"]["engine"] == "NINA_QUOTA_RANKING"
+
+
+def test_public_site_sdc_simulate_manual_quota_ids_still_supported(client):
     quotas = client.get("/api/v1/public/site/quotas").json()
     assert len(quotas) >= 2
     sim = client.post("/api/v1/public/site/sdc/simulate", json={
@@ -2002,13 +2022,10 @@ def test_public_site_sdc_simulate_with_quotas(client):
         "requested_amount": "800000",
         "duration_months": 12,
         "capital_source": "POOL",
+        "asset_category": "REAL_ESTATE",
     })
     assert sim.status_code == 200
-    output = sim.json()["output"]
-    assert output["principal"] == "800000.00"
-    assert output["total_interest"] == "432000.00"
-    assert sim.json()["mmn"]["configured"] is True
-    assert sim.json()["mmn"]["commission_pool"] == "2400.00"
+    assert sim.json()["nina_match"] is None
 
 
 def test_public_site_chat_home_proxy(client, monkeypatch):
@@ -2401,16 +2418,12 @@ def test_public_site_lead_flash_pool_and_sdc(client, auth_headers):
     assert body["mmn"]["configured"] is True
     assert body["mmn"]["commission_pool"] == "10440.00"
 
-    quotas = client.get("/api/v1/public/site/quotas")
-    assert quotas.status_code == 200
-    catalog = quotas.json()
-    assert len(catalog) >= 2
-
     sdc = client.post("/api/v1/public/site/sdc/simulate", json={
-        "quota_ids": [catalog[0]["id"], catalog[1]["id"]],
         "requested_amount": "800000",
         "duration_months": 12,
         "capital_source": "POOL",
+        "asset_category": "REAL_ESTATE",
+        "asset_value": "1200000",
     })
     assert sdc.status_code == 200
     out = sdc.json()["output"]
@@ -2418,6 +2431,7 @@ def test_public_site_lead_flash_pool_and_sdc(client, auth_headers):
     assert out["total_interest"] == "432000.00"
     assert sdc.json()["mmn"]["configured"] is True
     assert sdc.json()["mmn"]["commission_pool"] == "2400.00"
+    assert sdc.json()["nina_match"] is not None
 
 def test_public_client_self_registration(client, auth_headers):
     users = client.get("/api/v1/admin/users", headers=auth_headers).json()

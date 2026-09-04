@@ -23,6 +23,20 @@ export type SdcMockResult = {
   formula_version: string;
   output: Record<string, string | number>;
   mmn: MmnPreview;
+  nina_match?: {
+    quotas: Array<{
+      id: string;
+      group_code: string;
+      quota_code: string;
+      category: string;
+      credit_value: string;
+    }>;
+    total_credit: string;
+    deviation_percent: string;
+    score: number;
+    explanation: string;
+    asset_category: string;
+  } | null;
 };
 
 const money = (v: number) => Math.round(v * 100) / 100;
