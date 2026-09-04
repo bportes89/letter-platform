@@ -7,6 +7,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.account_uniqueness import ensure_unique_account_fields, find_user_by_email
 from app.finops_engine import money, pool_public_simulation
 from app.flash_capital_params import get_active_flash_simulation_params
 from app.bacen_scr_service import attach_scr_to_lead, bacen_scr_client
@@ -148,22 +149,22 @@ def register_public_client(
     ip_address: str | None = None,
 ) -> dict:
     org = headquarters_org(db)
-    normalized_email = email.strip().lower()
-    normalized_document = document.strip() if document else None
-    existing = db.scalar(select(User).where(User.email == normalized_email))
+    existing = find_user_by_email(db, email)
     if existing:
         if existing.last_login_at is not None:
             raise HTTPException(
                 status_code=409,
                 detail="E-mail já cadastrado. Faça login para acessar sua conta.",
             )
-        if normalized_document:
-            doc_conflict = db.scalar(
-                select(User).where(User.document == normalized_document, User.id != existing.id)
-            )
-            if doc_conflict:
-                raise HTTPException(status_code=409, detail="Documento já cadastrado")
-            existing.document = normalized_document
+        normalized_email, normalized_cpf, _ = ensure_unique_account_fields(
+            db,
+            email=email,
+            document=document,
+            exclude_user_id=existing.id,
+        )
+        existing.email = normalized_email
+        if normalized_cpf:
+            existing.document = normalized_cpf
         existing.name = name.strip()
         existing.phone = phone.strip()
         existing.password_hash = hash_password(password)
@@ -180,8 +181,11 @@ def register_public_client(
             source_prefix="CLIENT_ACCOUNT_ACTIVATION",
         )
     else:
-        if normalized_document and db.scalar(select(User).where(User.document == normalized_document)):
-            raise HTTPException(status_code=409, detail="Documento já cadastrado")
+        normalized_email, normalized_cpf, _ = ensure_unique_account_fields(
+            db,
+            email=email,
+            document=document,
+        )
 
         referrer_node = lookup_referral_code(db, org.id, referral_code)
         if referral_code and referral_code.strip() and not referrer_node:
@@ -193,7 +197,7 @@ def register_public_client(
             name=name.strip(),
             email=normalized_email,
             phone=phone.strip(),
-            document=normalized_document,
+            document=normalized_cpf,
             password_hash=hash_password(password),
             role=Role.CLIENT,
             referred_by_user_id=referrer_user_id,

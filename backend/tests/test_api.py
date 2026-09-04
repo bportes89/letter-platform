@@ -2528,6 +2528,99 @@ def test_public_brand_new_client_registration(client):
     assert login.status_code == 200
 
 
+def test_account_uniqueness_blocks_duplicate_cpf_email_and_cnpj(client, auth_headers):
+    cpf = "98765432100"
+    first_email = f"conta1.{uuid4().hex[:8]}@letter.com.br"
+    second_email = f"conta2.{uuid4().hex[:8]}@letter.com.br"
+
+    created = client.post("/api/v1/public/site/auth/register", json={
+        "name": "Primeira Conta",
+        "email": first_email,
+        "phone": "11911112222",
+        "password": "ClienteNovo1!",
+        "document": cpf,
+        "terms_accepted": True,
+    })
+    assert created.status_code == 201
+
+    duplicate_cpf = client.post("/api/v1/public/site/auth/register", json={
+        "name": "Segunda Conta",
+        "email": second_email,
+        "phone": "11922223333",
+        "password": "ClienteNovo1!",
+        "document": "987.654.321-00",
+        "terms_accepted": True,
+    })
+    assert duplicate_cpf.status_code == 409
+    assert "CPF" in duplicate_cpf.json()["detail"]
+
+    duplicate_email = client.post("/api/v1/public/site/auth/register", json={
+        "name": "Terceira Conta",
+        "email": first_email,
+        "phone": "11933334444",
+        "password": "ClienteNovo1!",
+        "document": "11122233344",
+        "terms_accepted": True,
+    })
+    assert duplicate_email.status_code == 409
+    assert "E-mail" in duplicate_email.json()["detail"]
+
+    partner_login = client.post("/api/v1/auth/login", json={
+        "email": "parceiro@letter.com.br",
+        "password": "Letter@123",
+    })
+    assert partner_login.status_code == 200
+    partner_headers = {"Authorization": f"Bearer {partner_login.json()['access_token']}"}
+
+    invite = client.post("/api/v1/network/invitations", headers=partner_headers, json={
+        "email": f"parceiro.duplicado.{uuid4().hex[:8]}@letter.com.br",
+        "role": "PARTNER",
+    })
+    assert invite.status_code == 201
+    token = invite.json()["token"]
+
+    accepted = client.post("/api/v1/auth/invitations/accept", json={
+        "token": token,
+        "name": "Parceiro Duplicado",
+        "document": "22233344455",
+        "password": "NovaSenha@123",
+        "company_name": "Parceiro Duplicado Ltda",
+        "company_cnpj": "99887766000155",
+        "company_address": "Rua A, 10",
+        "company_city": "Salvador",
+        "company_state": "BA",
+        "phone": "71988887777",
+        "terms_accepted": True,
+        "scroll_completed": True,
+        "verification_reference": "dup-cnpj-1",
+    })
+    assert accepted.status_code == 200
+
+    invite2 = client.post("/api/v1/network/invitations", headers=partner_headers, json={
+        "email": f"parceiro.duplicado2.{uuid4().hex[:8]}@letter.com.br",
+        "role": "PARTNER",
+    })
+    assert invite2.status_code == 201
+
+    duplicate_cnpj = client.post("/api/v1/auth/invitations/accept", json={
+        "token": invite2.json()["token"],
+        "name": "Outro Parceiro",
+        "document": "33344455566",
+        "password": "NovaSenha@123",
+        "company_name": "Outro Parceiro Ltda",
+        "company_cnpj": "99.887.766/0001-55",
+        "company_address": "Rua B, 20",
+        "company_city": "Salvador",
+        "company_state": "BA",
+        "phone": "71977776666",
+        "terms_accepted": True,
+        "scroll_completed": True,
+        "verification_reference": "dup-cnpj-2",
+    })
+    assert duplicate_cnpj.status_code == 409
+    assert "CNPJ" in duplicate_cnpj.json()["detail"]
+
+
 def test_public_client_activation_for_migrated_partner(client, auth_headers):
     from app.core.security import hash_password
     from app.db import SessionLocal

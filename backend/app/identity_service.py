@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.account_uniqueness import ensure_unique_account_fields, find_user_by_email
 from app.core.config import settings
 from app.core.security import create_token, decode_token, hash_password, verify_password
 from app.models import AuthSession, KycCase, PasswordReset, ROLE_SCOPES, Role, User, UserInvitation
@@ -58,7 +59,10 @@ def verify_mfa(user: User, otp: str) -> bool:
 
 
 def create_invitation(db:Session,user:User,email:str,role,branch_id:str|None):
-    raw=secrets.token_urlsafe(32);invite=UserInvitation(organization_id=user.organization_id,branch_id=branch_id,invited_by_id=user.id,email=email.lower(),role=role,token_hash=token_hash(raw),expires_at=datetime.now(UTC)+timedelta(days=3));db.add(invite);return invite,raw
+    normalized = email.strip().lower()
+    if find_user_by_email(db, normalized):
+        raise HTTPException(status_code=409, detail="E-mail já cadastrado")
+    raw=secrets.token_urlsafe(32);invite=UserInvitation(organization_id=user.organization_id,branch_id=branch_id,invited_by_id=user.id,email=normalized,role=role,token_hash=token_hash(raw),expires_at=datetime.now(UTC)+timedelta(days=3));db.add(invite);return invite,raw
 
 
 def create_partner_invitation(db: Session, inviter: User, email: str, role: Role) -> tuple[UserInvitation, str]:
@@ -67,7 +71,7 @@ def create_partner_invitation(db: Session, inviter: User, email: str, role: Role
     if role not in PARTNER_NETWORK_ROLES:
         raise HTTPException(status_code=422, detail="Parceiros só podem convidar perfis comerciais da rede")
     normalized = email.strip().lower()
-    if db.scalar(select(User).where(User.email == normalized)):
+    if find_user_by_email(db, normalized):
         raise HTTPException(status_code=409, detail="E-mail já cadastrado")
     pending = db.scalar(select(UserInvitation).where(
         UserInvitation.organization_id == inviter.organization_id,
@@ -112,7 +116,7 @@ def accept_invitation(
     invite = db.scalar(select(UserInvitation).where(UserInvitation.token_hash == token_hash(raw), UserInvitation.status == "PENDING"))
     if not invite or as_utc(invite.expires_at) <= datetime.now(UTC):
         raise HTTPException(status_code=422, detail="Convite inválido ou expirado")
-    if db.scalar(select(User).where(User.email == invite.email)):
+    if find_user_by_email(db, invite.email):
         raise HTTPException(status_code=409, detail="E-mail já cadastrado")
     validate_partner_contract_payload(
         invite,
@@ -126,15 +130,21 @@ def accept_invitation(
         verification_reference=verification_reference,
         phone=phone,
     )
+    normalized_email, normalized_cpf, normalized_cnpj = ensure_unique_account_fields(
+        db,
+        email=invite.email,
+        document=document,
+        company_cnpj=company_cnpj,
+    )
     user = User(
         organization_id=invite.organization_id,
         branch_id=invite.branch_id,
         name=name,
-        email=invite.email,
-        document=document,
+        email=normalized_email,
+        document=normalized_cpf,
         phone=(phone or "").strip() or None,
         company_name=(company_name or "").strip() or None,
-        company_cnpj=(company_cnpj or "").strip() or None,
+        company_cnpj=normalized_cnpj,
         company_address=(company_address or "").strip() or None,
         company_city=(company_city or "").strip() or None,
         company_state=(company_state or "").strip().upper()[:2] or None,
