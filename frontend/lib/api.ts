@@ -1,3 +1,5 @@
+import { fetchWithRetry } from "@/lib/fetch-with-retry";
+
 export const API_URL = (process.env.NEXT_PUBLIC_API_URL?.trim() || "http://localhost:8000/api/v1").replace(/\s+/g, "");
 
 export type Module = { key: string; name: string; description: string; status: string; route: string; critical: boolean };
@@ -255,13 +257,13 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
   const token = getToken();
   let response: Response;
   try {
-    response = await fetch(`${API_URL}${path}`, {
+    response = await fetchWithRetry(`${API_URL}${path}`, {
       ...options,
       headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}), ...options.headers },
     });
   } catch {
     throw new Error(
-      `Não foi possível conectar à API (${API_URL}). Verifique se o backend LETTER está rodando e se NEXT_PUBLIC_API_URL está correto.`,
+      "Não foi possível conectar à API LETTER. O servidor pode estar iniciando — aguarde até 1 minuto e tente novamente.",
     );
   }
   if (!response.ok) {

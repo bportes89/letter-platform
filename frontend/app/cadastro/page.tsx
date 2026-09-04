@@ -156,9 +156,14 @@ function CadastroForm() {
         <div className="site-error">
           <p>{error}</p>
           {error.toLowerCase().includes("faça login") && (
-            <Link href="/login" className="site-login-back">
-              Ir para o login →
-            </Link>
+            <>
+              <Link href="/login" className="site-login-back">
+                Ir para o login →
+              </Link>
+              <Link href="/recuperar-senha" className="site-login-back">
+                Redefinir senha →
+              </Link>
+            </>
           )}
         </div>
       )}
@@ -170,6 +175,9 @@ function CadastroForm() {
       <p className="site-login-note">Já tem conta?</p>
       <Link href="/login" className="site-login-back">
         Entrar na plataforma →
+      </Link>
+      <Link href="/recuperar-senha" className="site-login-back">
+        Esqueci minha senha / Redefinir senha →
       </Link>
       <Link href="/" className="site-login-back">
         ← Voltar ao site institucional

@@ -103,6 +103,9 @@ function LoginForm() {
       <Link href="/cadastro" className="site-login-back">
         Ainda não tem conta? Abra sua conta →
       </Link>
+      <Link href="/recuperar-senha" className="site-login-back">
+        Esqueci minha senha / Redefinir senha →
+      </Link>
     </form>
   );
 }

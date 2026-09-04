@@ -1,16 +1,19 @@
 import type { FlashMockResult, SdcMockResult } from "@/lib/public-simulator-mock";
+import { fetchWithRetry } from "@/lib/fetch-with-retry";
 
 const API_URL = (process.env.NEXT_PUBLIC_API_URL?.trim() || "http://localhost:8001/api/v1").replace(/\s+/g, "");
 
 async function publicFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(`${API_URL}${path}`, {
+    response = await fetchWithRetry(`${API_URL}${path}`, {
       ...options,
       headers: { "Content-Type": "application/json", ...options.headers },
     });
   } catch {
-    throw new Error("Não foi possível conectar à API. Tente novamente em instantes.");
+    throw new Error(
+      "Não foi possível conectar à API LETTER. O servidor pode estar iniciando — aguarde até 1 minuto e tente novamente.",
+    );
   }
   if (!response.ok) {
     const body = (await response.json().catch(() => ({}))) as { detail?: string | { msg?: string }[] };
@@ -89,6 +92,23 @@ export async function registerPublicClient(payload: {
   return publicFetch<PublicClientRegisterResponse>("/public/site/auth/register", {
     method: "POST",
     body: JSON.stringify(payload),
+  });
+}
+
+export async function requestPasswordReset(email: string): Promise<{ status: string; development_token: string | null }> {
+  return publicFetch("/auth/password-reset/request", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+}
+
+export async function confirmPasswordReset(
+  token: string,
+  newPassword: string,
+): Promise<{ status: string }> {
+  return publicFetch("/auth/password-reset/confirm", {
+    method: "POST",
+    body: JSON.stringify({ token, new_password: newPassword }),
   });
 }
 
