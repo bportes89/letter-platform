@@ -22,7 +22,7 @@ from app.models import (
     EscrowAccount, FundingOpportunity, Invoice, RecoveredAsset,
     InvestmentPosition, InvestmentReservation, KycCase, Lead, LedgerEntry,
     LedgerTransaction, NetworkNode, PaymentReceipt, PayoutApproval, PayoutRequest, PreAnalysisPauta, Proposal, LeaseEquityPauta, QuitConOperacao, CollateralNativeInspection,
-    Quota, QuotaReservation, SignatureEnvelope, User, UserInvitation,
+    Quota, QuotaReservation, SignatureEnvelope, User, UserInvitation, Role,
     ReconciliationBatch, ReconciliationItem, TaxClosing, TaxDocument, TaxException,
     UnderwritingAssessment, UnderwritingDecision, UnderwritingPolicy, OperationalJob, SecurityEvent, TenantQuota,
     NinaCriticalApproval, NinaDistressCase, NinaDistressEvent, NinaLegalDocument,
@@ -83,6 +83,7 @@ from app.schemas import (
     ReconciliationBatchView, ReconciliationItemView, ReconciliationResolveRequest,
     MarketplaceEsteira1Request, MarketplaceEsteira1Response, MarketplaceEsteira2Request, MarketplaceEsteira2Response,
     ProposalView, QuotaCreate, QuotaUpdate, QuotaView, NinaQuotaScanView, RecoveredAssetCreate, RecoveredAssetView, RefreshRequest,
+    CommercialClientView,
     ReservationCreate, ReservationView, SdcCalculationRequest, SessionView, SignatureComplete,
     SignatureCreate, SignatureView, SignatureZapSignStatusView, StepUpRequest, TaxClosingRequest, TaxClosingView,
     TaxDocumentCreate, TaxDocumentView, TaxExceptionResolve, TaxExceptionView,
@@ -190,6 +191,12 @@ from app.flash_capital_params import get_active_flash_simulation_params, save_fl
 from app.network_service import (
     allocate_commissions, confirm_investment, create_network_node, create_rule,
     downline_summary, reserve_investment,
+)
+from app.commission_attribution import (
+    apply_proposal_attribution,
+    assert_lead_access_for_sale,
+    get_or_create_client_lead,
+    is_commercial_seller,
 )
 from app.network_visibility import (
     OVERSIGHT_ROLES,
@@ -1206,19 +1213,76 @@ def list_proposals(user: User = Depends(get_current_user), db: Session = Depends
     lead_ids = {proposal.lead_id for proposal in proposals}
     leads = {item.id: item for item in db.scalars(select(Lead).where(Lead.id.in_(lead_ids)))} if lead_ids else {}
     owners = owner_map(db, {lead.owner_id for lead in leads.values() if lead.owner_id})
-    return [enrich_proposal_view(proposal, leads.get(proposal.lead_id), owners) for proposal in proposals]
+    return [enrich_proposal_view(proposal, leads.get(proposal.lead_id), owners, db) for proposal in proposals]
+
+
+@router.get("/commercial/clients", response_model=list[CommercialClientView])
+def commercial_clients(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if not is_commercial_seller(user.role):
+        raise HTTPException(status_code=403, detail="Perfil sem permissão para atendimento comercial")
+    clients = list(
+        db.scalars(
+            select(User).where(
+                User.organization_id == user.organization_id,
+                User.role == Role.CLIENT,
+                User.active.is_(True),
+            ).order_by(User.name)
+        )
+    )
+    return [
+        CommercialClientView(
+            id=item.id,
+            name=item.name,
+            email=item.email,
+            phone=item.phone,
+            referred_by_user_id=item.referred_by_user_id,
+        )
+        for item in clients
+    ]
 
 
 @router.post("/proposals", response_model=ProposalView, status_code=201)
 def create_proposal(payload: ProposalCreate, user: User = Depends(require_scope("proposals:write")), db: Session = Depends(get_db)):
-    lead = get_lead_for_user(db, user, payload.lead_id)
+    if user.role == Role.CLIENT:
+        lead = (
+            get_lead_for_user(db, user, payload.lead_id)
+            if payload.lead_id
+            else get_or_create_client_lead(db, user)
+        )
+    else:
+        if not payload.lead_id:
+            raise HTTPException(status_code=422, detail="lead_id é obrigatório para venda comercial")
+        lead = get_lead_for_user(db, user, payload.lead_id)
+
+    assert_lead_access_for_sale(db, user, lead, payload.client_user_id)
+
+    terms = dict(payload.terms or {})
     proposal = Proposal(
-        organization_id=user.organization_id, lead_id=payload.lead_id, product=payload.product,
-        requested_amount=payload.requested_amount, terms_json=json.dumps(payload.terms, ensure_ascii=False),
+        organization_id=user.organization_id,
+        lead_id=lead.id,
+        product=payload.product,
+        requested_amount=payload.requested_amount,
+        terms_json=json.dumps(terms, ensure_ascii=False),
     )
-    db.add(proposal); db.flush(); audit(db, user, "proposal.created", "proposal", proposal.id); db.commit(); db.refresh(proposal)
+    db.add(proposal)
+    db.flush()
+    apply_proposal_attribution(
+        db,
+        user,
+        proposal,
+        client_user_id=payload.client_user_id or terms.get("client_user_id"),
+        sale_channel=payload.sale_channel or terms.get("sale_channel"),
+        served_by_user_id=payload.served_by_user_id or terms.get("served_by_user_id"),
+        lead=lead,
+    )
+    audit(db, user, "proposal.created", "proposal", proposal.id, {
+        "sale_channel": proposal.sale_channel,
+        "commission_originator_id": proposal.commission_originator_id,
+    })
+    db.commit()
+    db.refresh(proposal)
     owners = owner_map(db, {lead.owner_id} if lead.owner_id else set())
-    return enrich_proposal_view(proposal, lead, owners)
+    return enrich_proposal_view(proposal, lead, owners, db)
 
 
 @router.patch("/proposals/{proposal_id}", response_model=ProposalView)
@@ -1230,7 +1294,7 @@ def update_proposal(proposal_id: str, payload: ProposalUpdate, user: User = Depe
     audit(db, user, "proposal.updated", "proposal", proposal.id, payload.model_dump(exclude_unset=True, mode="json")); db.commit(); db.refresh(proposal)
     lead = db.get(Lead, proposal.lead_id)
     owners = owner_map(db, {lead.owner_id} if lead and lead.owner_id else set())
-    return enrich_proposal_view(proposal, lead, owners)
+    return enrich_proposal_view(proposal, lead, owners, db)
 
 
 @router.post("/proposals/{proposal_id}/calculate", response_model=CalculationView, status_code=201)

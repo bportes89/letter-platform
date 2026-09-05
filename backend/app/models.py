@@ -32,7 +32,7 @@ ROLE_SCOPES = {
     Role.MANAGER: ["dashboard:read", "leads:read", "network:invite", "proposals:read", "wallet:read"],
     Role.PARTNER: ["dashboard:read", "leads:write", "proposals:write", "wallet:read", "network:invite"],
     Role.QUOTA_SELLER: ["dashboard:read", "inventory:write", "payments:read", "network:invite", "wallet:read"],
-    Role.CLIENT: ["dashboard:read", "proposals:read", "contracts:read", "payments:read", "wallet:read"],
+    Role.CLIENT: ["dashboard:read", "proposals:read", "proposals:write", "leads:read", "contracts:read", "payments:read", "wallet:read"],
     Role.RETAIL_INVESTOR: ["dashboard:read", "investments:read", "investments:reserve", "wallet:read"],
     Role.INSTITUTIONAL_FUND: ["dashboard:read", "institutional:read", "investments:write", "wallet:read"],
     Role.AUDITOR: ["dashboard:read", "audit:read", "wallet:read"],
@@ -166,6 +166,7 @@ class Lead(TimestampMixin, Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
     owner_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"))
+    client_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), index=True)
     name: Mapped[str] = mapped_column(String(180))
     document: Mapped[str | None] = mapped_column(String(20))
     phone: Mapped[str] = mapped_column(String(30))
@@ -237,6 +238,11 @@ class Proposal(TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(50), default="DRAFT")
     calculation_version: Mapped[str] = mapped_column(String(30), default="v1")
     terms_json: Mapped[str] = mapped_column(Text, default="{}")
+    client_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), index=True)
+    sale_channel: Mapped[str] = mapped_column(String(30), default="PARTNER_OFFICE")
+    served_by_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"))
+    commission_originator_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), index=True)
+    created_by_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"))
 
 
 class CalculationMemory(TimestampMixin, Base):

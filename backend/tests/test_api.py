@@ -3284,3 +3284,107 @@ def test_manager_sees_downline_proposals_and_members(client, auth_headers):
     partner_only = client.get("/api/v1/proposals", headers=partner_headers).json()
     assert len(partner_only) == 1
     assert partner_only[0]["owner_name"] == "Parceiro Downline"
+
+
+def test_commission_attribution_self_service_vs_partner_office(client, auth_headers):
+    users = client.get("/api/v1/admin/users", headers=auth_headers).json()
+    partner = next(u for u in users if u["email"] == "parceiro@letter.com.br")
+    node = client.post("/api/v1/network/nodes", headers=auth_headers, json={"user_id": partner["id"], "tree_type": "SALES"})
+    if node.status_code == 201:
+        referral_code = node.json()["referral_code"]
+    else:
+        assert node.status_code == 409
+        nodes = client.get("/api/v1/network/nodes", headers=auth_headers).json()
+        partner_node = next(n for n in nodes if n["user_id"] == partner["id"])
+        referral_code = partner_node["referral_code"]
+
+    rule = client.post("/api/v1/commission-rules", headers=auth_headers, json={
+        "product": "MARKETPLACE",
+        "commission_type": "SALES",
+        "pool_rate_percent": "10",
+        "base_type": "LETTER_FEE",
+    })
+    assert rule.status_code == 201
+
+    administrator_id = client.get("/api/v1/administrators", headers=auth_headers).json()[0]["id"]
+    suffix = uuid4().hex[:6]
+    test_quotas = []
+    for code in ("01", "02"):
+        created = client.post("/api/v1/quotas", headers=auth_headers, json={
+            "administrator_id": administrator_id,
+            "group_code": f"9{suffix}",
+            "quota_code": code,
+            "category": "REAL_ESTATE",
+            "credit_value": "400000",
+            "outstanding_balance": "250000",
+            "premium_value": "80000",
+        })
+        assert created.status_code == 201
+        test_quotas.append(created.json())
+        client.patch(
+            f"/api/v1/quotas/{created.json()['id']}",
+            headers=auth_headers,
+            json={"installment_due_date": "2026-09-10"},
+        )
+
+    suffix = uuid4().hex[:8]
+    client_email = f"cliente.mmn.{suffix}@letter.com.br"
+    registered = client.post("/api/v1/public/site/auth/register", json={
+        "name": "Cliente MMN",
+        "email": client_email,
+        "phone": "27966665555",
+        "password": "ClienteMmn1!",
+        "document": f"{int(suffix, 16) % 10**11:011d}",
+        "referral_code": referral_code,
+        "terms_accepted": True,
+    })
+    assert registered.status_code == 201, registered.text
+
+    client_login = client.post("/api/v1/auth/login", json={"email": client_email, "password": "ClienteMmn1!"})
+    assert client_login.status_code == 200
+    client_headers = {"Authorization": f"Bearer {client_login.json()['access_token']}"}
+
+    self_proposal = client.post("/api/v1/proposals", headers=client_headers, json={
+        "product": "MARKETPLACE",
+        "requested_amount": "800000",
+        "terms": {"channel": "SELF_SERVICE"},
+    })
+    assert self_proposal.status_code == 201
+    assert self_proposal.json()["sale_channel"] == "SELF_SERVICE"
+    assert self_proposal.json()["commission_originator_id"] == partner["id"]
+
+    partner_login = client.post("/api/v1/auth/login", json={"email": "parceiro@letter.com.br", "password": "Letter@123"})
+    partner_headers = {"Authorization": f"Bearer {partner_login.json()['access_token']}"}
+    lead = client.get("/api/v1/leads", headers=partner_headers).json()[0]
+
+    office_proposal = client.post("/api/v1/proposals", headers=partner_headers, json={
+        "lead_id": lead["id"],
+        "product": "MARKETPLACE",
+        "requested_amount": "800000",
+        "client_user_id": registered.json()["user"]["id"],
+        "sale_channel": "PARTNER_OFFICE",
+    })
+    assert office_proposal.status_code == 201
+    assert office_proposal.json()["sale_channel"] == "PARTNER_OFFICE"
+    assert office_proposal.json()["commission_originator_id"] == partner["id"]
+    assert office_proposal.json()["served_by_name"] == "Parceiro Demonstração"
+
+    calc = client.post(
+        f"/api/v1/proposals/{office_proposal.json()['id']}/calculate",
+        headers=partner_headers,
+        json={"quota_ids": [q["id"] for q in test_quotas], "fee_percent": "10", "start_fee": "1500"},
+    )
+    assert calc.status_code == 201
+
+    contract = client.post(
+        f"/api/v1/proposals/{office_proposal.json()['id']}/contracts",
+        headers=partner_headers,
+        json={"calculation_memory_id": calc.json()["id"]},
+    )
+    assert contract.status_code == 201
+
+    commissions = client.get("/api/v1/wallet/commissions", headers=partner_headers).json()
+    sale_entries = [item for item in commissions if item["reference"] == f"CONTRACT-{contract.json()['contract_number']}"]
+    assert sale_entries
+    assert sale_entries[0]["level"] == 1
+    assert sale_entries[0]["status"] == "PENDING_FISCAL"

@@ -780,16 +780,27 @@ class ReservationView(ORMModel):
 
 
 class ProposalCreate(BaseModel):
-    lead_id: str
+    lead_id: str | None = None
     product: str
     requested_amount: Decimal = Field(gt=0)
     terms: dict = Field(default_factory=dict)
+    client_user_id: str | None = None
+    sale_channel: str | None = Field(default=None, description="SELF_SERVICE ou PARTNER_OFFICE")
+    served_by_user_id: str | None = None
 
 
 class ProposalUpdate(BaseModel):
     status: str | None = None
     requested_amount: Decimal | None = Field(default=None, gt=0)
     terms: dict | None = None
+
+
+class CommercialClientView(ORMModel):
+    id: str
+    name: str
+    email: str
+    phone: str | None = None
+    referred_by_user_id: str | None = None
 
 
 class ProposalView(ORMModel):
@@ -804,6 +815,13 @@ class ProposalView(ORMModel):
     owner_name: str | None = None
     owner_role: str | None = None
     lead_name: str | None = None
+    sale_channel: str | None = None
+    client_user_id: str | None = None
+    client_name: str | None = None
+    served_by_user_id: str | None = None
+    served_by_name: str | None = None
+    commission_originator_id: str | None = None
+    commission_originator_name: str | None = None
 
 
 class CalculationRequest(BaseModel):

@@ -214,6 +214,7 @@ def calculate_marketplace(db: Session, user: User, proposal: Proposal, quotas: l
 
 
 def create_contract(db: Session, user: User, proposal: Proposal, calculation: CalculationMemory) -> Contract:
+    from app.commission_attribution import auto_allocate_sale_commission
     from app.quota_inventory_service import mark_quotas_sold_from_calculation
 
     existing = db.scalar(select(Contract).where(Contract.proposal_id == proposal.id))
@@ -232,6 +233,14 @@ def create_contract(db: Session, user: User, proposal: Proposal, calculation: Ca
     proposal.status = "CONTRACT_DRAFTED"
     db.add(contract)
     mark_quotas_sold_from_calculation(db, calculation)
+    db.flush()
+    auto_allocate_sale_commission(
+        db,
+        user,
+        proposal,
+        calculation,
+        reference=f"CONTRACT-{number}",
+    )
     return contract
 
 

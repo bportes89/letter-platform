@@ -92,6 +92,8 @@ def downline_user_ids(
 def visible_owner_ids(db: Session, user: User) -> set[str] | None:
     if user.role in ORG_WIDE_ROLES:
         return None
+    if user.role == Role.CLIENT:
+        return {user.id}
     if user.role in OVERSIGHT_ROLES:
         ids = downline_user_ids(db, user, include_self=True)
         return ids
@@ -102,13 +104,28 @@ def visible_owner_ids(db: Session, user: User) -> set[str] | None:
 
 def list_visible_leads(db: Session, user: User) -> list[Lead]:
     query = select(Lead).where(Lead.organization_id == user.organization_id)
-    owner_ids = visible_owner_ids(db, user)
-    if owner_ids is not None:
-        query = query.where(Lead.owner_id.in_(owner_ids))
+    if user.role == Role.CLIENT:
+        query = query.where(
+            (Lead.client_user_id == user.id) | (Lead.owner_id == user.id)
+        )
+    else:
+        owner_ids = visible_owner_ids(db, user)
+        if owner_ids is not None:
+            query = query.where(Lead.owner_id.in_(owner_ids))
     return list(db.scalars(query.order_by(Lead.created_at.desc())))
 
 
 def list_visible_proposals(db: Session, user: User) -> list[Proposal]:
+    if user.role == Role.CLIENT:
+        query = (
+            select(Proposal)
+            .join(Lead, Proposal.lead_id == Lead.id)
+            .where(
+                Proposal.organization_id == user.organization_id,
+                (Proposal.client_user_id == user.id) | (Lead.client_user_id == user.id),
+            )
+        )
+        return list(db.scalars(query.order_by(Proposal.created_at.desc())))
     owner_ids = visible_owner_ids(db, user)
     query = (
         select(Proposal)
@@ -124,6 +141,10 @@ def get_lead_for_user(db: Session, user: User, lead_id: str) -> Lead:
     lead = db.scalar(select(Lead).where(Lead.id == lead_id, Lead.organization_id == user.organization_id))
     if not lead:
         raise HTTPException(status_code=404, detail="Lead não encontrado")
+    if user.role == Role.CLIENT:
+        if lead.client_user_id != user.id and lead.owner_id != user.id:
+            raise HTTPException(status_code=404, detail="Lead não encontrado")
+        return lead
     owner_ids = visible_owner_ids(db, user)
     if owner_ids is not None and lead.owner_id not in owner_ids:
         raise HTTPException(status_code=404, detail="Lead não encontrado")
@@ -139,6 +160,10 @@ def get_proposal_for_user(db: Session, user: User, proposal_id: str) -> Proposal
     lead = db.get(Lead, proposal.lead_id)
     if not lead:
         raise HTTPException(status_code=404, detail="Proposta não encontrada")
+    if user.role == Role.CLIENT:
+        if proposal.client_user_id != user.id and lead.client_user_id != user.id:
+            raise HTTPException(status_code=404, detail="Proposta não encontrada")
+        return proposal
     owner_ids = visible_owner_ids(db, user)
     if owner_ids is not None and lead.owner_id not in owner_ids:
         raise HTTPException(status_code=404, detail="Proposta não encontrada")
@@ -172,9 +197,9 @@ def enrich_lead_view(lead: Lead, owners: dict[str, User]) -> dict:
     return payload
 
 
-def enrich_proposal_view(proposal: Proposal, lead: Lead | None, owners: dict[str, User]) -> dict:
+def enrich_proposal_view(proposal: Proposal, lead: Lead | None, owners: dict[str, User], db: Session | None = None) -> dict:
     owner = owners.get((lead.owner_id if lead else "") or "")
-    return {
+    payload = {
         "id": proposal.id,
         "lead_id": proposal.lead_id,
         "product": proposal.product,
@@ -187,6 +212,11 @@ def enrich_proposal_view(proposal: Proposal, lead: Lead | None, owners: dict[str
         "owner_role": owner.role.value if owner and hasattr(owner.role, "value") else (str(owner.role) if owner else None),
         "lead_name": lead.name if lead else None,
     }
+    if db is not None:
+        from app.commission_attribution import attribution_view
+
+        payload.update(attribution_view(proposal, db))
+    return payload
 
 
 def list_downline_members(db: Session, user: User, tree_type: str = "SALES") -> list[dict]:

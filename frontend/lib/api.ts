@@ -56,7 +56,8 @@ export type OperationalJob = { id:string; job_type:string; idempotency_key:strin
 export type Lead = { id: string; name: string; phone: string; product_interest: string; status: string; source: string; scr_status?: string | null; scr_reference?: string | null; scr_consulted_at?: string | null; created_at: string; owner_id?: string | null; owner_name?: string | null; owner_role?: string | null };
 export type Administrator = { id: string; name: string; document: string; authorization_status: string };
 export type Quota = { id: string; administrator_id: string; group_code: string; quota_code: string; category: string; credit_value: string; outstanding_balance: string; premium_value: string; installment_due_date?: string | null; nina_scan_status?: string | null; nina_scanned_at?: string | null; status: string; created_at: string };
-export type Proposal = { id: string; lead_id: string; product: string; requested_amount: string; status: string; calculation_version: string; created_at: string; owner_id?: string | null; owner_name?: string | null; owner_role?: string | null; lead_name?: string | null };
+export type Proposal = { id: string; lead_id: string; product: string; requested_amount: string; status: string; calculation_version: string; created_at: string; owner_id?: string | null; owner_name?: string | null; owner_role?: string | null; lead_name?: string | null; sale_channel?: string | null; client_user_id?: string | null; client_name?: string | null; served_by_user_id?: string | null; served_by_name?: string | null; commission_originator_id?: string | null; commission_originator_name?: string | null };
+export type CommercialClient = { id: string; name: string; email: string; phone?: string | null; referred_by_user_id?: string | null };
 export type LeaseEquityPauta = {
   id: string; proposal_id: string; pauta_code: string; status: string; property_type: string;
   appraisal_value: string; registry_number: string; registry_office: string;

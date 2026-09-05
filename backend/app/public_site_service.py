@@ -259,6 +259,7 @@ def _ensure_client_self_register_lead(
     lead = Lead(
         organization_id=org.id,
         owner_id=referrer_node.user_id if referrer_node else user.referred_by_user_id,
+        client_user_id=user.id,
         name=user.name,
         document=user.document,
         phone=user.phone or phone.strip(),
