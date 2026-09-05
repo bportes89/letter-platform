@@ -56,12 +56,28 @@ def audit(db: Session, user: User, action: str, entity_type: str, entity_id: str
 
 
 def dashboard_summary(db: Session, user: User) -> dict:
+    from app.network_visibility import list_visible_leads, list_visible_proposals, visible_owner_ids
+
     org = user.organization_id
+    owner_ids = visible_owner_ids(db, user)
+    if owner_ids is None:
+        count = lambda model, *filters: db.scalar(select(func.count()).select_from(model).where(model.organization_id == org, *filters)) or 0
+        return {
+            "leads": count(Lead),
+            "available_quotas": count(Quota, Quota.status == "AVAILABLE"),
+            "active_proposals": count(Proposal, Proposal.status.notin_(["CANCELLED", "EXPIRED"])),
+            "active_operations": count(Operation, Operation.status.notin_(["CLOSED", "CANCELLED"])),
+            "modules": len(MODULES),
+            "financial_transactions_enabled": settings.financial_transactions_enabled,
+        }
+    leads = list_visible_leads(db, user)
+    proposals = list_visible_proposals(db, user)
+    active_proposals = [p for p in proposals if p.status not in {"CANCELLED", "EXPIRED"}]
     count = lambda model, *filters: db.scalar(select(func.count()).select_from(model).where(model.organization_id == org, *filters)) or 0
     return {
-        "leads": count(Lead),
+        "leads": len(leads),
         "available_quotas": count(Quota, Quota.status == "AVAILABLE"),
-        "active_proposals": count(Proposal, Proposal.status.notin_(["CANCELLED", "EXPIRED"])),
+        "active_proposals": len(active_proposals),
         "active_operations": count(Operation, Operation.status.notin_(["CLOSED", "CANCELLED"])),
         "modules": len(MODULES),
         "financial_transactions_enabled": settings.financial_transactions_enabled,

@@ -13,6 +13,7 @@ from app.core.config import settings
 from app.core.security import create_token, decode_token, hash_password, verify_password
 from app.models import AuthSession, KycCase, PasswordReset, ROLE_SCOPES, Role, User, UserInvitation
 from app.network_service import PARTNER_NETWORK_ROLES, attach_partner_under_sponsor
+from app.network_visibility import CONTRACT_REQUIRED_INVITE_ROLES, assert_invitable_role, ensure_network_node
 
 
 def as_utc(value: datetime | None) -> datetime | None:
@@ -70,6 +71,8 @@ def create_partner_invitation(db: Session, inviter: User, email: str, role: Role
         raise HTTPException(status_code=403, detail="Perfil sem permissão para convidar parceiros")
     if role not in PARTNER_NETWORK_ROLES:
         raise HTTPException(status_code=422, detail="Parceiros só podem convidar perfis comerciais da rede")
+    assert_invitable_role(inviter, role)
+    ensure_network_node(db, inviter)
     normalized = email.strip().lower()
     if find_user_by_email(db, normalized):
         raise HTTPException(status_code=409, detail="E-mail já cadastrado")
@@ -81,7 +84,7 @@ def create_partner_invitation(db: Session, inviter: User, email: str, role: Role
     if pending:
         raise HTTPException(status_code=409, detail="Já existe convite pendente para este e-mail")
     invite, raw = create_invitation(db, inviter, normalized, role, inviter.branch_id)
-    invite.partner_contract_required = True
+    invite.partner_contract_required = role in CONTRACT_REQUIRED_INVITE_ROLES
     return invite, raw
 
 

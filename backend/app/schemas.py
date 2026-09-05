@@ -367,6 +367,18 @@ class NetworkNodeView(ORMModel):
     status: str
 
 
+class NetworkDownlineMemberView(ORMModel):
+    user_id: str
+    name: str
+    email: str
+    role: str
+    referral_code: str
+    level: int
+    sponsor_user_id: str | None = None
+    sponsor_name: str | None = None
+    status: str
+
+
 class CommissionRuleCreate(BaseModel):
     product: str
     commission_type: str
@@ -657,6 +669,9 @@ class LeadView(ORMModel):
     scr_reference: str | None = None
     scr_consulted_at: datetime | None = None
     created_at: datetime
+    owner_id: str | None = None
+    owner_name: str | None = None
+    owner_role: str | None = None
 
 
 class AdministratorCreate(BaseModel):
@@ -785,6 +800,10 @@ class ProposalView(ORMModel):
     status: str
     calculation_version: str
     created_at: datetime
+    owner_id: str | None = None
+    owner_name: str | None = None
+    owner_role: str | None = None
+    lead_name: str | None = None
 
 
 class CalculationRequest(BaseModel):

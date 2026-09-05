@@ -59,7 +59,7 @@ const ROLE_PLATFORM_MODULE_KEYS: Record<LetterRole, AccessList> = {
     "communications", "reports", "operations", "admin",
   ],
   MASTER_FRANCHISEE: ["crm", "mmn", "reports", "contracts", "my-wallet", "wallet", "communications"],
-  MANAGER: ["crm", "reports", "contracts", "my-wallet", "wallet", "communications"],
+  MANAGER: ["crm", "mmn", "reports", "contracts", "my-wallet", "wallet", "communications"],
   PARTNER: ["crm", "contracts", "my-wallet", "wallet", "mmn", "structured-properties", "communications"],
   CLIENT: ["contracts", "my-wallet", "payments", "communications"],
   QUOTA_SELLER: ["crm", "contracts", "my-wallet", "wallet", "communications"],

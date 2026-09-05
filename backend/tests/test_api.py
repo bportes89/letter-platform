@@ -3147,3 +3147,140 @@ def test_asaas_webhook_applies_boleto_fee(client, auth_headers, monkeypatch):
     wallet_after = client.get("/api/v1/wallet/me", headers=headers)
     # 200 - 3.49 boleto fee
     assert wallet_after.json()["account"]["available_balance"] == "196.51"
+
+
+def _accept_network_invite(client, token: str, *, email: str, name: str, document: str, password: str, with_contract: bool = False, company_cnpj: str | None = None):
+    payload = {
+        "token": token,
+        "name": name,
+        "document": document,
+        "password": password,
+        "phone": "27999990000",
+        "terms_accepted": True,
+    }
+    if with_contract:
+        payload.update({
+            "company_name": f"{name} Ltda",
+            "company_cnpj": company_cnpj or "12345678000199",
+            "company_address": "Rua Teste, 100",
+            "company_city": "Vitória",
+            "company_state": "ES",
+            "scroll_completed": True,
+            "verification_reference": f"contract-{uuid4().hex[:8]}",
+        })
+    return client.post("/api/v1/auth/invitations/accept", json=payload)
+
+
+def test_manager_sees_downline_proposals_and_members(client, auth_headers):
+    suffix = uuid4().hex[:8]
+    master_email = f"master.rede.{suffix}@letter.com.br"
+    manager_email = f"gerente.rede.{suffix}@letter.com.br"
+    partner_email = f"parceiro.rede.{suffix}@letter.com.br"
+
+    master_invite = client.post("/api/v1/admin/invitations", headers=auth_headers, json={
+        "email": master_email,
+        "role": "MASTER_FRANCHISEE",
+    })
+    assert master_invite.status_code == 201
+    master_accept = _accept_network_invite(
+        client, master_invite.json()["token"],
+        email=master_email, name="Master Bevi", document="10101010101", password="MasterRede1!",
+    )
+    assert master_accept.status_code == 200
+    master_headers = {"Authorization": f"Bearer {client.post('/api/v1/auth/login', json={'email': master_email, 'password': 'MasterRede1!'}).json()['access_token']}"}
+
+    manager_invite = client.post("/api/v1/network/invitations", headers=master_headers, json={
+        "email": manager_email,
+        "role": "MANAGER",
+    })
+    assert manager_invite.status_code == 201
+    manager_preview = client.get(f"/api/v1/auth/invitations/preview?token={manager_invite.json()['token']}")
+    assert manager_preview.status_code == 200
+    assert manager_preview.json()["contract_required"] is False
+
+    manager_accept = _accept_network_invite(
+        client, manager_invite.json()["token"],
+        email=manager_email, name="Gerente Regional", document="20202020202", password="GerenteRede1!",
+    )
+    assert manager_accept.status_code == 200
+    manager_headers = {"Authorization": f"Bearer {client.post('/api/v1/auth/login', json={'email': manager_email, 'password': 'GerenteRede1!'}).json()['access_token']}"}
+
+    partner_invite = client.post("/api/v1/network/invitations", headers=manager_headers, json={
+        "email": partner_email,
+        "role": "PARTNER",
+    })
+    assert partner_invite.status_code == 201
+    partner_cnpj = f"{(int(suffix, 16) % 10**14):014d}"
+    partner_accept = _accept_network_invite(
+        client, partner_invite.json()["token"],
+        email=partner_email, name="Parceiro Downline", document="30303030303", password="ParceiroRede1!",
+        with_contract=True,
+        company_cnpj=partner_cnpj,
+    )
+    assert partner_accept.status_code == 200
+    partner_headers = {"Authorization": f"Bearer {client.post('/api/v1/auth/login', json={'email': partner_email, 'password': 'ParceiroRede1!'}).json()['access_token']}"}
+
+    blocked = client.post("/api/v1/network/invitations", headers=manager_headers, json={
+        "email": f"outro.master.{suffix}@letter.com.br",
+        "role": "MASTER_FRANCHISEE",
+    })
+    assert blocked.status_code == 422
+
+    lead = client.post("/api/v1/leads", headers=partner_headers, json={
+        "name": "Cliente da Rede",
+        "phone": "27988887777",
+        "product_interest": "MARKETPLACE",
+        "status": "QUALIFIED",
+        "source": "DASHBOARD",
+    })
+    assert lead.status_code == 201
+    proposal = client.post("/api/v1/proposals", headers=partner_headers, json={
+        "lead_id": lead.json()["id"],
+        "product": "MARKETPLACE",
+        "requested_amount": "250000",
+        "terms": {"channel": "DASHBOARD"},
+    })
+    assert proposal.status_code == 201
+
+    manager_proposals = client.get("/api/v1/proposals", headers=manager_headers)
+    assert manager_proposals.status_code == 200
+    visible = manager_proposals.json()
+    assert len(visible) == 1
+    assert visible[0]["owner_name"] == "Parceiro Downline"
+    assert visible[0]["id"] == proposal.json()["id"]
+
+    manager_leads = client.get("/api/v1/leads", headers=manager_headers)
+    assert manager_leads.status_code == 200
+    assert len(manager_leads.json()) == 1
+    assert manager_leads.json()[0]["owner_name"] == "Parceiro Downline"
+
+    summary = client.get("/api/v1/network/me/summary", headers=manager_headers)
+    assert summary.status_code == 200
+    assert summary.json()["privacy_mode"] == "DOWNLINE_VISIBLE"
+    assert summary.json()["pending_proposals"] >= 1
+    assert summary.json()["downline_size"] >= 1
+
+    downline = client.get("/api/v1/network/me/downline", headers=manager_headers)
+    assert downline.status_code == 200
+    assert any(item["email"] == partner_email for item in downline.json())
+
+    isolated_manager = client.post("/api/v1/admin/invitations", headers=auth_headers, json={
+        "email": f"gerente.isolado.{suffix}@letter.com.br",
+        "role": "MANAGER",
+    })
+    assert isolated_manager.status_code == 201
+    _accept_network_invite(
+        client, isolated_manager.json()["token"],
+        email=f"gerente.isolado.{suffix}@letter.com.br",
+        name="Gerente Isolado",
+        document="40404040404",
+        password="GerenteIso1!",
+    )
+    isolated_headers = {"Authorization": f"Bearer {client.post('/api/v1/auth/login', json={'email': f'gerente.isolado.{suffix}@letter.com.br', 'password': 'GerenteIso1!'}).json()['access_token']}"}
+    isolated_proposals = client.get("/api/v1/proposals", headers=isolated_headers)
+    assert isolated_proposals.status_code == 200
+    assert isolated_proposals.json() == []
+
+    partner_only = client.get("/api/v1/proposals", headers=partner_headers).json()
+    assert len(partner_only) == 1
+    assert partner_only[0]["owner_name"] == "Parceiro Downline"

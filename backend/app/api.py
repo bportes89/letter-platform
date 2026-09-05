@@ -79,7 +79,7 @@ from app.schemas import (
     ContractNativeInspectionRequest, CollateralNativeInspectionView,
     LeadUpdate, LeadView, LedgerPostRequest, LedgerTransactionView, LegacyIdMapView, LegacyMigrationBundle, LegacyMigrationRunView, LoginRequest,
     FlashCreditCalculationRequest, MfaSetupView, MfaVerify, ModuleView, PasswordResetConfirm, PasswordResetRequest,
-    NetworkNodeCreate, NetworkNodeView, PayoutApprove, PayoutCreate, PayoutView, ProposalCreate, ProposalUpdate,
+    NetworkNodeCreate, NetworkNodeView, NetworkDownlineMemberView, PayoutApprove, PayoutCreate, PayoutView, ProposalCreate, ProposalUpdate,
     ReconciliationBatchView, ReconciliationItemView, ReconciliationResolveRequest,
     MarketplaceEsteira1Request, MarketplaceEsteira1Response, MarketplaceEsteira2Request, MarketplaceEsteira2Response,
     ProposalView, QuotaCreate, QuotaUpdate, QuotaView, NinaQuotaScanView, RecoveredAssetCreate, RecoveredAssetView, RefreshRequest,
@@ -190,6 +190,18 @@ from app.flash_capital_params import get_active_flash_simulation_params, save_fl
 from app.network_service import (
     allocate_commissions, confirm_investment, create_network_node, create_rule,
     downline_summary, reserve_investment,
+)
+from app.network_visibility import (
+    OVERSIGHT_ROLES,
+    enrich_lead_view,
+    enrich_proposal_view,
+    get_lead_for_user,
+    get_proposal_for_user,
+    list_downline_members,
+    list_visible_leads,
+    list_visible_proposals,
+    owner_map,
+    pending_counts_for_network,
 )
 from app.billing_service import (
     apply_payment, generate_billing_schedule, import_reconciliation_csv,
@@ -601,7 +613,18 @@ def network_nodes(tree_type: str = "SALES", user: User = Depends(require_scope("
 
 @router.get("/network/me/summary")
 def network_my_summary(tree_type: str = "SALES", user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    return downline_summary(db, user, tree_type)
+    summary = downline_summary(db, user, tree_type)
+    if user.role in OVERSIGHT_ROLES:
+        summary.update(pending_counts_for_network(db, user))
+        summary["privacy_mode"] = "DOWNLINE_VISIBLE"
+    return summary
+
+
+@router.get("/network/me/downline", response_model=list[NetworkDownlineMemberView])
+def network_my_downline(tree_type: str = "SALES", user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if user.role not in OVERSIGHT_ROLES:
+        raise HTTPException(status_code=403, detail="Perfil sem permissão para visualizar a rede comercial")
+    return list_downline_members(db, user, tree_type)
 
 
 @router.post("/commission-rules", response_model=CommissionRuleView, status_code=201)
@@ -883,29 +906,30 @@ def dashboard(user: User = Depends(require_scope("dashboard:read")), db: Session
 
 @router.get("/leads", response_model=list[LeadView])
 def list_leads(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    return list(db.scalars(select(Lead).where(Lead.organization_id == user.organization_id).order_by(Lead.created_at.desc())))
+    leads = list_visible_leads(db, user)
+    owners = owner_map(db, {lead.owner_id for lead in leads if lead.owner_id})
+    return [enrich_lead_view(lead, owners) for lead in leads]
 
 
 @router.post("/leads", response_model=LeadView, status_code=201)
 def create_lead(payload: LeadCreate, user: User = Depends(require_scope("leads:write")), db: Session = Depends(get_db)):
     lead = Lead(organization_id=user.organization_id, owner_id=user.id, **payload.model_dump())
     db.add(lead); db.flush(); audit(db, user, "lead.created", "lead", lead.id); db.commit(); db.refresh(lead)
-    return lead
+    return enrich_lead_view(lead, owner_map(db, {user.id}))
 
 
 @router.patch("/leads/{lead_id}", response_model=LeadView)
 def update_lead(lead_id: str, payload: LeadUpdate, user: User = Depends(require_scope("leads:write")), db: Session = Depends(get_db)):
-    lead = db.scalar(select(Lead).where(Lead.id == lead_id, Lead.organization_id == user.organization_id))
-    if not lead: raise HTTPException(status_code=404, detail="Lead não encontrado")
+    lead = get_lead_for_user(db, user, lead_id)
     for field, value in payload.model_dump(exclude_unset=True).items(): setattr(lead, field, value)
     audit(db, user, "lead.updated", "lead", lead.id, payload.model_dump(exclude_unset=True)); db.commit(); db.refresh(lead)
-    return lead
+    owners = owner_map(db, {lead.owner_id} if lead.owner_id else set())
+    return enrich_lead_view(lead, owners)
 
 
 @router.delete("/leads/{lead_id}", status_code=204)
 def delete_lead(lead_id: str, user: User = Depends(require_scope("leads:write")), db: Session = Depends(get_db)):
-    lead = db.scalar(select(Lead).where(Lead.id == lead_id, Lead.organization_id == user.organization_id))
-    if not lead: raise HTTPException(status_code=404, detail="Lead não encontrado")
+    lead = get_lead_for_user(db, user, lead_id)
     if db.scalar(select(Proposal).where(Proposal.lead_id == lead.id)):
         raise HTTPException(status_code=409, detail="Lead possui propostas e não pode ser excluído")
     audit(db, user, "lead.deleted", "lead", lead.id); db.delete(lead); db.commit()
@@ -1178,36 +1202,40 @@ def nina_validate_combination(
 
 @router.get("/proposals", response_model=list[ProposalView])
 def list_proposals(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    return list(db.scalars(select(Proposal).where(Proposal.organization_id == user.organization_id).order_by(Proposal.created_at.desc())))
+    proposals = list_visible_proposals(db, user)
+    lead_ids = {proposal.lead_id for proposal in proposals}
+    leads = {item.id: item for item in db.scalars(select(Lead).where(Lead.id.in_(lead_ids)))} if lead_ids else {}
+    owners = owner_map(db, {lead.owner_id for lead in leads.values() if lead.owner_id})
+    return [enrich_proposal_view(proposal, leads.get(proposal.lead_id), owners) for proposal in proposals]
 
 
 @router.post("/proposals", response_model=ProposalView, status_code=201)
 def create_proposal(payload: ProposalCreate, user: User = Depends(require_scope("proposals:write")), db: Session = Depends(get_db)):
-    lead = db.scalar(select(Lead).where(Lead.id == payload.lead_id, Lead.organization_id == user.organization_id))
-    if not lead: raise HTTPException(status_code=404, detail="Lead não encontrado")
+    lead = get_lead_for_user(db, user, payload.lead_id)
     proposal = Proposal(
         organization_id=user.organization_id, lead_id=payload.lead_id, product=payload.product,
         requested_amount=payload.requested_amount, terms_json=json.dumps(payload.terms, ensure_ascii=False),
     )
     db.add(proposal); db.flush(); audit(db, user, "proposal.created", "proposal", proposal.id); db.commit(); db.refresh(proposal)
-    return proposal
+    owners = owner_map(db, {lead.owner_id} if lead.owner_id else set())
+    return enrich_proposal_view(proposal, lead, owners)
 
 
 @router.patch("/proposals/{proposal_id}", response_model=ProposalView)
 def update_proposal(proposal_id: str, payload: ProposalUpdate, user: User = Depends(require_scope("proposals:write")), db: Session = Depends(get_db)):
-    proposal = db.scalar(select(Proposal).where(Proposal.id == proposal_id, Proposal.organization_id == user.organization_id))
-    if not proposal: raise HTTPException(status_code=404, detail="Proposta não encontrada")
+    proposal = get_proposal_for_user(db, user, proposal_id)
     changes = payload.model_dump(exclude_unset=True)
     if "terms" in changes: changes["terms_json"] = json.dumps(changes.pop("terms"), ensure_ascii=False)
     for field, value in changes.items(): setattr(proposal, field, value)
     audit(db, user, "proposal.updated", "proposal", proposal.id, payload.model_dump(exclude_unset=True, mode="json")); db.commit(); db.refresh(proposal)
-    return proposal
+    lead = db.get(Lead, proposal.lead_id)
+    owners = owner_map(db, {lead.owner_id} if lead and lead.owner_id else set())
+    return enrich_proposal_view(proposal, lead, owners)
 
 
 @router.post("/proposals/{proposal_id}/calculate", response_model=CalculationView, status_code=201)
 def calculate_proposal(proposal_id: str, payload: CalculationRequest, user: User = Depends(require_scope("proposals:write")), db: Session = Depends(get_db)):
-    proposal = db.scalar(select(Proposal).where(Proposal.id == proposal_id, Proposal.organization_id == user.organization_id))
-    if not proposal: raise HTTPException(status_code=404, detail="Proposta não encontrada")
+    proposal = get_proposal_for_user(db, user, proposal_id)
     quotas = list(db.scalars(select(Quota).where(Quota.id.in_(payload.quota_ids), Quota.organization_id == user.organization_id)))
     if len(quotas) != len(set(payload.quota_ids)): raise HTTPException(status_code=404, detail="Uma ou mais cotas não foram encontradas")
     calculation = calculate_marketplace(db, user, proposal, quotas, payload.fee_percent, payload.start_fee)
@@ -1240,8 +1268,7 @@ def calculation_view(calculation: CalculationMemory, *, attach_quitcon_sdc: bool
 
 @router.post("/proposals/{proposal_id}/calculate-sdc", response_model=CalculationView, status_code=201)
 def calculate_sdc_proposal(proposal_id: str, payload: SdcCalculationRequest, user: User = Depends(require_scope("proposals:write")), db: Session = Depends(get_db)):
-    proposal = db.scalar(select(Proposal).where(Proposal.id == proposal_id, Proposal.organization_id == user.organization_id))
-    if not proposal: raise HTTPException(status_code=404, detail="Proposta não encontrada")
+    proposal = get_proposal_for_user(db, user, proposal_id)
     quotas = list(db.scalars(select(Quota).where(Quota.id.in_(payload.quota_ids), Quota.organization_id == user.organization_id)))
     if len(quotas) != len(set(payload.quota_ids)): raise HTTPException(status_code=404, detail="Uma ou mais cotas não foram encontradas")
     calculation = calculate_sdc(
@@ -1254,8 +1281,7 @@ def calculate_sdc_proposal(proposal_id: str, payload: SdcCalculationRequest, use
 
 @router.post("/proposals/{proposal_id}/calculate-flash-credit", response_model=CalculationView, status_code=201)
 def calculate_flash_credit_proposal(proposal_id: str, payload: FlashCreditCalculationRequest, user: User = Depends(require_scope("proposals:write")), db: Session = Depends(get_db)):
-    proposal = db.scalar(select(Proposal).where(Proposal.id == proposal_id, Proposal.organization_id == user.organization_id))
-    if not proposal: raise HTTPException(status_code=404, detail="Proposta não encontrada")
+    proposal = get_proposal_for_user(db, user, proposal_id)
     calculation = calculate_flash_credit(
         db, user, proposal, payload.asset_value, payload.capital_source,
         payload.term_months, payload.ipca_annual_percent,
@@ -1267,8 +1293,7 @@ def calculate_flash_credit_proposal(proposal_id: str, payload: FlashCreditCalcul
 
 @router.get("/proposals/{proposal_id}/calculations", response_model=list[CalculationView])
 def list_calculations(proposal_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    proposal = db.scalar(select(Proposal).where(Proposal.id == proposal_id, Proposal.organization_id == user.organization_id))
-    if not proposal: raise HTTPException(status_code=404, detail="Proposta não encontrada")
+    proposal = get_proposal_for_user(db, user, proposal_id)
     rows = db.scalars(select(CalculationMemory).where(CalculationMemory.proposal_id == proposal.id).order_by(CalculationMemory.version.desc()))
     return [CalculationView(id=x.id, proposal_id=x.proposal_id, version=x.version, formula_version=x.formula_version, input=json.loads(x.input_json), output=json.loads(x.output_json), approved_at=x.approved_at) for x in rows]
 
@@ -1540,10 +1565,7 @@ def finops_invoice_processor(payload: InvoiceProcessorRequest, user: User = Depe
 
 
 def _load_proposal(db: Session, user: User, proposal_id: str) -> Proposal:
-    proposal = db.scalar(select(Proposal).where(Proposal.id == proposal_id, Proposal.organization_id == user.organization_id))
-    if not proposal:
-        raise HTTPException(status_code=404, detail="Proposta não encontrada")
-    return proposal
+    return get_proposal_for_user(db, user, proposal_id)
 
 
 @router.post("/finops/pre-analysis/validate-documents", response_model=PreAnalysisPautaView)
@@ -2167,8 +2189,7 @@ def flash_policy_approve(policy_id:str,user:User=Depends(require_step_up),_:User
 
 @router.post("/flash-credit/proposals/{proposal_id}/parties",response_model=FlashCreditRouteView)
 def flash_parties(proposal_id:str,payload:FlashCreditPartiesCreate,user:User=Depends(require_scope("proposals:write")),db:Session=Depends(get_db)):
-    proposal=db.scalar(select(Proposal).where(Proposal.id==proposal_id,Proposal.organization_id==user.organization_id))
-    if not proposal:raise HTTPException(404,"Proposta não encontrada")
+    proposal=get_proposal_for_user(db,user,proposal_id)
     route=configure_flash_parties(db,user,proposal,**payload.model_dump());audit(db,user,"flash_credit.parties_configured","proposal",proposal.id,{"route":route["route"]});db.commit();return route
 
 
@@ -2191,8 +2212,7 @@ def nina_routing_policy_approve(policy_id:str,user:User=Depends(require_step_up)
 
 @router.post("/nina-routing/proposals/{proposal_id}/assess",response_model=NinaRoutingAssessmentView,status_code=201)
 def nina_routing_assess(proposal_id:str,payload:NinaRoutingAssessmentCreate,user:User=Depends(require_scope("proposals:write")),db:Session=Depends(get_db)):
-    proposal=db.scalar(select(Proposal).where(Proposal.id==proposal_id,Proposal.organization_id==user.organization_id));policy=db.scalar(select(NinaRoutingPolicy).where(NinaRoutingPolicy.organization_id==user.organization_id,NinaRoutingPolicy.status=="ACTIVE").order_by(NinaRoutingPolicy.version.desc()))
-    if not proposal:raise HTTPException(404,"Proposta não encontrada")
+    proposal=get_proposal_for_user(db,user,proposal_id);policy=db.scalar(select(NinaRoutingPolicy).where(NinaRoutingPolicy.organization_id==user.organization_id,NinaRoutingPolicy.status=="ACTIVE").order_by(NinaRoutingPolicy.version.desc()))
     if not policy:raise HTTPException(409,"Não há política NINA ativa")
     item=assess_nina_route(db,user,proposal,policy,**payload.model_dump());audit(db,user,"nina.routing_assessed","nina_routing_assessment",item.id,{"product_route":item.product_route,"capital_route":item.capital_route});db.commit();db.refresh(item);return nina_routing_view(item)
 
@@ -2312,9 +2332,9 @@ def lss_allocation(plan_id:str,user:User=Depends(get_current_user),db:Session=De
 
 @router.post("/proposals/{proposal_id}/contracts", response_model=ContractView, status_code=201)
 def create_contract_route(proposal_id: str, payload: ContractCreate, user: User = Depends(require_scope("proposals:write")), db: Session = Depends(get_db)):
-    proposal = db.scalar(select(Proposal).where(Proposal.id == proposal_id, Proposal.organization_id == user.organization_id))
+    proposal = get_proposal_for_user(db, user, proposal_id)
     calculation = db.scalar(select(CalculationMemory).where(CalculationMemory.id == payload.calculation_memory_id, CalculationMemory.organization_id == user.organization_id))
-    if not proposal or not calculation: raise HTTPException(status_code=404, detail="Proposta ou memória de cálculo não encontrada")
+    if not calculation: raise HTTPException(status_code=404, detail="Proposta ou memória de cálculo não encontrada")
     contract = create_contract(db, user, proposal, calculation)
     link_inspection_to_contract(db, proposal.id, contract.id)
     db.flush()
@@ -2983,8 +3003,8 @@ def assessment_view(item:UnderwritingAssessment)->UnderwritingAssessmentView:
 
 @router.post("/nina/proposals/{proposal_id}/assess",response_model=UnderwritingAssessmentView,status_code=201)
 def nina_assess(proposal_id:str,payload:UnderwritingAssessmentCreate,user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
-    proposal=db.scalar(select(Proposal).where(Proposal.id==proposal_id,Proposal.organization_id==user.organization_id));policy=db.scalar(select(UnderwritingPolicy).where(UnderwritingPolicy.id==payload.policy_id,UnderwritingPolicy.organization_id==user.organization_id,UnderwritingPolicy.active.is_(True)))
-    if not proposal or not policy: raise HTTPException(status_code=404,detail="Proposta ou política ativa não encontrada")
+    proposal=get_proposal_for_user(db,user,proposal_id);policy=db.scalar(select(UnderwritingPolicy).where(UnderwritingPolicy.id==payload.policy_id,UnderwritingPolicy.organization_id==user.organization_id,UnderwritingPolicy.active.is_(True)))
+    if not policy: raise HTTPException(status_code=404,detail="Proposta ou política ativa não encontrada")
     inputs=payload.model_dump(exclude={"policy_id"},mode="json");item=assess(db,user,proposal,policy,inputs);db.flush();audit(db,user,"nina.assessed","underwriting_assessment",item.id,{"score":item.score});db.commit();db.refresh(item);return assessment_view(item)
 
 @router.get("/nina/assessments",response_model=list[UnderwritingAssessmentView])

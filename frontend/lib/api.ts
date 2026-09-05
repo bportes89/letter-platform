@@ -10,6 +10,8 @@ export type Invitation = { id: string; email: string; role: string; branch_id: s
 export type AuthSession = { id: string; user_agent: string | null; ip_address: string | null; active: boolean; created_at: string; expires_at: string; last_seen_at: string; step_up_until: string | null };
 export type KycCase = { id: string; subject_type: string; subject_id: string; provider: string; status: string; risk_level: string | null; created_at: string; reviewed_at: string | null };
 export type NetworkNode = { id:string; user_id:string; sponsor_user_id:string|null; tree_type:string; referral_code:string; status:string };
+export type NetworkDownlineMember = { user_id:string; name:string; email:string; role:string; referral_code:string; level:number; sponsor_user_id:string|null; sponsor_name:string|null; status:string };
+export type NetworkSummary = { tree_type:string; total_downline:number; levels:Record<string,number>; privacy_mode:string; visible_proposals?:number; pending_proposals?:number; visible_leads?:number; open_leads?:number; downline_size?:number };
 export type CommissionRule = { id:string; product:string; commission_type:string; version:number; base_type:string; pool_rate_percent:string; levels_json:string; active:boolean };
 export type CommissionEntry = { id:string; beneficiary_id:string; reference:string; product:string; level:number; amount:string; status:string };
 export type FundingOpportunity = { id:string; title:string; product:string; capital_source:string; target_amount:string; funded_amount:string; min_investment:string; annual_return_reference:string|null; status:string; created_at:string };
@@ -51,10 +53,10 @@ export type UnderwritingPolicy = { id:string; product:string; version:number; mi
 export type UnderwritingAssessment = { id:string; proposal_id:string; policy_id:string; version:number; score:number; risk_band:string; recommendation:string; status:string; created_at:string; explanation:Record<string,unknown> };
 export type BISummary = { funnel:{leads:number;proposals:number;approved:number}; portfolio:{invoiced:string;paid:string;open:string;delinquency_charges:string}; risk:{assessments:number;high_risk:number;pending_decisions:number}; funding:{target:string;funded:string}; recovery:{settled:string} };
 export type OperationalJob = { id:string; job_type:string; idempotency_key:string; status:string; attempts:number; max_attempts:number; scheduled_at:string; completed_at:string|null; last_error:string|null; created_at:string };
-export type Lead = { id: string; name: string; phone: string; product_interest: string; status: string; source: string; scr_status?: string | null; scr_reference?: string | null; scr_consulted_at?: string | null; created_at: string };
+export type Lead = { id: string; name: string; phone: string; product_interest: string; status: string; source: string; scr_status?: string | null; scr_reference?: string | null; scr_consulted_at?: string | null; created_at: string; owner_id?: string | null; owner_name?: string | null; owner_role?: string | null };
 export type Administrator = { id: string; name: string; document: string; authorization_status: string };
 export type Quota = { id: string; administrator_id: string; group_code: string; quota_code: string; category: string; credit_value: string; outstanding_balance: string; premium_value: string; installment_due_date?: string | null; nina_scan_status?: string | null; nina_scanned_at?: string | null; status: string; created_at: string };
-export type Proposal = { id: string; lead_id: string; product: string; requested_amount: string; status: string; calculation_version: string; created_at: string };
+export type Proposal = { id: string; lead_id: string; product: string; requested_amount: string; status: string; calculation_version: string; created_at: string; owner_id?: string | null; owner_name?: string | null; owner_role?: string | null; lead_name?: string | null };
 export type LeaseEquityPauta = {
   id: string; proposal_id: string; pauta_code: string; status: string; property_type: string;
   appraisal_value: string; registry_number: string; registry_office: string;
