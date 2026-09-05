@@ -3,20 +3,13 @@
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { api, logout, type User } from "@/lib/api";
-import { portalHomeForRole, postSignupRedirectForRole } from "@/lib/portal-routes";
-
-type WalletPeek = {
-  has_subaccount: boolean;
-  kyc_case?: { status: string } | null;
-};
+import {
+  shouldForceWalletOnboarding,
+  type WalletPeek,
+  type WalletProfile,
+} from "@/lib/wallet-onboarding";
 
 const SKIP_PREFIXES = ["/cadastro", "/login", "/convite", "/recuperar-senha", "/seguranca"];
-
-function walletOnboardingComplete(wallet: WalletPeek): boolean {
-  if (wallet.has_subaccount) return true;
-  const kycStatus = wallet.kyc_case?.status ?? "";
-  return kycStatus === "APPROVED" || kycStatus === "SUBMITTED";
-}
 
 export function WalletOnboardingGuard({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -27,15 +20,13 @@ export function WalletOnboardingGuard({ children }: { children: React.ReactNode 
       setReady(true);
       return;
     }
-    api<User>("/auth/me")
-      .then(async (user) => {
-        const onboarding = postSignupRedirectForRole(user.role);
-        if (onboarding === portalHomeForRole(user.role)) {
-          setReady(true);
-          return;
-        }
-        const wallet = await api<WalletPeek>("/wallet/me");
-        if (!walletOnboardingComplete(wallet)) {
+    Promise.all([
+      api<User>("/auth/me"),
+      api<WalletProfile>("/auth/me/profile"),
+      api<WalletPeek>("/wallet/me"),
+    ])
+      .then(([user, profile, wallet]) => {
+        if (shouldForceWalletOnboarding(user.role, wallet, profile)) {
           window.location.href = "/cadastro/conta";
           return;
         }

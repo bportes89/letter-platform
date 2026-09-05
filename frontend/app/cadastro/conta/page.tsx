@@ -7,6 +7,7 @@ import "../../site.css";
 import { SiteNav } from "@/components/public-site/simulator-section";
 import { api, getToken, type User } from "@/lib/api";
 import { portalHomeForRole } from "@/lib/portal-routes";
+import { profileHasWalletBasics } from "@/lib/wallet-onboarding";
 
 type Profile = {
   document: string | null;
@@ -138,18 +139,8 @@ function AberturaContaForm() {
           return;
         }
 
-        const hasBasics = digitsOnly(profile.document ?? "").length >= 11 && (profile.phone ?? "").trim().length >= 10;
-        if (hasBasics) {
-          try {
-            await completeWalletActivation(me, profile, {
-              document: profile.document ?? "",
-              phone: profile.phone ?? "",
-              companyName: profile.company_name ?? "",
-              companyCnpj: profile.company_cnpj ?? "",
-            });
-          } catch {
-            // Mantém o formulário para o usuário revisar os dados manualmente.
-          }
+        if (profileHasWalletBasics(profile)) {
+          setNotice("Seus dados já estão cadastrados. Você pode entrar no escritório e ativar a carteira LETTER depois em Minha Carteira.");
         }
       })
       .catch(() => {
@@ -189,7 +180,10 @@ function AberturaContaForm() {
     return <div className="site-login-card">Preparando abertura da conta…</div>;
   }
 
-  const canEnterPortal = kycAllowsPortalAccess(kycStatus) || Boolean(onboardingUrl);
+  const canEnterPortal = profileHasWalletBasics({
+    document,
+    phone,
+  }) || kycAllowsPortalAccess(kycStatus) || Boolean(onboardingUrl);
 
   return (
     <form className="site-login-card" onSubmit={submit}>
@@ -258,7 +252,7 @@ function AberturaContaForm() {
           style={{ width: "100%", marginTop: 8, background: "transparent", color: "inherit", border: "1px solid currentColor" }}
           onClick={() => { window.location.href = portalHomeForRole(user.role); }}
         >
-          Ir para o escritório
+          Ir para o escritório{!kycAllowsPortalAccess(kycStatus) && !onboardingUrl ? " (ativar carteira depois)" : ""}
         </button>
       )}
 

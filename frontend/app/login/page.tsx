@@ -8,13 +8,26 @@ import "../site.css";
 import { SiteNav } from "@/components/public-site/simulator-section";
 import { getToken, login, api, User } from "@/lib/api";
 import { portalHomeForRole } from "@/lib/portal-routes";
+import {
+  canAccessPortalWithoutWallet,
+  type WalletPeek,
+  type WalletProfile,
+} from "@/lib/wallet-onboarding";
 
-function redirectAfterLogin(role: string, nextPath: string | null) {
+async function redirectAfterLogin(user: User, nextPath: string | null) {
   if (nextPath && nextPath.startsWith("/")) {
     window.location.href = nextPath;
     return;
   }
-  window.location.href = portalHomeForRole(role);
+  const [profile, wallet] = await Promise.all([
+    api<WalletProfile>("/auth/me/profile"),
+    api<WalletPeek>("/wallet/me"),
+  ]);
+  if (canAccessPortalWithoutWallet(user.role, wallet, profile)) {
+    window.location.href = portalHomeForRole(user.role);
+    return;
+  }
+  window.location.href = "/cadastro/conta";
 }
 
 function LoginForm() {
@@ -31,7 +44,7 @@ function LoginForm() {
     if (!getToken()) return;
     api<User>("/auth/me")
       .then((user) => {
-        redirectAfterLogin(user.role, nextPath);
+        redirectAfterLogin(user, nextPath);
       })
       .catch(() => {
         localStorage.removeItem("letter_access_token");
@@ -46,7 +59,7 @@ function LoginForm() {
     try {
       await login(email, password, showMfa ? otp : undefined);
       const user = await api<User>("/auth/me");
-      redirectAfterLogin(user.role, nextPath);
+      await redirectAfterLogin(user, nextPath);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Falha no acesso");
       setLoading(false);

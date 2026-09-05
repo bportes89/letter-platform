@@ -12,6 +12,7 @@ import {
 } from "@/lib/public-site-api";
 import { api, getToken, type User } from "@/lib/api";
 import { portalHomeForRole, postSignupRedirectForRole } from "@/lib/portal-routes";
+import { canAccessPortalWithoutWallet, type WalletPeek, type WalletProfile } from "@/lib/wallet-onboarding";
 
 function CadastroForm() {
   const searchParams = useSearchParams();
@@ -31,8 +32,16 @@ function CadastroForm() {
   useEffect(() => {
     if (!getToken()) return;
     api<User>("/auth/me")
-      .then((user) => {
-        window.location.href = portalHomeForRole(user.role);
+      .then(async (user) => {
+        const [profile, wallet] = await Promise.all([
+          api<WalletProfile>("/auth/me/profile"),
+          api<WalletPeek>("/wallet/me"),
+        ]);
+        if (canAccessPortalWithoutWallet(user.role, wallet, profile)) {
+          window.location.href = portalHomeForRole(user.role);
+          return;
+        }
+        window.location.href = postSignupRedirectForRole(user.role);
       })
       .catch(() => {
         localStorage.removeItem("letter_access_token");
