@@ -58,10 +58,10 @@ const WALLET_ONBOARDING_ROLES = new Set<string>([
   "INTERNAL_STAFF",
 ]);
 
-/** Após cadastro ou convite — leva direto à abertura da conta LETTER. */
+/** Após cadastro ou convite — etapa 2 antes do escritório (abertura da conta LETTER). */
 export function postSignupRedirectForRole(role: string | undefined): string {
   if (role && WALLET_ONBOARDING_ROLES.has(role)) {
-    return "/modules/my-wallet?onboarding=kyc";
+    return "/cadastro/conta";
   }
   return portalHomeForRole(role);
 }

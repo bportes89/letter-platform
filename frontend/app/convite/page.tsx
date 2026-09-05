@@ -12,6 +12,7 @@ import {
   type InvitationPreview,
 } from "@/lib/public-site-api";
 import { login } from "@/lib/api";
+import { postSignupRedirectForRole } from "@/lib/portal-routes";
 
 function ConviteForm() {
   const searchParams = useSearchParams();
@@ -69,7 +70,7 @@ function ConviteForm() {
         verification_reference: verificationReference,
       });
       await login(preview.email, password);
-      window.location.href = "/modules/my-wallet?onboarding=kyc";
+      window.location.href = postSignupRedirectForRole(preview.role);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Não foi possível concluir o aceite");
       setLoading(false);

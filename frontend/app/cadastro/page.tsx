@@ -83,11 +83,11 @@ function CadastroForm() {
 
   return (
     <form className="site-login-card" onSubmit={submit}>
-      <p className="site-kicker">Conta LETTER</p>
+      <p className="site-kicker">Passo 1 de 2 · Conta LETTER</p>
       <h1>Abra sua conta</h1>
       <p>
-        Crie sua conta para acompanhar propostas, contratos e operações. Ao concluir, você será
-        direcionado para abrir sua <strong>conta LETTER</strong> (dados bancários e verificação).
+        Primeiro, crie seu acesso. Na sequência você confirma CPF/CNPJ e celular para ativar a
+        <strong> conta LETTER</strong> antes de entrar no escritório.
       </p>
 
       <label>
@@ -111,8 +111,8 @@ function CadastroForm() {
       </label>
       <label>
         CPF ou CNPJ
-        <small>Opcional neste momento</small>
-        <input value={document} onChange={(e) => setDocument(e.target.value)} />
+        <small>Obrigatório para abrir sua conta LETTER</small>
+        <input value={document} onChange={(e) => setDocument(e.target.value)} required minLength={11} />
       </label>
       <label>
         Senha
@@ -168,7 +168,7 @@ function CadastroForm() {
       )}
 
       <button className="site-submit" type="submit" disabled={loading} style={{ width: "100%" }}>
-        {loading ? "Criando conta…" : "Criar minha conta"}
+        {loading ? "Criando acesso…" : "Continuar — ativar conta LETTER"}
       </button>
 
       <p className="site-login-note">Já tem conta?</p>
