@@ -288,10 +288,21 @@ export async function apiForm<T>(path:string, body:FormData):Promise<T>{
 export async function downloadApi(path:string,filename:string){const token=getToken();const response=await fetch(`${API_URL}${path}`,{headers:{...(token?{Authorization:`Bearer ${token}`}:{})}});if(!response.ok)throw new Error("Não foi possível exportar o relatório");const url=URL.createObjectURL(await response.blob());const link=document.createElement("a");link.href=url;link.download=filename;link.click();URL.revokeObjectURL(url)}
 
 export async function login(email: string, password: string, otp?: string) {
-  const result = await api<{ access_token: string; refresh_token: string }>("/auth/login", {
+  const response = await fetch(`${API_URL}/auth/login`, {
     method: "POST",
-    body: JSON.stringify({ email, password, otp: otp || undefined }),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password, otp: otp?.trim() || undefined }),
   });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    if (response.status === 428) {
+      throw new Error(
+        "Esta conta exige código do autenticador (MFA). Abra Google Authenticator, Microsoft Authenticator ou similar e informe o código de 6 dígitos.",
+      );
+    }
+    throw new Error(body.detail ?? "E-mail ou senha inválidos");
+  }
+  const result = (await response.json()) as { access_token: string; refresh_token: string };
   localStorage.setItem("letter_access_token", result.access_token);
   localStorage.setItem("letter_refresh_token", result.refresh_token);
 }

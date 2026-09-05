@@ -23,6 +23,7 @@ function LoginForm() {
   const [email, setEmail] = useState("admin@letter.com.br");
   const [password, setPassword] = useState("Letter@123");
   const [otp, setOtp] = useState("");
+  const [showMfa, setShowMfa] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -43,7 +44,7 @@ function LoginForm() {
     setError("");
     setLoading(true);
     try {
-      await login(email, password, otp);
+      await login(email, password, showMfa ? otp : undefined);
       const user = await api<User>("/auth/me");
       redirectAfterLogin(user.role, nextPath);
     } catch (e) {
@@ -75,16 +76,31 @@ function LoginForm() {
           required
         />
       </label>
-      <label>
-        Código MFA
-        <small>Preencha somente se estiver ativado</small>
+      <label className="site-login-mfa-toggle">
         <input
-          value={otp}
-          onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
-          inputMode="numeric"
-          placeholder="000000"
+          type="checkbox"
+          checked={showMfa}
+          onChange={(e) => {
+            setShowMfa(e.target.checked);
+            if (!e.target.checked) setOtp("");
+          }}
         />
+        Já ativei o autenticador (código MFA)
       </label>
+      {showMfa && (
+        <label>
+          Código do autenticador
+          <small>Use o app Google Authenticator, Microsoft Authenticator ou similar</small>
+          <input
+            value={otp}
+            onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
+            inputMode="numeric"
+            placeholder="6 dígitos"
+            required
+            autoComplete="one-time-code"
+          />
+        </label>
+      )}
 
       {error && <p className="site-error">{error}</p>}
 
