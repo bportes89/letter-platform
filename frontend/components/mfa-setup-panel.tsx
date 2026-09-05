@@ -91,10 +91,14 @@ export function MfaSetupPanel({ compact = false }: { compact?: boolean }) {
           <button type="submit">Desativar código validador</button>
         </form>
       ) : !setup ? (
+        <>
         <button className="admin-button" type="button" onClick={beginSetup}>
           <KeyRound /> Ativar código validador
         </button>
-        <p className="muted mfa-hint">Nunca ativou antes? Veja a aba <strong>Como funciona</strong> com o passo a passo completo.</p>
+        {!compact && (
+          <p className="muted mfa-hint">Nunca ativou antes? Veja a aba <strong>Como funciona</strong> com o passo a passo completo.</p>
+        )}
+        </>
       ) : (
         <form className="stack-form" onSubmit={enable}>
           <ol className="mfa-steps">
