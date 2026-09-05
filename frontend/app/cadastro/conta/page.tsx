@@ -7,7 +7,7 @@ import "../../site.css";
 import { SiteNav } from "@/components/public-site/simulator-section";
 import { api, getToken, type User } from "@/lib/api";
 import { portalHomeForRole } from "@/lib/portal-routes";
-import { profileHasWalletBasics } from "@/lib/wallet-onboarding";
+import { canAccessPortalWithoutWallet, type WalletPeek, type WalletProfile } from "@/lib/wallet-onboarding";
 
 type Profile = {
   document: string | null;
@@ -128,6 +128,11 @@ function AberturaContaForm() {
           return;
         }
 
+        if (canAccessPortalWithoutWallet(me.role, wallet, profile)) {
+          window.location.href = portalHomeForRole(me.role);
+          return;
+        }
+
         setDocument(profile.document ?? "");
         setPhone(profile.phone ?? "");
         setCompanyName(profile.company_name ?? "");
@@ -137,10 +142,6 @@ function AberturaContaForm() {
         if (kycAllowsPortalAccess(wallet.kyc_case?.status)) {
           setNotice("Sua verificação já foi enviada. Você pode entrar no escritório enquanto a conta LETTER é finalizada.");
           return;
-        }
-
-        if (profileHasWalletBasics(profile)) {
-          setNotice("Seus dados já estão cadastrados. Você pode entrar no escritório e ativar a carteira LETTER depois em Minha Carteira.");
         }
       })
       .catch(() => {
@@ -180,10 +181,7 @@ function AberturaContaForm() {
     return <div className="site-login-card">Preparando abertura da conta…</div>;
   }
 
-  const canEnterPortal = profileHasWalletBasics({
-    document,
-    phone,
-  }) || kycAllowsPortalAccess(kycStatus) || Boolean(onboardingUrl);
+  const canEnterPortal = Boolean(user);
 
   return (
     <form className="site-login-card" onSubmit={submit}>

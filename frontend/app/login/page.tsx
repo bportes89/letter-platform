@@ -8,26 +8,13 @@ import "../site.css";
 import { SiteNav } from "@/components/public-site/simulator-section";
 import { getToken, login, api, User } from "@/lib/api";
 import { portalHomeForRole } from "@/lib/portal-routes";
-import {
-  canAccessPortalWithoutWallet,
-  type WalletPeek,
-  type WalletProfile,
-} from "@/lib/wallet-onboarding";
 
 async function redirectAfterLogin(user: User, nextPath: string | null) {
   if (nextPath && nextPath.startsWith("/")) {
     window.location.href = nextPath;
     return;
   }
-  const [profile, wallet] = await Promise.all([
-    api<WalletProfile>("/auth/me/profile"),
-    api<WalletPeek>("/wallet/me"),
-  ]);
-  if (canAccessPortalWithoutWallet(user.role, wallet, profile)) {
-    window.location.href = portalHomeForRole(user.role);
-    return;
-  }
-  window.location.href = "/cadastro/conta";
+  window.location.href = portalHomeForRole(user.role);
 }
 
 function LoginForm() {

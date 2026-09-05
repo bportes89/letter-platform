@@ -115,7 +115,7 @@ function CadastroForm() {
           type="tel"
           placeholder="(11) 99999-9999"
           required
-          minLength={8}
+          minLength={10}
         />
       </label>
       <label>
