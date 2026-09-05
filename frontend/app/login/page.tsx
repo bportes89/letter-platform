@@ -85,7 +85,7 @@ function LoginForm() {
             if (!e.target.checked) setOtp("");
           }}
         />
-        Já ativei o autenticador (código MFA)
+        Já ativei a autenticação em duas etapas (código no celular)
       </label>
       {showMfa && (
         <label>

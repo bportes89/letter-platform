@@ -47,7 +47,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
       <div className="side-context"><small>SEU ACESSO</small><strong>{persona}</strong><ChevronDown size={14}/></div>
       <nav>
         <Link className={isPortalHomePath(pathname, user?.role)?"active":""} href={portalHome}><LayoutDashboard/>Visão geral</Link>
-        <Link className={pathname==="/seguranca"?"active":""} href="/seguranca"><ShieldCheck/>Código validador</Link>
+        <Link className={pathname==="/seguranca"?"active":""} href="/seguranca"><ShieldCheck/>Autenticação 2 etapas</Link>
         {commercialNav.length > 0 && <>
         <div className="nav-label">COMERCIAL (PARCEIROS)</div>
         <div className="nav-products">

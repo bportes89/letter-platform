@@ -37,7 +37,7 @@ export function MfaSetupPanel({ compact = false }: { compact?: boolean }) {
     try {
       await api("/auth/mfa/enable", { method: "POST", body: JSON.stringify({ otp }) });
       setSetup(null);
-      setMessage("Código validador ativado com sucesso. Nos próximos logins, marque a opção MFA e informe o código.");
+      setMessage("Autenticação em duas etapas ativada. Nos próximos logins, marque a opção no login e informe o código do app.");
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Código inválido. Tente o código atual do app.");
@@ -65,9 +65,9 @@ export function MfaSetupPanel({ compact = false }: { compact?: boolean }) {
     <section className="panel mfa-panel">
       {!compact && (
         <>
-          <h2><KeyRound /> Código validador (MFA)</h2>
+          <h2><KeyRound /> Ativar autenticação em duas etapas</h2>
           <p className="muted">
-            Proteja sua conta com um código de 6 dígitos gerado no celular (Google Authenticator, Microsoft Authenticator, Authy, etc.).
+            Gere o código validador no celular com Google Authenticator, Microsoft Authenticator, Authy ou similar.
           </p>
         </>
       )}
@@ -94,6 +94,7 @@ export function MfaSetupPanel({ compact = false }: { compact?: boolean }) {
         <button className="admin-button" type="button" onClick={beginSetup}>
           <KeyRound /> Ativar código validador
         </button>
+        <p className="muted mfa-hint">Nunca ativou antes? Veja a aba <strong>Como funciona</strong> com o passo a passo completo.</p>
       ) : (
         <form className="stack-form" onSubmit={enable}>
           <ol className="mfa-steps">
