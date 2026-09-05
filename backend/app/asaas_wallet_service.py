@@ -135,7 +135,7 @@ def wallet_view(db: Session, user: User) -> dict:
         return {
             "has_subaccount": False,
             "kyc_case": kyc_case,
-            "message": "Subconta ainda não provisionada. Conclua o KYC para abrir sua carteira.",
+            "message": "Conta LETTER ainda não aberta. Conclua a verificação para ativar sua carteira.",
         }
 
     if _is_mock_account(account):
@@ -213,7 +213,7 @@ def _wallet_message(account: EscrowAccount, db: Session | None = None) -> str:
     if status in {"APPROVED", "ACTIVE"}:
         return "Carteira ativa — depósitos, saques e pagamentos disponíveis conforme saldo."
     if account.asaas_onboarding_url:
-        return "Envie seus documentos pelo link de onboarding Asaas para liberar saques e transferências."
+        return "Envie seus documentos pelo link de verificação LETTER para liberar saques e transferências."
     return "Documentação pendente — envie os documentos KYC para liberar saques e transferências."
 
 

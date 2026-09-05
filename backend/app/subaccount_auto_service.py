@@ -152,9 +152,9 @@ def complete_user_kyc_and_provision(db: Session, user: User) -> dict:
         "kyc_case_id": case.id,
         "subaccount": _subaccount_payload(account) if account else None,
         "message": (
-            "KYC aprovado e subconta normal criada automaticamente."
+            "KYC aprovado e conta LETTER criada automaticamente."
             if account
-            else "KYC enviado — subconta será criada após aprovação."
+            else "Verificação enviada — a conta será aberta após validação dos dados."
         ),
     }
 

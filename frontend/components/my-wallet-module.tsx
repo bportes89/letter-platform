@@ -110,7 +110,7 @@ export function MyWalletModule() {
     const w = await api<WalletView>("/wallet/me/sync", { method: "POST" });
     setWallet(w);
     await load();
-    setNotice("Dados sincronizados com o Asaas.");
+    setNotice("Dados da conta LETTER atualizados.");
   }
 
   async function saveProfile(e: FormEvent<HTMLFormElement>) {
@@ -124,7 +124,7 @@ export function MyWalletModule() {
         company_name: profileCompany || undefined,
       }),
     });
-    setNotice("Dados cadastrais atualizados. Agora conclua o KYC.");
+    setNotice("Dados cadastrais atualizados. Agora conclua a verificação e abra sua conta.");
     await load();
   }
 
@@ -208,7 +208,7 @@ export function MyWalletModule() {
         <div>
           <span className="eyebrow dark">CONTA DIGITAL</span>
           <h1>Minha Carteira</h1>
-          <p>Dados bancários, Pix, extrato, KYC e operações da sua subconta Asaas.</p>
+          <p>Dados bancários, Pix, extrato, verificação de identidade e operações da sua conta LETTER.</p>
         </div>
         <div className="operational-icon"><Wallet /></div>
       </div>
@@ -217,17 +217,17 @@ export function MyWalletModule() {
         <div className="notice">
           <CheckCircle2 />
           <div>
-            <strong>Ative sua subconta Asaas</strong>
-            <p>Contrato aceito. Conclua o KYC abaixo para abrir a subconta PJ e liberar saldo, extrato e transferências.</p>
+            <strong>Ative sua conta LETTER</strong>
+            <p>Complete seus dados e a verificação para abrir a conta digital e liberar saldo, extrato e transferências.</p>
           </div>
         </div>
       )}
 
       <section className="panel operational-panel financial-panel">
         <div className="toolbar">
-          <button onClick={() => void syncWallet()}><RefreshCw />Sincronizar com Asaas</button>
+          <button onClick={() => void syncWallet()}><RefreshCw />Atualizar dados da conta</button>
           {!wallet?.has_subaccount && (
-            <button onClick={() => void completeKyc().catch((e) => setNotice(e.message))}><CheckCircle2 />Concluir KYC e abrir subconta</button>
+            <button onClick={() => void completeKyc().catch((e) => setNotice(e.message))}><CheckCircle2 />Concluir verificação e abrir conta</button>
           )}
         </div>
 
@@ -236,9 +236,9 @@ export function MyWalletModule() {
 
         {!wallet?.has_subaccount && (
           <section className="panel">
-            <h3>Dados para abertura da conta (Asaas)</h3>
+            <h3>Dados para abertura da conta LETTER</h3>
             <p className="muted">
-              Informe CPF válido (pessoa física) ou CNPJ válido (pessoa jurídica) e celular com DDD antes de concluir o KYC.
+              Informe CPF válido (pessoa física) ou CNPJ válido (pessoa jurídica) e celular com DDD antes de concluir a verificação.
             </p>
             <form className="stack-form" onSubmit={(e) => void saveProfile(e).catch((err) => setNotice(err.message))}>
               <input
@@ -260,7 +260,7 @@ export function MyWalletModule() {
               <input
                 value={profileCnpj}
                 onChange={(e) => setProfileCnpj(e.target.value)}
-                placeholder="CNPJ (opcional — PJ tem prioridade no Asaas)"
+                placeholder="CNPJ (opcional — PJ tem prioridade na conta LETTER)"
               />
               <button type="submit">Salvar dados cadastrais</button>
             </form>
@@ -268,7 +268,7 @@ export function MyWalletModule() {
         )}
 
         {!wallet?.has_subaccount ? (
-          <p className="muted">Complete o cadastro com CPF/CNPJ e conclua o KYC para visualizar agência, conta e Pix.</p>
+          <p className="muted">Complete o cadastro com CPF/CNPJ e conclua a verificação para visualizar agência, conta e Pix.</p>
         ) : (
           <>
             <div className="balance-grid">
@@ -278,7 +278,7 @@ export function MyWalletModule() {
                 <span>{wallet.account?.subaccount_name ?? "Subconta LETTER"}</span>
               </div>
               <div className="balance-card">
-                <small>KYC Asaas</small>
+                <small>Verificação de identidade</small>
                 <b>{wallet.account?.asaas_kyc_status ?? "PENDENTE"}</b>
                 <span>Comercial: {wallet.account?.asaas_commercial_status ?? "—"}</span>
               </div>
@@ -303,7 +303,7 @@ export function MyWalletModule() {
                   </div>
                   <div className="escrow-card">
                     <small>Conta corrente</small>
-                    <b>{wallet.banking.account_number ?? "Aguardando Asaas"}</b>
+                    <b>{wallet.banking.account_number ?? "Em processamento"}</b>
                   </div>
                   <div className="escrow-card">
                     <small>Chave Pix</small>
@@ -333,11 +333,11 @@ export function MyWalletModule() {
 
             {(wallet.account?.asaas_onboarding_url || documents.length > 0) && (
               <section className="panel">
-                <h3>Documentação KYC (Asaas)</h3>
+                <h3>Documentação de verificação</h3>
                 {wallet.account?.asaas_onboarding_url && (
                   <div className="notice">
-                    Envie seus documentos pelo link oficial Asaas:{" "}
-                    <a href={wallet.account.asaas_onboarding_url} target="_blank" rel="noreferrer">Abrir onboarding</a>
+                    Envie seus documentos pelo link oficial de verificação LETTER:{" "}
+                    <a href={wallet.account.asaas_onboarding_url} target="_blank" rel="noreferrer">Abrir verificação</a>
                   </div>
                 )}
                 {documents.map((doc) => (

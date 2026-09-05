@@ -46,6 +46,26 @@ export function portalHomeForRole(role: string | undefined): string {
   return PORTAL_PATHS[portalSlugForRole(role)];
 }
 
+const WALLET_ONBOARDING_ROLES = new Set<string>([
+  "CLIENT",
+  "PARTNER",
+  "QUOTA_SELLER",
+  "MASTER_FRANCHISEE",
+  "MANAGER",
+  "RETAIL_INVESTOR",
+  "INSTITUTIONAL_FUND",
+  "PLATFORM_ADMIN",
+  "INTERNAL_STAFF",
+]);
+
+/** Após cadastro ou convite — leva direto à abertura da conta LETTER. */
+export function postSignupRedirectForRole(role: string | undefined): string {
+  if (role && WALLET_ONBOARDING_ROLES.has(role)) {
+    return "/modules/my-wallet?onboarding=kyc";
+  }
+  return portalHomeForRole(role);
+}
+
 export function roleMatchesPortal(role: string | undefined, slug: PortalSlug): boolean {
   return portalSlugForRole(role) === slug;
 }

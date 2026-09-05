@@ -11,7 +11,7 @@ import {
   type PublicReferralPreview,
 } from "@/lib/public-site-api";
 import { api, getToken, type User } from "@/lib/api";
-import { portalHomeForRole } from "@/lib/portal-routes";
+import { portalHomeForRole, postSignupRedirectForRole } from "@/lib/portal-routes";
 
 function CadastroForm() {
   const searchParams = useSearchParams();
@@ -74,7 +74,7 @@ function CadastroForm() {
       });
       localStorage.setItem("letter_access_token", result.access_token);
       localStorage.setItem("letter_refresh_token", result.refresh_token);
-      window.location.href = portalHomeForRole(result.user.role);
+      window.location.href = postSignupRedirectForRole(result.user.role);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Não foi possível concluir o cadastro");
       setLoading(false);
@@ -86,9 +86,8 @@ function CadastroForm() {
       <p className="site-kicker">Conta LETTER</p>
       <h1>Abra sua conta</h1>
       <p>
-        Crie sua conta para acompanhar propostas, contratos e operações. Clientes novos e quem já tinha
-        cadastro no sistema anterior podem usar este formulário — ao concluir, você entra automaticamente na
-        área logada.
+        Crie sua conta para acompanhar propostas, contratos e operações. Ao concluir, você será
+        direcionado para abrir sua <strong>conta LETTER</strong> (dados bancários e verificação).
       </p>
 
       <label>
