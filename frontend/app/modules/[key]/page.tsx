@@ -76,7 +76,7 @@ export default function ModulePage() {
   if (routeKey === "crm") return <LeadsModule />;
   if (routeKey === "contracts") return <ContractsModule />;
   if (routeKey === "my-wallet") return (
-    <Suspense fallback={<div className="loading">Carregando Minha Carteira...</div>}>
+    <Suspense fallback={<div className="loading">Carregando BANK...</div>}>
       <MyWalletModule />
     </Suspense>
   );

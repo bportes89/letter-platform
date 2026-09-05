@@ -228,15 +228,18 @@ export function MyWalletModule() {
     setNotice("Copiado para a área de transferência.");
   }
 
-  if (loading) return <div className="loading">Carregando Minha Carteira...</div>;
+  if (loading) return <div className="loading">Carregando BANK...</div>;
 
   return (
     <>
       <div className="page-heading">
         <div>
           <span className="eyebrow dark">CONTA DIGITAL</span>
-          <h1>Minha Carteira</h1>
-          <p>Dados bancários, Pix, extrato, verificação de identidade e operações da sua conta LETTER.</p>
+          <h1>BANK</h1>
+          <p>
+            Saldo em conta, extrato, Pix, pagamento de boletos, dados bancários e abertura da sua
+            conta digital LETTER — tudo em um só lugar.
+          </p>
         </div>
         <div className="operational-icon"><Wallet /></div>
       </div>
@@ -248,7 +251,7 @@ export function MyWalletModule() {
             <strong>Ative sua conta LETTER</strong>
             <p>
               Confirme CPF/CNPJ e celular abaixo e abra sua conta digital. Este é o mesmo fluxo do primeiro acesso —
-              você pode concluir aqui em Minha Carteira a qualquer momento.
+              você pode concluir aqui no BANK a qualquer momento.
             </p>
           </div>
         </div>

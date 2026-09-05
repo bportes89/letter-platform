@@ -30,7 +30,7 @@ MODULES = [
     ("contracts", "Contratos e documentos", "Templates, assinatura e evidências", "FOUNDATION", "/contracts", True),
     ("legal-manuals", "Manuais e contratos", "Templates jurídicos homologados e manuais operacionais", "ACTIVE", "/legal-manuals", False),
     ("payments", "Pagamentos e escrow", "Pix, locks, payouts, estornos e conciliação", "ADAPTER_REQUIRED", "/payments", True),
-    ("my-wallet", "Minha Carteira", "Dados bancários Asaas, Pix, extrato, KYC e pagamentos", "ACTIVE", "/my-wallet", False),
+    ("my-wallet", "BANK", "Saldo, extrato, Pix, pagamento de boletos e conta digital LETTER", "ACTIVE", "/my-wallet", False),
     ("wallet", "Wallet e ledger", "Razão de dupla entrada, saldos e extratos", "FOUNDATION", "/wallet", True),
     ("funding", "Funding e investimentos", "Oportunidades, reservas, posições e resgates", "ACTIVE", "/investments", True),
     ("collections", "Cobrança e inadimplência", "Faturas, régua, mora e recuperação", "ACTIVE", "/collections", True),

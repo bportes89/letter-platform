@@ -104,7 +104,7 @@ def auto_credit_commissions_to_partner_wallet(
         actor,
         reference=f"COMMISSION:{event_id}",
         event_type="COMMISSION_WALLET_CREDIT",
-        description=f"Comissão creditada na Minha Carteira — {reference}",
+        description=f"Comissão creditada no BANK — {reference}",
         debit_account="SELLER_PAYABLE",
         credit_account="CLIENT_FUNDS_PAYABLE",
         amount=total,
@@ -121,5 +121,5 @@ def auto_credit_commissions_to_partner_wallet(
         "amount": str(total),
         "wallet_account_id": account.id,
         "wallet_balance": str(account.available_balance),
-        "message": "Comissão creditada automaticamente na Minha Carteira do parceiro.",
+        "message": "Comissão creditada automaticamente no BANK do parceiro.",
     }
