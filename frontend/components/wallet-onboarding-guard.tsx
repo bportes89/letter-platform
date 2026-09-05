@@ -7,7 +7,7 @@ import { portalHomeForRole, postSignupRedirectForRole } from "@/lib/portal-route
 
 type WalletPeek = { has_subaccount: boolean };
 
-const SKIP_PREFIXES = ["/cadastro", "/login", "/convite", "/recuperar-senha"];
+const SKIP_PREFIXES = ["/cadastro", "/login", "/convite", "/recuperar-senha", "/seguranca"];
 
 export function WalletOnboardingGuard({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
