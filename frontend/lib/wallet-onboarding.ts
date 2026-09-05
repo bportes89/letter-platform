@@ -46,5 +46,9 @@ export function shouldForceWalletOnboarding(role: string, wallet: WalletPeek): b
 }
 
 export function walletOnboardingPath(): string {
-  return "/cadastro/conta";
+  return "/modules/my-wallet?onboarding=1";
+}
+
+export function isWalletOnboardingRoute(pathname: string): boolean {
+  return pathname.startsWith("/cadastro/conta") || pathname.startsWith("/modules/my-wallet");
 }

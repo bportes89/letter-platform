@@ -1,4 +1,5 @@
 import type { LetterRole } from "@/lib/role-nav";
+import { walletOnboardingPath } from "@/lib/wallet-onboarding";
 
 export type PortalSlug = "cliente" | "parceiro" | "investidor" | "fundo" | "operacao";
 
@@ -61,7 +62,7 @@ const WALLET_ONBOARDING_ROLES = new Set<string>([
 /** Após cadastro ou convite — etapa 2 antes do escritório (abertura da conta LETTER). */
 export function postSignupRedirectForRole(role: string | undefined): string {
   if (role && WALLET_ONBOARDING_ROLES.has(role)) {
-    return "/cadastro/conta";
+    return walletOnboardingPath();
   }
   return portalHomeForRole(role);
 }

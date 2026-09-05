@@ -3,8 +3,13 @@
 import { CheckCircle2, Copy, Landmark, QrCode, RefreshCw, Send, Upload, Wallet } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { FormEvent, useCallback, useEffect, useState } from "react";
-import { API_URL, api, getToken } from "@/lib/api";
+import { API_URL, api, getToken, type User } from "@/lib/api";
 import { CurrencyInput } from "@/components/currency-input";
+import {
+  activateWalletAccount,
+  redirectToPortalAfterWallet,
+  walletActivationErrorMessage,
+} from "@/lib/wallet-activation";
 
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
@@ -79,6 +84,7 @@ export function MyWalletModule() {
   const [pixQr, setPixQr] = useState<{ payload?: string; encoded_image?: string | null } | null>(null);
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(true);
+  const [openingAccount, setOpeningAccount] = useState(false);
   const [transferAmount, setTransferAmount] = useState("");
   const [billAmount, setBillAmount] = useState("");
 
@@ -113,6 +119,34 @@ export function MyWalletModule() {
     setNotice("Dados da conta LETTER atualizados.");
   }
 
+  async function openWalletAccount() {
+    if (!profile) return;
+    setOpeningAccount(true);
+    setNotice("");
+    try {
+      const result = await activateWalletAccount(
+        {
+          document: profileDocument,
+          phone: profilePhone,
+          companyName: profileCompany,
+          companyCnpj: profileCnpj,
+        },
+        profile,
+      );
+      if (result.hasSubaccount) {
+        const me = await api<User>("/auth/me");
+        redirectToPortalAfterWallet(me.role);
+        return;
+      }
+      setNotice(result.message);
+      await load();
+    } catch (e) {
+      setNotice(walletActivationErrorMessage(e));
+    } finally {
+      setOpeningAccount(false);
+    }
+  }
+
   async function saveProfile(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     await api("/auth/me/profile", {
@@ -125,12 +159,6 @@ export function MyWalletModule() {
       }),
     });
     setNotice("Dados cadastrais atualizados. Agora conclua a verificação e abra sua conta.");
-    await load();
-  }
-
-  async function completeKyc() {
-    const result = await api<{ message: string }>("/kyc/me/complete", { method: "POST" });
-    setNotice(result.message);
     await load();
   }
 
@@ -213,12 +241,15 @@ export function MyWalletModule() {
         <div className="operational-icon"><Wallet /></div>
       </div>
 
-      {onboarding && !wallet?.has_subaccount && (
+      {(onboarding || !wallet?.has_subaccount) && (
         <div className="notice">
           <CheckCircle2 />
           <div>
             <strong>Ative sua conta LETTER</strong>
-            <p>Complete seus dados e a verificação para abrir a conta digital e liberar saldo, extrato e transferências.</p>
+            <p>
+              Confirme CPF/CNPJ e celular abaixo e abra sua conta digital. Este é o mesmo fluxo do primeiro acesso —
+              você pode concluir aqui em Minha Carteira a qualquer momento.
+            </p>
           </div>
         </div>
       )}
@@ -227,7 +258,13 @@ export function MyWalletModule() {
         <div className="toolbar">
           <button onClick={() => void syncWallet()}><RefreshCw />Atualizar dados da conta</button>
           {!wallet?.has_subaccount && (
-            <button onClick={() => void completeKyc().catch((e) => setNotice(e.message))}><CheckCircle2 />Concluir verificação e abrir conta</button>
+            <button
+              disabled={openingAccount}
+              onClick={() => void openWalletAccount()}
+            >
+              <CheckCircle2 />
+              {openingAccount ? "Abrindo conta LETTER…" : "Abrir minha conta LETTER"}
+            </button>
           )}
         </div>
 
@@ -263,6 +300,13 @@ export function MyWalletModule() {
                 placeholder="CNPJ (opcional — PJ tem prioridade na conta LETTER)"
               />
               <button type="submit">Salvar dados cadastrais</button>
+              <button
+                type="button"
+                disabled={openingAccount}
+                onClick={() => void openWalletAccount()}
+              >
+                {openingAccount ? "Abrindo conta LETTER…" : "Abrir minha conta LETTER"}
+              </button>
             </form>
           </section>
         )}

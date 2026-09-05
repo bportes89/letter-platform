@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { api, logout, type User } from "@/lib/api";
 import {
+  isWalletOnboardingRoute,
   shouldForceWalletOnboarding,
   walletOnboardingPath,
   type WalletPeek,
@@ -17,6 +18,10 @@ export function WalletOnboardingGuard({ children }: { children: React.ReactNode 
 
   useEffect(() => {
     if (SKIP_PREFIXES.some((p) => pathname.startsWith(p))) {
+      setReady(true);
+      return;
+    }
+    if (isWalletOnboardingRoute(pathname)) {
       setReady(true);
       return;
     }
