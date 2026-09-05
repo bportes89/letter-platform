@@ -12,7 +12,7 @@ import {
 } from "@/lib/public-site-api";
 import { api, getToken, type User } from "@/lib/api";
 import { portalHomeForRole, postSignupRedirectForRole } from "@/lib/portal-routes";
-import { canAccessPortalWithoutWallet, type WalletPeek, type WalletProfile } from "@/lib/wallet-onboarding";
+import { shouldForceWalletOnboarding, type WalletPeek } from "@/lib/wallet-onboarding";
 
 function CadastroForm() {
   const searchParams = useSearchParams();
@@ -33,11 +33,8 @@ function CadastroForm() {
     if (!getToken()) return;
     api<User>("/auth/me")
       .then(async (user) => {
-        const [profile, wallet] = await Promise.all([
-          api<WalletProfile>("/auth/me/profile"),
-          api<WalletPeek>("/wallet/me"),
-        ]);
-        if (canAccessPortalWithoutWallet(user.role, wallet, profile)) {
+        const wallet = await api<WalletPeek>("/wallet/me");
+        if (!shouldForceWalletOnboarding(user.role, wallet)) {
           window.location.href = portalHomeForRole(user.role);
           return;
         }

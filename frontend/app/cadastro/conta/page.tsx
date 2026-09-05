@@ -7,7 +7,7 @@ import "../../site.css";
 import { SiteNav } from "@/components/public-site/simulator-section";
 import { api, getToken, type User } from "@/lib/api";
 import { portalHomeForRole } from "@/lib/portal-routes";
-import { canAccessPortalWithoutWallet, type WalletPeek, type WalletProfile } from "@/lib/wallet-onboarding";
+import { profileHasWalletBasics, walletAccountReady } from "@/lib/wallet-onboarding";
 
 type Profile = {
   document: string | null;
@@ -123,12 +123,7 @@ function AberturaContaForm() {
         setSavedProfile(profile);
         setKycStatus(wallet.kyc_case?.status ?? null);
 
-        if (wallet.has_subaccount) {
-          window.location.href = portalHomeForRole(me.role);
-          return;
-        }
-
-        if (canAccessPortalWithoutWallet(me.role, wallet, profile)) {
+        if (walletAccountReady(wallet)) {
           window.location.href = portalHomeForRole(me.role);
           return;
         }
@@ -140,8 +135,21 @@ function AberturaContaForm() {
         setOnboardingUrl(wallet.account?.asaas_onboarding_url ?? null);
 
         if (kycAllowsPortalAccess(wallet.kyc_case?.status)) {
-          setNotice("Sua verificação já foi enviada. Você pode entrar no escritório enquanto a conta LETTER é finalizada.");
+          setNotice("Verificação em andamento. Conclua a abertura da conta ou aguarde a confirmação.");
           return;
+        }
+
+        if (profileHasWalletBasics(profile)) {
+          try {
+            await completeWalletActivation(me, profile, {
+              document: profile.document ?? "",
+              phone: profile.phone ?? "",
+              companyName: profile.company_name ?? "",
+              companyCnpj: profile.company_cnpj ?? "",
+            });
+          } catch {
+            // Mantém o formulário para revisão manual dos dados.
+          }
         }
       })
       .catch(() => {
@@ -181,15 +189,13 @@ function AberturaContaForm() {
     return <div className="site-login-card">Preparando abertura da conta…</div>;
   }
 
-  const canEnterPortal = Boolean(user);
-
   return (
     <form className="site-login-card" onSubmit={submit}>
       <p className="site-kicker">Passo 2 de 2 · Conta LETTER</p>
       <h1>Ative sua conta</h1>
       <p>
-        Confirme seus dados para abrir a conta digital LETTER. Depois disso você entra no escritório com
-        a carteira pronta para uso.
+        Confirme seus dados para abrir a conta digital LETTER. É necessário concluir este passo antes de
+        acessar o escritório.
       </p>
 
       <label>
@@ -235,24 +241,13 @@ function AberturaContaForm() {
         <p className="site-login-note">
           Documentos adicionais:{" "}
           <a href={onboardingUrl} target="_blank" rel="noreferrer">abrir verificação</a>
-          . Você já pode entrar no escritório — a conta será liberada após análise.
+          . A conta será liberada após análise dos documentos.
         </p>
       )}
 
       <button className="site-submit" type="submit" disabled={submitting} style={{ width: "100%" }}>
         {submitting ? "Abrindo conta LETTER…" : "Abrir minha conta LETTER"}
       </button>
-
-      {canEnterPortal && user && (
-        <button
-          type="button"
-          className="site-submit"
-          style={{ width: "100%", marginTop: 8, background: "transparent", color: "inherit", border: "1px solid currentColor" }}
-          onClick={() => { window.location.href = portalHomeForRole(user.role); }}
-        >
-          Ir para o escritório{!kycAllowsPortalAccess(kycStatus) && !onboardingUrl ? " (ativar carteira depois)" : ""}
-        </button>
-      )}
 
       <Link href="/" className="site-login-back">← Voltar ao site institucional</Link>
     </form>

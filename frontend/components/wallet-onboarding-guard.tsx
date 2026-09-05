@@ -3,6 +3,11 @@
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { api, logout, type User } from "@/lib/api";
+import {
+  shouldForceWalletOnboarding,
+  walletOnboardingPath,
+  type WalletPeek,
+} from "@/lib/wallet-onboarding";
 
 const SKIP_PREFIXES = ["/cadastro", "/login", "/convite", "/recuperar-senha", "/seguranca"];
 
@@ -15,8 +20,14 @@ export function WalletOnboardingGuard({ children }: { children: React.ReactNode 
       setReady(true);
       return;
     }
-    api<User>("/auth/me")
-      .then(() => setReady(true))
+    Promise.all([api<User>("/auth/me"), api<WalletPeek>("/wallet/me")])
+      .then(([user, wallet]) => {
+        if (shouldForceWalletOnboarding(user.role, wallet)) {
+          window.location.href = walletOnboardingPath();
+          return;
+        }
+        setReady(true);
+      })
       .catch(() => logout());
   }, [pathname]);
 
