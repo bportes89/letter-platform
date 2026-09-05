@@ -6,6 +6,7 @@ import json
 from datetime import UTC, datetime
 
 import re
+from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -106,6 +107,15 @@ def complete_user_kyc_and_provision(db: Session, user: User) -> dict:
         raise ValueError("CPF ou CNPJ obrigatório no cadastro para abrir subconta")
     if not (profile.mobile_phone or "").strip():
         raise ValueError("Telefone celular obrigatório para abrir subconta Asaas")
+
+    from app.asaas_common import asaas_configured
+    if asaas_configured():
+        from app.account_uniqueness import assert_valid_cpf_or_cnpj
+
+        try:
+            assert_valid_cpf_or_cnpj(profile.cpf_cnpj)
+        except HTTPException as exc:
+            raise ValueError(str(exc.detail)) from exc
 
     case = ensure_kyc_case_for_user(db, user)
 

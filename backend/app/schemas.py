@@ -213,6 +213,30 @@ class UserUpdate(BaseModel):
     role: Role | None = None
     branch_id: str | None = None
     active: bool | None = None
+    document: str | None = Field(default=None, max_length=20)
+    phone: str | None = Field(default=None, max_length=30)
+    company_name: str | None = Field(default=None, max_length=180)
+    company_cnpj: str | None = Field(default=None, max_length=20)
+
+
+class ProfileSelfUpdate(BaseModel):
+    document: str | None = Field(default=None, max_length=20)
+    phone: str | None = Field(default=None, max_length=30)
+    company_name: str | None = Field(default=None, max_length=180)
+    company_cnpj: str | None = Field(default=None, max_length=20)
+    company_address: str | None = Field(default=None, max_length=255)
+    company_city: str | None = Field(default=None, max_length=120)
+    company_state: str | None = Field(default=None, max_length=2)
+
+
+class ProfileView(BaseModel):
+    document: str | None = None
+    phone: str | None = None
+    company_name: str | None = None
+    company_cnpj: str | None = None
+    company_address: str | None = None
+    company_city: str | None = None
+    company_state: str | None = None
 
 
 class BranchCreate(BaseModel):

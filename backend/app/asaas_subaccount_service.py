@@ -50,7 +50,7 @@ def build_subaccount_profile(
     if len(document) not in {11, 14}:
         raise HTTPException(
             status_code=422,
-            detail="CPF/CNPJ obrigatório para abrir subconta Asaas. Informe no perfil ou cadastre na organização.",
+            detail="CPF/CNPJ obrigatório para abrir subconta Asaas. Informe no perfil antes de concluir o KYC.",
         )
 
     income = float(profile.income_value) if profile.income_value is not None else settings.asaas_subaccount_default_income_value
@@ -172,6 +172,9 @@ def create_asaas_subaccount(
 
     _ensure_no_duplicate(db, operation_id, user_id)
     payload = build_subaccount_profile(db, user, operation_id, overrides)
+    from app.account_uniqueness import assert_valid_cpf_or_cnpj
+
+    payload["cpfCnpj"] = assert_valid_cpf_or_cnpj(payload["cpfCnpj"])
 
     with AsaasClient() as client:
         verify_wallet_id(client)

@@ -89,7 +89,7 @@ from app.schemas import (
     TaxDocumentCreate, TaxDocumentView, TaxExceptionResolve, TaxExceptionView,
     TokenPair, UnderwritingAssessmentCreate, UnderwritingAssessmentView, OperationalJobCreate, OperationalJobView, JobProcessRequest, TenantQuotaUpdate, TenantQuotaView, SecurityEventView,
     UnderwritingDecisionCreate, UnderwritingDecisionView, UnderwritingPolicyCreate,
-    UnderwritingPolicyView, UserUpdate, UserView, QuotaRankingView,
+    UnderwritingPolicyView, UserUpdate, UserView, QuotaRankingView, ProfileSelfUpdate, ProfileView,
     ProviderIntegrationCreate, ProviderIntegrationView, IntegrationProbeRequest,
     WebhookEndpointCreate, WebhookEndpointView, WebhookDispatchRequest, WebhookRetryRequest,
     WebhookDeliveryView, WebhookVerifyRequest,
@@ -325,6 +325,48 @@ def me(user: User = Depends(get_current_user)):
     return user
 
 
+@router.get("/auth/me/profile", response_model=ProfileView)
+def my_profile(user: User = Depends(get_current_user)):
+    return ProfileView(
+        document=user.document,
+        phone=user.phone,
+        company_name=user.company_name,
+        company_cnpj=user.company_cnpj,
+        company_address=user.company_address,
+        company_city=user.company_city,
+        company_state=user.company_state,
+    )
+
+
+@router.patch("/auth/me/profile", response_model=UserView)
+def update_my_profile(payload: ProfileSelfUpdate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.account_uniqueness import assert_valid_cpf_or_cnpj, find_user_by_cnpj, find_user_by_cpf, normalize_digits
+
+    data = payload.model_dump(exclude_unset=True)
+    if "document" in data and data["document"]:
+        cpf = assert_valid_cpf_or_cnpj(data["document"], field_label="CPF")
+        if find_user_by_cpf(db, cpf, exclude_user_id=user.id):
+            raise HTTPException(status_code=409, detail="CPF já cadastrado em outra conta.")
+        user.document = cpf
+    if "company_cnpj" in data and data["company_cnpj"]:
+        cnpj = assert_valid_cpf_or_cnpj(data["company_cnpj"], field_label="CNPJ")
+        if find_user_by_cnpj(db, cnpj, exclude_user_id=user.id):
+            raise HTTPException(status_code=409, detail="CNPJ já cadastrado em outra conta.")
+        user.company_cnpj = cnpj
+    if "phone" in data:
+        phone = (data["phone"] or "").strip()
+        if phone and len(normalize_digits(phone)) < 10:
+            raise HTTPException(status_code=422, detail="Telefone celular inválido.")
+        user.phone = phone or None
+    for field in ("company_name", "company_address", "company_city", "company_state"):
+        if field in data:
+            setattr(user, field, (data[field] or "").strip() or None)
+    audit(db, user, "profile.updated", "user", user.id, data)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
 @router.get("/auth/sessions",response_model=list[SessionView])
 def sessions(user:User=Depends(get_current_user),db:Session=Depends(get_db)):
     return list(db.scalars(select(AuthSession).where(AuthSession.user_id==user.id).order_by(AuthSession.created_at.desc())))
@@ -380,9 +422,27 @@ def admin_users(user:User=Depends(require_scope("admin:users")),db:Session=Depen
 
 @router.patch("/admin/users/{user_id}",response_model=UserView)
 def admin_update_user(user_id:str,payload:UserUpdate,user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
+    from app.account_uniqueness import assert_valid_cpf_or_cnpj, find_user_by_cnpj, find_user_by_cpf, normalize_digits
+
     target=db.scalar(select(User).where(User.id==user_id,User.organization_id==user.organization_id))
     if not target: raise HTTPException(status_code=404,detail="Usuário não encontrado")
-    for field,value in payload.model_dump(exclude_unset=True).items():setattr(target,field,value)
+    data = payload.model_dump(exclude_unset=True)
+    if data.get("document"):
+        cpf = assert_valid_cpf_or_cnpj(data.pop("document"), field_label="CPF")
+        if find_user_by_cpf(db, cpf, exclude_user_id=target.id):
+            raise HTTPException(status_code=409, detail="CPF já cadastrado em outra conta.")
+        target.document = cpf
+    if data.get("company_cnpj"):
+        cnpj = assert_valid_cpf_or_cnpj(data.pop("company_cnpj"), field_label="CNPJ")
+        if find_user_by_cnpj(db, cnpj, exclude_user_id=target.id):
+            raise HTTPException(status_code=409, detail="CNPJ já cadastrado em outra conta.")
+        target.company_cnpj = cnpj
+    if "phone" in data:
+        phone = (data.pop("phone") or "").strip()
+        if phone and len(normalize_digits(phone)) < 10:
+            raise HTTPException(status_code=422, detail="Telefone celular inválido.")
+        target.phone = phone or None
+    for field, value in data.items(): setattr(target, field, value)
     audit(db,user,"user.updated","user",target.id,payload.model_dump(exclude_unset=True,mode="json"));db.commit();db.refresh(target);return target
 
 

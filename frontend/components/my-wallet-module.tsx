@@ -58,10 +58,22 @@ type KycDocument = {
   accepts_api_upload: boolean;
 };
 
+type Profile = {
+  document: string | null;
+  phone: string | null;
+  company_name: string | null;
+  company_cnpj: string | null;
+};
+
 export function MyWalletModule() {
   const searchParams = useSearchParams();
   const onboarding = searchParams.get("onboarding") === "kyc";
   const [wallet, setWallet] = useState<WalletView | null>(null);
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [profileDocument, setProfileDocument] = useState("");
+  const [profilePhone, setProfilePhone] = useState("");
+  const [profileCnpj, setProfileCnpj] = useState("");
+  const [profileCompany, setProfileCompany] = useState("");
   const [transactions, setTransactions] = useState<WalletTransaction[]>([]);
   const [documents, setDocuments] = useState<KycDocument[]>([]);
   const [pixQr, setPixQr] = useState<{ payload?: string; encoded_image?: string | null } | null>(null);
@@ -71,14 +83,22 @@ export function MyWalletModule() {
   const [billAmount, setBillAmount] = useState("");
 
   const load = useCallback(async () => {
-    const [w, tx, docs] = await Promise.all([
+    const [w, tx, docs, p] = await Promise.all([
       api<WalletView>("/wallet/me"),
       api<{ items: WalletTransaction[] }>("/wallet/me/transactions").catch(() => ({ items: [] })),
       api<{ items: KycDocument[] }>("/wallet/me/kyc/documents").catch(() => ({ items: [] })),
+      api<Profile>("/auth/me/profile").catch(() => null),
     ]);
     setWallet(w);
     setTransactions(tx.items ?? []);
     setDocuments(docs.items ?? []);
+    if (p) {
+      setProfile(p);
+      setProfileDocument(p.document ?? "");
+      setProfilePhone(p.phone ?? "");
+      setProfileCnpj(p.company_cnpj ?? "");
+      setProfileCompany(p.company_name ?? "");
+    }
   }, []);
 
   useEffect(() => {
@@ -91,6 +111,21 @@ export function MyWalletModule() {
     setWallet(w);
     await load();
     setNotice("Dados sincronizados com o Asaas.");
+  }
+
+  async function saveProfile(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    await api("/auth/me/profile", {
+      method: "PATCH",
+      body: JSON.stringify({
+        document: profileDocument || undefined,
+        phone: profilePhone || undefined,
+        company_cnpj: profileCnpj || undefined,
+        company_name: profileCompany || undefined,
+      }),
+    });
+    setNotice("Dados cadastrais atualizados. Agora conclua o KYC.");
+    await load();
   }
 
   async function completeKyc() {
@@ -198,6 +233,39 @@ export function MyWalletModule() {
 
         {notice && <div className="notice"><CheckCircle2 />{notice}</div>}
         {wallet && <div className="notice"><Landmark />{wallet.message}</div>}
+
+        {!wallet?.has_subaccount && (
+          <section className="panel">
+            <h3>Dados para abertura da conta (Asaas)</h3>
+            <p className="muted">
+              Informe CPF válido (pessoa física) ou CNPJ válido (pessoa jurídica) e celular com DDD antes de concluir o KYC.
+            </p>
+            <form className="stack-form" onSubmit={(e) => void saveProfile(e).catch((err) => setNotice(err.message))}>
+              <input
+                value={profileDocument}
+                onChange={(e) => setProfileDocument(e.target.value)}
+                placeholder="CPF (somente números ou formatado)"
+              />
+              <input
+                value={profilePhone}
+                onChange={(e) => setProfilePhone(e.target.value)}
+                placeholder="Celular com DDD"
+                required
+              />
+              <input
+                value={profileCompany}
+                onChange={(e) => setProfileCompany(e.target.value)}
+                placeholder="Razão social (opcional — PJ)"
+              />
+              <input
+                value={profileCnpj}
+                onChange={(e) => setProfileCnpj(e.target.value)}
+                placeholder="CNPJ (opcional — PJ tem prioridade no Asaas)"
+              />
+              <button type="submit">Salvar dados cadastrais</button>
+            </form>
+          </section>
+        )}
 
         {!wallet?.has_subaccount ? (
           <p className="muted">Complete o cadastro com CPF/CNPJ e conclua o KYC para visualizar agência, conta e Pix.</p>

@@ -40,6 +40,56 @@ def normalize_cnpj(value: str | None) -> str | None:
     return digits
 
 
+def is_valid_cpf(digits: str) -> bool:
+    if len(digits) != CPF_LENGTH or digits == digits[0] * CPF_LENGTH:
+        return False
+
+    def check(body: str) -> int:
+        total = sum(int(body[i]) * (len(body) + 1 - i) for i in range(len(body)))
+        remainder = (total * 10) % 11
+        return 0 if remainder == 10 else remainder
+
+    return check(digits[:9]) == int(digits[9]) and check(digits[:10]) == int(digits[10])
+
+
+def is_valid_cnpj(digits: str) -> bool:
+    if len(digits) != CNPJ_LENGTH or digits == digits[0] * CNPJ_LENGTH:
+        return False
+
+    def check(body: str, weights: tuple[int, ...]) -> int:
+        total = sum(int(body[i]) * weights[i] for i in range(len(body)))
+        remainder = total % 11
+        return 0 if remainder < 2 else 11 - remainder
+
+    first_weights = (5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2)
+    second_weights = (6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2)
+    return (
+        check(digits[:12], first_weights) == int(digits[12])
+        and check(digits[:13], second_weights) == int(digits[13])
+    )
+
+
+def assert_valid_cpf_or_cnpj(value: str | None, *, field_label: str = "CPF/CNPJ") -> str:
+    digits = normalize_digits(value)
+    if len(digits) == CPF_LENGTH:
+        if not is_valid_cpf(digits):
+            raise HTTPException(
+                status_code=422,
+                detail=f"{field_label} inválido. Atualize seu cadastro com um CPF válido antes de concluir o KYC.",
+            )
+        return digits
+    if len(digits) == CNPJ_LENGTH:
+        if not is_valid_cnpj(digits):
+            raise HTTPException(
+                status_code=422,
+                detail=f"{field_label} inválido. Atualize seu cadastro com um CNPJ válido antes de concluir o KYC.",
+            )
+        return digits
+    raise HTTPException(
+        status_code=422,
+        detail=f"{field_label} obrigatório com 11 (CPF) ou 14 (CNPJ) dígitos válidos.",
+    )
+
 def find_user_by_email(db: Session, email: str, *, exclude_user_id: str | None = None) -> User | None:
     normalized = normalize_email(email)
     query = select(User).where(func.lower(User.email) == normalized)
