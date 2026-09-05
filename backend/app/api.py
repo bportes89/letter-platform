@@ -345,12 +345,14 @@ def update_my_profile(payload: ProfileSelfUpdate, user: User = Depends(get_curre
     data = payload.model_dump(exclude_unset=True)
     if "document" in data and data["document"]:
         cpf = assert_valid_cpf_or_cnpj(data["document"], field_label="CPF")
-        if find_user_by_cpf(db, cpf, exclude_user_id=user.id):
+        current_cpf = normalize_digits(user.document)
+        if cpf != current_cpf and find_user_by_cpf(db, cpf, exclude_user_id=user.id):
             raise HTTPException(status_code=409, detail="CPF já cadastrado em outra conta.")
         user.document = cpf
     if "company_cnpj" in data and data["company_cnpj"]:
         cnpj = assert_valid_cpf_or_cnpj(data["company_cnpj"], field_label="CNPJ")
-        if find_user_by_cnpj(db, cnpj, exclude_user_id=user.id):
+        current_cnpj = normalize_digits(user.company_cnpj)
+        if cnpj != current_cnpj and find_user_by_cnpj(db, cnpj, exclude_user_id=user.id):
             raise HTTPException(status_code=409, detail="CNPJ já cadastrado em outra conta.")
         user.company_cnpj = cnpj
     if "phone" in data:

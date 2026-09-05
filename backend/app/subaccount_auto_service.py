@@ -93,7 +93,10 @@ def provision_plain_subaccount_for_user(db: Session, user: User, actor: User) ->
 
     from app.financial_service import create_client_plain_subaccount
 
-    account = create_client_plain_subaccount(db, actor, user, profile=profile)
+    try:
+        account = create_client_plain_subaccount(db, actor, user, profile=profile)
+    except HTTPException as exc:
+        raise ValueError(str(exc.detail)) from exc
     if account:
         db.flush()
     return account
@@ -126,9 +129,9 @@ def complete_user_kyc_and_provision(db: Session, user: User) -> dict:
             "kyc_case_id": case.id,
             "subaccount": _subaccount_payload(account) if account else None,
             "message": (
-                "KYC já aprovado — subconta normal disponível."
+                "Verificação já concluída — conta LETTER disponível."
                 if account
-                else "KYC aprovado — complete CPF/CNPJ para abrir subconta."
+                else "Verificação concluída — complete CPF/CNPJ para abrir a conta."
             ),
         }
 

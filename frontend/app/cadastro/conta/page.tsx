@@ -18,11 +18,37 @@ type Profile = {
 type WalletView = {
   has_subaccount: boolean;
   message: string;
+  kyc_case?: { status: string } | null;
   account?: { asaas_onboarding_url: string | null };
 };
 
+function digitsOnly(value: string) {
+  return value.replace(/\D/g, "");
+}
+
+function profileMatches(
+  profile: Profile,
+  document: string,
+  phone: string,
+  companyName: string,
+  companyCnpj: string,
+) {
+  return (
+    digitsOnly(profile.document ?? "") === digitsOnly(document)
+    && (profile.phone ?? "").trim() === phone.trim()
+    && (profile.company_name ?? "").trim() === companyName.trim()
+    && digitsOnly(profile.company_cnpj ?? "") === digitsOnly(companyCnpj)
+  );
+}
+
+function kycAllowsPortalAccess(status: string | null | undefined) {
+  return status === "APPROVED" || status === "SUBMITTED";
+}
+
 function AberturaContaForm() {
   const [user, setUser] = useState<User | null>(null);
+  const [savedProfile, setSavedProfile] = useState<Profile | null>(null);
+  const [kycStatus, setKycStatus] = useState<string | null>(null);
   const [document, setDocument] = useState("");
   const [phone, setPhone] = useState("");
   const [companyName, setCompanyName] = useState("");
@@ -32,6 +58,54 @@ function AberturaContaForm() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [onboardingUrl, setOnboardingUrl] = useState<string | null>(null);
+
+  async function completeWalletActivation(
+    currentUser: User,
+    currentProfile: Profile,
+    fields?: { document: string; phone: string; companyName: string; companyCnpj: string },
+  ) {
+    const nextDocument = fields?.document ?? document;
+    const nextPhone = fields?.phone ?? phone;
+    const nextCompanyName = fields?.companyName ?? companyName;
+    const nextCompanyCnpj = fields?.companyCnpj ?? companyCnpj;
+    const unchanged = profileMatches(currentProfile, nextDocument, nextPhone, nextCompanyName, nextCompanyCnpj);
+    if (!unchanged) {
+      await api("/auth/me/profile", {
+        method: "PATCH",
+        body: JSON.stringify({
+          document: nextDocument.trim() || undefined,
+          phone: nextPhone.trim() || undefined,
+          company_cnpj: nextCompanyCnpj.trim() || undefined,
+          company_name: nextCompanyName.trim() || undefined,
+        }),
+      });
+      setSavedProfile({
+        document: digitsOnly(nextDocument) || null,
+        phone: nextPhone.trim() || null,
+        company_name: nextCompanyName.trim() || null,
+        company_cnpj: digitsOnly(nextCompanyCnpj) || null,
+      });
+    }
+
+    const kyc = await api<{ message: string; kyc_status?: string }>("/kyc/me/complete", { method: "POST" });
+    const wallet = await api<WalletView>("/wallet/me");
+    setKycStatus(wallet.kyc_case?.status ?? kyc.kyc_status ?? null);
+    setOnboardingUrl(wallet.account?.asaas_onboarding_url ?? null);
+
+    if (wallet.has_subaccount) {
+      window.location.href = portalHomeForRole(currentUser.role);
+      return;
+    }
+
+    setNotice(kyc.message);
+    if (kycAllowsPortalAccess(wallet.kyc_case?.status ?? kyc.kyc_status)) {
+      setError("");
+      return;
+    }
+    if (!wallet.account?.asaas_onboarding_url) {
+      setError("Conta ainda em processamento. Revise CPF/CNPJ e celular ou tente novamente em instantes.");
+    }
+  }
 
   useEffect(() => {
     if (!getToken()) {
@@ -43,17 +117,40 @@ function AberturaContaForm() {
       api<Profile>("/auth/me/profile"),
       api<WalletView>("/wallet/me"),
     ])
-      .then(([me, profile, wallet]) => {
+      .then(async ([me, profile, wallet]) => {
         setUser(me);
+        setSavedProfile(profile);
+        setKycStatus(wallet.kyc_case?.status ?? null);
+
         if (wallet.has_subaccount) {
           window.location.href = portalHomeForRole(me.role);
           return;
         }
+
         setDocument(profile.document ?? "");
         setPhone(profile.phone ?? "");
         setCompanyName(profile.company_name ?? "");
         setCompanyCnpj(profile.company_cnpj ?? "");
         setOnboardingUrl(wallet.account?.asaas_onboarding_url ?? null);
+
+        if (kycAllowsPortalAccess(wallet.kyc_case?.status)) {
+          setNotice("Sua verificação já foi enviada. Você pode entrar no escritório enquanto a conta LETTER é finalizada.");
+          return;
+        }
+
+        const hasBasics = digitsOnly(profile.document ?? "").length >= 11 && (profile.phone ?? "").trim().length >= 10;
+        if (hasBasics) {
+          try {
+            await completeWalletActivation(me, profile, {
+              document: profile.document ?? "",
+              phone: profile.phone ?? "",
+              companyName: profile.company_name ?? "",
+              companyCnpj: profile.company_cnpj ?? "",
+            });
+          } catch {
+            // Mantém o formulário para o usuário revisar os dados manualmente.
+          }
+        }
       })
       .catch(() => {
         window.location.href = "/login";
@@ -63,32 +160,26 @@ function AberturaContaForm() {
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if (!user || !savedProfile) return;
     setError("");
     setNotice("");
     setSubmitting(true);
     try {
-      await api("/auth/me/profile", {
-        method: "PATCH",
-        body: JSON.stringify({
-          document: document.trim() || undefined,
-          phone: phone.trim() || undefined,
-          company_cnpj: companyCnpj.trim() || undefined,
-          company_name: companyName.trim() || undefined,
-        }),
+      await completeWalletActivation(user, savedProfile, {
+        document,
+        phone,
+        companyName,
+        companyCnpj,
       });
-      const kyc = await api<{ message: string }>("/kyc/me/complete", { method: "POST" });
-      const wallet = await api<WalletView>("/wallet/me");
-      if (wallet.has_subaccount) {
-        window.location.href = portalHomeForRole(user?.role);
-        return;
-      }
-      setNotice(kyc.message);
-      setOnboardingUrl(wallet.account?.asaas_onboarding_url ?? null);
-      if (!wallet.account?.asaas_onboarding_url) {
-        setError("Conta ainda em processamento. Revise CPF/CNPJ e celular ou tente novamente em instantes.");
-      }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Não foi possível abrir a conta");
+      const message = e instanceof Error ? e.message : "Não foi possível abrir a conta";
+      if (message.toLowerCase().includes("cpf já cadastrado")) {
+        setError(
+          "Este CPF já está vinculado a outro e-mail na LETTER. Entre com a conta original ou contate o suporte para unificar o cadastro.",
+        );
+      } else {
+        setError(message);
+      }
     } finally {
       setSubmitting(false);
     }
@@ -97,6 +188,8 @@ function AberturaContaForm() {
   if (loading) {
     return <div className="site-login-card">Preparando abertura da conta…</div>;
   }
+
+  const canEnterPortal = kycAllowsPortalAccess(kycStatus) || Boolean(onboardingUrl);
 
   return (
     <form className="site-login-card" onSubmit={submit}>
@@ -158,7 +251,7 @@ function AberturaContaForm() {
         {submitting ? "Abrindo conta LETTER…" : "Abrir minha conta LETTER"}
       </button>
 
-      {onboardingUrl && user && (
+      {canEnterPortal && user && (
         <button
           type="button"
           className="site-submit"

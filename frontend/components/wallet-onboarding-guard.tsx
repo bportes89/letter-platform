@@ -5,9 +5,18 @@ import { useEffect, useState } from "react";
 import { api, logout, type User } from "@/lib/api";
 import { portalHomeForRole, postSignupRedirectForRole } from "@/lib/portal-routes";
 
-type WalletPeek = { has_subaccount: boolean };
+type WalletPeek = {
+  has_subaccount: boolean;
+  kyc_case?: { status: string } | null;
+};
 
 const SKIP_PREFIXES = ["/cadastro", "/login", "/convite", "/recuperar-senha", "/seguranca"];
+
+function walletOnboardingComplete(wallet: WalletPeek): boolean {
+  if (wallet.has_subaccount) return true;
+  const kycStatus = wallet.kyc_case?.status ?? "";
+  return kycStatus === "APPROVED" || kycStatus === "SUBMITTED";
+}
 
 export function WalletOnboardingGuard({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -26,7 +35,7 @@ export function WalletOnboardingGuard({ children }: { children: React.ReactNode 
           return;
         }
         const wallet = await api<WalletPeek>("/wallet/me");
-        if (!wallet.has_subaccount) {
+        if (!walletOnboardingComplete(wallet)) {
           window.location.href = "/cadastro/conta";
           return;
         }
