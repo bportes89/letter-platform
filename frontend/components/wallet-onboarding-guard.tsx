@@ -10,7 +10,7 @@ import {
   type WalletPeek,
 } from "@/lib/wallet-onboarding";
 
-const SKIP_PREFIXES = ["/cadastro", "/login", "/convite", "/recuperar-senha", "/seguranca"];
+const SKIP_PREFIXES = ["/cadastro", "/login", "/convite", "/recuperar-senha", "/recuperar-email", "/seguranca"];
 
 export function WalletOnboardingGuard({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();

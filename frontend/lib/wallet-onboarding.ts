@@ -1,5 +1,6 @@
 export type WalletPeek = {
   has_subaccount: boolean;
+  onboarding_complete?: boolean;
   kyc_case?: { status: string } | null;
 };
 
@@ -28,6 +29,9 @@ export function roleRequiresWalletAccount(role: string): boolean {
 }
 
 export function walletAccountReady(wallet: WalletPeek): boolean {
+  if (wallet.onboarding_complete !== undefined) {
+    return wallet.onboarding_complete;
+  }
   return wallet.has_subaccount;
 }
 

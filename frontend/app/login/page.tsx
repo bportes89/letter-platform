@@ -15,13 +15,13 @@ import {
 } from "@/lib/wallet-onboarding";
 
 async function redirectAfterLogin(user: User, nextPath: string | null) {
-  if (nextPath && nextPath.startsWith("/")) {
-    window.location.href = nextPath;
-    return;
-  }
   const wallet = await api<WalletPeek>("/wallet/me");
   if (shouldForceWalletOnboarding(user.role, wallet)) {
     window.location.href = walletOnboardingPath();
+    return;
+  }
+  if (nextPath && nextPath.startsWith("/")) {
+    window.location.href = nextPath;
     return;
   }
   window.location.href = portalHomeForRole(user.role);

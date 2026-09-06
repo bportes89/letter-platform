@@ -10,6 +10,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.asaas_common import asaas_configured
 from app.core.config import settings
 from app.identity_service import create_kyc_case
 from app.models import EscrowAccount, KycCase, Role, User
@@ -111,7 +112,6 @@ def complete_user_kyc_and_provision(db: Session, user: User) -> dict:
     if not (profile.mobile_phone or "").strip():
         raise ValueError("Telefone celular obrigatório para abrir subconta Asaas")
 
-    from app.asaas_common import asaas_configured
     if asaas_configured():
         from app.account_uniqueness import assert_valid_cpf_or_cnpj
 

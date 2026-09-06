@@ -66,6 +66,15 @@ def apply_banking_fields(account: EscrowAccount, *, api_key: str | None = None, 
     account.bank_agency = str(payload.get("agency") or account.bank_agency or settings.asaas_default_agency)
 
 
+def wallet_onboarding_complete(account: EscrowAccount | None) -> bool:
+    if account is None:
+        return False
+    if _is_mock_account(account):
+        return True
+    status = (account.asaas_kyc_status or "").upper()
+    return status in {"APPROVED", "ACTIVE"}
+
+
 def ensure_mock_banking(account: EscrowAccount) -> None:
     if not account.bank_account_number:
         account.bank_code = settings.asaas_bank_code
@@ -134,6 +143,7 @@ def wallet_view(db: Session, user: User) -> dict:
     if not account:
         return {
             "has_subaccount": False,
+            "onboarding_complete": False,
             "kyc_case": kyc_case,
             "message": "Conta LETTER ainda não aberta. Conclua a verificação para ativar sua carteira.",
         }
@@ -142,8 +152,10 @@ def wallet_view(db: Session, user: User) -> dict:
         ensure_mock_banking(account)
         db.flush()
 
+    complete = wallet_onboarding_complete(account)
     return {
         "has_subaccount": True,
+        "onboarding_complete": complete,
         "kyc_case": kyc_case,
         "account": _account_payload(account),
         "banking": _banking_payload(account),
@@ -214,7 +226,7 @@ def _wallet_message(account: EscrowAccount, db: Session | None = None) -> str:
         return "Carteira ativa — depósitos, saques e pagamentos disponíveis conforme saldo."
     if account.asaas_onboarding_url:
         return "Envie seus documentos pelo link de verificação LETTER para liberar saques e transferências."
-    return "Documentação pendente — envie os documentos KYC para liberar saques e transferências."
+    return "Documentação pendente — envie os documentos de verificação para liberar saques e transferências."
 
 
 def list_wallet_transactions(db: Session, account: EscrowAccount, *, offset: int = 0, limit: int = 50) -> dict:

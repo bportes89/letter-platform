@@ -2914,6 +2914,7 @@ def test_my_wallet_view_and_operations(client, auth_headers, monkeypatch):
     assert wallet.status_code == 200
     body = wallet.json()
     assert body["has_subaccount"] is True
+    assert body["onboarding_complete"] is True
     assert body["banking"]["bank_code"] == "461"
     assert body["banking"]["agency"] == "0001"
     assert body["banking"]["pix_key"]
@@ -3424,3 +3425,14 @@ def test_account_recovery_mask_email_helper():
     assert mask_email("a@x.com") == "*@x.com"
     assert phones_match("11900000001", "(11) 90000-0001") is True
     assert phones_match("11900000001", "11999999999") is False
+
+
+def test_migrated_partner_wallet_requires_bank_onboarding(client):
+    login = client.post("/api/v1/auth/login", json={"email": "parceiro@letter.com.br", "password": "Letter@123"})
+    assert login.status_code == 200
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    wallet = client.get("/api/v1/wallet/me", headers=headers)
+    assert wallet.status_code == 200
+    body = wallet.json()
+    assert body["has_subaccount"] is False
+    assert body["onboarding_complete"] is False

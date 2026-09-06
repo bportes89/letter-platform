@@ -10,11 +10,13 @@ import {
   redirectToPortalAfterWallet,
   walletActivationErrorMessage,
 } from "@/lib/wallet-activation";
+import { walletAccountReady } from "@/lib/wallet-onboarding";
 
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
 export type WalletView = {
   has_subaccount: boolean;
+  onboarding_complete?: boolean;
   message: string;
   kyc_case?: { id: string; status: string; risk_level: string | null; provider: string } | null;
   account?: {
@@ -72,7 +74,7 @@ type Profile = {
 
 export function MyWalletModule() {
   const searchParams = useSearchParams();
-  const onboarding = searchParams.get("onboarding") === "kyc";
+  const onboarding = searchParams.get("onboarding") === "1" || searchParams.get("onboarding") === "kyc";
   const [wallet, setWallet] = useState<WalletView | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [profileDocument, setProfileDocument] = useState("");
@@ -133,13 +135,15 @@ export function MyWalletModule() {
         },
         profile,
       );
-      if (result.hasSubaccount) {
+      await load();
+      const refreshed = await api<WalletView>("/wallet/me");
+      const ready = refreshed.onboarding_complete ?? refreshed.has_subaccount;
+      if (ready) {
         const me = await api<User>("/auth/me");
         redirectToPortalAfterWallet(me.role);
         return;
       }
-      setNotice(result.message);
-      await load();
+      setNotice(result.message || "Conta em abertura — conclua a verificação no BANK para acessar o portal.");
     } catch (e) {
       setNotice(walletActivationErrorMessage(e));
     } finally {
@@ -230,6 +234,8 @@ export function MyWalletModule() {
 
   if (loading) return <div className="loading">Carregando BANK...</div>;
 
+  const bankReady = wallet ? walletAccountReady(wallet) : false;
+
   return (
     <>
       <div className="page-heading">
@@ -244,14 +250,15 @@ export function MyWalletModule() {
         <div className="operational-icon"><Wallet /></div>
       </div>
 
-      {(onboarding || !wallet?.has_subaccount) && (
+      {(onboarding || !bankReady) && (
         <div className="notice">
           <CheckCircle2 />
           <div>
             <strong>Ative sua conta LETTER</strong>
             <p>
-              Confirme CPF/CNPJ e celular abaixo e abra sua conta digital. Este é o mesmo fluxo do primeiro acesso —
-              você pode concluir aqui no BANK a qualquer momento.
+              {wallet?.has_subaccount
+                ? "Sua conta foi criada — conclua a verificação e os documentos abaixo para liberar o acesso ao portal."
+                : "Confirme CPF/CNPJ e celular abaixo e abra sua conta digital. Este é o mesmo fluxo do primeiro acesso — você pode concluir aqui no BANK a qualquer momento."}
             </p>
           </div>
         </div>
