@@ -336,6 +336,17 @@ class PasswordResetConfirm(BaseModel):
     new_password: str = Field(min_length=10)
 
 
+class AccountRecoveryLookupRequest(BaseModel):
+    document: str = Field(min_length=11, max_length=20)
+    phone: str = Field(min_length=10, max_length=30)
+
+
+class AccountRecoveryLookupResponse(BaseModel):
+    found: bool
+    masked_email: str | None = None
+    message: str
+
+
 class SessionView(ORMModel):
     id: str
     user_agent: str | None

@@ -79,6 +79,7 @@ from app.schemas import (
     ContractNativeInspectionRequest, CollateralNativeInspectionView,
     LeadUpdate, LeadView, LedgerPostRequest, LedgerTransactionView, LegacyIdMapView, LegacyMigrationBundle, LegacyMigrationRunView, LoginRequest,
     FlashCreditCalculationRequest, MfaSetupView, MfaVerify, ModuleView, PasswordResetConfirm, PasswordResetRequest,
+    AccountRecoveryLookupRequest, AccountRecoveryLookupResponse,
     NetworkNodeCreate, NetworkNodeView, NetworkDownlineMemberView, PayoutApprove, PayoutCreate, PayoutView, ProposalCreate, ProposalUpdate,
     ReconciliationBatchView, ReconciliationItemView, ReconciliationResolveRequest,
     MarketplaceEsteira1Request, MarketplaceEsteira1Response, MarketplaceEsteira2Request, MarketplaceEsteira2Response,
@@ -415,6 +416,21 @@ def password_reset_request(payload:PasswordResetRequest,db:Session=Depends(get_d
 @router.post("/auth/password-reset/confirm")
 def password_reset_confirm(payload:PasswordResetConfirm,db:Session=Depends(get_db)):
     confirm_password_reset(db,payload.token,payload.new_password);db.commit();return {"status":"password_updated"}
+
+
+@router.post("/auth/account-recovery/lookup", response_model=AccountRecoveryLookupResponse)
+def account_recovery_lookup(payload: AccountRecoveryLookupRequest, request: Request, db: Session = Depends(get_db)):
+    from app.account_recovery_service import lookup_account_email
+
+    ip = request.client.host if request.client else "unknown"
+    cpf_key = "".join(ch for ch in payload.document if ch.isdigit())[-11:]
+    allowed, retry = rate_limiter.allow(
+        f"account-recovery:{ip}:{cpf_key}",
+        settings.login_rate_limit_per_minute,
+    )
+    if not allowed:
+        raise HTTPException(429, "Limite de tentativas atingido. Aguarde e tente novamente.", headers={"Retry-After": str(retry)})
+    return lookup_account_email(db, document=payload.document, phone=payload.phone)
 
 
 @router.get("/admin/users",response_model=list[UserView])

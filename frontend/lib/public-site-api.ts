@@ -112,6 +112,19 @@ export async function confirmPasswordReset(
   });
 }
 
+export type AccountRecoveryLookupResult = {
+  found: boolean;
+  masked_email: string | null;
+  message: string;
+};
+
+export async function lookupAccountEmail(document: string, phone: string): Promise<AccountRecoveryLookupResult> {
+  return publicFetch<AccountRecoveryLookupResult>("/auth/account-recovery/lookup", {
+    method: "POST",
+    body: JSON.stringify({ document, phone }),
+  });
+}
+
 export async function simulateFlashPublic(
   assetValue: number,
   requestedAmount: number | null,

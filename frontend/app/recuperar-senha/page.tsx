@@ -167,6 +167,9 @@ function RecuperarSenhaForm() {
       <Link href="/login" className="site-login-back">
         Já sei minha senha — entrar →
       </Link>
+      <Link href="/recuperar-email" className="site-login-back">
+        Não lembro meu e-mail →
+      </Link>
       <Link href="/" className="site-login-back">
         ← Voltar ao site institucional
       </Link>

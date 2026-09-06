@@ -184,6 +184,9 @@ function CadastroForm() {
       <Link href="/recuperar-senha" className="site-login-back">
         Esqueci minha senha / Redefinir senha →
       </Link>
+      <Link href="/recuperar-email" className="site-login-back">
+        Não lembro meu e-mail →
+      </Link>
       <Link href="/" className="site-login-back">
         ← Voltar ao site institucional
       </Link>

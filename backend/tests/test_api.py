@@ -3388,3 +3388,39 @@ def test_commission_attribution_self_service_vs_partner_office(client, auth_head
     assert sale_entries
     assert sale_entries[0]["level"] == 1
     assert sale_entries[0]["status"] == "PENDING_FISCAL"
+
+
+def test_account_recovery_lookup_masks_email(client):
+    ok = client.post(
+        "/api/v1/auth/account-recovery/lookup",
+        json={"document": "000.000.000-00", "phone": "(11) 90000-0001"},
+    )
+    assert ok.status_code == 200
+    body = ok.json()
+    assert body["found"] is True
+    assert body["masked_email"] == "a****@letter.com.br"
+    assert "localizada" in body["message"].lower()
+
+    wrong_phone = client.post(
+        "/api/v1/auth/account-recovery/lookup",
+        json={"document": "00000000000", "phone": "11999999999"},
+    )
+    assert wrong_phone.status_code == 200
+    assert wrong_phone.json()["found"] is False
+    assert wrong_phone.json()["masked_email"] is None
+
+    unknown = client.post(
+        "/api/v1/auth/account-recovery/lookup",
+        json={"document": "12345678901", "phone": "11900000001"},
+    )
+    assert unknown.status_code == 200
+    assert unknown.json()["found"] is False
+
+
+def test_account_recovery_mask_email_helper():
+    from app.account_recovery_service import mask_email, phones_match
+
+    assert mask_email("admin@letter.com.br") == "a****@letter.com.br"
+    assert mask_email("a@x.com") == "*@x.com"
+    assert phones_match("11900000001", "(11) 90000-0001") is True
+    assert phones_match("11900000001", "11999999999") is False

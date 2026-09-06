@@ -132,6 +132,9 @@ function LoginForm() {
       <Link href="/recuperar-senha" className="site-login-back">
         Esqueci minha senha / Redefinir senha →
       </Link>
+      <Link href="/recuperar-email" className="site-login-back">
+        Não lembro meu e-mail →
+      </Link>
     </form>
   );
 }
