@@ -475,23 +475,43 @@ def request_bill_payment(db: Session, account: EscrowAccount, *, barcode: str, a
     }
 
 
+def _resolve_webhook_account_id(payload: dict, payment: dict, transfer: dict) -> str | None:
+    account = payload.get("account")
+    if isinstance(account, dict):
+        account_id = str(account.get("id") or "").strip()
+        if account_id:
+            return account_id
+    for candidate in (
+        payment.get("accountId"),
+        transfer.get("accountId"),
+        payload.get("accountId"),
+        payload.get("account") if isinstance(payload.get("account"), str) else None,
+    ):
+        if candidate:
+            return str(candidate).strip()
+    return None
+
+
+def _account_status_webhook(event: str) -> bool:
+    return event in {
+        "ACCOUNT_STATUS_UPDATED",
+        "ACCOUNT_DOCUMENTATION_APPROVED",
+        "ACCOUNT_DOCUMENTATION_REJECTED",
+    } or event.startswith("ACCOUNT_STATUS_")
+
+
 def handle_asaas_webhook(db: Session, payload: dict) -> dict:
     event = str(payload.get("event") or payload.get("type") or "UNKNOWN")
     payment = payload.get("payment") if isinstance(payload.get("payment"), dict) else {}
     transfer = payload.get("transfer") if isinstance(payload.get("transfer"), dict) else {}
-    account_ref = (
-        payload.get("account")
-        or payment.get("accountId")
-        or transfer.get("accountId")
-        or payload.get("accountId")
-    )
+    account_ref = _resolve_webhook_account_id(payload, payment, transfer)
 
     account = None
     if account_ref:
         account = db.scalar(
             select(EscrowAccount).where(
-                (EscrowAccount.asaas_account_id == str(account_ref))
-                | (EscrowAccount.external_account_id == str(account_ref))
+                (EscrowAccount.asaas_account_id == account_ref)
+                | (EscrowAccount.external_account_id == account_ref)
             )
         )
 
@@ -532,7 +552,17 @@ def handle_asaas_webhook(db: Session, payload: dict) -> dict:
                 )
                 ensure_chart(db, actor)
 
-    if account and event in {"ACCOUNT_STATUS_UPDATED", "ACCOUNT_DOCUMENTATION_APPROVED", "ACCOUNT_DOCUMENTATION_REJECTED"}:
+    if account and _account_status_webhook(event):
+        account_status = payload.get("accountStatus") if isinstance(payload.get("accountStatus"), dict) else {}
+        if account_status:
+            general = str(account_status.get("general") or "").upper()
+            documentation = str(account_status.get("documentation") or "").upper()
+            if general == "APPROVED" or documentation == "APPROVED":
+                account.asaas_kyc_status = "APPROVED"
+            elif general == "REJECTED" or documentation == "REJECTED":
+                account.asaas_kyc_status = "REJECTED"
+            elif general in {"AWAITING_APPROVAL", "PENDING"}:
+                account.asaas_kyc_status = general
         sync_account_from_asaas(db, account)
         processed = True
 

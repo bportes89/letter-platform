@@ -2971,6 +2971,41 @@ def test_asaas_webhook_endpoint(client, auth_headers, monkeypatch):
     assert accepted.json()["status"] == "ok"
 
 
+def test_asaas_account_status_general_approval_webhook(client, auth_headers, monkeypatch):
+    monkeypatch.setattr("app.asaas_common.asaas_configured", lambda: False)
+    monkeypatch.setattr("app.core.config.settings.asaas_webhook_access_token", "test-webhook-token")
+
+    created = client.post(
+        "/api/v1/escrow/accounts",
+        headers=auth_headers,
+        json={"create_subaccount": True, "enable_escrow": False},
+    )
+    assert created.status_code == 201
+    account = created.json()
+    asaas_account_id = account["asaas_account_id"]
+
+    webhook = client.post(
+        "/api/v1/webhooks/asaas",
+        headers={"asaas-access-token": "test-webhook-token"},
+        json={
+            "id": "evt_account_status_001",
+            "event": "ACCOUNT_STATUS_GENERAL_APPROVAL_APPROVED",
+            "account": {"id": asaas_account_id},
+            "accountStatus": {
+                "commercialInfo": "APPROVED",
+                "bankAccountInfo": "APPROVED",
+                "documentation": "APPROVED",
+                "general": "APPROVED",
+            },
+        },
+    )
+    assert webhook.status_code == 200
+    assert webhook.json()["processed"] is True
+
+    wallet = client.get("/api/v1/wallet/me", headers=auth_headers)
+    assert wallet.status_code == 200
+
+
 def test_wallet_pricing_table(client, auth_headers):
     pricing = client.get("/api/v1/wallet/pricing", headers=auth_headers)
     assert pricing.status_code == 200
