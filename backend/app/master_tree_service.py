@@ -60,7 +60,24 @@ def resolve_master_tree_key_from_legacy(legacy_source: str | None, row: dict | N
     return None
 
 
+def _find_master_by_tree_key(db: Session, organization_id: str, tree_key: str) -> User | None:
+    return db.scalar(
+        select(User)
+        .where(
+            User.organization_id == organization_id,
+            User.role == Role.MASTER_FRANCHISEE,
+            User.master_tree_key == tree_key,
+            User.active.is_(True),
+        )
+        .order_by(User.created_at.asc())
+        .limit(1)
+    )
+
+
 def get_master_root_user(db: Session, organization_id: str, tree_key: str) -> User | None:
+    user = _find_master_by_tree_key(db, organization_id, tree_key)
+    if user:
+        return user
     email = _master_email(tree_key).lower()
     if not email:
         return None
@@ -103,34 +120,58 @@ def ensure_master_root_node(db: Session, master: User, tree_key: str) -> Network
     return node
 
 
+def _resolve_master_user(
+    db: Session,
+    organization_id: str,
+    tree_key: str,
+    spec: dict,
+    target_email: str,
+    hashed: str,
+) -> User:
+    """Localiza ou cria o master da árvore; reaplica e-mail das env vars quando seguro."""
+    user = _find_master_by_tree_key(db, organization_id, tree_key)
+    if user and user.email.lower() != target_email:
+        conflict = db.scalar(select(User).where(User.email == target_email))
+        if conflict is None:
+            user.email = target_email
+        elif conflict.id != user.id:
+            user = conflict
+    if not user:
+        user = db.scalar(select(User).where(User.email == target_email))
+    if not user:
+        user = User(
+            organization_id=organization_id,
+            name=spec["name"],
+            email=target_email,
+            document=spec["document"],
+            phone=spec["phone"],
+            password_hash=hashed,
+            role=Role.MASTER_FRANCHISEE,
+            master_tree_key=tree_key,
+            active=True,
+        )
+        db.add(user)
+        db.flush()
+    else:
+        user.organization_id = organization_id
+        user.role = Role.MASTER_FRANCHISEE
+        user.master_tree_key = tree_key
+        user.active = True
+        if not (user.name or "").strip():
+            user.name = spec["name"]
+        if not (user.phone or "").strip():
+            user.phone = spec["phone"]
+    return user
+
+
 def ensure_master_roots(db: Session, organization_id: str, password: str | None = None) -> dict[str, User]:
     pwd = password or os.environ.get("LETTER_DEMO_PASSWORD", "Letter@123")
     hashed = hash_password(pwd)
     masters: dict[str, User] = {}
     for spec in MASTER_ROOT_SPECS:
         tree_key = spec["key"]
-        email = _master_email(tree_key).lower() or spec["email"]
-        user = db.scalar(select(User).where(User.email == email))
-        if not user:
-            user = User(
-                organization_id=organization_id,
-                name=spec["name"],
-                email=email,
-                document=spec["document"],
-                phone=spec["phone"],
-                password_hash=hashed,
-                role=Role.MASTER_FRANCHISEE,
-                master_tree_key=tree_key,
-                active=True,
-            )
-            db.add(user)
-            db.flush()
-        else:
-            user.role = Role.MASTER_FRANCHISEE
-            user.master_tree_key = tree_key
-            user.active = True
-            if not (user.phone or "").strip():
-                user.phone = spec["phone"]
+        target_email = (_master_email(tree_key) or spec["email"]).lower()
+        user = _resolve_master_user(db, organization_id, tree_key, spec, target_email, hashed)
         ensure_master_root_node(db, user, tree_key)
         masters[tree_key] = user
     db.flush()

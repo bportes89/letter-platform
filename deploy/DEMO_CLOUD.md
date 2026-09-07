@@ -127,6 +127,23 @@ Salve e faça **Manual Deploy** da API (para recarregar env).
 
 ---
 
+## 4b) Masters comerciais (Letter Bank + RMK/Bevi)
+
+Após o deploy do contrato pós-BANK, configure os e-mails **reais** dos masters no Render → **Environment**:
+
+| Variável | Sugestão (export legado) | Observação |
+|----------|--------------------------|------------|
+| `LETTER_MASTER_LETTER_BANK_EMAIL` | `comercial@letter.app.br` | Letter Bank Ltda (matriz) — **confirmar com Paulo** |
+| `LETTER_MASTER_RMK_BEVI_EMAIL` | `senhas.icred@bevioficial.com.br` | RMK INTERMEDIAÇÕES (regional Bevi) — **confirmar com Paulo** |
+
+Os defaults técnicos (`letter-bank@letter.com.br` / `rmk-bevi@letter.com.br`) são placeholders do seed.
+
+Ao salvar as variáveis e redeployar, o start script (`ensure_master_roots`) **reaplica o e-mail** na árvore correspondente.
+
+Validação: logado como admin → `GET /api/v1/admin/master-trees` deve listar os dois masters com os e-mails corretos.
+
+---
+
 ## 5) Contas de demonstração
 
 Criadas no primeiro seed (`LETTER_DEMO_PASSWORD`):

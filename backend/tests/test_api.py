@@ -3483,3 +3483,13 @@ def test_master_trees_admin_view(client, auth_headers):
     letter_bank = next(item for item in body if item["tree_key"] == "LETTER_BANK")
     assert letter_bank["active"] is True
     assert letter_bank["referral_code"]
+
+
+def test_master_root_email_rebind_from_env(monkeypatch, client, auth_headers):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "master_letter_bank_email", "comercial@letter.app.br")
+    trees = client.get("/api/v1/admin/master-trees", headers=auth_headers)
+    assert trees.status_code == 200
+    letter_bank = next(item for item in trees.json() if item["tree_key"] == "LETTER_BANK")
+    assert letter_bank["master_email"] == "comercial@letter.app.br"
