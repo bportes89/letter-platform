@@ -156,3 +156,9 @@ class AsaasClient:
 
     def get_payment(self, payment_id: str) -> dict:
         return self.request("GET", f"/payments/{payment_id}")
+
+    def create_payment(self, payload: dict) -> dict:
+        return self.request("POST", "/payments", json=payload)
+
+    def update_payment(self, payment_id: str, payload: dict) -> dict:
+        return self.request("PUT", f"/payments/{payment_id}", json=payload)

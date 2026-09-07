@@ -121,3 +121,5 @@ Distribuição dinâmica sobre a **verba de comissão** (pool) de qualquer produ
 - **PF:** pendente assinatura de recibo no celular.
 
 **Demais produtos:** comissão provisionada na **conclusão da operação** (mesma grade), com hold fiscal conforme perfil.
+
+**Split nativo Asaas (fase 1):** prévia e cobrança com `split[]` via `/finops/mmn/*`; liquidação confirmada por webhook `PAYMENT_SPLIT_DONE`. Ver `docs/ASAAS_SPLIT_HOMOLOGATION_CHECKLIST.md`. Flag `LETTER_ASAAS_SPLIT_ENABLED` permanece `false` até homologação sandbox.

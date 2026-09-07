@@ -52,7 +52,7 @@ from app.schemas import (
     ValidStampCreate, ValidStampView, SaaSTermsCreate, SaaSTermsView, SaaSPlanCreate, SaaSPlanView,
     SaaSSubscribeCreate, SaaSSubscriptionView,
     BillingGenerateRequest, CollectionActionView, CommissionAllocate, CommissionEntryView, CommissionRuleCreate,
-    CommissionRuleView, DocumentView, EscrowAsaasStatusView, EscrowCreate, EscrowBillingCycleView, EscrowSubaccountPreviewView, EscrowView, EscrowWebhook, WalletBillPaymentRequest, WalletEscrowBillingSyncView, LssBillingSyncView, RecurringCommissionSettlementView, LegalManualPublicView, LegalManualView, WalletPricingRowView, WalletTransferRequest,
+    CommissionRuleView, DocumentView, EscrowAsaasStatusView, EscrowCreate, EscrowBillingCycleView, EscrowSubaccountPreviewView, EscrowView, EscrowWebhook, WalletBillPaymentRequest, WalletEscrowBillingSyncView, LssBillingSyncView, RecurringCommissionSettlementView, MmnSplitPreviewRequest, MmnSplitPreviewView, AsaasMmnPaymentCreate, AsaasMmnPaymentView, PaymentSplitRowView, LegalManualPublicView, LegalManualView, WalletPricingRowView, WalletTransferRequest,
     FiscalEvidenceView, SefazRobotStatusView,
     DelinquencyView, FiscalReleaseRequest, FundingOpportunityCreate, FundingOpportunityView, InvitationView,
     NinaApprovalRequest, NinaCriticalApprovalView, NinaDistressCaseCreate, NinaDistressCaseView,
@@ -1824,6 +1824,90 @@ def finops_tapaf_settlement_lookup(
 @router.post("/finops/sdc/bullet-split-preview")
 def sdc_bullet_split_preview(payload:SdcBulletPreviewRequest,user:User=Depends(require_scope("payments:review"))):
     return sdc_bullet_and_split(payload.capital,payload.turnover_days,payload.commission_pool,payload.level3_available)
+
+
+@router.post("/finops/mmn/split-preview", response_model=MmnSplitPreviewView)
+def finops_mmn_split_preview(
+    payload: MmnSplitPreviewRequest,
+    user: User = Depends(require_scope("payments:review")),
+    db: Session = Depends(get_db),
+):
+    from uuid import uuid4
+    from app.asaas_split_service import plan_mmn_payment_splits
+
+    reference = payload.reference or f"MMN-PREVIEW-{uuid4().hex[:10]}"
+    result = plan_mmn_payment_splits(
+        db,
+        user.organization_id,
+        payload.originator_id,
+        payload.pool_amount,
+        reference=reference,
+    )
+    return MmnSplitPreviewView(**result)
+
+
+@router.get("/finops/mmn/split-instructions", response_model=list[PaymentSplitRowView])
+def finops_mmn_split_instructions(
+    reference: str | None = Query(default=None),
+    user: User = Depends(require_scope("payments:review")),
+    db: Session = Depends(get_db),
+):
+    from app.asaas_split_service import list_split_instructions
+
+    return [PaymentSplitRowView(**row) for row in list_split_instructions(db, user, reference=reference)]
+
+
+@router.post("/finops/mmn/payments", response_model=AsaasMmnPaymentView)
+def finops_mmn_payment_create(
+    payload: AsaasMmnPaymentCreate,
+    user: User = Depends(require_step_up),
+    _: User = Depends(require_scope("payments:review")),
+    db: Session = Depends(get_db),
+):
+    from uuid import uuid4
+    from app.asaas_split_service import create_payment_with_mmn_split
+
+    reference = payload.reference or f"MMN-PAY-{uuid4().hex[:12]}"
+    result = create_payment_with_mmn_split(
+        db,
+        user,
+        customer_id=payload.customer_id,
+        billing_type=payload.billing_type,
+        value=payload.value,
+        due_date=payload.due_date,
+        description=payload.description,
+        originator_id=payload.originator_id,
+        pool_amount=payload.pool_amount,
+        reference=reference,
+    )
+    audit(db, user, "finops.mmn.payment_with_split", "payment_split", reference, {"payment_id": result.get("payment_id")})
+    db.commit()
+    return AsaasMmnPaymentView(**result)
+
+
+@router.post("/finops/mmn/payments/mock", response_model=AsaasMmnPaymentView)
+def finops_mmn_payment_create_mock(
+    payload: AsaasMmnPaymentCreate,
+    user: User = Depends(require_scope("payments:review")),
+    db: Session = Depends(get_db),
+):
+    from app.asaas_split_service import mock_create_payment_with_split
+
+    result = mock_create_payment_with_split(
+        db,
+        user,
+        customer_id=payload.customer_id,
+        billing_type=payload.billing_type,
+        value=payload.value,
+        due_date=payload.due_date,
+        description=payload.description,
+        originator_id=payload.originator_id,
+        pool_amount=payload.pool_amount,
+        reference=payload.reference,
+    )
+    audit(db, user, "finops.mmn.payment_with_split_mock", "payment_split", result["reference"], {"payment_id": result.get("payment_id")})
+    db.commit()
+    return AsaasMmnPaymentView(**result)
 
 
 @router.post("/finops/billing/invoice-processor")

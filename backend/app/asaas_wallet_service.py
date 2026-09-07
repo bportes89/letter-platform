@@ -498,8 +498,14 @@ def handle_asaas_webhook(db: Session, payload: dict) -> dict:
     event_id = str(payload.get("id") or payload.get("event") or uuid4())
     processed = False
     lss_subscription_id = None
+    split_result = None
 
     from app.lss_billing_service import handle_lss_payment_webhook
+    from app.asaas_split_service import PAYMENT_SPLIT_DONE, handle_payment_split_done
+
+    if event == PAYMENT_SPLIT_DONE:
+        split_result = handle_payment_split_done(db, payload)
+        processed = bool(split_result.get("processed"))
 
     lss_item = handle_lss_payment_webhook(db, event, payment)
     if lss_item:
@@ -546,4 +552,10 @@ def handle_asaas_webhook(db: Session, payload: dict) -> dict:
             )
         )
 
-    return {"event": event, "processed": processed, "account_id": account.id if account else None, "lss_subscription_id": lss_subscription_id}
+    return {
+        "event": event,
+        "processed": processed,
+        "account_id": account.id if account else None,
+        "lss_subscription_id": lss_subscription_id,
+        "split": split_result,
+    }

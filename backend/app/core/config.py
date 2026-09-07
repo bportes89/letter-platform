@@ -60,6 +60,7 @@ class Settings(BaseSettings):
     lss_billing_enabled: bool = True
     lss_default_billing_type: str = "BOLETO"
     lss_billing_grace_days: int = 3
+    asaas_split_enabled: bool = False
     asaas_webhook_access_token: str | None = None
     asaas_bank_code: str = "461"
     asaas_bank_name: str = "Asaas IP S.A."

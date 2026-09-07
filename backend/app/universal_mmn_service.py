@@ -100,6 +100,52 @@ def initial_payout_status(user: User, payout_schedule: str) -> str:
     return STATUS_PENDING_FISCAL
 
 
+def plan_universal_mmn_allocations(
+    db: Session,
+    organization_id: str,
+    originator_id: str,
+    pool_amount: Decimal,
+) -> list[dict]:
+    """Planeja camadas da grade universal sem persistir comissões."""
+    originator = db.get(User, originator_id)
+    if not originator or originator.organization_id != organization_id:
+        raise HTTPException(status_code=422, detail="Originador inválido")
+    if not _sales_node(db, organization_id, originator_id):
+        raise HTTPException(status_code=422, detail="Originador não pertence à árvore de comissão")
+
+    master = find_network_master(db, organization_id, originator_id)
+    if not master:
+        raise HTTPException(status_code=422, detail="Master da rede não encontrado para rateio")
+
+    uplines = _upline_chain(db, organization_id, originator_id, depth=3)
+    layer_beneficiaries: list[tuple[str, str | None]] = [
+        ("MASTER", master.id),
+        ("DIRECT_SELLER", originator_id),
+        ("UPLINE_1", uplines[0] if len(uplines) > 0 else None),
+        ("UPLINE_2", uplines[1] if len(uplines) > 1 else None),
+        ("UPLINE_3", uplines[2] if len(uplines) > 2 else None),
+    ]
+    residual_master = master.id
+    planned: list[dict] = []
+    for level, (layer_name, share_percent) in enumerate(UNIVERSAL_MMN_LAYERS, start=1):
+        beneficiary_id = layer_beneficiaries[level - 1][1] or residual_master
+        amount = money(pool_amount * share_percent / Decimal("100"))
+        if amount <= 0:
+            continue
+        planned.append(
+            {
+                "layer_name": layer_name,
+                "level": level,
+                "beneficiary_id": beneficiary_id,
+                "share_percent": share_percent,
+                "amount": amount,
+            }
+        )
+    if not planned:
+        raise HTTPException(status_code=422, detail="Pool de comissão zerado")
+    return planned
+
+
 def allocate_universal_mmn(
     db: Session,
     actor: User,

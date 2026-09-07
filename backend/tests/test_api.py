@@ -3525,3 +3525,72 @@ def test_master_network_created_on_invitation_accept(client, auth_headers):
     assert master_node is not None
     assert master_node["referral_code"]
     assert master_node["sponsor_user_id"] is None
+
+
+def test_mmn_asaas_split_preview_mock_payment_and_webhook(client, auth_headers, monkeypatch):
+    users = client.get("/api/v1/admin/users", headers=auth_headers).json()
+    partner = next(u for u in users if u["email"] == "parceiro@letter.com.br")
+    wallet_map: dict[str, str] = {}
+
+    def fake_wallet(db, organization_id, user_id):
+        if user_id not in wallet_map:
+            wallet_map[user_id] = f"wallet-{user_id.replace('-', '')[:12]}"
+        return wallet_map[user_id]
+
+    monkeypatch.setattr("app.asaas_split_service.wallet_id_for_user", fake_wallet)
+
+    preview = client.post(
+        "/api/v1/finops/mmn/split-preview",
+        headers=auth_headers,
+        json={"originator_id": partner["id"], "pool_amount": "1000.00", "reference": "MMN-SPLIT-TEST-001"},
+    )
+    assert preview.status_code == 200
+    body = preview.json()
+    assert body["pool_amount"] == "1000.00"
+    assert body["split_total"] == "1000.00"
+    assert body["execution"] == "PREVIEW_ONLY"
+    assert len(body["splits"]) >= 1
+
+    payment = client.post(
+        "/api/v1/finops/mmn/payments/mock",
+        headers=auth_headers,
+        json={
+            "customer_id": "cus_test_001",
+            "billing_type": "PIX",
+            "value": "5000.00",
+            "due_date": "2026-09-15",
+            "description": "Teste split MMN",
+            "originator_id": partner["id"],
+            "pool_amount": "1000.00",
+            "reference": "MMN-SPLIT-TEST-002",
+        },
+    )
+    assert payment.status_code == 200
+    pay_body = payment.json()
+    assert pay_body["payment_id"]
+    assert len(pay_body["instructions"]) == 5
+
+    listed = client.get("/api/v1/finops/mmn/split-instructions?reference=MMN-SPLIT-TEST-002", headers=auth_headers)
+    assert listed.status_code == 200
+    assert len(listed.json()) == 5
+
+    first_wallet = pay_body["instructions"][0]["wallet_id"]
+    monkeypatch.setattr("app.core.config.settings.asaas_webhook_access_token", "test-webhook-token")
+    webhook = client.post(
+        "/api/v1/webhooks/asaas",
+        headers={"asaas-access-token": "test-webhook-token"},
+        json={
+            "event": "PAYMENT_SPLIT_DONE",
+            "payment": {"id": pay_body["payment_id"]},
+            "additionalInfo": {
+                "splitId": "split_test_001",
+                "externalReference": f"MMN-SPLIT-TEST-002:{first_wallet[:8]}",
+            },
+        },
+    )
+    assert webhook.status_code == 200
+    assert webhook.json()["split"]["processed"] is True
+
+    settled = client.get("/api/v1/finops/mmn/split-instructions?reference=MMN-SPLIT-TEST-002", headers=auth_headers)
+    assert any(row["status"] == "SETTLED" for row in settled.json())
+

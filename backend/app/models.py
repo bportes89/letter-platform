@@ -854,6 +854,25 @@ class RecurringCommissionAccrual(TimestampMixin, Base):
     settlement_reference: Mapped[str | None] = mapped_column(String(120))
 
 
+class PaymentSplitInstruction(TimestampMixin, Base):
+    __tablename__ = "payment_split_instructions"
+    __table_args__ = (UniqueConstraint("reference", "level", "beneficiary_id"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    reference: Mapped[str] = mapped_column(String(120), index=True)
+    asaas_payment_id: Mapped[str | None] = mapped_column(String(80), index=True)
+    beneficiary_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), index=True)
+    commission_entry_id: Mapped[str | None] = mapped_column(ForeignKey("commission_entries.id"), index=True)
+    layer_name: Mapped[str] = mapped_column(String(30))
+    level: Mapped[int]
+    wallet_id: Mapped[str | None] = mapped_column(String(120), index=True)
+    amount: Mapped[float] = mapped_column(Numeric(15, 2))
+    asaas_split_id: Mapped[str | None] = mapped_column(String(80), index=True)
+    status: Mapped[str] = mapped_column(String(30), default="PLANNED", index=True)
+    detail_json: Mapped[str] = mapped_column(Text, default="{}")
+    settled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class FiscalEvidence(TimestampMixin, Base):
     __tablename__ = "fiscal_evidences"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)

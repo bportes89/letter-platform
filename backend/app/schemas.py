@@ -1639,6 +1639,60 @@ class RecurringCommissionSettlementView(BaseModel):
     total_rows: int
 
 
+class MmnSplitPreviewRequest(BaseModel):
+    originator_id: str
+    pool_amount: Decimal = Field(gt=0)
+    reference: str | None = None
+
+
+class PaymentSplitRowView(BaseModel):
+    id: str | None = None
+    reference: str
+    wallet_id: str | None = None
+    beneficiary_id: str | None = None
+    layer_name: str | None = None
+    level: int | None = None
+    amount: str
+    status: str
+    asaas_payment_id: str | None = None
+    asaas_split_id: str | None = None
+    settled_at: str | None = None
+
+
+class MmnSplitPreviewView(BaseModel):
+    reference: str
+    originator_id: str
+    pool_amount: str
+    split_total: str
+    issuer_wallet_id: str | None = None
+    splits: list[dict]
+    skipped: list[dict]
+    execution: str
+
+
+class AsaasMmnPaymentCreate(BaseModel):
+    customer_id: str
+    billing_type: str = "PIX"
+    value: Decimal = Field(gt=0)
+    due_date: str
+    description: str
+    originator_id: str
+    pool_amount: Decimal = Field(gt=0)
+    reference: str | None = None
+
+
+class AsaasMmnPaymentView(BaseModel):
+    reference: str
+    originator_id: str
+    pool_amount: str
+    split_total: str
+    execution: str
+    payment_id: str | None = None
+    status: str
+    checkout_url: str | None = None
+    instructions: list[PaymentSplitRowView] = Field(default_factory=list)
+
+
 class LegalManualPublicView(BaseModel):
     slug: str
     title: str
