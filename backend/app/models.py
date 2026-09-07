@@ -836,6 +836,24 @@ class CommissionEntry(TimestampMixin, Base):
     released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class RecurringCommissionAccrual(TimestampMixin, Base):
+    __tablename__ = "recurring_commission_accruals"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "source_type", "source_reference", "accrual_period"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    accrual_period: Mapped[str] = mapped_column(String(7), index=True)
+    source_type: Mapped[str] = mapped_column(String(40), index=True)
+    source_reference: Mapped[str] = mapped_column(String(120), index=True)
+    originator_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), index=True)
+    gross_amount: Mapped[float] = mapped_column(Numeric(15, 2))
+    network_pool_amount: Mapped[float] = mapped_column(Numeric(15, 2))
+    status: Mapped[str] = mapped_column(String(30), default="ACCRUED", index=True)
+    settled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    settlement_reference: Mapped[str | None] = mapped_column(String(120))
+
+
 class FiscalEvidence(TimestampMixin, Base):
     __tablename__ = "fiscal_evidences"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)

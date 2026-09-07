@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.asaas_client import AsaasClient
 from app.asaas_common import asaas_api_available
 from app.core.config import settings
-from app.models import SaaSPlan, SaaSSubscription
+from app.models import SaaSPlan, SaaSSubscription, SaaSAcceptance
 
 LSS_BILLING_TYPES = {"BOLETO", "PIX", "CREDIT_CARD", "UNDEFINED"}
 PAYMENT_CONFIRMED_EVENTS = {"PAYMENT_RECEIVED", "PAYMENT_CONFIRMED"}
@@ -155,6 +155,33 @@ def _apply_payment_period(item: SaaSSubscription, payment: dict) -> None:
     item.status = "ACTIVE"
 
 
+def _record_lss_recurring_accrual(db: Session, item: SaaSSubscription, payment: dict) -> None:
+    """Apura 30% da rede no fechamento mensal (dia 1–30), liquidação dia 10."""
+    from app.recurring_commission_service import accrual_period_for, record_recurring_accrual
+
+    acceptance = db.scalar(select(SaaSAcceptance).where(SaaSAcceptance.subscription_id == item.id))
+    if not acceptance or not acceptance.user_id:
+        return
+    plan = db.get(SaaSPlan, item.plan_id)
+    if not plan:
+        return
+    payment_value = payment.get("value") or payment.get("netValue")
+    gross = Decimal(str(payment_value)) if payment_value else Decimal(str(plan.monthly_price))
+    if gross <= 0:
+        return
+    payment_id = str(payment.get("id") or "").strip() or item.id
+    period_start = _aware(item.current_period_start)
+    record_recurring_accrual(
+        db,
+        organization_id=item.organization_id,
+        source_type="LSS_SUBSCRIPTION",
+        source_reference=f"{item.id}:{payment_id}",
+        originator_id=acceptance.user_id,
+        gross_amount=gross,
+        accrual_period=accrual_period_for(period_start),
+    )
+
+
 def handle_lss_payment_webhook(db: Session, event: str, payment: dict) -> SaaSSubscription | None:
     item = _find_subscription_for_payment(db, payment)
     if not item:
@@ -172,6 +199,7 @@ def handle_lss_payment_webhook(db: Session, event: str, payment: dict) -> SaaSSu
 
     if event in PAYMENT_CONFIRMED_EVENTS:
         _apply_payment_period(item, payment)
+        _record_lss_recurring_accrual(db, item, payment)
     elif event in PAYMENT_OVERDUE_EVENTS:
         if item.status not in {"CANCELLATION_SCHEDULED", "CANCELLED"}:
             item.status = "PAST_DUE"

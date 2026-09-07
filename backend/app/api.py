@@ -52,7 +52,7 @@ from app.schemas import (
     ValidStampCreate, ValidStampView, SaaSTermsCreate, SaaSTermsView, SaaSPlanCreate, SaaSPlanView,
     SaaSSubscribeCreate, SaaSSubscriptionView,
     BillingGenerateRequest, CollectionActionView, CommissionAllocate, CommissionEntryView, CommissionRuleCreate,
-    CommissionRuleView, DocumentView, EscrowAsaasStatusView, EscrowCreate, EscrowBillingCycleView, EscrowSubaccountPreviewView, EscrowView, EscrowWebhook, WalletBillPaymentRequest, WalletEscrowBillingSyncView, LssBillingSyncView, LegalManualPublicView, LegalManualView, WalletPricingRowView, WalletTransferRequest,
+    CommissionRuleView, DocumentView, EscrowAsaasStatusView, EscrowCreate, EscrowBillingCycleView, EscrowSubaccountPreviewView, EscrowView, EscrowWebhook, WalletBillPaymentRequest, WalletEscrowBillingSyncView, LssBillingSyncView, RecurringCommissionSettlementView, LegalManualPublicView, LegalManualView, WalletPricingRowView, WalletTransferRequest,
     FiscalEvidenceView, SefazRobotStatusView,
     DelinquencyView, FiscalReleaseRequest, FundingOpportunityCreate, FundingOpportunityView, InvitationView,
     NinaApprovalRequest, NinaCriticalApprovalView, NinaDistressCaseCreate, NinaDistressCaseView,
@@ -1239,6 +1239,37 @@ def cron_lss_billing_evaluation(
     result = run_lss_billing_evaluation_job(db)
     db.commit()
     return LssBillingSyncView(**result)
+
+
+@router.post("/system/cron/recurring-commission-settlement", response_model=RecurringCommissionSettlementView)
+def cron_recurring_commission_settlement(
+    request: Request,
+    accrual_period: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
+    db: Session = Depends(get_db),
+):
+    secret = settings.cron_secret
+    if secret:
+        provided = request.headers.get("x-cron-secret") or request.headers.get("authorization", "").removeprefix("Bearer ").strip()
+        if provided != secret:
+            raise HTTPException(status_code=401, detail="Cron secret inválido")
+    from app.models import Organization, Role
+    from app.recurring_commission_service import run_monthly_recurring_settlement_job
+
+    org = db.scalar(select(Organization).limit(1))
+    if not org:
+        raise HTTPException(status_code=404, detail="Organização não encontrada")
+    actor = db.scalar(
+        select(User).where(
+            User.organization_id == org.id,
+            User.role == Role.PLATFORM_ADMIN,
+            User.active.is_(True),
+        )
+    )
+    if not actor:
+        raise HTTPException(status_code=404, detail="Admin não encontrado para liquidação")
+    result = run_monthly_recurring_settlement_job(db, actor, accrual_period=accrual_period)
+    db.commit()
+    return RecurringCommissionSettlementView(**result)
 
 
 @router.get("/wallet/pricing", response_model=list[WalletPricingRowView])

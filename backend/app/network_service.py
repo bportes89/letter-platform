@@ -14,7 +14,7 @@ from app.models import (
 )
 
 
-LEVEL_SHARES = [Decimal("50"), Decimal("20"), Decimal("15"), Decimal("10"), Decimal("5")]
+LEVEL_SHARES = [Decimal("50"), Decimal("35"), Decimal("7"), Decimal("5"), Decimal("3")]
 
 
 def money(value: Decimal) -> Decimal:
@@ -141,44 +141,31 @@ def create_rule(db: Session, user: User, product: str, commission_type: str, poo
 
 
 def allocate_commissions(db: Session, user: User, originator_id: str, proposal_id: str | None, reference: str, product: str, commission_type: str, calculation_base: Decimal) -> list[CommissionEntry]:
+    from app.universal_mmn_service import allocate_universal_mmn
+
     rule = db.scalar(select(CommissionRule).where(
         CommissionRule.organization_id == user.organization_id, CommissionRule.product == product,
         CommissionRule.commission_type == commission_type, CommissionRule.active.is_(True),
     ))
     if not rule:
         raise HTTPException(status_code=422, detail="Regra de comissão ativa não encontrada")
-    node = db.scalar(select(NetworkNode).where(
-        NetworkNode.organization_id == user.organization_id, NetworkNode.user_id == originator_id,
-        NetworkNode.tree_type == commission_type,
-    ))
-    if not node:
-        raise HTTPException(status_code=422, detail="Originador não pertence à árvore de comissão")
     pool = money(calculation_base * Decimal(str(rule.pool_rate_percent)) / Decimal("100"))
-    shares = [Decimal(x) for x in json.loads(rule.levels_json)]
-    entries: list[CommissionEntry] = []
-    beneficiary_id: str | None = originator_id
-    for level, share in enumerate(shares, start=1):
-        if not beneficiary_id:
-            break
-        amount = money(pool * share / Decimal("100"))
-        entry = CommissionEntry(
-            organization_id=user.organization_id, beneficiary_id=beneficiary_id,
-            originator_id=originator_id, proposal_id=proposal_id, reference=reference,
-            product=product, commission_type=commission_type, level=level,
-            calculation_base=calculation_base, pool_rate_percent=rule.pool_rate_percent,
-            level_share_percent=share, amount=amount, status="PENDING_FISCAL",
-        )
-        db.add(entry); entries.append(entry)
-        current = db.scalar(select(NetworkNode).where(
-            NetworkNode.organization_id == user.organization_id, NetworkNode.user_id == beneficiary_id,
-            NetworkNode.tree_type == commission_type,
-        ))
-        beneficiary_id = current.sponsor_user_id if current else None
     try:
-        db.flush()
+        return allocate_universal_mmn(
+            db,
+            user,
+            originator_id=originator_id,
+            proposal_id=proposal_id,
+            reference=reference,
+            product=product,
+            commission_type=commission_type,
+            pool_amount=pool,
+            pool_rate_percent=Decimal(str(rule.pool_rate_percent)),
+            calculation_base=calculation_base,
+        )
     except IntegrityError:
-        db.rollback(); raise HTTPException(status_code=409, detail="Comissões desta referência já foram provisionadas")
-    return entries
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Comissões desta referência já foram provisionadas")
 
 
 def release_fiscal_hold(db: Session, user: User, reference_month: str, document_content: str) -> FiscalEvidence:

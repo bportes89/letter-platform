@@ -254,6 +254,7 @@ def credit_escrow_incoming(
             _transfer_fee_to_master(account, fee, f"Taxa LETTER ({fee_code})")
         except Exception:
             pass
+        _record_wallet_fee_accrual(db, user, account, event_id, fee)
 
     return event, True
 
@@ -302,7 +303,31 @@ def _charge_from_balance(
     cycle.billing_blocked = False
     cycle.status = "ACTIVE"
     cycle.delinquent_since = None
+    _record_wallet_fee_accrual(db, user, account, provider_ref, amount)
     return True
+
+
+def _record_wallet_fee_accrual(
+    db: Session,
+    user: User,
+    account: EscrowAccount,
+    source_reference: str,
+    gross_amount: Decimal,
+) -> None:
+    """Apura 30% da rede sobre taxas bancárias — fechamento dia 1–30, pagamento dia 10."""
+    from app.recurring_commission_service import record_recurring_accrual
+
+    originator_id = account.user_id or user.id
+    if not originator_id or gross_amount <= 0:
+        return
+    record_recurring_accrual(
+        db,
+        organization_id=account.organization_id,
+        source_type="WALLET_FEE",
+        source_reference=source_reference,
+        originator_id=originator_id,
+        gross_amount=gross_amount,
+    )
 
 
 def _mark_delinquent(cycle: EscrowBillingCycle, monthly_amount: Decimal) -> None:

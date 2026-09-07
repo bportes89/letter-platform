@@ -100,3 +100,24 @@ Veículos leve, pesado ou máquina com restrição **não seguem** a operação.
 - Índices econômicos devem vir de fonte oficial, sem entrada manual em produção.
 - Escrow, Pix, conciliação e payout dependem de fornecedor BaaS homologado.
 - Alterações futuras criam nova versão de fórmula; memórias anteriores não são reescritas.
+
+## Grade Universal MMN (Capítulo 2)
+
+Distribuição dinâmica sobre a **verba de comissão** (pool) de qualquer produto ou assinatura:
+
+| Camada | % do pool | Governança |
+|--------|-----------|------------|
+| Master franqueado (nível 1) | 50% | Fixo, vitalício na rede; independente de quem vendeu |
+| Vendedor direto | 35% | Remuneração da ponta comercial |
+| Upline nível 1 | 7% | Primeiro patrocinador acima do vendedor |
+| Upline nível 2 | 5% | Segundo patrocinador |
+| Upline nível 3 | 3% | Terceiro patrocinador |
+
+**SaaS LSS + taxas bancárias (BANK/Escrow):** 30% do valor vai para a rede e segue a grade acima.
+
+- **Apuração:** dia 1 ao dia 30 de cada mês.
+- **Pagamento:** todo dia 10 do mês seguinte.
+- **PJ:** pendente NF-e.
+- **PF:** pendente assinatura de recibo no celular.
+
+**Demais produtos:** comissão provisionada na **conclusão da operação** (mesma grade), com hold fiscal conforme perfil.

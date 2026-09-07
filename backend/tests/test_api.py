@@ -384,12 +384,7 @@ def test_flash_credit_institutional_and_ltv_guard(client, auth_headers):
 
 def test_five_level_commission_allocation_and_fiscal_hold(client, auth_headers):
     users = client.get("/api/v1/admin/users", headers=auth_headers).json()
-    admin = next(u for u in users if u["email"] == "admin@letter.com.br")
     partner = next(u for u in users if u["email"] == "parceiro@letter.com.br")
-    root = client.post("/api/v1/network/nodes", headers=auth_headers, json={"user_id":admin["id"],"tree_type":"SALES"})
-    assert root.status_code == 201
-    child = client.post("/api/v1/network/nodes", headers=auth_headers, json={"user_id":partner["id"],"sponsor_user_id":admin["id"],"tree_type":"SALES"})
-    assert child.status_code == 201
     rule = client.post("/api/v1/commission-rules", headers=auth_headers, json={
         "product":"MARKETPLACE","commission_type":"SALES","pool_rate_percent":"10","base_type":"LETTER_FEE"
     })
@@ -399,13 +394,20 @@ def test_five_level_commission_allocation_and_fiscal_hold(client, auth_headers):
         "commission_type":"SALES","calculation_base":"100000"
     })
     assert entries.status_code == 201
-    assert len(entries.json()) == 2
-    assert entries.json()[0]["level"] == 1 and entries.json()[0]["amount"] == "5000.00"
-    assert entries.json()[1]["level"] == 2 and entries.json()[1]["amount"] == "2000.00"
+    body = entries.json()
+    assert len(body) == 5
+    by_level = {row["level"]: row for row in body}
+    assert by_level[1]["amount"] == "5000.00"
+    assert by_level[2]["amount"] == "3500.00"
+    assert by_level[3]["amount"] == "700.00"
+    assert by_level[4]["amount"] == "500.00"
+    assert by_level[5]["amount"] == "300.00"
     login = client.post("/api/v1/auth/login", json={"email":"parceiro@letter.com.br","password":"Letter@123"}).json()
     partner_headers = {"Authorization":f"Bearer {login['access_token']}"}
     wallet = client.get("/api/v1/wallet/commissions", headers=partner_headers)
-    assert wallet.status_code == 200 and wallet.json()[0]["status"] == "PENDING_FISCAL"
+    assert wallet.status_code == 200
+    partner_row = next(row for row in wallet.json() if row["reference"] == "SALE-MMN-001" and row["level"] == 2)
+    assert partner_row["status"] == "PENDING_FISCAL"
     sefaz_status = client.get("/api/v1/wallet/commissions/sefaz/status", headers=partner_headers)
     assert sefaz_status.status_code == 200 and sefaz_status.json()["enabled"] is True
     nf_xml = (
@@ -416,18 +418,18 @@ def test_five_level_commission_allocation_and_fiscal_hold(client, auth_headers):
     released = client.post("/api/v1/wallet/commissions/release-fiscal", headers=partner_headers, json={
         "reference_month": datetime.now(UTC).strftime("%Y-%m"),
         "document_content": nf_xml,
-        "gross_amount": "5000.00",
+        "gross_amount": "3500.00",
     })
     assert released.status_code == 200
     body = released.json()
     assert body["access_key"] == "35250801234567890123456789012345678901234567"
     assert body["wallet_credit"]["credited"] is True
-    assert body["wallet_credit"]["amount"] == "5000.00"
+    assert body["wallet_credit"]["amount"] == "3500.00"
 
     partner_wallet = client.get("/api/v1/wallet/me", headers=partner_headers)
     assert partner_wallet.status_code == 200
     assert partner_wallet.json()["has_subaccount"] is True
-    assert partner_wallet.json()["account"]["available_balance"] == "5000.00"
+    assert partner_wallet.json()["account"]["available_balance"] == "3500.00"
 
     commissions = client.get("/api/v1/wallet/commissions", headers=partner_headers)
     assert commissions.json()[0]["status"] == "CREDITED_TO_WALLET"

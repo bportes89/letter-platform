@@ -1632,6 +1632,13 @@ class LssBillingSyncView(BaseModel):
     synced_at: str | None = None
 
 
+class RecurringCommissionSettlementView(BaseModel):
+    accrual_period: str
+    settled: int
+    skipped: int
+    total_rows: int
+
+
 class LegalManualPublicView(BaseModel):
     slug: str
     title: str

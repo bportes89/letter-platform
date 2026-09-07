@@ -10,7 +10,7 @@ from app.db import Base, SessionLocal, engine
 from app.models import Administrator, CommissionRule, Lead, Organization, Proposal, Quota, Role, User
 
 
-LEVEL_SHARES = ["50", "20", "15", "10", "5"]
+LEVEL_SHARES = ["50", "35", "7", "5", "3"]
 DEMO_USER_EMAILS = (
     "admin@letter.com.br",
     "parceiro@letter.com.br",
