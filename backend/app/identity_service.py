@@ -12,7 +12,7 @@ from app.account_uniqueness import ensure_unique_account_fields, find_user_by_em
 from app.core.config import settings
 from app.core.security import create_token, decode_token, hash_password, verify_password
 from app.models import AuthSession, KycCase, PasswordReset, ROLE_SCOPES, Role, User, UserInvitation
-from app.network_service import PARTNER_NETWORK_ROLES, attach_partner_under_sponsor
+from app.network_service import PARTNER_NETWORK_ROLES, attach_partner_under_sponsor, provision_master_network_on_signup
 from app.network_visibility import CONTRACT_REQUIRED_INVITE_ROLES, assert_invitable_role, ensure_network_node
 
 
@@ -159,6 +159,7 @@ def accept_invitation(
     inviter = db.get(User, invite.invited_by_id)
     if inviter:
         attach_partner_under_sponsor(db, invite.organization_id, user, inviter)
+    provision_master_network_on_signup(db, user)
     if invite.partner_contract_required:
         record_partner_contract_acceptance(
             db,

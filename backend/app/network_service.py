@@ -29,6 +29,18 @@ PARTNER_NETWORK_ROLES = frozenset({
 })
 
 
+def provision_master_network_on_signup(db: Session, user: User) -> NetworkNode | None:
+    """Cria a rede comercial do master no cadastro (raiz com código de indicação)."""
+    if user.role != Role.MASTER_FRANCHISEE:
+        return None
+    from app.master_tree_service import sync_user_master_tree
+    from app.network_visibility import ensure_network_node
+
+    if user.master_tree_key:
+        return sync_user_master_tree(db, user)
+    return ensure_network_node(db, user)
+
+
 def attach_partner_under_sponsor(
     db: Session,
     organization_id: str,

@@ -180,10 +180,14 @@ def ensure_master_roots(db: Session, organization_id: str, password: str | None 
 
 def sync_user_master_tree(db: Session, user: User) -> NetworkNode | None:
     """Vincula parceiro migrado à árvore do master quando master_tree_key estiver definido."""
+    if user.role == Role.MASTER_FRANCHISEE:
+        if user.master_tree_key:
+            return ensure_master_root_node(db, user, user.master_tree_key)
+        from app.network_visibility import ensure_network_node
+
+        return ensure_network_node(db, user)
     if not user.master_tree_key or user.role not in PARTNER_NETWORK_ROLES:
         return None
-    if user.role == Role.MASTER_FRANCHISEE:
-        return ensure_master_root_node(db, user, user.master_tree_key)
     master = get_master_root_user(db, user.organization_id, user.master_tree_key)
     if not master:
         return None

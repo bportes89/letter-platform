@@ -3270,13 +3270,15 @@ def test_manager_sees_downline_proposals_and_members(client, auth_headers):
         "role": "MANAGER",
     })
     assert isolated_manager.status_code == 201
-    _accept_network_invite(
+    isolated_document = f"{(int(suffix, 16) % 10**11):011d}"
+    isolated_accept = _accept_network_invite(
         client, isolated_manager.json()["token"],
         email=f"gerente.isolado.{suffix}@letter.com.br",
         name="Gerente Isolado",
-        document="40404040404",
+        document=isolated_document,
         password="GerenteIso1!",
     )
+    assert isolated_accept.status_code == 200
     isolated_headers = {"Authorization": f"Bearer {client.post('/api/v1/auth/login', json={'email': f'gerente.isolado.{suffix}@letter.com.br', 'password': 'GerenteIso1!'}).json()['access_token']}"}
     isolated_proposals = client.get("/api/v1/proposals", headers=isolated_headers)
     assert isolated_proposals.status_code == 200
@@ -3493,3 +3495,31 @@ def test_master_root_email_rebind_from_env(monkeypatch, client, auth_headers):
     assert trees.status_code == 200
     letter_bank = next(item for item in trees.json() if item["tree_key"] == "LETTER_BANK")
     assert letter_bank["master_email"] == "comercial@letter.app.br"
+
+
+def test_master_network_created_on_invitation_accept(client, auth_headers):
+    suffix = uuid4().hex[:8]
+    master_email = f"master.instant.{suffix}@letter.com.br"
+    master_document = f"{(int(suffix, 16) % 10**11):011d}"
+    invite = client.post("/api/v1/admin/invitations", headers=auth_headers, json={
+        "email": master_email,
+        "role": "MASTER_FRANCHISEE",
+    })
+    assert invite.status_code == 201
+    accepted = _accept_network_invite(
+        client,
+        invite.json()["token"],
+        email=master_email,
+        name="Master Instantâneo",
+        document=master_document,
+        password="MasterInstant1!",
+    )
+    assert accepted.status_code == 200
+    master_id = accepted.json()["id"]
+
+    nodes = client.get("/api/v1/network/nodes", headers=auth_headers)
+    assert nodes.status_code == 200
+    master_node = next((row for row in nodes.json() if row["user_id"] == master_id), None)
+    assert master_node is not None
+    assert master_node["referral_code"]
+    assert master_node["sponsor_user_id"] is None

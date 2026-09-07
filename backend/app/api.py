@@ -557,6 +557,10 @@ def admin_update_user(user_id:str,payload:UserUpdate,user:User=Depends(require_s
             raise HTTPException(status_code=422, detail="Telefone celular inválido.")
         target.phone = phone or None
     for field, value in data.items(): setattr(target, field, value)
+    if target.role == Role.MASTER_FRANCHISEE:
+        from app.network_service import provision_master_network_on_signup
+
+        provision_master_network_on_signup(db, target)
     audit(db,user,"user.updated","user",target.id,payload.model_dump(exclude_unset=True,mode="json"));db.commit();db.refresh(target);return target
 
 
