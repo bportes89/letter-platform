@@ -347,6 +347,37 @@ class AccountRecoveryLookupResponse(BaseModel):
     message: str
 
 
+class ContractStatusView(BaseModel):
+    required: bool
+    completed: bool
+    template_slug: str | None = None
+    template_title: str | None = None
+    template_version: str | None = None
+    contract_excerpt: str | None = None
+    requires_pj_fields: bool = False
+
+
+class ContractAcceptRequest(BaseModel):
+    terms_accepted: bool
+    scroll_completed: bool
+    verification_reference: str = Field(min_length=6, max_length=120)
+    company_name: str | None = None
+    company_cnpj: str | None = None
+    company_address: str | None = None
+    company_city: str | None = None
+    company_state: str | None = None
+    phone: str | None = None
+
+
+class MasterTreeView(BaseModel):
+    tree_key: str
+    label: str
+    master_user_id: str | None = None
+    master_email: str
+    referral_code: str | None = None
+    active: bool
+
+
 class SessionView(ORMModel):
     id: str
     user_agent: str | None

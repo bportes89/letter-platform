@@ -140,7 +140,7 @@ export function MyWalletModule() {
       const ready = refreshed.onboarding_complete ?? refreshed.has_subaccount;
       if (ready) {
         const me = await api<User>("/auth/me");
-        redirectToPortalAfterWallet(me.role);
+        await redirectToPortalAfterWallet(me.role);
         return;
       }
       setNotice(result.message || "Conta em abertura — conclua a verificação no BANK para acessar o portal.");

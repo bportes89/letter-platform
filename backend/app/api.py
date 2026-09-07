@@ -80,6 +80,7 @@ from app.schemas import (
     LeadUpdate, LeadView, LedgerPostRequest, LedgerTransactionView, LegacyIdMapView, LegacyMigrationBundle, LegacyMigrationRunView, LoginRequest,
     FlashCreditCalculationRequest, MfaSetupView, MfaVerify, ModuleView, PasswordResetConfirm, PasswordResetRequest,
     AccountRecoveryLookupRequest, AccountRecoveryLookupResponse,
+    ContractStatusView, ContractAcceptRequest, MasterTreeView,
     NetworkNodeCreate, NetworkNodeView, NetworkDownlineMemberView, PayoutApprove, PayoutCreate, PayoutView, ProposalCreate, ProposalUpdate,
     ReconciliationBatchView, ReconciliationItemView, ReconciliationResolveRequest,
     MarketplaceEsteira1Request, MarketplaceEsteira1Response, MarketplaceEsteira2Request, MarketplaceEsteira2Response,
@@ -312,6 +313,9 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
         raise HTTPException(status_code=401, detail="E-mail ou senha inválidos")
     if user.mfa_enabled and (not payload.otp or not verify_mfa(user,payload.otp)):
         raise HTTPException(status_code=428,detail="Código MFA obrigatório ou inválido")
+    from app.master_tree_service import sync_user_master_tree
+
+    sync_user_master_tree(db, user)
     access,refresh,_=create_session_tokens(db,user,request.headers.get("user-agent"),request.client.host if request.client else None)
     db.commit();return TokenPair(access_token=access,refresh_token=refresh)
 
@@ -431,6 +435,98 @@ def account_recovery_lookup(payload: AccountRecoveryLookupRequest, request: Requ
     if not allowed:
         raise HTTPException(429, "Limite de tentativas atingido. Aguarde e tente novamente.", headers={"Retry-After": str(retry)})
     return lookup_account_email(db, document=payload.document, phone=payload.phone)
+
+
+@router.get("/contracts/me/status", response_model=ContractStatusView)
+def my_contract_status(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.platform_contract_service import contract_status_view
+
+    return contract_status_view(db, user)
+
+
+@router.get("/contracts/me/preview")
+def my_contract_preview(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.platform_contract_service import preview_contract_bytes
+
+    content, filename = preview_contract_bytes(db, user)
+    return Response(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.post("/contracts/me/accept", response_model=ContractStatusView)
+def my_contract_accept(
+    payload: ContractAcceptRequest,
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.platform_contract_service import (
+        contract_status_view,
+        record_user_contract_acceptance,
+        required_contract_slug,
+        user_contract_completed,
+        validate_accept_payload,
+    )
+
+    slug = required_contract_slug(user)
+    if not slug:
+        return contract_status_view(db, user)
+    if user_contract_completed(db, user):
+        return contract_status_view(db, user)
+    validate_accept_payload(
+        user,
+        slug,
+        company_name=payload.company_name,
+        company_cnpj=payload.company_cnpj,
+        company_address=payload.company_address,
+        company_city=payload.company_city,
+        company_state=payload.company_state,
+        phone=payload.phone,
+        terms_accepted=payload.terms_accepted,
+        scroll_completed=payload.scroll_completed,
+        verification_reference=payload.verification_reference,
+    )
+    if payload.phone and payload.phone.strip():
+        user.phone = payload.phone.strip()
+    if payload.company_name:
+        user.company_name = payload.company_name.strip()
+    if payload.company_cnpj:
+        user.company_cnpj = payload.company_cnpj.strip()
+    if payload.company_address:
+        user.company_address = payload.company_address.strip()
+    if payload.company_city:
+        user.company_city = payload.company_city.strip()
+    if payload.company_state:
+        user.company_state = payload.company_state.strip().upper()[:2]
+    record_user_contract_acceptance(
+        db,
+        user,
+        company_name=payload.company_name or user.company_name or user.name,
+        company_cnpj=payload.company_cnpj or user.company_cnpj or "",
+        company_address=payload.company_address or user.company_address or "",
+        company_city=payload.company_city or user.company_city or "",
+        company_state=payload.company_state or user.company_state or "",
+        representative_name=user.name,
+        representative_document=user.document or "",
+        verification_reference=payload.verification_reference,
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
+    audit(db, user, "contract.accepted", "user_contract", user.id, {"template_slug": slug})
+    db.commit()
+    return contract_status_view(db, user)
+
+
+@router.get("/admin/master-trees", response_model=list[MasterTreeView])
+def admin_master_trees(user: User = Depends(require_scope("admin:users")), db: Session = Depends(get_db)):
+    from app.master_tree_service import ensure_master_roots, list_master_trees
+
+    ensure_master_roots(db, user.organization_id)
+    db.commit()
+    return list_master_trees(db, user.organization_id)
 
 
 @router.get("/admin/users",response_model=list[UserView])
@@ -566,12 +662,14 @@ def migration_apply(
     db: Session = Depends(get_db),
 ):
     from app.legacy_migration_service import apply_bundle, migration_run_view, normalize_bundle
+    from app.master_tree_service import ensure_master_roots
 
     try:
         bundle = normalize_bundle(payload.model_dump())
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     try:
+        ensure_master_roots(db, user.organization_id)
         run, _report = apply_bundle(db, user, bundle, dry_run=False)
         audit(db, user, "migration.apply", "legacy_migration_run", run.id, {"legacy_source": bundle["legacy_source"]})
         db.commit()

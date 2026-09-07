@@ -57,6 +57,7 @@ def attach_partner_under_sponsor(
         organization_id=organization_id,
         user_id=new_user.id,
         sponsor_user_id=sponsor.id,
+        master_tree_key=sponsor_node.master_tree_key,
         tree_type=tree_type,
         referral_code=code,
     )

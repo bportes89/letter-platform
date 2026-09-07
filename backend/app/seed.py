@@ -110,6 +110,19 @@ def _sync_headquarters_org(db) -> None:
     db.commit()
 
 
+def _ensure_master_trees(db, org_id: str, password: str) -> None:
+    from app.master_tree_service import MASTER_TREE_LETTER_BANK, ensure_master_roots, sync_user_master_tree
+
+    masters = ensure_master_roots(db, org_id, password)
+    partner = db.scalar(select(User).where(User.email == "parceiro@letter.com.br"))
+    if partner and not partner.master_tree_key:
+        partner.master_tree_key = MASTER_TREE_LETTER_BANK
+        sync_user_master_tree(db, partner)
+    db.commit()
+    if masters:
+        print(f"Masters comerciais sincronizados: {', '.join(masters.keys())}.")
+
+
 def seed():
     Base.metadata.create_all(engine)
     password = _demo_password()
@@ -118,6 +131,7 @@ def seed():
             org = db.scalar(select(Organization).limit(1))
             if org:
                 _ensure_profile_demo_users(db, org.id, password)
+                _ensure_master_trees(db, org.id, password)
             _sync_headquarters_org(db)
             _sync_demo_phones(db)
             _sync_demo_passwords(db, password)
@@ -187,6 +201,7 @@ def seed():
             ),
         ])
         db.commit()
+        _ensure_master_trees(db, org.id, password)
         print("Seed concluído: admin@letter.com.br / (senha de LETTER_DEMO_PASSWORD ou Letter@123)")
 
 

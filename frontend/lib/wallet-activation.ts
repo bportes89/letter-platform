@@ -1,5 +1,5 @@
 import { api } from "@/lib/api";
-import { portalHomeForRole } from "@/lib/portal-routes";
+import { redirectAfterOnboarding } from "@/lib/contract-onboarding";
 
 export type WalletActivationProfile = {
   document: string | null;
@@ -70,6 +70,6 @@ export function walletActivationErrorMessage(error: unknown): string {
   return message;
 }
 
-export function redirectToPortalAfterWallet(role: string | undefined) {
-  window.location.href = portalHomeForRole(role);
+export async function redirectToPortalAfterWallet(role: string | undefined) {
+  await redirectAfterOnboarding(role);
 }

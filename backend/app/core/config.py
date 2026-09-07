@@ -55,6 +55,8 @@ class Settings(BaseSettings):
     wallet_fee_bill_payment: float = 0.0
     wallet_billing_cycle_days: int = 30
     wallet_escrow_billing_enabled: bool = True
+    master_letter_bank_email: str = "letter-bank@letter.com.br"
+    master_rmk_bevi_email: str = "rmk-bevi@letter.com.br"
     lss_billing_enabled: bool = True
     lss_default_billing_type: str = "BOLETO"
     lss_billing_grace_days: int = 3

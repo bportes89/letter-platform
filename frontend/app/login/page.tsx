@@ -9,6 +9,11 @@ import { SiteNav } from "@/components/public-site/simulator-section";
 import { getToken, login, api, User } from "@/lib/api";
 import { portalHomeForRole } from "@/lib/portal-routes";
 import {
+  contractOnboardingPath,
+  fetchContractStatus,
+  shouldForceContractOnboarding,
+} from "@/lib/contract-onboarding";
+import {
   shouldForceWalletOnboarding,
   walletOnboardingPath,
   type WalletPeek,
@@ -18,6 +23,11 @@ async function redirectAfterLogin(user: User, nextPath: string | null) {
   const wallet = await api<WalletPeek>("/wallet/me");
   if (shouldForceWalletOnboarding(user.role, wallet)) {
     window.location.href = walletOnboardingPath();
+    return;
+  }
+  const contract = await fetchContractStatus();
+  if (shouldForceContractOnboarding(user.role, contract)) {
+    window.location.href = contractOnboardingPath();
     return;
   }
   if (nextPath && nextPath.startsWith("/")) {

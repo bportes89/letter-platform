@@ -3436,3 +3436,50 @@ def test_migrated_partner_wallet_requires_bank_onboarding(client):
     body = wallet.json()
     assert body["has_subaccount"] is False
     assert body["onboarding_complete"] is False
+
+
+def test_platform_contract_required_for_client_and_partner(client):
+    login = client.post("/api/v1/auth/login", json={"email": "cliente@letter.com.br", "password": "Letter@123"})
+    assert login.status_code == 200
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    status = client.get("/api/v1/contracts/me/status", headers=headers)
+    assert status.status_code == 200
+    body = status.json()
+    assert body["required"] is True
+    assert body["completed"] is False
+    assert body["template_slug"] == "carta-contemplada-cliente"
+
+    partner_login = client.post("/api/v1/auth/login", json={"email": "parceiro@letter.com.br", "password": "Letter@123"})
+    partner_headers = {"Authorization": f"Bearer {partner_login.json()['access_token']}"}
+    partner_status = client.get("/api/v1/contracts/me/status", headers=partner_headers)
+    assert partner_status.json()["template_slug"] == "parceiros"
+    assert partner_status.json()["requires_pj_fields"] is True
+
+
+def test_platform_contract_acceptance_for_client(client):
+    login = client.post("/api/v1/auth/login", json={"email": "cliente@letter.com.br", "password": "Letter@123"})
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    accepted = client.post("/api/v1/contracts/me/accept", headers=headers, json={
+        "terms_accepted": True,
+        "scroll_completed": True,
+        "verification_reference": "client-contract-001",
+        "phone": "11966660006",
+    })
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["completed"] is True
+
+    preview = client.get("/api/v1/contracts/me/preview", headers=headers)
+    assert preview.status_code == 200
+    assert preview.content.startswith(b"PK")
+
+
+def test_master_trees_admin_view(client, auth_headers):
+    trees = client.get("/api/v1/admin/master-trees", headers=auth_headers)
+    assert trees.status_code == 200
+    body = trees.json()
+    keys = {item["tree_key"] for item in body}
+    assert "LETTER_BANK" in keys
+    assert "RMK_BEVI" in keys
+    letter_bank = next(item for item in body if item["tree_key"] == "LETTER_BANK")
+    assert letter_bank["active"] is True
+    assert letter_bank["referral_code"]

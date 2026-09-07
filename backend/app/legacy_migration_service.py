@@ -577,6 +577,9 @@ def _apply_users(
             document = None
 
         role = Role[str(row.get("role")).strip().upper()]
+        from app.master_tree_service import resolve_master_tree_key_from_legacy, sync_user_master_tree
+
+        master_tree_key = resolve_master_tree_key_from_legacy(legacy_source, row)
         item = User(
             organization_id=actor.organization_id,
             branch_id=_resolve_branch_id(
@@ -596,9 +599,11 @@ def _apply_users(
             password_hash=_migration_password_hash(),
             role=role,
             active=bool(row.get("active", True)),
+            master_tree_key=master_tree_key,
         )
         db.add(item)
         db.flush()
+        sync_user_master_tree(db, item)
         _remember_map(
             db,
             organization_id=actor.organization_id,

@@ -201,8 +201,23 @@ def get_manual(slug: str) -> dict:
 
 
 def signed_contract_slugs(db: Session, user: User) -> set[str]:
-    rows = db.scalars(select(PartnerContractAcceptance.template_slug).where(PartnerContractAcceptance.user_id == user.id))
-    return {slug for slug in rows if slug}
+    from app.models import UserContractAcceptance
+
+    slugs = {
+        slug
+        for slug in db.scalars(
+            select(PartnerContractAcceptance.template_slug).where(PartnerContractAcceptance.user_id == user.id)
+        )
+        if slug
+    }
+    slugs.update(
+        slug
+        for slug in db.scalars(
+            select(UserContractAcceptance.template_slug).where(UserContractAcceptance.user_id == user.id)
+        )
+        if slug
+    )
+    return slugs
 
 
 def user_can_access_document(db: Session, user: User, slug: str) -> bool:
