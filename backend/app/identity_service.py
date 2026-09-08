@@ -56,7 +56,12 @@ def setup_mfa(user: User):
 
 
 def verify_mfa(user: User, otp: str) -> bool:
-    return bool(user.mfa_secret and pyotp.TOTP(user.mfa_secret).verify(otp,valid_window=1))
+    return bool(user.mfa_secret and pyotp.TOTP(user.mfa_secret).verify(otp, valid_window=1))
+
+
+def reset_mfa(user: User) -> None:
+    user.mfa_enabled = False
+    user.mfa_secret = None
 
 
 def create_invitation(db:Session,user:User,email:str,role,branch_id:str|None):

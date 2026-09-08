@@ -114,8 +114,11 @@ html,body{-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
 .main-nav{display:flex;flex-direction:column;gap:10px;padding:0 10px 8px}
 .nav-zone{border:1px solid rgb(255 255 255 / 0.08);border-radius:12px;background:rgb(255 255 255 / 0.02);overflow:hidden}
 .nav-zone.active-zone{border-color:rgb(0 208 132 / 0.35);box-shadow:0 0 0 1px rgb(0 208 132 / 0.12) inset}
-.nav-zone-header{display:flex;align-items:center;gap:10px;padding:14px 14px;font-size:12px;font-weight:800;letter-spacing:.14em;color:#fff;background:rgb(255 255 255 / 0.04);border-bottom:1px solid transparent}
+.nav-zone-header{display:flex;align-items:center;gap:10px;padding:14px 14px;font-size:12px;font-weight:800;letter-spacing:.14em;color:#fff;background:rgb(255 255 255 / 0.04);border:0;border-bottom:1px solid transparent;width:100%;text-align:left;cursor:pointer}
 .nav-zone-header:hover{background:rgb(255 255 255 / 0.08)}
 .nav-zone-header.active{background:rgb(0 208 132 / 0.18);border-bottom-color:rgb(0 208 132 / 0.25);color:#eafff5}
+.nav-zone-header span{flex:1}
+.nav-zone-chevron{opacity:.55;transition:transform .18s ease;margin-left:auto;flex-shrink:0}
+.nav-zone.open .nav-zone-chevron{transform:rotate(180deg);opacity:.9}
 .nav-zone-body{display:flex;flex-direction:column;gap:4px;padding:8px 10px 12px}
 .nav-zone-body>.nav-label{margin-top:8px;margin-bottom:2px}

@@ -11,7 +11,6 @@ import { useEffect, useMemo, useState } from "react";
 import { LetterLogo } from "@/components/brand/letter-logo";
 import { api, logout, Module, User } from "@/lib/api";
 import {
-  bankHomePath,
   isBankPath,
   isBankModuleKey,
   isPlatformPath,
@@ -47,12 +46,12 @@ export function Shell({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
+    // Mantém as duas zonas acessíveis: só garante que a zona da rota atual esteja aberta.
+    // Não fecha a outra — o BANK sumia visualmente na visão geral quando ficava só o título.
     if (isBankPath(pathname)) {
       setBankZoneOpen(true);
-      setPlatformZoneOpen(false);
     } else if (isPlatformPath(pathname, user?.role)) {
       setPlatformZoneOpen(true);
-      setBankZoneOpen(false);
     }
   }, [pathname, user?.role]);
 
@@ -69,7 +68,6 @@ export function Shell({ children }: { children: React.ReactNode }) {
   );
   const persona = personaLabel(user?.role);
   const portalHome = user ? platformHomePath(user.role) : "/login";
-  const bankHome = bankHomePath(user?.role);
   const modulePath = (key: string) => `/modules/${key}`;
   const isActive = (key: string) => pathname === modulePath(key);
   const isGroupActive = (keys: string[]) => keys.some(isActive);
@@ -97,18 +95,16 @@ export function Shell({ children }: { children: React.ReactNode }) {
         <nav className="main-nav">
           {showBankZone && (
             <div className={`nav-zone${bankZoneOpen ? " open" : ""}${isBankPath(pathname) ? " active-zone" : ""}`}>
-              <Link
+              <button
+                type="button"
                 className={`nav-zone-header${isBankPath(pathname) ? " active" : ""}`}
-                href={bankHome}
-                onClick={() => {
-                  setBankZoneOpen(true);
-                  setPlatformZoneOpen(false);
-                  setOpen(false);
-                }}
+                onClick={() => setBankZoneOpen((open) => !open)}
+                aria-expanded={bankZoneOpen}
               >
                 <Landmark size={18} />
-                BANK
-              </Link>
+                <span>BANK</span>
+                <ChevronDown size={14} className="nav-zone-chevron" />
+              </button>
               {bankZoneOpen && (
                 <div className="nav-zone-body">
                   {bankModules.map((m) => (
@@ -129,18 +125,16 @@ export function Shell({ children }: { children: React.ReactNode }) {
 
           {showPlatformZone && (
             <div className={`nav-zone${platformZoneOpen ? " open" : ""}${isPlatformPath(pathname, user?.role) ? " active-zone" : ""}`}>
-              <Link
+              <button
+                type="button"
                 className={`nav-zone-header${isPlatformPath(pathname, user?.role) ? " active" : ""}`}
-                href={portalHome}
-                onClick={() => {
-                  setPlatformZoneOpen(true);
-                  setBankZoneOpen(false);
-                  setOpen(false);
-                }}
+                onClick={() => setPlatformZoneOpen((open) => !open)}
+                aria-expanded={platformZoneOpen}
               >
                 <LayoutGrid size={18} />
-                PLATAFORMA
-              </Link>
+                <span>PLATAFORMA</span>
+                <ChevronDown size={14} className="nav-zone-chevron" />
+              </button>
               {platformZoneOpen && (
                 <div className="nav-zone-body">
                   <Link

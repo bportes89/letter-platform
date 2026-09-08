@@ -400,7 +400,52 @@ def mfa_enable(payload:MfaVerify,user:User=Depends(get_current_user),db:Session=
 @router.post("/auth/mfa/disable")
 def mfa_disable(payload:MfaVerify,user:User=Depends(get_current_user),db:Session=Depends(get_db)):
     if not verify_mfa(user,payload.otp): raise HTTPException(status_code=422,detail="Código MFA inválido")
-    user.mfa_enabled=False;user.mfa_secret=None;db.commit();return {"enabled":False}
+    from app.identity_service import reset_mfa
+
+    reset_mfa(user)
+    db.commit()
+    return {"enabled":False}
+
+
+@router.post("/admin/users/{user_id}/mfa/reset", response_model=UserView)
+def admin_reset_user_mfa(
+    user_id: str,
+    user: User = Depends(require_scope("admin:users")),
+    db: Session = Depends(get_db),
+):
+    from app.identity_service import reset_mfa
+
+    target = db.scalar(select(User).where(User.id == user_id, User.organization_id == user.organization_id))
+    if not target:
+        raise HTTPException(status_code=404, detail="Usuário não encontrado")
+    reset_mfa(target)
+    audit(db, user, "user.mfa_reset", "user", target.id, {"email": target.email})
+    db.commit()
+    db.refresh(target)
+    return target
+
+
+@router.post("/system/support/reset-user-mfa")
+def support_reset_user_mfa(
+    request: Request,
+    email: str = Query(..., min_length=5),
+    db: Session = Depends(get_db),
+):
+    """Reset MFA de emergência — requer LETTER_CRON_SECRET no header X-Cron-Secret."""
+    secret = settings.cron_secret
+    if not secret:
+        raise HTTPException(status_code=503, detail="Suporte MFA indisponível (cron secret não configurado)")
+    provided = request.headers.get("x-cron-secret") or request.headers.get("authorization", "").removeprefix("Bearer ").strip()
+    if provided != secret:
+        raise HTTPException(status_code=401, detail="Cron secret inválido")
+    from app.identity_service import reset_mfa
+
+    target = db.scalar(select(User).where(User.email == email.strip().lower()))
+    if not target:
+        raise HTTPException(status_code=404, detail="Usuário não encontrado")
+    reset_mfa(target)
+    db.commit()
+    return {"email": target.email, "mfa_enabled": False, "reset": True}
 
 
 @router.post("/auth/step-up")

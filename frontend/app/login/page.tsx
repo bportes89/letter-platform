@@ -68,7 +68,15 @@ function LoginForm() {
       const user = await api<User>("/auth/me");
       await redirectAfterLogin(user, nextPath);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Falha no acesso");
+      const message = e instanceof Error ? e.message : "Falha no acesso";
+      if (message.includes("autenticador (MFA)")) {
+        setShowMfa(true);
+        setError(
+          "Esta conta tem autenticação em duas etapas ativa. Informe o código de 6 dígitos do seu app autenticador abaixo.",
+        );
+      } else {
+        setError(message);
+      }
       setLoading(false);
     }
   }
@@ -116,8 +124,9 @@ function LoginForm() {
             onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
             inputMode="numeric"
             placeholder="6 dígitos"
-            required
+            required={showMfa}
             autoComplete="one-time-code"
+            autoFocus
           />
         </label>
       )}
