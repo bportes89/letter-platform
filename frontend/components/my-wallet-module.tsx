@@ -76,6 +76,7 @@ export function MyWalletModule() {
   const searchParams = useSearchParams();
   const onboarding = searchParams.get("onboarding") === "1" || searchParams.get("onboarding") === "kyc";
   const [wallet, setWallet] = useState<WalletView | null>(null);
+  const [holderName, setHolderName] = useState("");
   const [profile, setProfile] = useState<Profile | null>(null);
   const [profileDocument, setProfileDocument] = useState("");
   const [profilePhone, setProfilePhone] = useState("");
@@ -91,15 +92,17 @@ export function MyWalletModule() {
   const [billAmount, setBillAmount] = useState("");
 
   const load = useCallback(async () => {
-    const [w, tx, docs, p] = await Promise.all([
+    const [w, tx, docs, p, me] = await Promise.all([
       api<WalletView>("/wallet/me"),
       api<{ items: WalletTransaction[] }>("/wallet/me/transactions").catch(() => ({ items: [] })),
       api<{ items: KycDocument[] }>("/wallet/me/kyc/documents").catch(() => ({ items: [] })),
       api<Profile>("/auth/me/profile").catch(() => null),
+      api<User>("/auth/me").catch(() => null),
     ]);
     setWallet(w);
     setTransactions(tx.items ?? []);
     setDocuments(docs.items ?? []);
+    if (me?.name) setHolderName(me.name);
     if (p) {
       setProfile(p);
       setProfileDocument(p.document ?? "");
@@ -343,47 +346,73 @@ export function MyWalletModule() {
               </div>
             </div>
 
-            {wallet.banking && (
-              <section className="panel">
-                <h3>Dados bancários</h3>
-                <div className="escrow-grid">
-                  <div className="escrow-card">
-                    <small>Banco</small>
-                    <b>{wallet.banking.display_bank}</b>
-                  </div>
-                  <div className="escrow-card">
-                    <small>Agência</small>
-                    <b>{wallet.banking.agency}</b>
-                  </div>
-                  <div className="escrow-card">
-                    <small>Conta corrente</small>
-                    <b>{wallet.banking.account_number ?? "Em processamento"}</b>
-                  </div>
-                  <div className="escrow-card">
-                    <small>Chave Pix</small>
-                    <b>{wallet.banking.pix_key ?? "Não gerada"}</b>
-                    {wallet.banking.pix_key && (
-                      <button className="table-action" onClick={() => copyText(wallet.banking!.pix_key!)}><Copy />Copiar</button>
-                    )}
-                  </div>
+            <section className="panel" style={{ marginTop: 16 }}>
+              <h3>Dados bancários do cliente</h3>
+              <p className="muted" style={{ marginTop: 0 }}>
+                Dados da conta digital LETTER para recebimentos e identificação bancária.
+              </p>
+              <div className="escrow-grid">
+                <div className="escrow-card">
+                  <small>Titular</small>
+                  <b>{profile?.company_name || holderName || wallet.account?.subaccount_name || "—"}</b>
                 </div>
-                <div className="toolbar">
-                  {!wallet.banking.pix_key && wallet.capabilities?.pix_key_enabled && (
-                    <button onClick={() => void createPixKey().catch((e) => setNotice(e.message))}><QrCode />Gerar chave Pix</button>
-                  )}
-                  {wallet.banking.pix_key && (
-                    <button onClick={() => void loadPixQr().catch((e) => setNotice(e.message))}><QrCode />Ver QR Code Pix</button>
+                <div className="escrow-card">
+                  <small>CPF / CNPJ</small>
+                  <b>{profile?.company_cnpj || profile?.document || "—"}</b>
+                </div>
+                <div className="escrow-card">
+                  <small>Banco</small>
+                  <b>{wallet.banking?.display_bank || wallet.banking?.bank_name || "LETTER / Asaas"}</b>
+                  <span>Código: {wallet.banking?.bank_code || "—"}</span>
+                </div>
+                <div className="escrow-card">
+                  <small>Agência</small>
+                  <b>{wallet.banking?.agency || "Em processamento"}</b>
+                </div>
+                <div className="escrow-card">
+                  <small>Conta corrente</small>
+                  <b>{wallet.banking?.account_number || "Em processamento"}</b>
+                  {wallet.banking?.account_number && (
+                    <button className="table-action" onClick={() => copyText(wallet.banking!.account_number!)}>
+                      <Copy />Copiar
+                    </button>
                   )}
                 </div>
-                {pixQr?.payload && (
-                  <div className="notice">
-                    <small>Pix copia e cola</small>
-                    <code style={{ display: "block", wordBreak: "break-all", marginTop: 8 }}>{pixQr.payload}</code>
-                    <button className="table-action" onClick={() => copyText(pixQr.payload!)}><Copy />Copiar Pix</button>
-                  </div>
+                <div className="escrow-card">
+                  <small>Chave Pix</small>
+                  <b>{wallet.banking?.pix_key || "Não gerada"}</b>
+                  {wallet.banking?.pix_key && (
+                    <button className="table-action" onClick={() => copyText(wallet.banking!.pix_key!)}>
+                      <Copy />Copiar
+                    </button>
+                  )}
+                </div>
+              </div>
+              <div className="toolbar">
+                {!wallet.banking?.pix_key && wallet.capabilities?.pix_key_enabled && (
+                  <button onClick={() => void createPixKey().catch((e) => setNotice(e.message))}>
+                    <QrCode />Gerar chave Pix
+                  </button>
                 )}
-              </section>
-            )}
+                {wallet.banking?.pix_key && (
+                  <button onClick={() => void loadPixQr().catch((e) => setNotice(e.message))}>
+                    <QrCode />Ver QR Code Pix
+                  </button>
+                )}
+                <button onClick={() => void syncWallet()}>
+                  <RefreshCw />Atualizar dados bancários
+                </button>
+              </div>
+              {pixQr?.payload && (
+                <div className="notice">
+                  <small>Pix copia e cola</small>
+                  <code style={{ display: "block", wordBreak: "break-all", marginTop: 8 }}>{pixQr.payload}</code>
+                  <button className="table-action" onClick={() => copyText(pixQr.payload!)}>
+                    <Copy />Copiar Pix
+                  </button>
+                </div>
+              )}
+            </section>
 
             {(wallet.account?.asaas_onboarding_url || documents.length > 0) && (
               <section className="panel">

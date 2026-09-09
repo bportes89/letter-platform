@@ -4,7 +4,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 import "./site.css";
 import { AttendanceBotSection } from "@/components/public-site/attendance-bot";
-import { AuctionSection, FlashInvestSection } from "@/components/public-site/gated-vitrine-section";
+import { AuctionSection } from "@/components/public-site/gated-vitrine-section";
 import { PublicSimulatorSection, SiteNav } from "@/components/public-site/simulator-section";
 import { SiteFooter } from "@/components/public-site/site-footer";
 import { LegalManualsPublicSection } from "@/components/public-site/legal-manuals-section";
@@ -194,7 +194,6 @@ export default function PublicHomePage() {
           </div>
         </section>
 
-        <FlashInvestSection />
         <AuctionSection />
 
         <LegalManualsPublicSection />
