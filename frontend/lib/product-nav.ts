@@ -13,6 +13,8 @@ export type ProductNavItem = {
   children?: ProductNavChild[];
   /** Produto de estrutura interna — oculto para parceiros comerciais. */
   internalOnly?: boolean;
+  /** Produto do ambiente BANK (investimentos), não da PLATAFORMA. */
+  bank?: boolean;
 };
 
 /** Menu de produtos LETTER — ordem definida com o cliente. */
@@ -34,7 +36,7 @@ export const PRODUCT_NAV: ProductNavItem[] = [
   { key: "sdc", name: "SDC — estrutura interna", internalOnly: true },
   { key: "flash-capital", name: "Flash Capital" },
   { key: "lease-equity", name: "Lease Equity" },
-  { key: "flash-invest", name: "Flash Invest" },
+  { key: "flash-invest", name: "Flash Invest", bank: true },
   { key: "quitcon", name: "QuitCon" },
   { key: "lss", name: "SaaS LSS" },
   { key: "leilao", name: "Leilão" },

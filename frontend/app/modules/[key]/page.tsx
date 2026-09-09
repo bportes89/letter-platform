@@ -23,6 +23,7 @@ import { FinOpsModule } from "@/components/finops-module";
 import { PreAnalysisModule } from "@/components/pre-analysis-module";
 import { LeaseEquityModule } from "@/components/lease-equity-module";
 import { QuitConModule } from "@/components/quitcon-module";
+import { BankControlModule } from "@/components/bank-control-module";
 import { canAccessModuleRoute, personaLabel } from "@/lib/role-nav";
 import { portalHomeForRole } from "@/lib/portal-routes";
 
@@ -71,6 +72,7 @@ export default function ModulePage() {
   if (routeKey === "flash-capital" || routeKey === "finops") return <><FinOpsModule /><PreAnalysisModule variant="flash" /></>;
   if (routeKey === "lease-equity") return <><LeaseEquityModule /><PreAnalysisModule /></>;
   if (routeKey === "flash-invest" || routeKey === "funding") return <FundingModule />;
+  if (routeKey === "bank-control") return <BankControlModule />;
   if (routeKey === "quitcon") return <QuitConModule />;
   if (routeKey === "leilao" || routeKey === "auctions") return <AuctionsModule />;
   if (routeKey === "crm") return <LeadsModule />;
