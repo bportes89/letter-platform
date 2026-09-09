@@ -283,10 +283,19 @@ def list_kyc_documents(db: Session, account: EscrowAccount) -> dict:
                 {
                     "id": "identification",
                     "title": "Documento de identificação + selfie",
+                    "type": "IDENTIFICATION",
                     "status": "APPROVED",
                     "onboarding_url": None,
                     "accepts_api_upload": False,
-                }
+                },
+                {
+                    "id": "social-contract",
+                    "title": "Contrato social",
+                    "type": "SOCIAL_CONTRACT",
+                    "status": "NOT_SENT",
+                    "onboarding_url": None,
+                    "accepts_api_upload": True,
+                },
             ],
         }
 
@@ -296,10 +305,15 @@ def list_kyc_documents(db: Session, account: EscrowAccount) -> dict:
     items = []
     for row in data:
         onboarding_url = row.get("onboardingUrl")
+        doc_type = str(row.get("type") or row.get("documentType") or "CUSTOM").upper()
+        title = str(row.get("title") or row.get("description") or doc_type or "Documento")
+        if doc_type == "SOCIAL_CONTRACT" and "contrato" not in title.lower():
+            title = "Contrato social"
         items.append(
             {
                 "id": str(row.get("id") or row.get("type") or uuid4()),
-                "title": str(row.get("title") or row.get("description") or row.get("type") or "Documento"),
+                "title": title,
+                "type": doc_type,
                 "status": str(row.get("status") or "PENDING"),
                 "onboarding_url": onboarding_url,
                 "accepts_api_upload": not bool(onboarding_url),
@@ -313,10 +327,21 @@ def list_kyc_documents(db: Session, account: EscrowAccount) -> dict:
 
 async def upload_kyc_document(db: Session, account: EscrowAccount, document_id: str, file: UploadFile) -> dict:
     content = await file.read()
+    if not content:
+        raise HTTPException(status_code=422, detail="Arquivo vazio. Selecione o PDF novamente.")
+    filename = (file.filename or "documento.pdf").strip() or "documento.pdf"
+    content_type = (file.content_type or "").strip() or "application/pdf"
+    lower_name = filename.lower()
+    if not (lower_name.endswith((".pdf", ".png", ".jpg", ".jpeg")) or content_type.startswith(("application/pdf", "image/"))):
+        raise HTTPException(status_code=422, detail="Envie PDF, PNG ou JPG do documento.")
+    # Limite prático (~10 MB) para evitar timeout no Asaas
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=422, detail="Arquivo muito grande. Envie um PDF de até 10 MB.")
+
     if _is_mock_account(account):
         account.asaas_kyc_status = "UNDER_REVIEW"
         db.flush()
-        return {"status": "UNDER_REVIEW", "message": "Documento recebido em homologação (mock)."}
+        return {"status": "UNDER_REVIEW", "message": f"Documento '{filename}' recebido em homologação (mock)."}
 
     with subaccount_client(account) as client:
         docs = list_kyc_documents(db, account)
@@ -324,16 +349,29 @@ async def upload_kyc_document(db: Session, account: EscrowAccount, document_id: 
         if not target:
             raise HTTPException(status_code=404, detail="Grupo documental não encontrado")
         if target.get("onboarding_url"):
-            raise HTTPException(status_code=422, detail="Este documento deve ser enviado pelo link de onboarding Asaas.")
+            raise HTTPException(
+                status_code=422,
+                detail="Este documento deve ser enviado pelo link oficial de verificação Asaas.",
+            )
+        document_type = str(target.get("type") or "CUSTOM").upper()
+        # Contrato social e atas usam type do grupo; fallback sensato por título
+        title_l = str(target.get("title") or "").lower()
+        if document_type in {"", "CUSTOM"} and "contrato" in title_l:
+            document_type = "SOCIAL_CONTRACT"
         result = client.upload_document(
             document_id,
             file_bytes=content,
-            filename=file.filename or "documento.pdf",
-            content_type=file.content_type or "application/pdf",
+            filename=filename,
+            content_type=content_type,
+            document_type=document_type,
         )
     account.asaas_kyc_status = "UNDER_REVIEW"
     db.flush()
-    return {"status": "UNDER_REVIEW", "message": "Documento enviado ao Asaas para análise.", "provider": result}
+    return {
+        "status": str(result.get("status") or "UNDER_REVIEW"),
+        "message": f"Documento '{filename}' enviado ao Asaas para análise.",
+        "provider": result,
+    }
 
 
 def create_wallet_pix_key(db: Session, account: EscrowAccount) -> dict:

@@ -2927,6 +2927,15 @@ def test_my_wallet_view_and_operations(client, auth_headers, monkeypatch):
     docs = client.get("/api/v1/wallet/me/kyc/documents", headers=headers)
     assert docs.status_code == 200
     assert docs.json()["items"]
+    social = next((item for item in docs.json()["items"] if item.get("type") == "SOCIAL_CONTRACT" or item.get("accepts_api_upload")), None)
+    assert social is not None
+    upload = client.post(
+        f"/api/v1/wallet/me/kyc/documents/{social['id']}",
+        headers=headers,
+        files={"file": ("contrato-social.pdf", b"%PDF-1.4 mock contrato social", "application/pdf")},
+    )
+    assert upload.status_code == 200
+    assert "enviado" in upload.json()["message"].lower() or "recebido" in upload.json()["message"].lower()
 
     account_id = body["account"]["id"]
     deposit = client.post(

@@ -76,6 +76,7 @@ type IssuedBoleto = {
 type KycDocument = {
   id: string;
   title: string;
+  type?: string;
   status: string;
   onboarding_url: string | null;
   accepts_api_upload: boolean;
@@ -105,7 +106,7 @@ export function MyWalletModule() {
   const [pixQr, setPixQr] = useState<{ payload?: string; encoded_image?: string | null } | null>(null);
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(true);
-  const [openingAccount, setOpeningAccount] = useState(false);
+  const [uploadingDocId, setUploadingDocId] = useState<string | null>(null);
   const [transferAmount, setTransferAmount] = useState("");
   const [billAmount, setBillAmount] = useState("");
   const [boletoAmount, setBoletoAmount] = useState("");
@@ -264,19 +265,40 @@ export function MyWalletModule() {
     await load();
   }
 
-  async function uploadDoc(docId: string, file: File) {
-    const data = new FormData();
-    data.append("file", file);
-    const token = getToken();
-    const response = await fetch(`${API_URL}/wallet/me/kyc/documents/${docId}`, {
-      method: "POST",
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-      body: data,
-    });
-    const body = await response.json();
-    if (!response.ok) throw new Error(body.detail || "Falha no upload");
-    setNotice(body.message || "Documento enviado.");
-    await load();
+  async function uploadDoc(docId: string, file: File, input?: HTMLInputElement | null) {
+    setUploadingDocId(docId);
+    setNotice("");
+    try {
+      const data = new FormData();
+      data.append("file", file);
+      const token = getToken();
+      const response = await fetch(`${API_URL}/wallet/me/kyc/documents/${docId}`, {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: data,
+      });
+      let body: { detail?: string | { msg?: string }[]; message?: string; status?: string } = {};
+      try {
+        body = await response.json();
+      } catch {
+        body = {};
+      }
+      if (!response.ok) {
+        const detail = body.detail;
+        const message =
+          typeof detail === "string"
+            ? detail
+            : Array.isArray(detail)
+              ? detail.map((item) => (typeof item === "string" ? item : item.msg || "")).filter(Boolean).join("; ")
+              : "Falha no upload do documento";
+        throw new Error(message);
+      }
+      setNotice(body.message || `Documento "${file.name}" enviado para análise.`);
+      await load();
+    } finally {
+      setUploadingDocId(null);
+      if (input) input.value = "";
+    }
   }
 
   function copyText(value: string) {
@@ -466,9 +488,12 @@ export function MyWalletModule() {
             {(wallet.account?.asaas_onboarding_url || documents.length > 0) && (
               <section className="panel">
                 <h3>Documentação de verificação</h3>
+                <p className="muted" style={{ marginTop: 0 }}>
+                  Envie o contrato social e demais documentos em PDF (até 10 MB). Após o envio, o status muda para análise.
+                </p>
                 {wallet.account?.asaas_onboarding_url && (
                   <div className="notice">
-                    Envie seus documentos pelo link oficial de verificação LETTER:{" "}
+                    Alguns documentos exigem o link oficial de verificação LETTER:{" "}
                     <a href={wallet.account.asaas_onboarding_url} target="_blank" rel="noreferrer">Abrir verificação</a>
                   </div>
                 )}
@@ -476,19 +501,35 @@ export function MyWalletModule() {
                   <div className="session-row" key={doc.id}>
                     <div>
                       <b>{doc.title}</b>
-                      <small>Status: {doc.status}</small>
+                      <small>
+                        Status: {doc.status}
+                        {doc.type ? ` · ${doc.type}` : ""}
+                      </small>
                     </div>
                     {doc.onboarding_url ? (
                       <a className="table-action" href={doc.onboarding_url} target="_blank" rel="noreferrer">Enviar pelo link</a>
                     ) : doc.accepts_api_upload ? (
-                      <label className="table-action">
-                        <Upload />Enviar
-                        <input type="file" accept=".pdf,.png,.jpg,.jpeg" hidden onChange={(e) => {
-                          const file = e.target.files?.[0];
-                          if (file) void uploadDoc(doc.id, file).catch((err) => setNotice(err.message));
-                        }} />
+                      <label className="table-action" aria-busy={uploadingDocId === doc.id}>
+                        <Upload />
+                        {uploadingDocId === doc.id ? "Enviando…" : "Enviar PDF"}
+                        <input
+                          type="file"
+                          accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg"
+                          hidden
+                          disabled={uploadingDocId === doc.id}
+                          onChange={(e) => {
+                            const input = e.currentTarget;
+                            const file = input.files?.[0];
+                            if (!file) return;
+                            void uploadDoc(doc.id, file, input).catch((err) =>
+                              setNotice(err instanceof Error ? err.message : "Falha no upload"),
+                            );
+                          }}
+                        />
                       </label>
-                    ) : null}
+                    ) : (
+                      <small className="muted">Aguardando análise</small>
+                    )}
                   </div>
                 ))}
               </section>

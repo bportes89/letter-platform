@@ -113,13 +113,43 @@ class AsaasClient:
     def list_documents(self) -> dict:
         return self.request("GET", "/myAccount/documents")
 
-    def upload_document(self, document_group_id: str, *, file_bytes: bytes, filename: str, content_type: str) -> dict:
-        return self.request(
-            "POST",
-            f"/myAccount/documents/{document_group_id}",
-            content=file_bytes,
-            headers={"Content-Type": content_type, "filename": filename},
-        )
+    def upload_document(
+        self,
+        document_group_id: str,
+        *,
+        file_bytes: bytes,
+        filename: str,
+        content_type: str,
+        document_type: str,
+    ) -> dict:
+        """Asaas exige multipart/form-data com documentFile + type (ex.: SOCIAL_CONTRACT)."""
+        mime = (content_type or "application/pdf").split(";")[0].strip() or "application/pdf"
+        doc_type = (document_type or "CUSTOM").strip().upper()
+        try:
+            # Remove Content-Type: application/json do client padrão para o boundary multipart.
+            response = self._client.post(
+                f"/myAccount/documents/{document_group_id}",
+                data={"type": doc_type},
+                files={"documentFile": (filename or "documento.pdf", file_bytes, mime)},
+                headers={"Content-Type": None},
+            )
+        except httpx.HTTPError as exc:
+            raise HTTPException(status_code=502, detail=f"Asaas indisponível: {exc}") from exc
+        if response.status_code == 401:
+            raise HTTPException(status_code=502, detail="Asaas recusou a API Key (401). Verifique ambiente Sandbox vs Produção.")
+        if response.status_code >= 400:
+            detail = response.text[:400]
+            try:
+                body = response.json()
+                errors = body.get("errors")
+                if isinstance(errors, list) and errors:
+                    detail = errors[0].get("description") or errors[0].get("code") or detail
+            except Exception:
+                pass
+            raise HTTPException(status_code=502, detail=f"Asaas retornou erro {response.status_code}: {detail}")
+        if not response.content:
+            return {}
+        return response.json()
 
     def list_financial_transactions(self, *, offset: int = 0, limit: int = 50) -> dict:
         return self.request("GET", "/financialTransactions", params={"offset": offset, "limit": limit})
