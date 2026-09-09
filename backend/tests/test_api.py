@@ -2955,6 +2955,24 @@ def test_my_wallet_view_and_operations(client, auth_headers, monkeypatch):
     assert bill.status_code == 200
     assert bill.json()["status"] == "DONE"
 
+    boleto = client.post("/api/v1/wallet/me/boletos", headers=headers, json={
+        "customer_name": "Pagador Teste",
+        "customer_document": "12345678901",
+        "amount": "180.50",
+        "due_date": "2026-09-20",
+        "description": "Cobrança teste BANK",
+    })
+    assert boleto.status_code == 200
+    body = boleto.json()
+    assert body["status"] == "PENDING"
+    assert float(body["amount"]) == 180.5
+    assert body["invoice_url"]
+    assert body["identification_field"]
+
+    boletos = client.get("/api/v1/wallet/me/boletos", headers=headers)
+    assert boletos.status_code == 200
+    assert any(item["payment_id"] == body["payment_id"] for item in boletos.json()["items"])
+
 
 def test_asaas_webhook_endpoint(client, auth_headers, monkeypatch):
     monkeypatch.setattr("app.core.config.settings.asaas_webhook_access_token", "test-webhook-token")

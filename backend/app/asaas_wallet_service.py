@@ -26,8 +26,9 @@ TRANSACTION_LABELS = {
     "COMMISSION_CREDITED": "Comissão creditada",
     "TRANSFER": "Transferência",
     "TRANSFER_SENT": "Saque/transferência realizada",
-    "BILL_PAYMENT": "Pagamento de conta",
-    "PAYMENT_FEE": "Taxa de cobrança",
+  "BILL_PAYMENT": "Pagamento de conta",
+  "BOLETO_ISSUED": "Boleto emitido",
+  "PAYMENT_FEE": "Taxa de cobrança",
     "DEBIT": "Débito",
     "CREDIT": "Crédito",
     "INTERNAL_TRANSFER_DEBIT": "Transferência interna (saída)",
@@ -203,6 +204,7 @@ def _capabilities(account: EscrowAccount, db: Session | None = None) -> dict:
         "deposits_enabled": True,
         "withdrawals_enabled": withdrawals,
         "bill_payments_enabled": approved and not billing_blocked,
+        "boleto_issuance_enabled": approved and not billing_blocked,
         "pix_key_enabled": approved,
         "escrow_locked": account.escrow_enabled,
         "billing_blocked": billing_blocked,
@@ -473,6 +475,214 @@ def request_bill_payment(db: Session, account: EscrowAccount, *, barcode: str, a
         "status": str(result.get("status") or "PENDING"),
         "amount": str(value),
     }
+
+
+def _assert_boleto_issuance_allowed(db: Session, account: EscrowAccount) -> None:
+    caps = _capabilities(account, db)
+    if not caps.get("boleto_issuance_enabled"):
+        if caps.get("billing_blocked"):
+            raise HTTPException(status_code=422, detail="Emissão de boletos bloqueada por inadimplência da mensalidade Escrow.")
+        raise HTTPException(status_code=422, detail="KYC Asaas pendente — emissão de boletos bloqueada.")
+
+
+def _parse_due_date(raw: str) -> str:
+    value = (raw or "").strip()
+    try:
+        return datetime.strptime(value[:10], "%Y-%m-%d").date().isoformat()
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="Data de vencimento inválida. Use AAAA-MM-DD.") from exc
+
+
+def _boleto_view_from_payment(
+    payment: dict,
+    *,
+    provider: str,
+    customer_name: str | None = None,
+    customer_document: str | None = None,
+    description: str | None = None,
+) -> dict:
+    return {
+        "provider": provider,
+        "payment_id": str(payment.get("id") or ""),
+        "status": str(payment.get("status") or "PENDING"),
+        "amount": str(payment.get("value") or payment.get("amount") or "0"),
+        "due_date": str(payment.get("dueDate") or "") or None,
+        "description": description or (str(payment.get("description") or "") or None),
+        "customer_name": customer_name,
+        "customer_document": customer_document,
+        "invoice_url": str(payment.get("invoiceUrl") or "") or None,
+        "bank_slip_url": str(payment.get("bankSlipUrl") or payment.get("invoiceUrl") or "") or None,
+        "identification_field": str(payment.get("identificationField") or "") or None,
+        "barcode": str(payment.get("barCode") or payment.get("nossoNumero") or "") or None,
+    }
+
+
+def issue_wallet_boleto(
+    db: Session,
+    account: EscrowAccount,
+    *,
+    customer_name: str,
+    customer_document: str,
+    amount: Decimal,
+    due_date: str,
+    description: str | None = None,
+    customer_email: str | None = None,
+    customer_phone: str | None = None,
+) -> dict:
+    _assert_boleto_issuance_allowed(db, account)
+    value = money(amount)
+    due = _parse_due_date(due_date)
+    document = _digits(customer_document)
+    if len(document) not in {11, 14}:
+        raise HTTPException(status_code=422, detail="Informe CPF (11 dígitos) ou CNPJ (14 dígitos) do pagador.")
+    name = customer_name.strip()
+    if len(name) < 3:
+        raise HTTPException(status_code=422, detail="Informe o nome do pagador.")
+    desc = (description or "Cobrança LETTER BANK").strip()[:200]
+
+    if _is_mock_account(account):
+        payment_id = f"mock_boleto_{uuid4().hex[:12]}"
+        digitable = f"23793{uuid4().hex[:10].upper()}{document[-8:]}{int(value * 100):011d}"
+        payment = {
+            "id": payment_id,
+            "status": "PENDING",
+            "value": float(value),
+            "dueDate": due,
+            "description": desc,
+            "invoiceUrl": f"https://sandbox.asaas.com/i/{payment_id}",
+            "bankSlipUrl": f"https://sandbox.asaas.com/b/pdf/{payment_id}",
+            "identificationField": digitable,
+            "barCode": digitable,
+        }
+        db.add(
+            EscrowEvent(
+                organization_id=account.organization_id,
+                escrow_account_id=account.id,
+                provider_event_id=payment_id,
+                event_type="BOLETO_ISSUED",
+                amount=float(value),
+                payload_json=json.dumps(
+                    {
+                        "customer_name": name,
+                        "customer_document": document,
+                        "due_date": due,
+                        "description": desc,
+                        "invoice_url": payment["invoiceUrl"],
+                    },
+                    ensure_ascii=False,
+                ),
+            )
+        )
+        db.flush()
+        return _boleto_view_from_payment(
+            payment,
+            provider="MOCK",
+            customer_name=name,
+            customer_document=document,
+            description=desc,
+        )
+
+    with subaccount_client(account) as client:
+        customer_payload: dict = {
+            "name": name,
+            "cpfCnpj": document,
+            "notificationDisabled": True,
+            "externalReference": f"boleto:{account.id}:{uuid4().hex[:8]}",
+        }
+        if customer_email and customer_email.strip():
+            customer_payload["email"] = customer_email.strip()
+        phone = _digits(customer_phone)
+        if phone:
+            customer_payload["mobilePhone"] = phone
+        customer = client.create_customer(customer_payload)
+        customer_id = str(customer.get("id") or "").strip()
+        if not customer_id:
+            raise HTTPException(status_code=502, detail="Asaas não retornou o cliente do boleto.")
+
+        payment = client.create_payment(
+            {
+                "customer": customer_id,
+                "billingType": "BOLETO",
+                "value": float(value),
+                "dueDate": due,
+                "description": desc,
+                "externalReference": f"wallet-boleto:{account.id}:{uuid4().hex[:10]}",
+            }
+        )
+
+    db.add(
+        EscrowEvent(
+            organization_id=account.organization_id,
+            escrow_account_id=account.id,
+            provider_event_id=str(payment.get("id") or f"boleto_{uuid4().hex[:12]}"),
+            event_type="BOLETO_ISSUED",
+            amount=float(value),
+            payload_json=json.dumps(
+                {
+                    "customer_name": name,
+                    "customer_document": document,
+                    "due_date": due,
+                    "description": desc,
+                    "invoice_url": payment.get("invoiceUrl"),
+                    "bank_slip_url": payment.get("bankSlipUrl"),
+                },
+                ensure_ascii=False,
+            ),
+        )
+    )
+    db.flush()
+    return _boleto_view_from_payment(
+        payment,
+        provider="ASAAS",
+        customer_name=name,
+        customer_document=document,
+        description=desc,
+    )
+
+
+def list_wallet_boletos(db: Session, account: EscrowAccount, *, limit: int = 20) -> dict:
+    if _is_mock_account(account):
+        events = list(
+            db.scalars(
+                select(EscrowEvent)
+                .where(
+                    EscrowEvent.escrow_account_id == account.id,
+                    EscrowEvent.event_type == "BOLETO_ISSUED",
+                )
+                .order_by(EscrowEvent.processed_at.desc())
+                .limit(limit)
+            )
+        )
+        items = []
+        for event in events:
+            try:
+                meta = json.loads(event.payload_json or "{}")
+            except Exception:
+                meta = {}
+            items.append(
+                {
+                    "provider": "MOCK",
+                    "payment_id": event.provider_event_id,
+                    "status": "PENDING",
+                    "amount": str(event.amount),
+                    "due_date": meta.get("due_date"),
+                    "description": meta.get("description"),
+                    "customer_name": meta.get("customer_name"),
+                    "customer_document": meta.get("customer_document"),
+                    "invoice_url": meta.get("invoice_url"),
+                    "bank_slip_url": meta.get("invoice_url"),
+                    "identification_field": None,
+                    "barcode": None,
+                }
+            )
+        return {"items": items}
+
+    with subaccount_client(account) as client:
+        payload = client.list_payments(limit=limit, billing_type="BOLETO")
+    data = payload.get("data") if isinstance(payload, dict) else None
+    rows = data if isinstance(data, list) else []
+    items = [_boleto_view_from_payment(row, provider="ASAAS") for row in rows if isinstance(row, dict)]
+    return {"items": items}
 
 
 def _resolve_webhook_account_id(payload: dict, payment: dict, transfer: dict) -> str | None:

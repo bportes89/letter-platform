@@ -1600,6 +1600,31 @@ class WalletBillPaymentRequest(BaseModel):
     description: str | None = Field(default=None, max_length=200)
 
 
+class WalletBoletoIssueRequest(BaseModel):
+    customer_name: str = Field(min_length=3, max_length=180)
+    customer_document: str = Field(min_length=11, max_length=18)
+    amount: Decimal = Field(gt=0)
+    due_date: str = Field(min_length=8, max_length=12, description="YYYY-MM-DD")
+    description: str | None = Field(default=None, max_length=200)
+    customer_email: str | None = Field(default=None, max_length=180)
+    customer_phone: str | None = Field(default=None, max_length=30)
+
+
+class WalletBoletoView(BaseModel):
+    provider: str
+    payment_id: str
+    status: str
+    amount: str
+    due_date: str | None = None
+    description: str | None = None
+    customer_name: str | None = None
+    customer_document: str | None = None
+    invoice_url: str | None = None
+    bank_slip_url: str | None = None
+    identification_field: str | None = None
+    barcode: str | None = None
+
+
 class WalletPricingRowView(BaseModel):
     code: str
     label: str

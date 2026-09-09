@@ -52,7 +52,7 @@ from app.schemas import (
     ValidStampCreate, ValidStampView, SaaSTermsCreate, SaaSTermsView, SaaSPlanCreate, SaaSPlanView,
     SaaSSubscribeCreate, SaaSSubscriptionView,
     BillingGenerateRequest, CollectionActionView, CommissionAllocate, CommissionEntryView, CommissionRuleCreate,
-    CommissionRuleView, DocumentView, EscrowAsaasStatusView, EscrowCreate, EscrowBillingCycleView, EscrowSubaccountPreviewView, EscrowView, EscrowWebhook, WalletBillPaymentRequest, WalletEscrowBillingSyncView, LssBillingSyncView, RecurringCommissionSettlementView, MmnSplitPreviewRequest, MmnSplitPreviewView, AsaasMmnPaymentCreate, AsaasMmnPaymentView, PaymentSplitRowView, LegalManualPublicView, LegalManualView, WalletPricingRowView, WalletTransferRequest,
+    CommissionRuleView, DocumentView, EscrowAsaasStatusView, EscrowCreate, EscrowBillingCycleView, EscrowSubaccountPreviewView, EscrowView, EscrowWebhook, WalletBillPaymentRequest, WalletBoletoIssueRequest, WalletBoletoView, WalletEscrowBillingSyncView, LssBillingSyncView, RecurringCommissionSettlementView, MmnSplitPreviewRequest, MmnSplitPreviewView, AsaasMmnPaymentCreate, AsaasMmnPaymentView, PaymentSplitRowView, LegalManualPublicView, LegalManualView, WalletPricingRowView, WalletTransferRequest,
     FiscalEvidenceView, SefazRobotStatusView,
     DelinquencyView, FiscalReleaseRequest, FundingOpportunityCreate, FundingOpportunityView, InvitationView,
     NinaApprovalRequest, NinaCriticalApprovalView, NinaDistressCaseCreate, NinaDistressCaseView,
@@ -3185,6 +3185,45 @@ def pay_bill_from_my_wallet(payload: WalletBillPaymentRequest, user: User = Depe
     audit(db, user, "wallet.bill_payment_requested", "escrow_account", account.id, result)
     db.commit()
     return result
+
+
+@router.post("/wallet/me/boletos", response_model=WalletBoletoView)
+def issue_boleto_from_my_wallet(payload: WalletBoletoIssueRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.asaas_wallet_service import issue_wallet_boleto
+    from app.subaccount_auto_service import find_user_plain_subaccount
+
+    account = find_user_plain_subaccount(db, user)
+    if not account:
+        raise HTTPException(status_code=404, detail="Subconta não encontrada")
+    result = issue_wallet_boleto(
+        db,
+        account,
+        customer_name=payload.customer_name,
+        customer_document=payload.customer_document,
+        amount=payload.amount,
+        due_date=payload.due_date,
+        description=payload.description,
+        customer_email=payload.customer_email,
+        customer_phone=payload.customer_phone,
+    )
+    audit(db, user, "wallet.boleto_issued", "escrow_account", account.id, {"payment_id": result.get("payment_id"), "amount": result.get("amount")})
+    db.commit()
+    return result
+
+
+@router.get("/wallet/me/boletos")
+def list_boletos_from_my_wallet(
+    limit: int = Query(default=20, ge=1, le=50),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.asaas_wallet_service import list_wallet_boletos
+    from app.subaccount_auto_service import find_user_plain_subaccount
+
+    account = find_user_plain_subaccount(db, user)
+    if not account:
+        raise HTTPException(status_code=404, detail="Subconta não encontrada")
+    return list_wallet_boletos(db, account, limit=limit)
 
 
 @router.post("/webhooks/asaas")

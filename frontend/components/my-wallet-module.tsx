@@ -43,6 +43,7 @@ export type WalletView = {
     deposits_enabled: boolean;
     withdrawals_enabled: boolean;
     bill_payments_enabled: boolean;
+    boleto_issuance_enabled?: boolean;
     pix_key_enabled: boolean;
     escrow_locked: boolean;
   };
@@ -55,6 +56,21 @@ type WalletTransaction = {
   amount: string;
   direction: "CREDIT" | "DEBIT";
   date: string;
+};
+
+type IssuedBoleto = {
+  provider: string;
+  payment_id: string;
+  status: string;
+  amount: string;
+  due_date?: string | null;
+  description?: string | null;
+  customer_name?: string | null;
+  customer_document?: string | null;
+  invoice_url?: string | null;
+  bank_slip_url?: string | null;
+  identification_field?: string | null;
+  barcode?: string | null;
 };
 
 type KycDocument = {
@@ -83,6 +99,8 @@ export function MyWalletModule() {
   const [profileCnpj, setProfileCnpj] = useState("");
   const [profileCompany, setProfileCompany] = useState("");
   const [transactions, setTransactions] = useState<WalletTransaction[]>([]);
+  const [boletos, setBoletos] = useState<IssuedBoleto[]>([]);
+  const [lastBoleto, setLastBoleto] = useState<IssuedBoleto | null>(null);
   const [documents, setDocuments] = useState<KycDocument[]>([]);
   const [pixQr, setPixQr] = useState<{ payload?: string; encoded_image?: string | null } | null>(null);
   const [notice, setNotice] = useState("");
@@ -90,18 +108,26 @@ export function MyWalletModule() {
   const [openingAccount, setOpeningAccount] = useState(false);
   const [transferAmount, setTransferAmount] = useState("");
   const [billAmount, setBillAmount] = useState("");
+  const [boletoAmount, setBoletoAmount] = useState("");
+  const [boletoDueDate, setBoletoDueDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 3);
+    return d.toISOString().slice(0, 10);
+  });
 
   const load = useCallback(async () => {
-    const [w, tx, docs, p, me] = await Promise.all([
+    const [w, tx, docs, p, me, boletoList] = await Promise.all([
       api<WalletView>("/wallet/me"),
       api<{ items: WalletTransaction[] }>("/wallet/me/transactions").catch(() => ({ items: [] })),
       api<{ items: KycDocument[] }>("/wallet/me/kyc/documents").catch(() => ({ items: [] })),
       api<Profile>("/auth/me/profile").catch(() => null),
       api<User>("/auth/me").catch(() => null),
+      api<{ items: IssuedBoleto[] }>("/wallet/me/boletos").catch(() => ({ items: [] })),
     ]);
     setWallet(w);
     setTransactions(tx.items ?? []);
     setDocuments(docs.items ?? []);
+    setBoletos(boletoList.items ?? []);
     if (me?.name) setHolderName(me.name);
     if (p) {
       setProfile(p);
@@ -215,6 +241,29 @@ export function MyWalletModule() {
     await load();
   }
 
+  async function issueBoleto(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const form = e.currentTarget;
+    const fd = new FormData(form);
+    const result = await api<IssuedBoleto>("/wallet/me/boletos", {
+      method: "POST",
+      body: JSON.stringify({
+        customer_name: fd.get("customer_name"),
+        customer_document: fd.get("customer_document"),
+        customer_email: fd.get("customer_email") || undefined,
+        customer_phone: fd.get("customer_phone") || undefined,
+        amount: boletoAmount,
+        due_date: boletoDueDate,
+        description: fd.get("description") || "Cobrança LETTER BANK",
+      }),
+    });
+    setLastBoleto(result);
+    setNotice(`Boleto emitido (${result.status}) — ${brl.format(Number(result.amount))}`);
+    setBoletoAmount("");
+    form.reset();
+    await load();
+  }
+
   async function uploadDoc(docId: string, file: File) {
     const data = new FormData();
     data.append("file", file);
@@ -246,7 +295,7 @@ export function MyWalletModule() {
           <span className="eyebrow dark">CONTA DIGITAL</span>
           <h1>BANK</h1>
           <p>
-            Saldo em conta, extrato, Pix, pagamento de boletos, dados bancários e abertura da sua
+            Saldo em conta, extrato, Pix, emissão e pagamento de boletos, dados bancários e abertura da sua
             conta digital LETTER — tudo em um só lugar.
           </p>
         </div>
@@ -455,6 +504,79 @@ export function MyWalletModule() {
               </form>
             )}
 
+            {(wallet.capabilities?.boleto_issuance_enabled ?? wallet.capabilities?.bill_payments_enabled) && (
+              <form className="stack-form" onSubmit={(e) => void issueBoleto(e).catch((err) => setNotice(err.message))}>
+                <h3>Emitir boleto</h3>
+                <p className="muted" style={{ margin: 0 }}>
+                  Gere uma cobrança por boleto para o pagador. Após emitir, compartilhe o link ou a linha digitável.
+                </p>
+                <input name="customer_name" placeholder="Nome do pagador" required />
+                <input name="customer_document" placeholder="CPF ou CNPJ do pagador" required />
+                <input name="customer_email" type="email" placeholder="E-mail do pagador (opcional)" />
+                <input name="customer_phone" placeholder="Celular do pagador (opcional)" />
+                <CurrencyInput value={boletoAmount} onChange={setBoletoAmount} placeholder="Valor (R$)" required />
+                <label>
+                  Vencimento
+                  <input
+                    type="date"
+                    value={boletoDueDate}
+                    onChange={(ev) => setBoletoDueDate(ev.target.value)}
+                    required
+                  />
+                </label>
+                <input name="description" placeholder="Descrição da cobrança (opcional)" />
+                <button><Send />Emitir boleto</button>
+              </form>
+            )}
+
+            {lastBoleto && (
+              <section className="panel">
+                <h3>Último boleto emitido</h3>
+                <div className="escrow-grid">
+                  <div className="escrow-card">
+                    <small>Status</small>
+                    <b>{lastBoleto.status}</b>
+                  </div>
+                  <div className="escrow-card">
+                    <small>Valor</small>
+                    <b>{brl.format(Number(lastBoleto.amount))}</b>
+                  </div>
+                  <div className="escrow-card">
+                    <small>Vencimento</small>
+                    <b>{lastBoleto.due_date || "—"}</b>
+                  </div>
+                  <div className="escrow-card">
+                    <small>Pagador</small>
+                    <b>{lastBoleto.customer_name || "—"}</b>
+                    <span>{lastBoleto.customer_document || ""}</span>
+                  </div>
+                </div>
+                {lastBoleto.identification_field && (
+                  <div className="notice">
+                    <small>Linha digitável</small>
+                    <code style={{ display: "block", wordBreak: "break-all", marginTop: 8 }}>
+                      {lastBoleto.identification_field}
+                    </code>
+                    <button className="table-action" onClick={() => copyText(lastBoleto.identification_field!)}>
+                      <Copy />Copiar linha digitável
+                    </button>
+                  </div>
+                )}
+                <div className="toolbar">
+                  {lastBoleto.invoice_url && (
+                    <a className="table-action" href={lastBoleto.invoice_url} target="_blank" rel="noreferrer">
+                      Abrir fatura
+                    </a>
+                  )}
+                  {lastBoleto.bank_slip_url && (
+                    <a className="table-action" href={lastBoleto.bank_slip_url} target="_blank" rel="noreferrer">
+                      Abrir PDF do boleto
+                    </a>
+                  )}
+                </div>
+              </section>
+            )}
+
             {wallet.capabilities?.bill_payments_enabled && (
               <form className="stack-form" onSubmit={(e) => void payBill(e).catch((err) => setNotice(err.message))}>
                 <h3>Pagamento de contas</h3>
@@ -463,6 +585,62 @@ export function MyWalletModule() {
                 <input name="description" placeholder="Descrição (opcional)" />
                 <button><Send />Pagar boleto</button>
               </form>
+            )}
+
+            {(wallet.capabilities?.boleto_issuance_enabled ?? wallet.capabilities?.bill_payments_enabled) && (
+              <section className="panel">
+                <div className="subheading">
+                  <h2>Boletos emitidos</h2>
+                  <button onClick={() => void load()}><RefreshCw />Atualizar</button>
+                </div>
+                <div className="table-wrap">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Pagador</th>
+                        <th>Vencimento</th>
+                        <th>Status</th>
+                        <th>Valor</th>
+                        <th></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {boletos.length === 0 ? (
+                        <tr>
+                          <td colSpan={5}>
+                            <small className="muted">Nenhum boleto emitido ainda.</small>
+                          </td>
+                        </tr>
+                      ) : (
+                        boletos.map((boleto) => (
+                          <tr key={boleto.payment_id}>
+                            <td>
+                              <b>{boleto.customer_name || boleto.description || "Cobrança"}</b>
+                              <small>{boleto.customer_document || boleto.payment_id}</small>
+                            </td>
+                            <td>{boleto.due_date || "—"}</td>
+                            <td>
+                              <span className="pill pill-pending">{boleto.status}</span>
+                            </td>
+                            <td>{brl.format(Number(boleto.amount))}</td>
+                            <td>
+                              {boleto.invoice_url ? (
+                                <a className="table-action" href={boleto.invoice_url} target="_blank" rel="noreferrer">
+                                  Abrir
+                                </a>
+                              ) : boleto.identification_field ? (
+                                <button className="table-action" onClick={() => copyText(boleto.identification_field!)}>
+                                  <Copy />Copiar
+                                </button>
+                              ) : null}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
             )}
 
             <section className="panel">

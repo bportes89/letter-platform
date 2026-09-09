@@ -160,5 +160,11 @@ class AsaasClient:
     def create_payment(self, payload: dict) -> dict:
         return self.request("POST", "/payments", json=payload)
 
+    def list_payments(self, *, offset: int = 0, limit: int = 20, billing_type: str | None = None) -> dict:
+        params: dict = {"offset": offset, "limit": limit}
+        if billing_type:
+            params["billingType"] = billing_type
+        return self.request("GET", "/payments", params=params)
+
     def update_payment(self, payment_id: str, payload: dict) -> dict:
         return self.request("PUT", f"/payments/{payment_id}", json=payload)
