@@ -114,18 +114,18 @@ html,body{-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
 .nav-sub{display:block;border:1px solid rgb(255 255 255 / 0.05)!important;border-radius:6px!important;background:rgb(255 255 255 / 0.02)!important;padding:9px 10px 9px 28px!important;font-size:10px!important;line-height:1.35!important}
 .nav-sub.active{border-color:rgb(0 208 132 / 0.45)!important;background:rgb(0 208 132 / 0.14)!important}
 .mfa-panel .mfa-status{margin:12px 0}.mfa-steps{margin:0 0 12px 18px;display:grid;gap:6px;font-size:11px;color:var(--muted)}.mfa-qr{display:block;margin:8px auto;border-radius:12px;border:1px solid var(--line);background:#fff;padding:8px}.site-login-mfa-toggle{display:flex;align-items:center;gap:8px;font-size:12px;color:#425049;margin:4px 0 8px}.mfa-hint{margin-top:10px;font-size:11px}.mfa-tabs{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}.mfa-tab{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:999px;padding:10px 16px;background:#fff;font-size:11px;font-weight:700;color:var(--muted);cursor:pointer}.mfa-tab.active{border-color:var(--green-dark);background:rgb(0 208 132 / 0.1);color:var(--green-dark)}.mfa-guide-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin:16px 0}.mfa-guide-card{border:1px solid var(--line);border-radius:12px;padding:14px;background:rgb(255 255 255 / 0.6)}.mfa-guide-card svg{width:20px;color:var(--green-dark);margin-bottom:8px}.mfa-guide-card h3{font-size:13px;margin:0 0 6px}.mfa-guide-card p{margin:0;font-size:11px;color:var(--muted)}.mfa-guide-steps{margin:12px 0 16px 20px;display:grid;gap:10px;font-size:12px;color:#425049}.mfa-guide-steps li{padding-left:4px}.mfa-faq{margin:12px 0 16px;font-size:12px}.mfa-faq dt{font-weight:700;margin-top:12px;color:#1a2e28}.mfa-faq dd{margin:4px 0 0;color:var(--muted)}
-/* Sidebar scroll — área exclusiva entre logo/contexto e botão Sair */
+/* Sidebar scroll — um único container (Mac/trackpad); zonas sem scroll aninhado */
 .sidebar-scroll{
   flex:1 1 auto;
   min-height:0;
-  max-height:100%;
   overflow-x:hidden;
-  overflow-y:scroll;
+  overflow-y:auto;
   -webkit-overflow-scrolling:touch;
   overscroll-behavior:contain;
+  scrollbar-gutter:stable;
   scrollbar-width:thin;
   scrollbar-color:#2a5a45 transparent;
-  padding:0 0 4px;
+  padding:0 0 24px;
 }
 .sidebar-scroll::-webkit-scrollbar{width:8px}
 .sidebar-scroll::-webkit-scrollbar-thumb{background:#2a5a45;border-radius:8px}
@@ -143,14 +143,14 @@ html,body{-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
   border:1px solid rgb(255 255 255 / 0.08);
   border-radius:12px;
   background:rgb(255 255 255 / 0.02);
-  overflow:hidden;
+  overflow:visible;
   display:flex;
   flex-direction:column;
-  min-height:0;
-  flex:0 1 auto;
+  flex:0 0 auto;
 }
 .nav-zone.open{
-  max-height:calc(100dvh - 210px);
+  /* Sem max-height: o scroll fica só em .sidebar-scroll (evita cortar BI/últimas linhas no Mac). */
+  max-height:none;
 }
 .nav-zone.active-zone{border-color:rgb(0 208 132 / 0.35);box-shadow:0 0 0 1px rgb(0 208 132 / 0.12) inset}
 .nav-zone-header{display:flex;align-items:center;gap:10px;padding:14px 14px;font-size:12px;font-weight:800;letter-spacing:.14em;color:#fff;background:rgb(255 255 255 / 0.04);border:0;border-bottom:1px solid transparent;width:100%;text-align:left;cursor:pointer;flex-shrink:0}
@@ -164,15 +164,7 @@ html,body{-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
   flex-direction:column;
   gap:4px;
   padding:8px 10px 12px;
-  min-height:0;
-  overflow-x:hidden;
-  overflow-y:auto;
-  -webkit-overflow-scrolling:touch;
-  overscroll-behavior:contain;
-  scrollbar-width:thin;
-  scrollbar-color:#2a5a45 transparent;
-  flex:1 1 auto;
+  overflow:visible;
+  flex:0 0 auto;
 }
-.nav-zone-body::-webkit-scrollbar{width:8px}
-.nav-zone-body::-webkit-scrollbar-thumb{background:#2a5a45;border-radius:8px}
 .nav-zone-body>.nav-label{margin-top:8px;margin-bottom:2px}
