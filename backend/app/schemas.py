@@ -519,8 +519,12 @@ class FundingOpportunityCreate(BaseModel):
     title: str = Field(min_length=3, max_length=180)
     product: str
     capital_source: str = "RETAIL"
+    instrument_type: str = "TOKEN"  # TOKEN | MUTUO
     target_amount: Decimal = Field(gt=0)
-    min_investment: Decimal = Field(default=Decimal("1000"), gt=0)
+    min_investment: Decimal | None = Field(default=None, gt=0)
+    token_unit_price: Decimal = Field(default=Decimal("100"), gt=0)
+    monthly_return_rate: Decimal = Field(default=Decimal("0.016"), ge=0)
+    property_ref: str | None = Field(default=None, max_length=180)
     annual_return_reference: Decimal | None = Field(default=None, ge=0)
 
 
@@ -530,12 +534,20 @@ class FundingOpportunityView(ORMModel):
     title: str
     product: str
     capital_source: str
+    instrument_type: str = "TOKEN"
     target_amount: Decimal
     funded_amount: Decimal
     min_investment: Decimal
+    token_unit_price: Decimal = Decimal("100")
+    monthly_return_rate: Decimal = Decimal("0.016")
+    property_ref: str | None = None
     annual_return_reference: Decimal | None
     status: str
     created_at: datetime
+
+
+class FundingPropertyUpdate(BaseModel):
+    property_ref: str | None = Field(default=None, max_length=180)
 
 
 class InvestmentReserveRequest(BaseModel):
@@ -547,6 +559,7 @@ class InvestmentReservationView(ORMModel):
     opportunity_id: str
     investor_id: str
     amount: Decimal
+    instrument_type: str = "TOKEN"
     status: str
     confirmed_at: datetime | None
 
@@ -557,7 +570,44 @@ class InvestmentPositionView(ORMModel):
     investor_id: str
     principal: Decimal
     accrued_return: Decimal
+    instrument_type: str = "TOKEN"
+    source: str = "PLATFORM"
+    tokens_qty: int | None = None
+    property_ref: str | None = None
+    notes: str | None = None
     status: str
+
+
+class ManualInvestmentCreate(BaseModel):
+    opportunity_id: str
+    investor_id: str
+    amount: Decimal = Field(gt=0)
+    instrument_type: str | None = None
+    property_ref: str | None = Field(default=None, max_length=180)
+    notes: str | None = None
+
+
+class ManualRentabilityCreate(BaseModel):
+    position_id: str
+    amount: Decimal = Field(gt=0)
+    reference_month: str = Field(min_length=7, max_length=7)
+    notes: str | None = None
+
+
+class RentabilityCreditView(ORMModel):
+    id: str
+    position_id: str
+    investor_id: str
+    amount: Decimal
+    reference_month: str
+    source: str
+    status: str
+    notes: str | None = None
+    created_at: datetime
+
+
+class InstrumentHintRequest(BaseModel):
+    amount: Decimal = Field(gt=0)
 
 
 class BillingGenerateRequest(BaseModel):

@@ -3,7 +3,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { BadgeDollarSign, GitBranch, Landmark, LockKeyhole, Plus, ShieldCheck, WalletCards } from "lucide-react";
 import { CurrencyFormField } from "@/components/currency-input";
-import { api, CommissionEntry, CommissionRule, FundingOpportunity, InvestmentPosition, InvestmentReservation, Invitation, NetworkDownlineMember, NetworkNode, NetworkSummary, User } from "@/lib/api";
+import { api, CommissionEntry, CommissionRule, FundingOpportunity, InvestmentPosition, InvestmentReservation, Invitation, NetworkDownlineMember, NetworkNode, NetworkSummary, RentabilityCredit, User } from "@/lib/api";
 
 const brl=new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"});
 const PARTNER_ROLES=["MASTER_FRANCHISEE","MANAGER","PARTNER","QUOTA_SELLER"];
@@ -37,14 +37,224 @@ export function NetworkModule(){
 }
 
 export function FundingModule(){
-  const [items,setItems]=useState<FundingOpportunity[]>([]),[reservations,setReservations]=useState<InvestmentReservation[]>([]),[positions,setPositions]=useState<InvestmentPosition[]>([]),[message,setMessage]=useState(""),[canAdmin,setCanAdmin]=useState(false),[formKey,setFormKey]=useState(0);
-  const load=useCallback(()=>Promise.all([api<User>("/auth/me"),api<FundingOpportunity[]>("/funding/opportunities"),api<InvestmentReservation[]>("/funding/reservations"),api<InvestmentPosition[]>("/funding/positions")]).then(([me,o,r,p])=>{setCanAdmin(me.role==="PLATFORM_ADMIN");setItems(o);setReservations(r);setPositions(p)}),[]);useEffect(()=>{load().catch(e=>setMessage(e.message))},[load]);
-  async function create(e:FormEvent<HTMLFormElement>){e.preventDefault();const form=e.currentTarget;const f=new FormData(form);await api("/funding/opportunities",{method:"POST",body:JSON.stringify({title:f.get("title"),product:f.get("product"),capital_source:f.get("capital_source"),target_amount:f.get("target_amount"),min_investment:f.get("min_investment"),annual_return_reference:f.get("annual_return_reference")||null})});form.reset();setFormKey(k=>k+1);setMessage("Oportunidade publicada no ambiente simulado.");await load()}
-  async function reserve(id:string,min:string){try{await api(`/funding/opportunities/${id}/reserve`,{method:"POST",body:JSON.stringify({amount:min})});setMessage("Reserva criada. Aguarde a confirmação do backoffice.");await load()}catch(e){setMessage(e instanceof Error?e.message:"Perfil não habilitado")}}
-  async function confirm(id:string){await api(`/funding/reservations/${id}/mock-confirm`,{method:"POST"});setMessage("Aporte simulado confirmado e posição criada.");await load()}
+  const [items,setItems]=useState<FundingOpportunity[]>([]);
+  const [reservations,setReservations]=useState<InvestmentReservation[]>([]);
+  const [positions,setPositions]=useState<InvestmentPosition[]>([]);
+  const [credits,setCredits]=useState<RentabilityCredit[]>([]);
+  const [users,setUsers]=useState<User[]>([]);
+  const [message,setMessage]=useState('');
+  const [canAdmin,setCanAdmin]=useState(false);
+  const [formKey,setFormKey]=useState(0);
+  const [reserveAmount,setReserveAmount]=useState<Record<string,string>>({});
+  const load=useCallback(()=>Promise.all([
+    api<User>('/auth/me'),
+    api<FundingOpportunity[]>('/funding/opportunities'),
+    api<InvestmentReservation[]>('/funding/reservations'),
+    api<InvestmentPosition[]>('/funding/positions'),
+    api<RentabilityCredit[]>('/funding/rentability-credits').catch(()=>[] as RentabilityCredit[]),
+  ]).then(async ([me,o,r,p,c])=>{
+    setCanAdmin(me.role==='PLATFORM_ADMIN'||me.role==='INTERNAL_STAFF');
+    setItems(o);setReservations(r);setPositions(p);setCredits(c);
+    if(me.role==='PLATFORM_ADMIN'||me.role==='INTERNAL_STAFF'){
+      try{setUsers(await api<User[]>('/admin/users'));}catch{setUsers([]);}
+    }
+  }),[]);
+  useEffect(()=>{load().catch(e=>setMessage(e.message));},[load]);
+
+  async function create(e:FormEvent<HTMLFormElement>){
+    e.preventDefault();
+    const form=e.currentTarget;const f=new FormData(form);
+    await api('/funding/opportunities',{method:'POST',body:JSON.stringify({
+      title:f.get('title'),
+      product:f.get('product'),
+      capital_source:f.get('capital_source'),
+      instrument_type:f.get('instrument_type'),
+      target_amount:f.get('target_amount'),
+      min_investment:f.get('min_investment')||null,
+      token_unit_price:f.get('token_unit_price')||'100',
+      property_ref:f.get('property_ref')||null,
+      annual_return_reference:f.get('annual_return_reference')||null,
+    })});
+    form.reset();setFormKey(k=>k+1);setMessage('Captacao publicada (tokens a partir de R$ 100; mutuo a partir de R$ 10.000).');await load();
+  }
+  async function linkProperty(e:FormEvent<HTMLFormElement>){
+    e.preventDefault();const f=new FormData(e.currentTarget);
+    const id=String(f.get('opportunity_id')||'');
+    await api(/funding/opportunities//property,{method:'PATCH',body:JSON.stringify({property_ref:f.get('property_ref')||null})});
+    setMessage('Imovel/matricula vinculado a captacao.');await load();
+  }
+  async function reserve(id:string, fallbackMin:string){
+    try{
+      const amount=reserveAmount[id]||fallbackMin;
+      await api(/funding/opportunities//reserve,{method:'POST',body:JSON.stringify({amount})});
+      setMessage('Reserva criada. Aguarde a confirmacao do backoffice.');await load();
+    }catch(err){setMessage(err instanceof Error?err.message:'Perfil nao habilitado');}
+  }
+  async function confirm(id:string){await api(/funding/reservations//mock-confirm,{method:'POST'});setMessage('Aporte confirmado e posicao criada.');await load();}
+  async function manualInvest(e:FormEvent<HTMLFormElement>){
+    e.preventDefault();const form=e.currentTarget;const f=new FormData(form);
+    await api('/funding/manual-investments',{method:'POST',body:JSON.stringify({
+      opportunity_id:f.get('opportunity_id'),
+      investor_id:f.get('investor_id'),
+      amount:f.get('amount'),
+      instrument_type:f.get('instrument_type')||null,
+      property_ref:f.get('property_ref')||null,
+      notes:f.get('notes')||null,
+    })});
+    form.reset();setMessage('Investimento lancado manualmente.');await load();
+  }
+  async function manualRent(e:FormEvent<HTMLFormElement>){
+    e.preventDefault();const form=e.currentTarget;const f=new FormData(form);
+    await api('/funding/manual-rentability',{method:'POST',body:JSON.stringify({
+      position_id:f.get('position_id'),
+      amount:f.get('amount'),
+      reference_month:f.get('reference_month'),
+      notes:f.get('notes')||null,
+    })});
+    form.reset();setMessage('Rentabilidade lancada manualmente.');await load();
+  }
   const total=useMemo(()=>positions.reduce((s,p)=>s+Number(p.principal),0),[positions]);
-  return <><Heading title="Funding e investimentos" text="Oportunidades, capacidade, reservas e posições com segregação por perfil de investidor." icon={<Landmark/>}/>{message&&<div className="notice"><ShieldCheck/>{message}</div>}<div className="network-metrics"><Metric label="Oportunidades" value={String(items.length)}/><Metric label="Reservas" value={String(reservations.length)}/><Metric label="Posições" value={String(positions.length)}/><Metric label="Capital confirmado" value={brl.format(total)}/></div><section className="panel">{canAdmin&&<form key={formKey} className="quick-form funding-form" onSubmit={create}><input name="title" placeholder="Título da oportunidade" required/><select name="product"><option>SDC</option><option>FLASH_CREDIT</option></select><select name="capital_source"><option value="RETAIL">Varejo</option><option value="INSTITUTIONAL">Institucional</option></select><CurrencyFormField name="target_amount" placeholder="Meta (R$)" required/><CurrencyFormField name="min_investment" placeholder="Mínimo (R$)" required/><input name="annual_return_reference" type="number" step="0.01" placeholder="Retorno ref. a.a."/><button><Plus/>Publicar</button></form>}<div className="funding-grid">{items.map(x=>{const pct=Math.min(100,Number(x.funded_amount)/Number(x.target_amount)*100);return <article className="funding-card" key={x.id}><div><span className={`pill pill-${x.status.toLowerCase()}`}>{x.status}</span><small>{x.product} · {x.capital_source}</small></div><h3>{x.title}</h3><strong>{brl.format(Number(x.target_amount))}</strong><div className="funding-progress"><i style={{width:`${pct}%`}}/></div><small>{brl.format(Number(x.funded_amount))} confirmado · mínimo {brl.format(Number(x.min_investment))}</small><button onClick={()=>reserve(x.id,x.min_investment)} disabled={x.status!=="OPEN"||canAdmin}>Reservar mínimo</button></article>})}</div></section><section className="panel identity-table"><h2>Reservas operacionais</h2>{reservations.map(r=><div className="session-row" key={r.id}><div><b>{brl.format(Number(r.amount))}</b><small>Oportunidade: {items.find(x=>x.id===r.opportunity_id)?.title}</small></div><div className="actions-cell"><span className={`pill pill-${r.status.toLowerCase()}`}>{r.status}</span>{canAdmin&&r.status==="RESERVED"&&<button className="table-action" onClick={()=>confirm(r.id)}>Confirmar mock</button>}</div></div>)}</section></>
+  const investors=users.filter(u=>['RETAIL_INVESTOR','INSTITUTIONAL_FUND','CLIENT','PLATFORM_ADMIN'].includes(u.role));
+
+  return <>
+    <Heading title='Flash Invest' text='Captacao via tokens (a partir de R$ 100). A partir de R$ 10.000 tambem pode usar mutuo financeiro. Imovel vinculado manualmente; investimento e rentabilidade podem ser lancados a mao.' icon={<Landmark/>}/>
+    {message&&<div className='notice'><ShieldCheck/>{message}</div>}
+    <div className='network-metrics'>
+      <Metric label='Captacoes' value={String(items.length)}/>
+      <Metric label='Reservas' value={String(reservations.length)}/>
+      <Metric label='Posicoes' value={String(positions.length)}/>
+      <Metric label='Capital confirmado' value={brl.format(total)}/>
+    </div>
+
+    <section className='panel'>
+      {canAdmin&&(
+        <form key={formKey} className='quick-form funding-form' onSubmit={create}>
+          <input name='title' placeholder='Titulo da captacao' required/>
+          <select name='product'><option>FLASH_INVEST</option><option>SDC</option><option>FLASH_CREDIT</option></select>
+          <select name='capital_source'><option value='RETAIL'>Varejo</option><option value='INSTITUTIONAL'>Institucional</option></select>
+          <select name='instrument_type'><option value='TOKEN'>Token (min. R$ 100)</option><option value='MUTUO'>Mutuo (>= R$ 10.000)</option></select>
+          <CurrencyFormField name='target_amount' placeholder='Meta (R$)' required/>
+          <CurrencyFormField name='min_investment' placeholder='Minimo (opcional)'/>
+          <input name='token_unit_price' type='number' step='0.01' defaultValue={100} placeholder='Face do token'/>
+          <input name='property_ref' placeholder='Imovel / matricula (manual)'/>
+          <input name='annual_return_reference' type='number' step='0.01' placeholder='Retorno ref. a.a. (opc.)'/>
+          <button><Plus/>Publicar captacao</button>
+        </form>
+      )}
+      <div className='funding-grid'>{items.map(x=>{
+        const pct=Math.min(100,Number(x.funded_amount)/Number(x.target_amount)*100);
+        const unit=Number(x.token_unit_price||100);
+        return <article className='funding-card' key={x.id}>
+          <div>
+            <span className={pill pill-}>{x.status}</span>
+            <small>{x.instrument_type||'TOKEN'} · {x.product} · {x.capital_source}</small>
+          </div>
+          <h3>{x.title}</h3>
+          <strong>{brl.format(Number(x.target_amount))}</strong>
+          <div className='funding-progress'><i style={{width:${pct}%}}/></div>
+          <small>{brl.format(Number(x.funded_amount))} confirmado · min. {brl.format(Number(x.min_investment))}{(x.instrument_type||'TOKEN')==='TOKEN'? · token :''}</small>
+          {x.property_ref?<small>Imovel: {x.property_ref}</small>:<small>Imovel ainda nao vinculado</small>}
+          {!canAdmin&&x.status==='OPEN'&&(
+            <div style={{display:'grid',gap:8,marginTop:8}}>
+              <input type='number' min='100' step='100' placeholder='Valor do aporte (R$)' value={reserveAmount[x.id]||''} onChange={ev=>setReserveAmount(s=>({...s,[x.id]:ev.target.value}))}/>
+              <button type='button' onClick={()=>void reserve(x.id,x.min_investment)}>Reservar aporte</button>
+            </div>
+          )}
+        </article>;
+      })}</div>
+    </section>
+
+    {canAdmin&&(
+      <div className='admin-grid three'>
+        <section className='panel'>
+          <h2>Vincular imovel (manual)</h2>
+          <form className='stack-form' onSubmit={linkProperty}>
+            <select name='opportunity_id' required>
+              <option value=''>Captacao</option>
+              {items.map(o=><option key={o.id} value={o.id}>{o.title}</option>)}
+            </select>
+            <input name='property_ref' placeholder='Matricula / endereco / ref. do imovel' required/>
+            <button>Salvar vinculo</button>
+          </form>
+        </section>
+        <section className='panel'>
+          <h2>Lancar investimento manual</h2>
+          <form className='stack-form' onSubmit={manualInvest}>
+            <select name='opportunity_id' required>
+              <option value=''>Captacao</option>
+              {items.map(o=><option key={o.id} value={o.id}>{o.title} · {o.instrument_type||'TOKEN'}</option>)}
+            </select>
+            <select name='investor_id' required>
+              <option value=''>Investidor</option>
+              {investors.map(u=><option key={u.id} value={u.id}>{u.name} · {u.email}</option>)}
+            </select>
+            <CurrencyFormField name='amount' placeholder='Valor (R$)' required/>
+            <select name='instrument_type'>
+              <option value=''>Herdar da captacao</option>
+              <option value='TOKEN'>TOKEN</option>
+              <option value='MUTUO'>MUTUO</option>
+            </select>
+            <input name='property_ref' placeholder='Imovel (opcional)'/>
+            <input name='notes' placeholder='Observacao'/>
+            <button>Lancar investimento</button>
+          </form>
+        </section>
+        <section className='panel'>
+          <h2>Lancar rentabilidade manual</h2>
+          <form className='stack-form' onSubmit={manualRent}>
+            <select name='position_id' required>
+              <option value=''>Posicao</option>
+              {positions.map(p=>{
+                const opp=items.find(o=>o.id===p.opportunity_id);
+                return <option key={p.id} value={p.id}>{opp?.title||p.opportunity_id} · {brl.format(Number(p.principal))}</option>;
+              })}
+            </select>
+            <CurrencyFormField name='amount' placeholder='Rentabilidade (R$)' required/>
+            <input name='reference_month' type='month' required/>
+            <input name='notes' placeholder='Motivo / observacao'/>
+            <button>Lancar rentabilidade</button>
+          </form>
+        </section>
+      </div>
+    )}
+
+    <section className='panel identity-table'>
+      <h2>Reservas</h2>
+      {reservations.map(r=><div className='session-row' key={r.id}>
+        <div><b>{brl.format(Number(r.amount))}</b><small>{items.find(x=>x.id===r.opportunity_id)?.title} · {r.instrument_type||'TOKEN'}</small></div>
+        <div className='actions-cell'>
+          <span className={pill pill-}>{r.status}</span>
+          {canAdmin&&r.status==='RESERVED'&&<button className='table-action' onClick={()=>void confirm(r.id)}>Confirmar</button>}
+        </div>
+      </div>)}
+    </section>
+
+    <section className='panel identity-table'>
+      <h2>Posicoes</h2>
+      {positions.length===0?<p className='muted'>Nenhuma posicao ainda.</p>:positions.map(p=><div className='session-row' key={p.id}>
+        <div>
+          <b>{brl.format(Number(p.principal))}</b>
+          <small>
+            {items.find(x=>x.id===p.opportunity_id)?.title} · {p.instrument_type||'TOKEN'} · {p.source||'PLATFORM'}
+            {p.tokens_qty!=null? ·  tokens:''}
+            {p.property_ref? · imovel :''}
+          </small>
+          <small>Rentabilidade acumulada: {brl.format(Number(p.accrued_return))}</small>
+        </div>
+        <span className={pill pill-}>{p.status}</span>
+      </div>)}
+    </section>
+
+    {credits.length>0&&<section className='panel identity-table'>
+      <h2>Rentabilidades lancadas</h2>
+      {credits.map(c=><div className='session-row' key={c.id}>
+        <div><b>{brl.format(Number(c.amount))}</b><small>{c.reference_month} · {c.source}{c.notes? · :''}</small></div>
+        <span className={pill pill-}>{c.status}</span>
+      </div>)}
+    </section>}
+  </>;
 }
+
 
 function Heading({title,text,icon}:{title:string;text:string;icon:React.ReactNode}){return <div className="page-heading"><div><span className="eyebrow dark">ECOSSISTEMA LETTER</span><h1>{title}</h1><p>{text}</p></div><div className="operational-icon">{icon}</div></div>}
 function Metric({label,value}:{label:string;value:string}){return <article><small>{label}</small><strong>{value}</strong></article>}

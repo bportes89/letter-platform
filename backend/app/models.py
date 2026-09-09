@@ -2,7 +2,7 @@ from datetime import UTC, date, datetime
 from enum import StrEnum
 from uuid import uuid4
 
-from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -897,9 +897,14 @@ class FundingOpportunity(TimestampMixin, Base):
     title: Mapped[str] = mapped_column(String(180))
     product: Mapped[str] = mapped_column(String(50))
     capital_source: Mapped[str] = mapped_column(String(30), default="RETAIL")
+    # TOKEN (< R$10k exclusivo; >= R$10k também pode) | MUTUO (>= R$10k)
+    instrument_type: Mapped[str] = mapped_column(String(20), default="TOKEN", index=True)
     target_amount: Mapped[float] = mapped_column(Numeric(15, 2))
     funded_amount: Mapped[float] = mapped_column(Numeric(15, 2), default=0)
-    min_investment: Mapped[float] = mapped_column(Numeric(15, 2), default=1000)
+    min_investment: Mapped[float] = mapped_column(Numeric(15, 2), default=100)
+    token_unit_price: Mapped[float] = mapped_column(Numeric(15, 2), default=100)
+    monthly_return_rate: Mapped[float] = mapped_column(Numeric(8, 4), default=0.016)
+    property_ref: Mapped[str | None] = mapped_column(String(180))
     annual_return_reference: Mapped[float | None] = mapped_column(Numeric(8, 4))
     status: Mapped[str] = mapped_column(String(30), default="OPEN", index=True)
 
@@ -912,6 +917,7 @@ class InvestmentReservation(TimestampMixin, Base):
     opportunity_id: Mapped[str] = mapped_column(ForeignKey("funding_opportunities.id"), index=True)
     investor_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
     amount: Mapped[float] = mapped_column(Numeric(15, 2))
+    instrument_type: Mapped[str] = mapped_column(String(20), default="TOKEN")
     status: Mapped[str] = mapped_column(String(30), default="RESERVED", index=True)
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
@@ -925,7 +931,29 @@ class InvestmentPosition(TimestampMixin, Base):
     investor_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
     principal: Mapped[float] = mapped_column(Numeric(15, 2))
     accrued_return: Mapped[float] = mapped_column(Numeric(15, 2), default=0)
+    instrument_type: Mapped[str] = mapped_column(String(20), default="TOKEN")
+    source: Mapped[str] = mapped_column(String(20), default="PLATFORM")  # PLATFORM | MANUAL
+    tokens_qty: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    property_ref: Mapped[str | None] = mapped_column(String(180))
+    notes: Mapped[str | None] = mapped_column(Text)
+    recorded_by_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), index=True)
     status: Mapped[str] = mapped_column(String(30), default="ACTIVE")
+
+
+class RentabilityCredit(TimestampMixin, Base):
+    """Lançamento de rentabilidade (manual ou sistema) sobre posição Flash Invest."""
+
+    __tablename__ = "rentability_credits"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    position_id: Mapped[str] = mapped_column(ForeignKey("investment_positions.id"), index=True)
+    investor_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    amount: Mapped[float] = mapped_column(Numeric(15, 2))
+    reference_month: Mapped[str] = mapped_column(String(7), index=True)  # YYYY-MM
+    source: Mapped[str] = mapped_column(String(20), default="MANUAL")  # MANUAL | PLATFORM
+    status: Mapped[str] = mapped_column(String(30), default="POSTED", index=True)
+    notes: Mapped[str | None] = mapped_column(Text)
+    recorded_by_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), index=True)
 
 
 class Invoice(TimestampMixin, Base):

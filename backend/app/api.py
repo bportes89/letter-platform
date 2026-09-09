@@ -54,11 +54,12 @@ from app.schemas import (
     BillingGenerateRequest, CollectionActionView, CommissionAllocate, CommissionEntryView, CommissionRuleCreate,
     CommissionRuleView, DocumentView, EscrowAsaasStatusView, EscrowCreate, EscrowBillingCycleView, EscrowSubaccountPreviewView, EscrowToggleRequest, EscrowView, EscrowWebhook, WalletBillPaymentRequest, WalletBoletoIssueRequest, WalletBoletoView, WalletEscrowBillingSyncView, LssBillingSyncView, RecurringCommissionSettlementView, MmnSplitPreviewRequest, MmnSplitPreviewView, AsaasMmnPaymentCreate, AsaasMmnPaymentView, PaymentSplitRowView, LegalManualPublicView, LegalManualView, WalletPricingRowView, WalletTransferRequest,
     FiscalEvidenceView, SefazRobotStatusView,
-    DelinquencyView, FiscalReleaseRequest, FundingOpportunityCreate, FundingOpportunityView, InvitationView,
+    DelinquencyView, FiscalReleaseRequest, FundingOpportunityCreate, FundingOpportunityView, FundingPropertyUpdate, InvitationView,
     NinaApprovalRequest, NinaCriticalApprovalView, NinaDistressCaseCreate, NinaDistressCaseView,
     NinaDistressEventView, NinaDocumentCreate, NinaGateApplyRequest, NinaLegalDocumentView, NinaTimelineEvaluateRequest,
     InviteAccept, InviteCreate, PartnerInviteCreate, InvitationPreviewView, PartnerContractAcceptanceView, KycCreate, KycDecision, KycSelfCompleteResponse, KycView, LeadCreate,
-    InvestmentPositionView, InvestmentReservationView, InvestmentReserveRequest, InvoicePaymentWebhook, InvoiceProcessorRequest, InvoiceView,
+    InvestmentPositionView, InvestmentReservationView, InvestmentReserveRequest, InstrumentHintRequest, InvoicePaymentWebhook, InvoiceProcessorRequest, InvoiceView,
+    ManualInvestmentCreate, ManualRentabilityCreate, RentabilityCreditView,
     PaymentReceiptView, PreAnalysisEngineRequest, PreAnalysisPautaView, PreAnalysisProposalRequest,
     PreAnalysisTapafCheckoutAcceptRequest, PreAnalysisTapafPaymentWebhook, PreAnalysisValidateDocumentsRequest,
     LeaseEquityPautaCreate, LeaseEquityPautaView, LeaseEquityTapafWebhook, LeaseEquityInspectionRequest,
@@ -926,14 +927,56 @@ def commission_fiscal_release(payload: FiscalReleaseRequest, user: User = Depend
 
 @router.post("/funding/opportunities", response_model=FundingOpportunityView, status_code=201)
 def funding_opportunity_create(payload: FundingOpportunityCreate, user: User = Depends(require_scope("admin:users")), db: Session = Depends(get_db)):
-    if payload.capital_source not in {"RETAIL","INSTITUTIONAL"}: raise HTTPException(status_code=422,detail="Fonte de capital inválida")
-    if payload.proposal_id and not db.scalar(select(Proposal).where(Proposal.id==payload.proposal_id,Proposal.organization_id==user.organization_id)): raise HTTPException(status_code=404,detail="Proposta não encontrada")
-    item=FundingOpportunity(organization_id=user.organization_id,**payload.model_dump());db.add(item);db.flush();audit(db,user,"funding.opportunity_created","funding_opportunity",item.id);db.commit();db.refresh(item);return item
+    from app.flash_invest_service import create_opportunity
+
+    if payload.proposal_id and not db.scalar(select(Proposal).where(Proposal.id==payload.proposal_id,Proposal.organization_id==user.organization_id)):
+        raise HTTPException(status_code=404,detail="Proposta não encontrada")
+    item = create_opportunity(
+        db,
+        user,
+        title=payload.title,
+        product=payload.product,
+        capital_source=payload.capital_source,
+        target_amount=payload.target_amount,
+        instrument_type=payload.instrument_type,
+        min_investment=payload.min_investment,
+        token_unit_price=payload.token_unit_price,
+        monthly_return_rate=payload.monthly_return_rate,
+        property_ref=payload.property_ref,
+        annual_return_reference=payload.annual_return_reference,
+        proposal_id=payload.proposal_id,
+    )
+    audit(db,user,"funding.opportunity_created","funding_opportunity",item.id,{"instrument_type":item.instrument_type})
+    db.commit(); db.refresh(item); return item
 
 
 @router.get("/funding/opportunities", response_model=list[FundingOpportunityView])
 def funding_opportunities(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     return list(db.scalars(select(FundingOpportunity).where(FundingOpportunity.organization_id==user.organization_id).order_by(FundingOpportunity.created_at.desc())))
+
+
+@router.patch("/funding/opportunities/{opportunity_id}/property", response_model=FundingOpportunityView)
+def funding_opportunity_property(
+    opportunity_id: str,
+    payload: FundingPropertyUpdate,
+    user: User = Depends(require_scope("admin:users")),
+    db: Session = Depends(get_db),
+):
+    from app.flash_invest_service import set_opportunity_property
+
+    opportunity = db.scalar(select(FundingOpportunity).where(FundingOpportunity.id==opportunity_id,FundingOpportunity.organization_id==user.organization_id))
+    if not opportunity: raise HTTPException(status_code=404, detail="Oportunidade não encontrada")
+    item = set_opportunity_property(db, opportunity, payload.property_ref)
+    audit(db,user,"funding.property_linked","funding_opportunity",item.id,{"property_ref":item.property_ref})
+    db.commit(); db.refresh(item); return item
+
+
+@router.post("/funding/instrument-hint")
+def funding_instrument_hint(payload: InstrumentHintRequest, user: User = Depends(get_current_user)):
+    from app.flash_invest_service import instrument_hint
+
+    _ = user
+    return instrument_hint(payload.amount)
 
 
 @router.post("/funding/opportunities/{opportunity_id}/reserve", response_model=InvestmentReservationView, status_code=201)
@@ -948,6 +991,47 @@ def investment_confirm(reservation_id: str, user: User = Depends(require_scope("
     reservation=db.scalar(select(InvestmentReservation).where(InvestmentReservation.id==reservation_id,InvestmentReservation.organization_id==user.organization_id))
     if not reservation: raise HTTPException(status_code=404,detail="Reserva não encontrada")
     position=confirm_investment(db,reservation);audit(db,user,"investment.confirmed","investment_position",position.id);db.commit();db.refresh(position);return position
+
+
+@router.post("/funding/manual-investments", response_model=InvestmentPositionView, status_code=201)
+def funding_manual_investment(payload: ManualInvestmentCreate, user: User = Depends(require_scope("admin:users")), db: Session = Depends(get_db)):
+    from app.flash_invest_service import manual_investment
+
+    position = manual_investment(
+        db,
+        user,
+        opportunity_id=payload.opportunity_id,
+        investor_id=payload.investor_id,
+        amount=payload.amount,
+        instrument_type=payload.instrument_type,
+        property_ref=payload.property_ref,
+        notes=payload.notes,
+    )
+    audit(db,user,"investment.manual","investment_position",position.id,{"amount":str(payload.amount),"source":"MANUAL"})
+    db.commit(); db.refresh(position); return position
+
+
+@router.post("/funding/manual-rentability", response_model=RentabilityCreditView, status_code=201)
+def funding_manual_rentability(payload: ManualRentabilityCreate, user: User = Depends(require_scope("admin:users")), db: Session = Depends(get_db)):
+    from app.flash_invest_service import manual_rentability
+
+    credit = manual_rentability(
+        db,
+        user,
+        position_id=payload.position_id,
+        amount=payload.amount,
+        reference_month=payload.reference_month,
+        notes=payload.notes,
+    )
+    audit(db,user,"rentability.manual","rentability_credit",credit.id,{"amount":str(payload.amount),"month":payload.reference_month})
+    db.commit(); db.refresh(credit); return credit
+
+
+@router.get("/funding/rentability-credits", response_model=list[RentabilityCreditView])
+def funding_rentability_credits(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.flash_invest_service import list_rentability_credits
+
+    return list_rentability_credits(db, user)
 
 
 @router.get("/funding/reservations", response_model=list[InvestmentReservationView])

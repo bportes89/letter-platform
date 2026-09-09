@@ -184,41 +184,12 @@ def release_fiscal_hold(db: Session, user: User, reference_month: str, document_
 
 
 def reserve_investment(db: Session, user: User, opportunity: FundingOpportunity, amount: Decimal) -> InvestmentReservation:
-    if user.role not in {Role.RETAIL_INVESTOR, Role.INSTITUTIONAL_FUND}:
-        raise HTTPException(status_code=403, detail="Perfil não habilitado para investimento")
-    if opportunity.status != "OPEN":
-        raise HTTPException(status_code=409, detail="Oportunidade não está aberta")
-    value = money(amount)
-    if value < Decimal(str(opportunity.min_investment)):
-        raise HTTPException(status_code=422, detail="Valor abaixo do investimento mínimo")
-    reserved = db.scalar(select(func.coalesce(func.sum(InvestmentReservation.amount), 0)).where(
-        InvestmentReservation.opportunity_id == opportunity.id,
-        InvestmentReservation.status.in_(["RESERVED", "CONFIRMED"]),
-    ))
-    if Decimal(str(reserved)) + value > Decimal(str(opportunity.target_amount)):
-        raise HTTPException(status_code=409, detail="Reserva excede o saldo disponível da oportunidade")
-    item = InvestmentReservation(
-        organization_id=user.organization_id, opportunity_id=opportunity.id,
-        investor_id=user.id, amount=value,
-    )
-    db.add(item)
-    try:
-        db.flush()
-    except IntegrityError:
-        db.rollback(); raise HTTPException(status_code=409, detail="Já existe reserva ativa para este investidor")
-    return item
+    from app.flash_invest_service import reserve_investment as _reserve
+
+    return _reserve(db, user, opportunity, amount)
 
 
 def confirm_investment(db: Session, reservation: InvestmentReservation) -> InvestmentPosition:
-    if reservation.status != "RESERVED":
-        raise HTTPException(status_code=409, detail="Reserva não está pendente")
-    opportunity = db.get(FundingOpportunity, reservation.opportunity_id)
-    reservation.status = "CONFIRMED"; reservation.confirmed_at = datetime.now(UTC)
-    opportunity.funded_amount = money(Decimal(str(opportunity.funded_amount)) + Decimal(str(reservation.amount)))
-    if Decimal(str(opportunity.funded_amount)) >= Decimal(str(opportunity.target_amount)):
-        opportunity.status = "FUNDED"
-    position = InvestmentPosition(
-        organization_id=reservation.organization_id, opportunity_id=opportunity.id,
-        investor_id=reservation.investor_id, principal=reservation.amount,
-    )
-    db.add(position); db.flush(); return position
+    from app.flash_invest_service import confirm_investment as _confirm
+
+    return _confirm(db, reservation)

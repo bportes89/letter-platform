@@ -441,10 +441,12 @@ def test_five_level_commission_allocation_and_fiscal_hold(client, auth_headers):
 
 def test_funding_reservation_confirmation_and_profile_guard(client, auth_headers):
     opportunity = client.post("/api/v1/funding/opportunities", headers=auth_headers, json={
-        "title":"Pool SDC Piloto","product":"SDC","capital_source":"RETAIL",
+        "title":"Pool SDC Piloto","product":"SDC","capital_source":"RETAIL","instrument_type":"TOKEN",
         "target_amount":"10000","min_investment":"1000","annual_return_reference":"30"
     })
     assert opportunity.status_code == 201
+    assert opportunity.json()["instrument_type"] == "TOKEN"
+    assert opportunity.json()["token_unit_price"] == "100.00"
     investor_login = client.post("/api/v1/auth/login", json={"email":"investidor@letter.com.br","password":"Letter@123"}).json()
     investor_headers = {"Authorization":f"Bearer {investor_login['access_token']}"}
     reservation = client.post(f"/api/v1/funding/opportunities/{opportunity.json()['id']}/reserve", headers=investor_headers, json={"amount":"4000"})
@@ -452,12 +454,86 @@ def test_funding_reservation_confirmation_and_profile_guard(client, auth_headers
     confirmed = client.post(f"/api/v1/funding/reservations/{reservation.json()['id']}/mock-confirm", headers=auth_headers)
     assert confirmed.status_code == 200
     assert confirmed.json()["principal"] == "4000.00"
+    assert confirmed.json()["tokens_qty"] == 40
     positions = client.get("/api/v1/funding/positions", headers=investor_headers)
     assert positions.status_code == 200 and len(positions.json()) == 1
     partner_login = client.post("/api/v1/auth/login", json={"email":"parceiro@letter.com.br","password":"Letter@123"}).json()
     partner_headers = {"Authorization":f"Bearer {partner_login['access_token']}"}
     blocked = client.post(f"/api/v1/funding/opportunities/{opportunity.json()['id']}/reserve", headers=partner_headers, json={"amount":"1000"})
     assert blocked.status_code == 403
+
+
+def test_flash_invest_manual_investment_and_rentability(client, auth_headers):
+    opportunity = client.post("/api/v1/funding/opportunities", headers=auth_headers, json={
+        "title": "Flash Invest Tokens",
+        "product": "FLASH_INVEST",
+        "capital_source": "RETAIL",
+        "instrument_type": "TOKEN",
+        "target_amount": "50000",
+        "property_ref": "Matricula 123-A",
+    })
+    assert opportunity.status_code == 201
+    linked = client.patch(
+        f"/api/v1/funding/opportunities/{opportunity.json()['id']}/property",
+        headers=auth_headers,
+        json={"property_ref": "Imovel Centro · Mat. 999"},
+    )
+    assert linked.status_code == 200
+    assert linked.json()["property_ref"] == "Imovel Centro · Mat. 999"
+
+    investor = client.post("/api/v1/auth/login", json={"email": "investidor@letter.com.br", "password": "Letter@123"}).json()
+    investor_id = investor["user"]["id"] if "user" in investor else None
+    if not investor_id:
+        me = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {investor['access_token']}"})
+        investor_id = me.json()["id"]
+
+    below = client.post("/api/v1/funding/manual-investments", headers=auth_headers, json={
+        "opportunity_id": opportunity.json()["id"],
+        "investor_id": investor_id,
+        "amount": "50",
+    })
+    assert below.status_code == 422
+
+    manual = client.post("/api/v1/funding/manual-investments", headers=auth_headers, json={
+        "opportunity_id": opportunity.json()["id"],
+        "investor_id": investor_id,
+        "amount": "1500",
+        "notes": "Aporte offline",
+    })
+    assert manual.status_code == 201
+    assert manual.json()["source"] == "MANUAL"
+    assert manual.json()["tokens_qty"] == 15
+    assert manual.json()["property_ref"] == "Imovel Centro · Mat. 999"
+
+    rent = client.post("/api/v1/funding/manual-rentability", headers=auth_headers, json={
+        "position_id": manual.json()["id"],
+        "amount": "24.00",
+        "reference_month": "2026-09",
+        "notes": "Ajuste manual",
+    })
+    assert rent.status_code == 201
+    assert rent.json()["amount"] == "24.00"
+
+    positions = client.get("/api/v1/funding/positions", headers=auth_headers)
+    pos = next(p for p in positions.json() if p["id"] == manual.json()["id"])
+    assert pos["accrued_return"] == "24.00"
+
+    mutuo = client.post("/api/v1/funding/opportunities", headers=auth_headers, json={
+        "title": "Flash Invest Mutuo",
+        "product": "FLASH_INVEST",
+        "capital_source": "INSTITUTIONAL",
+        "instrument_type": "MUTUO",
+        "target_amount": "100000",
+    })
+    assert mutuo.status_code == 201
+    assert mutuo.json()["min_investment"] == "10000.00"
+    bad_mutuo = client.post("/api/v1/funding/manual-investments", headers=auth_headers, json={
+        "opportunity_id": mutuo.json()["id"],
+        "investor_id": investor_id,
+        "amount": "5000",
+        "instrument_type": "MUTUO",
+    })
+    assert bad_mutuo.status_code == 422
 
 
 def test_sdc_billing_schedule_and_idempotent_payment(client, auth_headers):
