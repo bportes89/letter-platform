@@ -31,6 +31,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
   const [bankZoneOpen, setBankZoneOpen] = useState(true);
   const [platformZoneOpen, setPlatformZoneOpen] = useState(true);
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     Promise.all([api<Module[]>("/modules"), api<User>("/auth/me")])
@@ -71,6 +72,13 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const modulePath = (key: string) => `/modules/${key}`;
   const isActive = (key: string) => pathname === modulePath(key);
   const isGroupActive = (keys: string[]) => keys.some(isActive);
+  const isGroupExpanded = (groupKey: string, childKeys: string[]) => {
+    if (isGroupActive(childKeys)) return true;
+    return Boolean(openGroups[groupKey]);
+  };
+  const toggleGroup = (groupKey: string) => {
+    setOpenGroups((prev) => ({ ...prev, [groupKey]: !prev[groupKey] }));
+  };
   const showBankZone = bankModules.length > 0;
   const showPlatformZone =
     commercialNav.length > 0 ||
@@ -92,6 +100,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
           <strong>{persona}</strong>
           <ChevronDown size={14} />
         </div>
+        <div className="sidebar-scroll">
         <nav className="main-nav">
           {showBankZone && (
             <div className={`nav-zone${bankZoneOpen ? " open" : ""}${isBankPath(pathname) ? " active-zone" : ""}`}>
@@ -161,23 +170,30 @@ export function Shell({ children }: { children: React.ReactNode }) {
                         {commercialNav.map((item) =>
                           item.children?.length ? (
                             <div
-                              className={`nav-group${isGroupActive(item.children.map((c) => c.key)) ? " open" : ""}`}
+                              className={`nav-group${isGroupExpanded(item.key, item.children.map((c) => c.key)) ? " open" : ""}`}
                               key={item.key}
                             >
-                              <div className="nav-group-title">
+                              <button
+                                type="button"
+                                className="nav-group-title"
+                                onClick={() => toggleGroup(item.key)}
+                                aria-expanded={isGroupExpanded(item.key, item.children.map((c) => c.key))}
+                              >
                                 <ProductIcon keyName="marketplace" />
-                                {item.name}
-                              </div>
-                              {item.children.map((child) => (
-                                <Link
-                                  className={`nav-sub${isActive(child.key) ? " active" : ""}`}
-                                  href={modulePath(child.key)}
-                                  key={child.key}
-                                  onClick={() => setOpen(false)}
-                                >
-                                  {child.name}
-                                </Link>
-                              ))}
+                                <span style={{ flex: 1 }}>{item.name}</span>
+                                <ChevronDown size={12} className="nav-zone-chevron" />
+                              </button>
+                              {isGroupExpanded(item.key, item.children.map((c) => c.key)) &&
+                                item.children.map((child) => (
+                                  <Link
+                                    className={`nav-sub${isActive(child.key) ? " active" : ""}`}
+                                    href={modulePath(child.key)}
+                                    key={child.key}
+                                    onClick={() => setOpen(false)}
+                                  >
+                                    {child.name}
+                                  </Link>
+                                ))}
                             </div>
                           ) : (
                             <Link
@@ -235,6 +251,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
             </div>
           )}
         </nav>
+        </div>
         <button className="logout" onClick={logout}>
           <LogOut />
           Sair
