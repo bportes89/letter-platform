@@ -268,16 +268,32 @@ export function MyWalletModule() {
 
   async function uploadDoc(docId: string, file: File, input?: HTMLInputElement | null) {
     setUploadingDocId(docId);
-    setNotice("");
+    setNotice(`Enviando "${file.name}"…`);
     try {
+      if (file.size > 10 * 1024 * 1024) {
+        throw new Error("Arquivo muito grande. Envie um PDF de até 10 MB.");
+      }
       const data = new FormData();
-      data.append("file", file);
+      data.append("file", file, file.name);
       const token = getToken();
-      const response = await fetch(`${API_URL}/wallet/me/kyc/documents/${docId}`, {
-        method: "POST",
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-        body: data,
-      });
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), 90_000);
+      let response: Response;
+      try {
+        response = await fetch(`${API_URL}/wallet/me/kyc/documents/${encodeURIComponent(docId)}`, {
+          method: "POST",
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          body: data,
+          signal: controller.signal,
+        });
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") {
+          throw new Error("Tempo esgotado no envio. Tente um PDF menor ou use o link oficial de verificação.");
+        }
+        throw err;
+      } finally {
+        window.clearTimeout(timeout);
+      }
       let body: { detail?: string | { msg?: string }[]; message?: string; status?: string } = {};
       try {
         body = await response.json();
@@ -291,7 +307,7 @@ export function MyWalletModule() {
             ? detail
             : Array.isArray(detail)
               ? detail.map((item) => (typeof item === "string" ? item : item.msg || "")).filter(Boolean).join("; ")
-              : "Falha no upload do documento";
+              : `Falha no upload (${response.status})`;
         throw new Error(message);
       }
       setNotice(body.message || `Documento "${file.name}" enviado para análise.`);
@@ -510,13 +526,24 @@ export function MyWalletModule() {
                     {doc.onboarding_url ? (
                       <a className="table-action" href={doc.onboarding_url} target="_blank" rel="noreferrer">Enviar pelo link</a>
                     ) : doc.accepts_api_upload ? (
-                      <label className="table-action" aria-busy={uploadingDocId === doc.id}>
-                        <Upload />
-                        {uploadingDocId === doc.id ? "Enviando…" : "Enviar PDF"}
+                      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
+                        <button
+                          type="button"
+                          className="table-action"
+                          disabled={uploadingDocId === doc.id}
+                          onClick={() => {
+                            const input = document.getElementById(`kyc-file-${doc.id}`) as HTMLInputElement | null;
+                            input?.click();
+                          }}
+                        >
+                          <Upload />
+                          {uploadingDocId === doc.id ? "Enviando…" : "Escolher PDF"}
+                        </button>
                         <input
+                          id={`kyc-file-${doc.id}`}
                           type="file"
                           accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg"
-                          hidden
+                          style={{ display: "none" }}
                           disabled={uploadingDocId === doc.id}
                           onChange={(e) => {
                             const input = e.currentTarget;
@@ -527,7 +554,7 @@ export function MyWalletModule() {
                             );
                           }}
                         />
-                      </label>
+                      </div>
                     ) : (
                       <small className="muted">Aguardando análise</small>
                     )}

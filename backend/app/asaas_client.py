@@ -27,7 +27,6 @@ class AsaasClient:
             timeout=self.timeout,
             headers={
                 "access_token": self.api_key,
-                "Content-Type": "application/json",
                 "User-Agent": "LETTER-Platform/0.24",
             },
         )
@@ -43,6 +42,9 @@ class AsaasClient:
 
     def request(self, method: str, path: str, *, json: dict | None = None, params: dict | None = None, content: bytes | None = None, headers: dict | None = None) -> dict:
         req_headers = dict(headers or {})
+        # Só força JSON quando há body JSON — multipart de upload não pode herdar application/json.
+        if json is not None and "Content-Type" not in req_headers:
+            req_headers["Content-Type"] = "application/json"
         try:
             response = self._client.request(method, path, json=json, params=params, content=content, headers=req_headers or None)
         except httpx.HTTPError as exc:
@@ -125,14 +127,20 @@ class AsaasClient:
         """Asaas exige multipart/form-data com documentFile + type (ex.: SOCIAL_CONTRACT)."""
         mime = (content_type or "application/pdf").split(";")[0].strip() or "application/pdf"
         doc_type = (document_type or "CUSTOM").strip().upper()
+        # Upload de PDF costuma passar de 10s; timeout dedicado evita "Enviando…" eterno no front.
+        upload_timeout = max(float(self.timeout), 60.0)
         try:
-            # Remove Content-Type: application/json do client padrão para o boundary multipart.
             response = self._client.post(
                 f"/myAccount/documents/{document_group_id}",
                 data={"type": doc_type},
                 files={"documentFile": (filename or "documento.pdf", file_bytes, mime)},
-                headers={"Content-Type": None},
+                timeout=upload_timeout,
             )
+        except httpx.TimeoutException as exc:
+            raise HTTPException(
+                status_code=504,
+                detail="Tempo esgotado ao enviar o PDF ao Asaas. Tente um arquivo menor (até 5 MB) ou use o link oficial de verificação.",
+            ) from exc
         except httpx.HTTPError as exc:
             raise HTTPException(status_code=502, detail=f"Asaas indisponível: {exc}") from exc
         if response.status_code == 401:

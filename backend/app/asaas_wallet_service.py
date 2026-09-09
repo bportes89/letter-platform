@@ -304,7 +304,11 @@ def list_kyc_documents(db: Session, account: EscrowAccount) -> dict:
     data = payload.get("data") if isinstance(payload.get("data"), list) else payload if isinstance(payload, list) else []
     items = []
     for row in data:
-        onboarding_url = row.get("onboardingUrl")
+        onboarding_url = row.get("onboardingUrl") or row.get("onboarding_url")
+        if isinstance(onboarding_url, str):
+            onboarding_url = onboarding_url.strip() or None
+        else:
+            onboarding_url = None
         doc_type = str(row.get("type") or row.get("documentType") or "CUSTOM").upper()
         title = str(row.get("title") or row.get("description") or doc_type or "Documento")
         if doc_type == "SOCIAL_CONTRACT" and "contrato" not in title.lower():
@@ -316,6 +320,7 @@ def list_kyc_documents(db: Session, account: EscrowAccount) -> dict:
                 "type": doc_type,
                 "status": str(row.get("status") or "PENDING"),
                 "onboarding_url": onboarding_url,
+                # Com onboardingUrl o Asaas rejeita upload via API — só o link cadastro.io.
                 "accepts_api_upload": not bool(onboarding_url),
             }
         )
@@ -329,8 +334,14 @@ async def upload_kyc_document(db: Session, account: EscrowAccount, document_id: 
     content = await file.read()
     if not content:
         raise HTTPException(status_code=422, detail="Arquivo vazio. Selecione o PDF novamente.")
-    filename = (file.filename or "documento.pdf").strip() or "documento.pdf"
-    content_type = (file.content_type or "").strip() or "application/pdf"
+    raw_name = (file.filename or "documento.pdf").strip() or "documento.pdf"
+    # Asaas/multipart falha com nome de arquivo problemático em alguns browsers.
+    safe_stem = "".join(ch if ch.isalnum() or ch in "-_." else "_" for ch in raw_name.rsplit(".", 1)[0])[:80] or "documento"
+    ext = raw_name.rsplit(".", 1)[-1].lower() if "." in raw_name else "pdf"
+    if ext not in {"pdf", "png", "jpg", "jpeg"}:
+        ext = "pdf"
+    filename = f"{safe_stem}.{ext}"
+    content_type = (file.content_type or "").strip() or ("application/pdf" if ext == "pdf" else f"image/{ext}")
     lower_name = filename.lower()
     if not (lower_name.endswith((".pdf", ".png", ".jpg", ".jpeg")) or content_type.startswith(("application/pdf", "image/"))):
         raise HTTPException(status_code=422, detail="Envie PDF, PNG ou JPG do documento.")
@@ -369,7 +380,7 @@ async def upload_kyc_document(db: Session, account: EscrowAccount, document_id: 
     db.flush()
     return {
         "status": str(result.get("status") or "UNDER_REVIEW"),
-        "message": f"Documento '{filename}' enviado ao Asaas para análise.",
+        "message": f"Documento '{raw_name}' enviado ao Asaas para análise.",
         "provider": result,
     }
 
