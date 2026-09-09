@@ -106,6 +106,7 @@ export function MyWalletModule() {
   const [pixQr, setPixQr] = useState<{ payload?: string; encoded_image?: string | null } | null>(null);
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(true);
+  const [openingAccount, setOpeningAccount] = useState(false);
   const [uploadingDocId, setUploadingDocId] = useState<string | null>(null);
   const [transferAmount, setTransferAmount] = useState("");
   const [billAmount, setBillAmount] = useState("");
