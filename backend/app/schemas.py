@@ -610,6 +610,22 @@ class InstrumentHintRequest(BaseModel):
     amount: Decimal = Field(gt=0)
 
 
+class MutuoContractCreate(BaseModel):
+    principal: Decimal = Field(gt=0)
+    settlement_option: str = Field(description="A = juros mensais | B = bullet no final")
+    opportunity_id: str | None = None
+    locality: str | None = None
+
+
+class MutuoAcceptSignRequest(BaseModel):
+    accepted: bool = True
+    signer_email: str | None = None
+
+
+class MutuoInterestPostRequest(BaseModel):
+    reference_month: str | None = Field(default=None, min_length=7, max_length=7)
+
+
 class BillingGenerateRequest(BaseModel):
     start_date: date
 

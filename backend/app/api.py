@@ -59,7 +59,7 @@ from app.schemas import (
     NinaDistressEventView, NinaDocumentCreate, NinaGateApplyRequest, NinaLegalDocumentView, NinaTimelineEvaluateRequest,
     InviteAccept, InviteCreate, PartnerInviteCreate, InvitationPreviewView, PartnerContractAcceptanceView, KycCreate, KycDecision, KycSelfCompleteResponse, KycView, LeadCreate,
     InvestmentPositionView, InvestmentReservationView, InvestmentReserveRequest, InstrumentHintRequest, InvoicePaymentWebhook, InvoiceProcessorRequest, InvoiceView,
-    ManualInvestmentCreate, ManualRentabilityCreate, RentabilityCreditView,
+    ManualInvestmentCreate, ManualRentabilityCreate, MutuoAcceptSignRequest, MutuoContractCreate, MutuoInterestPostRequest, RentabilityCreditView,
     PaymentReceiptView, PreAnalysisEngineRequest, PreAnalysisPautaView, PreAnalysisProposalRequest,
     PreAnalysisTapafCheckoutAcceptRequest, PreAnalysisTapafPaymentWebhook, PreAnalysisValidateDocumentsRequest,
     LeaseEquityPautaCreate, LeaseEquityPautaView, LeaseEquityTapafWebhook, LeaseEquityInspectionRequest,
@@ -1046,6 +1046,146 @@ def investment_positions(user: User = Depends(get_current_user), db: Session = D
     query=select(InvestmentPosition).where(InvestmentPosition.organization_id==user.organization_id)
     if user.role.value not in {"PLATFORM_ADMIN","INTERNAL_STAFF"}: query=query.where(InvestmentPosition.investor_id==user.id)
     return list(db.scalars(query.order_by(InvestmentPosition.created_at.desc())))
+
+
+@router.post("/funding/mutuo/contracts", status_code=201)
+def mutuo_create(payload: MutuoContractCreate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.mutuo_service import create_mutuo_contract, mutuo_view
+
+    item = create_mutuo_contract(
+        db,
+        user,
+        principal=payload.principal,
+        settlement_option=payload.settlement_option,
+        opportunity_id=payload.opportunity_id,
+        locality=payload.locality,
+    )
+    audit(db, user, "mutuo.created", "mutuo_contract", item.id, {"option": item.settlement_option, "principal": str(item.principal)})
+    db.commit()
+    db.refresh(item)
+    return mutuo_view(item)
+
+
+@router.get("/funding/mutuo/contracts")
+def mutuo_list(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.mutuo_service import list_mutuo_contracts, mutuo_view
+
+    return [mutuo_view(item) for item in list_mutuo_contracts(db, user)]
+
+
+@router.get("/funding/mutuo/contracts/{contract_id}")
+def mutuo_get(contract_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.mutuo_service import get_mutuo_contract, mutuo_view
+
+    return mutuo_view(get_mutuo_contract(db, user, contract_id))
+
+
+@router.post("/funding/mutuo/contracts/{contract_id}/accept-sign")
+def mutuo_accept_sign(contract_id: str, payload: MutuoAcceptSignRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.mutuo_service import accept_and_sign, get_mutuo_contract, mutuo_view
+
+    contract = get_mutuo_contract(db, user, contract_id)
+    item = accept_and_sign(db, user, contract, accepted=payload.accepted, signer_email=payload.signer_email)
+    audit(db, user, "mutuo.accept_sign", "mutuo_contract", item.id, {"provider": item.signature_provider})
+    db.commit()
+    db.refresh(item)
+    return mutuo_view(item)
+
+
+@router.post("/funding/mutuo/contracts/{contract_id}/mock-complete-signature")
+def mutuo_mock_sign(contract_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.mutuo_service import complete_signature, get_mutuo_contract, mutuo_view
+
+    contract = get_mutuo_contract(db, user, contract_id)
+    item = complete_signature(db, user, contract)
+    audit(db, user, "mutuo.signed", "mutuo_contract", item.id)
+    db.commit()
+    db.refresh(item)
+    return mutuo_view(item)
+
+
+@router.post("/funding/mutuo/contracts/{contract_id}/settle")
+def mutuo_settle(contract_id: str, user: User = Depends(require_scope("admin:users")), db: Session = Depends(get_db)):
+    from app.mutuo_service import get_mutuo_contract, mutuo_view, settle_mutuo
+
+    contract = get_mutuo_contract(db, user, contract_id)
+    item = settle_mutuo(db, user, contract)
+    audit(db, user, "mutuo.settled", "mutuo_contract", item.id, {"maturity_at": item.maturity_at.isoformat() if item.maturity_at else None})
+    db.commit()
+    db.refresh(item)
+    return mutuo_view(item)
+
+
+@router.post("/funding/mutuo/contracts/{contract_id}/post-interest")
+def mutuo_post_interest(
+    contract_id: str,
+    payload: MutuoInterestPostRequest | None = None,
+    user: User = Depends(require_scope("admin:users")),
+    db: Session = Depends(get_db),
+):
+    from app.mutuo_service import get_mutuo_contract, mutuo_view, post_monthly_interest
+
+    contract = get_mutuo_contract(db, user, contract_id)
+    month = payload.reference_month if payload else None
+    event = post_monthly_interest(db, contract, reference_month=month)
+    audit(db, user, "mutuo.interest_posted", "mutuo_contract", contract.id, {"month": event.reference_month, "amount": str(event.amount), "kind": event.kind})
+    db.commit()
+    db.refresh(contract)
+    return {"event": {"id": event.id, "kind": event.kind, "reference_month": event.reference_month, "amount": str(event.amount)}, "contract": mutuo_view(contract)}
+
+
+@router.post("/funding/mutuo/contracts/{contract_id}/request-redemption")
+def mutuo_request_redemption(contract_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.mutuo_service import get_mutuo_contract, mutuo_view, request_redemption
+
+    contract = get_mutuo_contract(db, user, contract_id)
+    item = request_redemption(db, user, contract)
+    audit(db, user, "mutuo.redemption_requested", "mutuo_contract", item.id, {"amount": str(item.redemption_amount)})
+    db.commit()
+    db.refresh(item)
+    return mutuo_view(item)
+
+
+@router.post("/funding/mutuo/contracts/{contract_id}/confirm-redemption")
+def mutuo_confirm_redemption(contract_id: str, user: User = Depends(require_scope("admin:users")), db: Session = Depends(get_db)):
+    from app.mutuo_service import confirm_redemption, get_mutuo_contract, mutuo_view
+
+    contract = get_mutuo_contract(db, user, contract_id)
+    item = confirm_redemption(db, user, contract)
+    audit(db, user, "mutuo.redeemed", "mutuo_contract", item.id, {"amount": str(item.redemption_amount)})
+    db.commit()
+    db.refresh(item)
+    return mutuo_view(item)
+
+
+@router.post("/funding/mutuo/contracts/{contract_id}/request-equity-conversion")
+def mutuo_request_equity(contract_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.mutuo_service import get_mutuo_contract, mutuo_view, request_equity_conversion
+
+    contract = get_mutuo_contract(db, user, contract_id)
+    item = request_equity_conversion(db, user, contract)
+    audit(db, user, "mutuo.equity_conversion", "mutuo_contract", item.id)
+    db.commit()
+    db.refresh(item)
+    return mutuo_view(item)
+
+
+@router.post("/funding/mutuo/contracts/{contract_id}/admin-accelerate-maturity")
+def mutuo_accelerate_maturity(contract_id: str, user: User = Depends(require_scope("admin:users")), db: Session = Depends(get_db)):
+    """Homologação/ops: marca vencimento como já atingido para testar resgate."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.mutuo_service import get_mutuo_contract, mutuo_view
+
+    contract = get_mutuo_contract(db, user, contract_id)
+    if contract.status != "ACTIVE":
+        raise HTTPException(status_code=409, detail="Contrato precisa estar ACTIVE")
+    contract.maturity_at = datetime.now(UTC) - timedelta(days=1)
+    db.add(contract)
+    audit(db, user, "mutuo.maturity_accelerated", "mutuo_contract", contract.id)
+    db.commit()
+    db.refresh(contract)
+    return mutuo_view(contract)
 
 
 @router.post("/contracts/{contract_id}/billing", response_model=list[InvoiceView], status_code=201)

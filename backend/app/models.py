@@ -956,6 +956,60 @@ class RentabilityCredit(TimestampMixin, Base):
     recorded_by_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), index=True)
 
 
+class MutuoContract(TimestampMixin, Base):
+    """Mútuo conversível Flash Invest (≥ R$ 10k) — Opção A mensal ou B bullet; resgate obrigatório no mês 36."""
+
+    __tablename__ = "mutuo_contracts"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    investor_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    opportunity_id: Mapped[str | None] = mapped_column(ForeignKey("funding_opportunities.id"), index=True)
+    position_id: Mapped[str | None] = mapped_column(ForeignKey("investment_positions.id"), index=True)
+    principal: Mapped[float] = mapped_column(Numeric(15, 2))
+    monthly_rate: Mapped[float] = mapped_column(Numeric(8, 4), default=0.016)
+    term_months: Mapped[int] = mapped_column(Integer, default=36)
+    # A = saque mensal na wallet | B = bullet juros simples no final
+    settlement_option: Mapped[str] = mapped_column(String(1))  # A | B
+    status: Mapped[str] = mapped_column(String(40), default="DRAFT", index=True)
+    # DRAFT → AWAITING_SIGNATURE → SIGNED → SETTLED/ACTIVE → REDEMPTION_REQUESTED → REDEEMED
+    # ou EQUITY_CONVERSION se resgate não for pago
+    locality: Mapped[str | None] = mapped_column(String(120))
+    contract_date: Mapped[str | None] = mapped_column(String(40))
+    acceptance_hash: Mapped[str | None] = mapped_column(String(64))
+    signature_provider: Mapped[str | None] = mapped_column(String(40))
+    signature_external_id: Mapped[str | None] = mapped_column(String(120))
+    signature_url: Mapped[str | None] = mapped_column(String(500))
+    signature_status: Mapped[str | None] = mapped_column(String(30))
+    signed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    settled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    maturity_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    accrued_interest: Mapped[float] = mapped_column(Numeric(15, 2), default=0)  # Opção B
+    paid_interest_total: Mapped[float] = mapped_column(Numeric(15, 2), default=0)  # Opção A
+    interest_months_posted: Mapped[int] = mapped_column(Integer, default=0)
+    last_interest_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    redemption_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    equity_unlock_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    redeemed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    redemption_amount: Mapped[float | None] = mapped_column(Numeric(15, 2))
+    equity_conversion_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    equity_converted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
+class MutuoInterestEvent(TimestampMixin, Base):
+    __tablename__ = "mutuo_interest_events"
+    __table_args__ = (UniqueConstraint("mutuo_contract_id", "reference_month", "kind"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    mutuo_contract_id: Mapped[str] = mapped_column(ForeignKey("mutuo_contracts.id"), index=True)
+    investor_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(20))  # MONTHLY_PAYOUT | BULLET_ACCRUAL
+    reference_month: Mapped[str] = mapped_column(String(7), index=True)
+    amount: Mapped[float] = mapped_column(Numeric(15, 2))
+    status: Mapped[str] = mapped_column(String(30), default="POSTED")
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
 class Invoice(TimestampMixin, Base):
     __tablename__ = "invoices"
     __table_args__ = (UniqueConstraint("contract_id", "installment_number", "kind"),)

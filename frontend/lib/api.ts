@@ -52,6 +52,40 @@ export type InvestmentPosition = {
   notes?: string | null;
   status: string;
 };
+export type MutuoContract = {
+  id: string;
+  investor_id: string;
+  opportunity_id?: string | null;
+  position_id?: string | null;
+  principal: string;
+  monthly_rate: string;
+  term_months: number;
+  settlement_option: string;
+  settlement_option_label?: string;
+  status: string;
+  signature_provider?: string | null;
+  signature_url?: string | null;
+  signature_status?: string | null;
+  signed_at?: string | null;
+  settled_at?: string | null;
+  maturity_at?: string | null;
+  maturity_reached?: boolean;
+  accrued_interest: string;
+  paid_interest_total: string;
+  interest_months_posted: number;
+  redemption_requested_at?: string | null;
+  equity_unlock_at?: string | null;
+  equity_conversion_ready?: boolean;
+  redeemed_at?: string | null;
+  redemption_amount?: string | null;
+  redemption_due_amount?: string;
+  equity_conversion_requested_at?: string | null;
+  equity_converted_at?: string | null;
+  notes?: string | null;
+  created_at: string;
+  rules?: Record<string, unknown>;
+};
+
 export type RentabilityCredit = {
   id: string;
   position_id: string;

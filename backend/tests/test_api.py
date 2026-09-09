@@ -456,7 +456,9 @@ def test_funding_reservation_confirmation_and_profile_guard(client, auth_headers
     assert confirmed.json()["principal"] == "4000.00"
     assert confirmed.json()["tokens_qty"] == 40
     positions = client.get("/api/v1/funding/positions", headers=investor_headers)
-    assert positions.status_code == 200 and len(positions.json()) == 1
+    assert positions.status_code == 200
+    opp_positions = [p for p in positions.json() if p["opportunity_id"] == opportunity.json()["id"]]
+    assert len(opp_positions) == 1 and opp_positions[0]["principal"] == "4000.00"
     partner_login = client.post("/api/v1/auth/login", json={"email":"parceiro@letter.com.br","password":"Letter@123"}).json()
     partner_headers = {"Authorization":f"Bearer {partner_login['access_token']}"}
     blocked = client.post(f"/api/v1/funding/opportunities/{opportunity.json()['id']}/reserve", headers=partner_headers, json={"amount":"1000"})
@@ -534,6 +536,92 @@ def test_flash_invest_manual_investment_and_rentability(client, auth_headers):
         "instrument_type": "MUTUO",
     })
     assert bad_mutuo.status_code == 422
+
+
+def test_flash_invest_mutuo_option_a_redemption_and_equity(client, auth_headers):
+    investor_login = client.post("/api/v1/auth/login", json={"email": "investidor@letter.com.br", "password": "Letter@123"}).json()
+    investor_headers = {"Authorization": f"Bearer {investor_login['access_token']}"}
+
+    created = client.post("/api/v1/funding/mutuo/contracts", headers=investor_headers, json={
+        "principal": "10000",
+        "settlement_option": "A",
+        "locality": "Teixeira de Freitas/BA",
+    })
+    assert created.status_code == 201
+    assert created.json()["settlement_option"] == "A"
+    contract_id = created.json()["id"]
+
+    too_small = client.post("/api/v1/funding/mutuo/contracts", headers=investor_headers, json={
+        "principal": "5000",
+        "settlement_option": "B",
+    })
+    assert too_small.status_code == 422
+
+    signed_flow = client.post(f"/api/v1/funding/mutuo/contracts/{contract_id}/accept-sign", headers=investor_headers, json={"accepted": True})
+    assert signed_flow.status_code == 200
+    assert signed_flow.json()["status"] == "AWAITING_SIGNATURE"
+
+    completed = client.post(f"/api/v1/funding/mutuo/contracts/{contract_id}/mock-complete-signature", headers=investor_headers)
+    assert completed.status_code == 200
+    assert completed.json()["status"] == "SIGNED"
+
+    settled = client.post(f"/api/v1/funding/mutuo/contracts/{contract_id}/settle", headers=auth_headers)
+    assert settled.status_code == 200
+    assert settled.json()["status"] == "ACTIVE"
+    assert settled.json()["maturity_at"]
+
+    interest = client.post(f"/api/v1/funding/mutuo/contracts/{contract_id}/post-interest", headers=auth_headers, json={"reference_month": "2026-09"})
+    assert interest.status_code == 200
+    assert interest.json()["event"]["kind"] == "MONTHLY_PAYOUT"
+    assert interest.json()["event"]["amount"] == "160.00"
+    assert interest.json()["contract"]["paid_interest_total"] == "160.00"
+
+    early = client.post(f"/api/v1/funding/mutuo/contracts/{contract_id}/request-redemption", headers=investor_headers)
+    assert early.status_code == 422
+
+    accelerated = client.post(f"/api/v1/funding/mutuo/contracts/{contract_id}/admin-accelerate-maturity", headers=auth_headers)
+    assert accelerated.status_code == 200
+    assert accelerated.json()["maturity_reached"] is True
+
+    redeem = client.post(f"/api/v1/funding/mutuo/contracts/{contract_id}/request-redemption", headers=investor_headers)
+    assert redeem.status_code == 200
+    assert redeem.json()["status"] == "REDEMPTION_REQUESTED"
+    assert redeem.json()["redemption_due_amount"] == "10000.00"
+
+    # Sem devolução: admin pode acelerar equity (bypass de graça)
+    equity = client.post(f"/api/v1/funding/mutuo/contracts/{contract_id}/request-equity-conversion", headers=auth_headers)
+    assert equity.status_code == 200
+    assert equity.json()["status"] == "EQUITY_CONVERSION"
+
+
+def test_flash_invest_mutuo_option_b_bullet_and_paid_redemption(client, auth_headers):
+    investor_login = client.post("/api/v1/auth/login", json={"email": "investidor@letter.com.br", "password": "Letter@123"}).json()
+    investor_headers = {"Authorization": f"Bearer {investor_login['access_token']}"}
+
+    created = client.post("/api/v1/funding/mutuo/contracts", headers=investor_headers, json={
+        "principal": "20000",
+        "settlement_option": "B",
+    })
+    assert created.status_code == 201
+    cid = created.json()["id"]
+    client.post(f"/api/v1/funding/mutuo/contracts/{cid}/accept-sign", headers=investor_headers, json={"accepted": True})
+    client.post(f"/api/v1/funding/mutuo/contracts/{cid}/mock-complete-signature", headers=investor_headers)
+    settled = client.post(f"/api/v1/funding/mutuo/contracts/{cid}/settle", headers=auth_headers)
+    assert settled.status_code == 200
+
+    interest = client.post(f"/api/v1/funding/mutuo/contracts/{cid}/post-interest", headers=auth_headers, json={"reference_month": "2026-10"})
+    assert interest.status_code == 200
+    assert interest.json()["event"]["kind"] == "BULLET_ACCRUAL"
+    assert interest.json()["contract"]["accrued_interest"] == "320.00"
+
+    client.post(f"/api/v1/funding/mutuo/contracts/{cid}/admin-accelerate-maturity", headers=auth_headers)
+    redeem = client.post(f"/api/v1/funding/mutuo/contracts/{cid}/request-redemption", headers=investor_headers)
+    assert redeem.status_code == 200
+    assert redeem.json()["redemption_due_amount"] == "20320.00"
+
+    paid = client.post(f"/api/v1/funding/mutuo/contracts/{cid}/confirm-redemption", headers=auth_headers)
+    assert paid.status_code == 200
+    assert paid.json()["status"] == "REDEEMED"
 
 
 def test_sdc_billing_schedule_and_idempotent_payment(client, auth_headers):
