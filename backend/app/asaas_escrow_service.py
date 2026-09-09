@@ -49,33 +49,46 @@ def set_account_escrow(db: Session, account: EscrowAccount, *, enabled: bool) ->
 
 def repair_client_plain_subaccounts(db: Session, organization_id: str) -> dict:
     """
-    Contas de carteira do cliente (user_id preenchido) devem ser plain — sem Escrow.
-    Força disabled no Asaas para cortar a taxa de R$ 9,90/mês por subconta.
+    Toda conta que na LETTER está marcada sem Escrow (escrow_enabled=False) — inclusive
+    subcontas abertas pelo admin — deve ter Escrow desligado também no Asaas.
+    Corta a taxa de ~R$ 9,90/mês por subconta na conta matriz.
     """
     accounts = list(
         db.scalars(
             select(EscrowAccount).where(
                 EscrowAccount.organization_id == organization_id,
-                EscrowAccount.user_id.is_not(None),
+                EscrowAccount.escrow_enabled.is_(False),
             )
         )
     )
     repaired: list[str] = []
+    skipped: list[str] = []
     errors: list[dict] = []
     for account in accounts:
+        if not account.asaas_account_id or not str(account.provider).startswith("ASAAS"):
+            skipped.append(account.id)
+            continue
         try:
             set_account_escrow(db, account, enabled=False)
             repaired.append(account.id)
         except Exception as exc:  # noqa: BLE001 — reparo parcial; segue nas demais
-            errors.append({"account_id": account.id, "error": str(exc)})
+            errors.append(
+                {
+                    "account_id": account.id,
+                    "name": account.subaccount_name,
+                    "error": str(exc),
+                }
+            )
     return {
         "repaired_count": len(repaired),
         "repaired_ids": repaired,
+        "skipped_count": len(skipped),
+        "skipped_ids": skipped,
         "error_count": len(errors),
         "errors": errors,
         "message": (
-            f"{len(repaired)} subconta(s) de cliente com Escrow desligado. "
-            "Taxa Asaas (~R$ 9,90/mês) deixa de ser cobrada nas próximas ciclos se o recurso ficou disabled."
+            f"{len(repaired)} subconta(s) com Escrow desligado no Asaas. "
+            "Confira no painel Asaas: Conta Escrow deve ficar desabilitada nessas subcontas."
         ),
     }
 

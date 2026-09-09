@@ -3068,7 +3068,7 @@ def escrow_asaas_disable_default(user: User = Depends(require_scope("payments:re
 
 @router.post("/escrow/repair/plain-client-accounts")
 def escrow_repair_plain_client_accounts(user: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
-    """Desliga Escrow nas subcontas de carteira (user_id) já abertas — corta taxa Asaas."""
+    """Desliga Escrow no Asaas em todas as subcontas que na LETTER estão sem Escrow."""
     from app.asaas_escrow_service import repair_client_plain_subaccounts
 
     result = repair_client_plain_subaccounts(db, user.organization_id)
