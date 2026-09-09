@@ -52,7 +52,7 @@ from app.schemas import (
     ValidStampCreate, ValidStampView, SaaSTermsCreate, SaaSTermsView, SaaSPlanCreate, SaaSPlanView,
     SaaSSubscribeCreate, SaaSSubscriptionView,
     BillingGenerateRequest, CollectionActionView, CommissionAllocate, CommissionEntryView, CommissionRuleCreate,
-    CommissionRuleView, DocumentView, EscrowAsaasStatusView, EscrowCreate, EscrowBillingCycleView, EscrowSubaccountPreviewView, EscrowView, EscrowWebhook, WalletBillPaymentRequest, WalletBoletoIssueRequest, WalletBoletoView, WalletEscrowBillingSyncView, LssBillingSyncView, RecurringCommissionSettlementView, MmnSplitPreviewRequest, MmnSplitPreviewView, AsaasMmnPaymentCreate, AsaasMmnPaymentView, PaymentSplitRowView, LegalManualPublicView, LegalManualView, WalletPricingRowView, WalletTransferRequest,
+    CommissionRuleView, DocumentView, EscrowAsaasStatusView, EscrowCreate, EscrowBillingCycleView, EscrowSubaccountPreviewView, EscrowToggleRequest, EscrowView, EscrowWebhook, WalletBillPaymentRequest, WalletBoletoIssueRequest, WalletBoletoView, WalletEscrowBillingSyncView, LssBillingSyncView, RecurringCommissionSettlementView, MmnSplitPreviewRequest, MmnSplitPreviewView, AsaasMmnPaymentCreate, AsaasMmnPaymentView, PaymentSplitRowView, LegalManualPublicView, LegalManualView, WalletPricingRowView, WalletTransferRequest,
     FiscalEvidenceView, SefazRobotStatusView,
     DelinquencyView, FiscalReleaseRequest, FundingOpportunityCreate, FundingOpportunityView, InvitationView,
     NinaApprovalRequest, NinaCriticalApprovalView, NinaDistressCaseCreate, NinaDistressCaseView,
@@ -3053,6 +3053,59 @@ def escrow_asaas_status(user: User = Depends(require_scope("payments:review"))):
 
     _ = user
     return asaas_status()
+
+
+@router.post("/escrow/asaas/disable-default")
+def escrow_asaas_disable_default(user: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
+    """Desliga Escrow padrão no Asaas (evita R$ 9,90/mês em toda subconta nova)."""
+    from app.asaas_escrow_service import disable_asaas_default_escrow
+
+    result = disable_asaas_default_escrow()
+    audit(db, user, "escrow.asaas_default_disabled", "asaas", None, {"enabled": False})
+    db.commit()
+    return {"ok": True, "asaas": result, "message": "Configuração padrão de Escrow desligada no Asaas."}
+
+
+@router.post("/escrow/repair/plain-client-accounts")
+def escrow_repair_plain_client_accounts(user: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
+    """Desliga Escrow nas subcontas de carteira (user_id) já abertas — corta taxa Asaas."""
+    from app.asaas_escrow_service import repair_client_plain_subaccounts
+
+    result = repair_client_plain_subaccounts(db, user.organization_id)
+    audit(
+        db,
+        user,
+        "escrow.plain_accounts_repaired",
+        "escrow_account",
+        None,
+        {"repaired_count": result["repaired_count"], "error_count": result["error_count"]},
+    )
+    db.commit()
+    return result
+
+
+@router.post("/escrow/accounts/{account_id}/escrow", response_model=EscrowView)
+def escrow_set_account_flag(
+    account_id: str,
+    payload: EscrowToggleRequest,
+    user: User = Depends(require_scope("payments:review")),
+    db: Session = Depends(get_db),
+):
+    from app.asaas_escrow_service import set_account_escrow
+
+    account = db.scalar(
+        select(EscrowAccount).where(
+            EscrowAccount.id == account_id,
+            EscrowAccount.organization_id == user.organization_id,
+        )
+    )
+    if not account:
+        raise HTTPException(status_code=404, detail="Conta não encontrada")
+    set_account_escrow(db, account, enabled=payload.enabled)
+    audit(db, user, "escrow.toggled", "escrow_account", account.id, {"enabled": payload.enabled})
+    db.commit()
+    db.refresh(account)
+    return account
 
 
 @router.get("/escrow/accounts", response_model=list[EscrowView])

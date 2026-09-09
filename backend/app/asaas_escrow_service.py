@@ -15,6 +15,71 @@ from app.models import EscrowAccount, User
 from app.schemas import EscrowSubaccountProfile
 
 
+def disable_asaas_default_escrow() -> dict:
+    """Desliga a config padrão do Asaas que aplica Escrow a todas as subcontas."""
+    if not asaas_configured():
+        raise HTTPException(status_code=503, detail="Integração Asaas não configurada.")
+    with AsaasClient() as client:
+        verify_wallet_id(client)
+        return client.configure_default_escrow(
+            enabled=False,
+            days_to_expire=settings.asaas_escrow_days_to_expire,
+            fee_payer_subaccount=settings.asaas_escrow_fee_payer_subaccount,
+        )
+
+
+def set_account_escrow(db: Session, account: EscrowAccount, *, enabled: bool) -> EscrowAccount:
+    """Liga/desliga Escrow em uma subconta (Asaas + flag local)."""
+    if account.asaas_account_id and asaas_configured() and account.provider.startswith("ASAAS"):
+        with AsaasClient() as client:
+            client.configure_subaccount_escrow(
+                account.asaas_account_id,
+                enabled=enabled,
+                days_to_expire=settings.asaas_escrow_days_to_expire,
+                fee_payer_subaccount=settings.asaas_escrow_fee_payer_subaccount,
+            )
+    account.escrow_enabled = enabled
+    if enabled:
+        from app.wallet_billing_service import ensure_escrow_billing_cycle
+
+        ensure_escrow_billing_cycle(db, account)
+    db.add(account)
+    return account
+
+
+def repair_client_plain_subaccounts(db: Session, organization_id: str) -> dict:
+    """
+    Contas de carteira do cliente (user_id preenchido) devem ser plain — sem Escrow.
+    Força disabled no Asaas para cortar a taxa de R$ 9,90/mês por subconta.
+    """
+    accounts = list(
+        db.scalars(
+            select(EscrowAccount).where(
+                EscrowAccount.organization_id == organization_id,
+                EscrowAccount.user_id.is_not(None),
+            )
+        )
+    )
+    repaired: list[str] = []
+    errors: list[dict] = []
+    for account in accounts:
+        try:
+            set_account_escrow(db, account, enabled=False)
+            repaired.append(account.id)
+        except Exception as exc:  # noqa: BLE001 — reparo parcial; segue nas demais
+            errors.append({"account_id": account.id, "error": str(exc)})
+    return {
+        "repaired_count": len(repaired),
+        "repaired_ids": repaired,
+        "error_count": len(errors),
+        "errors": errors,
+        "message": (
+            f"{len(repaired)} subconta(s) de cliente com Escrow desligado. "
+            "Taxa Asaas (~R$ 9,90/mês) deixa de ser cobrada nas próximas ciclos se o recurso ficou disabled."
+        ),
+    }
+
+
 def asaas_status() -> dict:
     if not asaas_configured():
         return {
@@ -66,11 +131,9 @@ def create_asaas_escrow(
     with AsaasClient() as client:
         verify_wallet_id(client)
         client.get_balance()
-        client.configure_default_escrow(
-            enabled=settings.asaas_escrow_enabled,
-            days_to_expire=settings.asaas_escrow_days_to_expire,
-            fee_payer_subaccount=settings.asaas_escrow_fee_payer_subaccount,
-        )
+        # NÃO chamar configure_default_escrow(enabled=True) aqui.
+        # Esse endpoint do Asaas liga Escrow em TODAS as subcontas (atuais e futuras)
+        # e cobra ~R$ 9,90/mês por subconta na conta matriz quando isFeePayer=false.
 
     account = EscrowAccount(
         organization_id=user.organization_id,
@@ -81,6 +144,7 @@ def create_asaas_escrow(
         status="ACTIVE",
     )
     db.add(account)
+    db.flush()
     ensure_chart(db, user)
     from app.wallet_billing_service import ensure_escrow_billing_cycle
 

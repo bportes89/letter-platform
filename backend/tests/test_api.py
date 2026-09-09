@@ -2174,7 +2174,9 @@ def test_escrow_create_plain_subaccount_without_escrow(client, auth_headers, mon
     assert body["provider"] == "ASAAS_SUBACCOUNT"
     assert body["external_account_id"] == "wallet-plain-001"
     assert body["escrow_enabled"] is False
-    assert escrow_calls == []
+    assert len(escrow_calls) == 1
+    assert escrow_calls[0]["account_id"] == "acct-plain-001"
+    assert escrow_calls[0]["enabled"] is False
 
 
 def test_escrow_create_main_wallet_legacy(client, auth_headers, monkeypatch):
@@ -2220,7 +2222,11 @@ def test_escrow_subaccount_preview(client, auth_headers):
 def test_escrow_create_mock_subaccount_without_asaas(client, auth_headers, monkeypatch):
     monkeypatch.setattr("app.asaas_common.settings.asaas_api_key", None)
     monkeypatch.setattr("app.asaas_common.settings.asaas_wallet_id", None)
-    created = client.post("/api/v1/escrow/accounts", headers=auth_headers, json={"create_subaccount": True})
+    created = client.post(
+        "/api/v1/escrow/accounts",
+        headers=auth_headers,
+        json={"create_subaccount": True, "enable_escrow": True},
+    )
     assert created.status_code == 201
     body = created.json()
     assert body["provider"] == "MOCK_SUBACCOUNT"

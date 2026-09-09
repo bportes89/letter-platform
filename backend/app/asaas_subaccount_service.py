@@ -186,13 +186,16 @@ def create_asaas_subaccount(
 
         sub_api_key = str(created.get("apiKey", "")).strip() or None
 
-        if enable_escrow:
-            client.configure_subaccount_escrow(
-                asaas_account_id,
-                enabled=settings.asaas_escrow_enabled,
-                days_to_expire=settings.asaas_escrow_days_to_expire,
-                fee_payer_subaccount=settings.asaas_escrow_fee_payer_subaccount,
-            )
+        # Sempre configura explicitamente: se a conta matriz tiver Escrow padrão
+        # ligado no Asaas, novas subcontas herdam e geram R$ 9,90/mês cada.
+        # Contas plain (carteira do cliente) DEVEM forçar enabled=False.
+        escrow_on = bool(enable_escrow and settings.asaas_escrow_enabled)
+        client.configure_subaccount_escrow(
+            asaas_account_id,
+            enabled=escrow_on,
+            days_to_expire=settings.asaas_escrow_days_to_expire,
+            fee_payer_subaccount=settings.asaas_escrow_fee_payer_subaccount,
+        )
 
     account = EscrowAccount(
         organization_id=user.organization_id,
@@ -207,7 +210,7 @@ def create_asaas_subaccount(
         bank_agency=settings.asaas_default_agency,
         asaas_kyc_status="PENDING",
         asaas_commercial_status="PENDING",
-        escrow_enabled=enable_escrow,
+        escrow_enabled=escrow_on,
         status="ACTIVE",
     )
     db.add(account)
@@ -220,7 +223,7 @@ def create_asaas_subaccount(
         except HTTPException:
             pass
     ensure_chart(db, user)
-    if enable_escrow:
+    if escrow_on:
         from app.wallet_billing_service import ensure_escrow_billing_cycle
 
         ensure_escrow_billing_cycle(db, account)

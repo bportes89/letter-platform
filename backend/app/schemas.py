@@ -1537,8 +1537,13 @@ class EscrowSubaccountProfile(BaseModel):
 class EscrowCreate(BaseModel):
     operation_id: str | None = None
     create_subaccount: bool = True
-    enable_escrow: bool = True
+    # Default False: carteira do dia a dia não deve herdar Escrow (taxa Asaas ~R$ 9,90/mês).
+    enable_escrow: bool = False
     profile: EscrowSubaccountProfile | None = None
+
+
+class EscrowToggleRequest(BaseModel):
+    enabled: bool
 
 
 class EscrowSubaccountPreviewView(BaseModel):
