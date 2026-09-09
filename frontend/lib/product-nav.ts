@@ -15,9 +15,17 @@ export type ProductNavItem = {
   internalOnly?: boolean;
   /** Produto do ambiente BANK (investimentos), não da PLATAFORMA. */
   bank?: boolean;
+  /** Em stand-by: oculto do menu e travado na rota. */
+  standby?: boolean;
 };
 
-/** Menu de produtos LETTER — ordem definida com o cliente. */
+/**
+ * Prioridade operacional (cliente LETTER):
+ * 1) Marketplace, SDC, Flash Capital
+ * 2) QuitCon, Flash Invest, SaaS (LSS) + ajustes TAPAF
+ * Lease Equity: stand-by até nova ordem.
+ * Flash Invest: captação por token + mútuo conversível (mútuo primeiro; tokenização depois).
+ */
 export const PRODUCT_NAV: ProductNavItem[] = [
   {
     key: "marketplace-group",
@@ -35,12 +43,17 @@ export const PRODUCT_NAV: ProductNavItem[] = [
   },
   { key: "sdc", name: "SDC — estrutura interna", internalOnly: true },
   { key: "flash-capital", name: "Flash Capital" },
-  { key: "lease-equity", name: "Lease Equity" },
-  { key: "flash-invest", name: "Flash Invest", bank: true },
   { key: "quitcon", name: "QuitCon" },
+  { key: "flash-invest", name: "Flash Invest", bank: true },
   { key: "lss", name: "SaaS LSS" },
   { key: "leilao", name: "Leilão" },
+  { key: "lease-equity", name: "Lease Equity", standby: true },
 ];
+
+/** Produtos travados / stand-by (não aparecem no menu). */
+export const STANDBY_PRODUCT_KEYS = new Set(
+  PRODUCT_NAV.filter((item) => item.standby).map((item) => item.key),
+);
 
 const NAV_ROUTE_KEYS = new Set<string>();
 for (const item of PRODUCT_NAV) {
@@ -74,6 +87,7 @@ export function filterProductNavItem(
 ): ProductNavItem | null {
   const internal = isInternalProductRole(role);
 
+  if (item.standby) return null;
   if (item.internalOnly && !internal) return null;
 
   if (item.children?.length) {
