@@ -53,6 +53,11 @@ STEP_ADDRESS_NUMBER = "10034"
 STEP_PROFESSION = "10035"
 STEP_INCOME_AMOUNT = "10036"
 STEP_INCOME_PROOF = "10037"
+STEP_DOUBTS = "10038"
+STEP_FAQ_LIST = "10039"
+STEP_FAQ_ANSWER = "10040"
+# Compatível com o widget legado (clique FAQ → step 95).
+STEP_FAQ_ANSWER_LEGACY = "95"
 # legado (renomeado)
 STEP_DONE = STEP_HANDOFF_RESUMO
 
@@ -94,6 +99,92 @@ INCOME_PROOF_OPTIONS = {
     "decore": "Decore",
     "extrato": "Extrato",
 }
+
+# FAQ seed (Paulo Items type=faq) — sem CRUD admin nesta frente.
+MARKETPLACE_CHAT_FAQ: list[dict[str, str]] = [
+    {
+        "id": "23",
+        "name": "Essa compra é realmente segura?",
+        "txt": (
+            "Todas as opções de créditos cadastrados em nosso sistema são devidamente checadas "
+            "por nosso setor de BackOffice e Compliance. Operamos em conformidade com a LGPD."
+        ),
+    },
+    {
+        "id": "25",
+        "name": "O que acontece com o meu dinheiro caso o processo não conclua?",
+        "txt": (
+            "Os valores pagos de entrada ficam retidos na plataforma. Se a transferência não "
+            "concluir por parte do fornecedor, a entrada é devolvida em até 2 dias úteis."
+        ),
+    },
+    {
+        "id": "24",
+        "name": "Como funciona o faturamento do bem que irei comprar?",
+        "txt": (
+            "Após a transferência do crédito para o seu nome, você inicia o faturamento "
+            "diretamente com a administradora. O crédito fica disponível para uso imediato."
+        ),
+    },
+    {
+        "id": "40",
+        "name": "O que é a Taxa de Transferência?",
+        "txt": (
+            "É a taxa cobrada pela administradora do crédito para concluir a transferência "
+            "para o seu nome."
+        ),
+    },
+    {
+        "id": "41",
+        "name": "Quanto tempo demora em média a transferência?",
+        "txt": (
+            "Em condições normais, até 10 dias — varia por administradora e pela agilidade "
+            "no envio de documentos por você e pelo fornecedor."
+        ),
+    },
+    {
+        "id": "42",
+        "name": "Estou negativado, consigo comprar?",
+        "txt": (
+            "Sim. Direcionamos créditos que permitem compra mesmo com restrição; na transferência "
+            "pode ser necessário avalista sem restrições e com renda comprovada."
+        ),
+    },
+]
+
+
+def _faq_by_id(faq_id: str | None) -> dict[str, str] | None:
+    if not faq_id:
+        return None
+    key = str(faq_id).strip()
+    for row in MARKETPLACE_CHAT_FAQ:
+        if row["id"] == key:
+            return row
+    return None
+
+
+def _faq_list_item() -> dict:
+    return {
+        "text": "Selecione uma dúvida:",
+        "faq": True,
+        "items": [{"id": row["id"], "name": row["name"]} for row in MARKETPLACE_CHAT_FAQ],
+        "next": int(STEP_FAQ_ANSWER),
+    }
+
+
+def _doubts_prompt(*, lead_id: str | None = None) -> dict:
+    return _wrap(
+        [
+            {
+                "text": "Vamos dar seguimento para concluirmos a sua compra. Mas antes, você ficou com alguma dúvida?",
+                "options": [
+                    {"name": "Sim", "save": "yes", "next": int(STEP_DOUBTS)},
+                    {"name": "Não", "save": "no", "next": int(STEP_DOUBTS)},
+                ],
+            }
+        ],
+        lead_id=lead_id,
+    )
 
 
 def _brl(value: Decimal | str | float | int) -> str:
@@ -1207,9 +1298,9 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
             return _wrap(
                 [
                     {
-                        "text": "Dados profissionais salvos. Vamos ao contrato de intermediação.",
-                        "button": "Continuar para o contrato",
-                        "next": int(STEP_CONTRACT_PLACEHOLDER),
+                        "text": "Dados profissionais salvos.",
+                        "button": "Continuar",
+                        "next": int(STEP_DOUBTS),
                     }
                 ],
                 lead_id=lead.id,
@@ -1222,6 +1313,60 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
             db.flush()
             return _income_proof_prompt(lead, selected)
         return _income_proof_prompt(lead, selected)
+
+    if step == STEP_DOUBTS:
+        if not lead:
+            raise HTTPException(422, "Sessão do chat expirada. Recomece pelo início.")
+        choice = str(data.get("option_save") or data.get("option_id") or "").strip().lower()
+        if choice in {"no", "nao", "não", "0", "false"}:
+            return _wrap(
+                [
+                    {
+                        "text": "Perfeito. Vamos ao contrato de intermediação.",
+                        "button": "Continuar para o contrato",
+                        "next": int(STEP_CONTRACT_PLACEHOLDER),
+                    }
+                ],
+                lead_id=lead.id,
+            )
+        if choice in {"yes", "sim", "1", "true"}:
+            return _wrap([_faq_list_item()], lead_id=lead.id)
+        return _doubts_prompt(lead_id=lead.id)
+
+    if step in {STEP_FAQ_LIST, "94"}:
+        if not lead:
+            raise HTTPException(422, "Sessão do chat expirada. Recomece pelo início.")
+        return _wrap([_faq_list_item()], lead_id=lead.id)
+
+    if step in {STEP_FAQ_ANSWER, STEP_FAQ_ANSWER_LEGACY}:
+        if not lead:
+            raise HTTPException(422, "Sessão do chat expirada. Recomece pelo início.")
+        faq_id = str(
+            data.get("faq_id")
+            or data.get("option_id")
+            or data.get("option_save")
+            or ""
+        ).strip()
+        if isinstance(data.get("option_save"), dict):
+            faq_id = str(data["option_save"].get("faq_id") or faq_id)
+        row = _faq_by_id(faq_id)
+        if not row:
+            item = _faq_list_item()
+            item["text"] = "Não encontrei essa dúvida. Escolha outra na lista:"
+            return _wrap([item], lead_id=lead.id)
+        return _wrap(
+            [
+                {"text": row["txt"]},
+                {
+                    "text": "Mais alguma dúvida?",
+                    "options": [
+                        {"name": "Sim, ver outras dúvidas", "save": "yes", "next": int(STEP_FAQ_LIST)},
+                        {"name": "Não, seguir para o contrato", "save": "no", "next": int(STEP_DOUBTS)},
+                    ],
+                },
+            ],
+            lead_id=lead.id,
+        )
 
     if step == STEP_CONTRACT_PLACEHOLDER:
         if not lead:
@@ -1313,14 +1458,10 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
                 [
                     {
                         "text": (
-                            "Sem problemas. Você pode falar com nosso time ou voltar ao resumo. "
-                            "O boleto da entrada fica disponível depois do aceite."
+                            "Sem problemas. Podemos esclarecer dúvidas antes de assinar o contrato."
                         ),
-                        "options": [
-                            {"name": "Voltar ao resumo", "next": int(STEP_HANDOFF_RESUMO)},
-                            {"name": "Falar no WhatsApp", "link": f"https://wa.me/55{_digits(settings.company_phone)}"},
-                            {"name": "Aceitar e continuar", "next": int(STEP_CONTRACT_PLACEHOLDER), "save": "accept"},
-                        ],
+                        "button": "Ver dúvidas",
+                        "next": int(STEP_DOUBTS),
                     }
                 ],
                 lead_id=lead.id,
@@ -1333,7 +1474,7 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
                     "contract": True,
                     "html": html,
                     "next": int(STEP_CONTRACT_PLACEHOLDER),
-                    "next_decline": int(STEP_CONTRACT_PLACEHOLDER),
+                    "next_decline": int(STEP_DOUBTS),
                     "accept_save": "accept",
                     "decline_save": "decline",
                 }

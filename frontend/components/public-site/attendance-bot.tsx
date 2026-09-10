@@ -606,7 +606,22 @@ export function AttendanceBotSection() {
                           type="button"
                           className="attendance-option"
                           disabled={busy}
-                          onClick={() => void advance(95, 0, { flowIndex, itemIndex, value: faqItem.name ?? "Dúvida" })}
+                          onClick={() => {
+                            const faqId = String(faqItem.id ?? "");
+                            const nextForm = {
+                              ...form,
+                              option_id: faqId,
+                              option_save: faqId,
+                              faq_id: faqId,
+                            };
+                            setForm(nextForm);
+                            void advance(
+                              item.next ?? 10040,
+                              0,
+                              { flowIndex, itemIndex, value: faqItem.name ?? "Dúvida" },
+                              nextForm,
+                            );
+                          }}
                         >
                           {faqItem.name}
                         </button>

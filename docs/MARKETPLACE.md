@@ -169,6 +169,7 @@ Jornada no site (`POST /api/v1/public/site/chat/home` e `.../home/{step}`):
 4. Handoff pós-match (`10014–10018` + dados `10030–10034`):
    - `10014` resumo (crédito / entrada / cotas)
    - `10030–10037` PF/PJ → CPF/CNPJ (+ razão social PJ) → CEP → número → profissão/atividade → renda/faturamento → comprovação (Holerite/IR/Decore/Extrato)
+   - `10038–10040` dúvida? → lista FAQ (seed Paulo) → resposta + mais dúvidas / contrato (decline do contrato volta a `10038`)
    - `10015` contrato templated (HTML com dados do comprador/cota/renda; ack em `terms_json.contract_html` + `contract_ack`)
    - `10016` senha in-chat → `register_public_client` + bind; se e-mail já existe → CTA login
    - `10017` emite boleto Inter com pagador real (documento/endereço do snapshot)

@@ -3749,7 +3749,35 @@ def test_public_site_chat_native_marketplace_flow(client, auth_headers):
         json={"lead_id": lead_id, "option_save": "done", "option_id": "done"},
     )
     assert proof_done.status_code == 200, proof_done.text
-    assert proof_done.json()["OBJ"]["chat_next"][0].get("next") == 10015
+    assert proof_done.json()["OBJ"]["chat_next"][0].get("next") == 10038
+
+    doubts = client.post("/api/v1/public/site/chat/home/10038", json={"lead_id": lead_id})
+    assert doubts.status_code == 200, doubts.text
+    assert any(o.get("save") == "yes" for o in (doubts.json()["OBJ"]["chat_next"][0].get("options") or []))
+
+    faq_list = client.post(
+        "/api/v1/public/site/chat/home/10038",
+        json={"lead_id": lead_id, "option_save": "yes"},
+    )
+    assert faq_list.status_code == 200, faq_list.text
+    faq_item = faq_list.json()["OBJ"]["chat_next"][0]
+    assert faq_item.get("faq") is True
+    assert faq_item.get("items")
+    assert faq_item.get("next") == 10040
+
+    answer = client.post(
+        "/api/v1/public/site/chat/home/10040",
+        json={"lead_id": lead_id, "faq_id": faq_item["items"][0]["id"], "option_id": faq_item["items"][0]["id"]},
+    )
+    assert answer.status_code == 200, answer.text
+    assert len(answer.json()["OBJ"]["chat_next"]) >= 2
+
+    no_more = client.post(
+        "/api/v1/public/site/chat/home/10038",
+        json={"lead_id": lead_id, "option_save": "no"},
+    )
+    assert no_more.status_code == 200, no_more.text
+    assert no_more.json()["OBJ"]["chat_next"][0].get("next") == 10015
 
     contract = client.post("/api/v1/public/site/chat/home/10015", json={"lead_id": lead_id})
     assert contract.status_code == 200, contract.text
@@ -3759,6 +3787,7 @@ def test_public_site_chat_native_marketplace_flow(client, auth_headers):
     assert "Engenheira" in (contract_item.get("html") or "")
     assert "Holerite" in (contract_item.get("html") or "")
     assert contract_item.get("accept_save") == "accept"
+    assert contract_item.get("next_decline") == 10038
 
     accept = client.post(
         "/api/v1/public/site/chat/home/10015",
