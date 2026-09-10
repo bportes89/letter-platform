@@ -2303,6 +2303,53 @@ class VendaDiretaManualStoreResponse(BaseModel):
     message: str
 
 
+class CadastroListItem(BaseModel):
+    lead_id: str
+    created_at: datetime | None = None
+    name: str
+    document: str | None = None
+    phone: str
+    email: str | None = None
+    source: str
+    lead_status: str
+    pipeline: str
+    situation: str
+    situation_label: str
+    credit_value: str | None = None
+    entrada_value: str | None = None
+    partner_name: str | None = None
+    partner_role: str | None = None
+    proposal_id: str | None = None
+    proposal_status: str | None = None
+    contract_id: str | None = None
+    contract_status: str | None = None
+    quota_ids: list[str] = Field(default_factory=list)
+    quota_codes: list[str] = Field(default_factory=list)
+    supplier_sources: list[str] = Field(default_factory=list)
+    person_type: str | None = None
+
+
+class CadastroDetailView(CadastroListItem):
+    snapshot: dict = Field(default_factory=dict)
+    terms: dict = Field(default_factory=dict)
+    address: dict = Field(default_factory=dict)
+    purchase_readonly: dict = Field(default_factory=dict)
+
+
+class CadastroUpdateRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=2, max_length=180)
+    phone: str | None = Field(default=None, min_length=8, max_length=40)
+    document: str | None = Field(default=None, max_length=20)
+    email: str | None = Field(default=None, max_length=180)
+    lead_status: str | None = Field(default=None, max_length=40)
+    zipcode: str | None = None
+    street: str | None = None
+    number: str | None = None
+    neighborhood: str | None = None
+    city: str | None = None
+    uf: str | None = Field(default=None, max_length=2)
+
+
 class VenderCotaCalculateRequest(BaseModel):
     tipo_consorcio: str
     credit_value: Decimal = Field(gt=0)

@@ -89,6 +89,7 @@ from app.schemas import (
     QuotaSupplierCreate, QuotaSupplierUpdate, QuotaSupplierView,
     VendaDiretaManualCotaOption, VendaDiretaManualCadastroOption, VendaDiretaManualPartnerOption,
     VendaDiretaManualStoreRequest, VendaDiretaManualStoreResponse,
+    CadastroListItem, CadastroDetailView, CadastroUpdateRequest,
     VenderCotaCalculateRequest, VenderCotaStoreRequest, QuotaOfferRangeUpdate, QuotaSellOfferUpdate, VenderCotaCloseRequest,
     SdcDeskEvaluateRequest, SdcDeskStoreRequest, SdcDeskStatusUpdate, SdcDeskSaleCreate,
     FlashDeskEvaluateRequest, FlashDeskStoreRequest, FlashDeskStatusUpdate, FlashDeskSaleCreate,
@@ -1845,6 +1846,35 @@ def venda_direta_manual_store(payload: VendaDiretaManualStoreRequest, user: User
         monthly_income=payload.monthly_income,
     )
     audit(db, user, "marketplace.venda_direta_manual.store", "proposal", result["proposal_id"], {"quota_id": result["quota_id"]})
+    db.commit()
+    return result
+
+
+@router.get("/marketplace/cadastros", response_model=list[CadastroListItem])
+def marketplace_cadastros(
+    pipeline: str = "ALL",
+    q: str | None = None,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.cadastro_service import list_cadastros
+
+    return list_cadastros(db, user, pipeline=pipeline, q=q)
+
+
+@router.get("/marketplace/cadastros/{lead_id}", response_model=CadastroDetailView)
+def marketplace_cadastro_detail(lead_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.cadastro_service import get_cadastro_detail
+
+    return get_cadastro_detail(db, user, lead_id)
+
+
+@router.patch("/marketplace/cadastros/{lead_id}", response_model=CadastroDetailView)
+def marketplace_cadastro_update(lead_id: str, payload: CadastroUpdateRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.cadastro_service import update_cadastro
+
+    result = update_cadastro(db, user, lead_id, **payload.model_dump(exclude_unset=True))
+    audit(db, user, "marketplace.cadastro.updated", "lead", lead_id, payload.model_dump(exclude_unset=True, mode="json"))
     db.commit()
     return result
 

@@ -646,6 +646,37 @@ def test_venda_direta_manual_store(client, auth_headers):
     assert locked["status"] == "RESERVED"
 
 
+def test_marketplace_cadastros_pipeline(client, auth_headers):
+    """Cadastro admin lista vendas Marketplace por etapa."""
+    all_rows = client.get("/api/v1/marketplace/cadastros?pipeline=ALL", headers=auth_headers)
+    assert all_rows.status_code == 200, all_rows.text
+    assert isinstance(all_rows.json(), list)
+    assert any(r["source"] in {"VENDA_DIRETA_MANUAL", "VENDA_DIRETA_ROBO", "DIRECT"} or r.get("proposal_id") for r in all_rows.json()) or len(all_rows.json()) >= 1
+
+    novos = client.get("/api/v1/marketplace/cadastros?pipeline=NOVOS", headers=auth_headers)
+    assert novos.status_code == 200
+    for row in novos.json():
+        assert row["pipeline"] == "NOVOS"
+        assert row["proposal_id"]
+
+    # Seed lead MARKETPLACE DRAFT cai em NOVOS ou INCOMPLETO dependendo de proposta
+    detail_id = (novos.json()[0]["lead_id"] if novos.json() else all_rows.json()[0]["lead_id"])
+    detail = client.get(f"/api/v1/marketplace/cadastros/{detail_id}", headers=auth_headers)
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["lead_id"] == detail_id
+    assert "purchase_readonly" in detail.json()
+
+    patched = client.patch(
+        f"/api/v1/marketplace/cadastros/{detail_id}",
+        headers=auth_headers,
+        json={"phone": "32911112222", "email": "cadastro.update@letter.test", "city": "Barbacena"},
+    )
+    assert patched.status_code == 200, patched.text
+    assert patched.json()["phone"] == "32911112222"
+    assert patched.json()["email"] == "cadastro.update@letter.test"
+    assert patched.json()["address"].get("city") == "Barbacena"
+
+
 def test_marketplace_suppliers_crud_and_markup_override(client, auth_headers):
     """Fornecedores: CRUD + markup cadastrado prevalece; cliente embute % plataforma."""
     from decimal import Decimal

@@ -78,7 +78,7 @@ Cadastro (Fornecedores + Inventário) → Sync Bacen (opcional) → Varredura Ni
 
 ## UI
 
-- **COMERCIAL:** Cartas contempladas → Marketplace | Venda Direta Robô | Venda Direta Manual | Fornecedores | Inventário
+- **COMERCIAL:** Cartas contempladas → Marketplace | Venda Direta Robô | Venda Direta Manual | Cadastros | Fornecedores | Inventário
 - **Propostas e simulações** → cadastro comercial unificado
 
 ## Venda Direta Robô (admin)
@@ -99,3 +99,12 @@ Formulário único: parceiro opcional → categoria → **uma cota** do inventá
 3. `POST /api/v1/marketplace/venda-direta-manual/store` — lead + proposta + Nina + trava 60 min
 
 Entrada exibida já aplica markup/comissão do fornecedor. **Não** embute markup de afiliado na entrada (só vínculo do parceiro para comissão na finalização).
+
+## Cadastros (admin)
+
+Lista operacional das vendas Marketplace (chat / venda direta):
+
+- `GET /api/v1/marketplace/cadastros?pipeline=ALL|NOVOS|NEGOCIACAO|CONCLUIDO|INCOMPLETO|COMPRAS`
+- `GET/PATCH /api/v1/marketplace/cadastros/{lead_id}`
+
+Abas espelham o pacote Paulo: Clientes, Novos, Em negociação, Concluído, Incompleto, Compras. Compra (crédito/entrada/cotas) é somente leitura; dados do cliente são editáveis.
