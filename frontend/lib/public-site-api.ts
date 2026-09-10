@@ -19,12 +19,25 @@ async function publicFetch<T>(path: string, options: RequestInit = {}): Promise<
     const body = (await response.json().catch(() => ({}))) as {
       detail?: string | { msg?: string }[] | { message?: string; motivos?: string[] };
     };
-    if (typeof body.detail === "string") throw new Error(body.detail);
+    if (typeof body.detail === "string") {
+      const detail = body.detail.trim();
+      if (/^not found$/i.test(detail) || response.status === 404) {
+        throw new Error(
+          "Serviço de cálculo ainda não disponível nesta API (rota não publicada). Aguarde o deploy do backend ou tente novamente em alguns minutos.",
+        );
+      }
+      throw new Error(detail);
+    }
     if (Array.isArray(body.detail) && body.detail[0]?.msg) throw new Error(body.detail[0].msg);
     if (body.detail && typeof body.detail === "object" && !Array.isArray(body.detail)) {
       const d = body.detail as { message?: string; motivos?: string[] };
       const extra = d.motivos?.length ? ` ${d.motivos.join(" ")}` : "";
       throw new Error(`${d.message || "Não foi possível concluir a solicitação."}${extra}`);
+    }
+    if (response.status === 404) {
+      throw new Error(
+        "Serviço de cálculo ainda não disponível nesta API (rota não publicada). Aguarde o deploy do backend.",
+      );
     }
     throw new Error("Não foi possível concluir a solicitação.");
   }
