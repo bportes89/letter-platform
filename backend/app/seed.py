@@ -133,9 +133,11 @@ def seed():
                 _ensure_profile_demo_users(db, org.id, password)
                 _ensure_master_trees(db, org.id, password)
                 from app.vender_cota_service import ensure_default_ranges, ensure_quota_sell_commission_rule
+                from app.quota_supplier_service import ensure_default_suppliers
 
                 ensure_default_ranges(db, org.id)
                 ensure_quota_sell_commission_rule(db, org.id)
+                ensure_default_suppliers(db, org.id)
                 db.commit()
             _sync_headquarters_org(db)
             _sync_demo_phones(db)

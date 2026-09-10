@@ -1,4 +1,4 @@
-"""Esteira 2 robot fields on quotas.
+"""Quota suppliers for marketplace markups.
 
 Revision ID: o5p6q7r8s9t0
 Revises: n4o5p6q7r8s9
@@ -19,7 +19,7 @@ def upgrade() -> None:
         "quota_suppliers",
         sa.Column("id", sa.String(length=36), nullable=False),
         sa.Column("organization_id", sa.String(length=36), nullable=False),
-        sa.Column("active", sa.Boolean(), nullable=False, server_default=sa.text("1")),
+        sa.Column("active", sa.Boolean(), nullable=False, server_default=sa.true()),
         sa.Column("person_type", sa.String(length=2), nullable=False, server_default="PJ"),
         sa.Column("name", sa.String(length=180), nullable=False),
         sa.Column("trade_name", sa.String(length=180), nullable=True),
