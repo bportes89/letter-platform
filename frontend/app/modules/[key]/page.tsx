@@ -22,6 +22,7 @@ import { LegalManualsModule } from "@/components/legal-manuals-module";
 import { PreAnalysisModule } from "@/components/pre-analysis-module";
 import { LeaseEquityModule } from "@/components/lease-equity-module";
 import { QuitConModule } from "@/components/quitcon-module";
+import { QuitConDeskModule } from "@/components/quitcon-desk-module";
 import { VenderCotaAdminModule } from "@/components/vender-cota-admin-module";
 import { SdcDeskModule } from "@/components/sdc-desk-module";
 import { FlashDeskModule } from "@/components/flash-desk-module";
@@ -95,7 +96,7 @@ export default function ModulePage() {
   if (routeKey === "lease-equity") return <><LeaseEquityModule /><PreAnalysisModule /></>;
   if (routeKey === "flash-invest" || routeKey === "funding") return <FundingModule />;
   if (routeKey === "bank-control") return <BankControlModule />;
-  if (routeKey === "quitcon") return <QuitConModule />;
+  if (routeKey === "quitcon") return <QuitConDeskModule />;
   if (routeKey === "leilao" || routeKey === "auctions") return <AuctionsModule />;
   if (routeKey === "crm") return <LeadsModule />;
   if (routeKey === "contracts") return <ContractsModule />;

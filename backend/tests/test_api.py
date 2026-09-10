@@ -352,6 +352,78 @@ def test_flash_desk_evaluate_store_approve_and_sale(client, auth_headers):
     assert again.status_code == 409
 
 
+def test_quitcon_desk_evaluate_store_approve_and_sale(client, auth_headers):
+    bad = client.post("/api/v1/quitcon/desk/evaluate", headers=auth_headers, json={
+        "outstanding_balance": "100000",
+        "meses_restantes": 48,
+        "registry_number": "G-1/C-1",
+        "registry_office": "Administradora Fantasma",
+        "contemplada": True,
+        "bem_faturado": True,
+        "parcelas_em_dia": True,
+        "docs_complete": True,
+    })
+    assert bad.status_code == 200
+    assert bad.json()["result"]["viable"] is False
+
+    ok = client.post("/api/v1/quitcon/desk/evaluate", headers=auth_headers, json={
+        "outstanding_balance": "100000",
+        "meses_restantes": 48,
+        "registry_number": "G-1/C-1",
+        "registry_office": "Embracon",
+        "operational_service": True,
+        "contemplada": True,
+        "bem_faturado": True,
+        "parcelas_em_dia": True,
+        "docs_complete": True,
+    })
+    assert ok.status_code == 200
+    result = ok.json()["result"]
+    assert result["viable"] is True
+    assert Decimal(result["valor_presente_quitacao"]) > 0
+    assert result["custos_entrada"]["itens"]
+
+    stored = client.post("/api/v1/quitcon/desk/solicitations", headers=auth_headers, json={
+        "outstanding_balance": "100000",
+        "meses_restantes": 48,
+        "registry_number": "G-1/C-1",
+        "registry_office": "Embracon",
+        "operational_service": False,
+        "contemplada": True,
+        "bem_faturado": True,
+        "parcelas_em_dia": True,
+        "docs_complete": True,
+        "contact_name": "Cliente QuitCon Desk",
+        "contact_email": "cliente.quitcon.desk@example.com",
+        "contact_phone": "31966554433",
+        "document": "12345678901",
+        "person_type": "PF",
+    })
+    assert stored.status_code == 201, stored.text
+    item = stored.json()
+    assert item["status"] == "AWAITING_DOCS"
+    sid = item["id"]
+
+    approved = client.patch(
+        f"/api/v1/quitcon/desk/solicitations/{sid}",
+        headers=auth_headers,
+        json={"status": "APPROVED"},
+    )
+    assert approved.status_code == 200
+    assert approved.json()["can_create_sale"] is True
+
+    sale = client.post(f"/api/v1/quitcon/desk/solicitations/{sid}/sale", headers=auth_headers)
+    assert sale.status_code == 201, sale.text
+    body = sale.json()
+    assert body["quitcon_operacao_id"]
+    assert body["operacao_status"] == "AGUARDANDO_TAPAF"
+    assert body["tapaf_checkout"]["valor_tapaf_brl"] == "1500.00"
+    assert body["solicitation"]["can_create_sale"] is False
+
+    again = client.post(f"/api/v1/quitcon/desk/solicitations/{sid}/sale", headers=auth_headers)
+    assert again.status_code == 409
+
+
 def test_marketplace_esteira1_and_esteira2(client, auth_headers):
     quota = next(q for q in client.get("/api/v1/quotas", headers=auth_headers).json() if q["status"] == "AVAILABLE")
     client.patch(

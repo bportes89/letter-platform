@@ -208,6 +208,10 @@ def seed():
                 organization_id=org.id, product="QUOTA_SELL", commission_type="SALES", version=1,
                 base_type="CREDIT_VALUE", pool_rate_percent=Decimal("3"), levels_json=json.dumps(LEVEL_SHARES), active=True,
             ),
+            CommissionRule(
+                organization_id=org.id, product="QUITCON", commission_type="SALES", version=1,
+                base_type="QUITACAO_VP", pool_rate_percent=Decimal("3"), levels_json=json.dumps(LEVEL_SHARES), active=True,
+            ),
         ])
         db.commit()
         from app.vender_cota_service import ensure_default_ranges

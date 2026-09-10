@@ -88,6 +88,7 @@ from app.schemas import (
     VenderCotaCalculateRequest, VenderCotaStoreRequest, QuotaOfferRangeUpdate, QuotaSellOfferUpdate, VenderCotaCloseRequest,
     SdcDeskEvaluateRequest, SdcDeskStoreRequest, SdcDeskStatusUpdate, SdcDeskSaleCreate,
     FlashDeskEvaluateRequest, FlashDeskStoreRequest, FlashDeskStatusUpdate, FlashDeskSaleCreate,
+    QuitConDeskEvaluateRequest, QuitConDeskStoreRequest, QuitConDeskStatusUpdate,
     ProposalView, QuotaCreate, QuotaUpdate, QuotaView, NinaQuotaScanView, RecoveredAssetCreate, RecoveredAssetView, RefreshRequest,
     CommercialClientView,
     ReservationCreate, ReservationView, SdcCalculationRequest, SessionView, SignatureComplete,
@@ -2467,6 +2468,109 @@ def flash_desk_create_sale(
         "solicitation": solicitation_view(item, list_documents(db, item.id)),
         **sale,
         "message": "Proposta Flash Capital criada e vinculada à solicitação",
+    }
+
+
+@router.post("/quitcon/desk/evaluate")
+def quitcon_desk_evaluate(payload: QuitConDeskEvaluateRequest, user: User = Depends(get_current_user)):
+    from app.quitcon_desk_service import assert_desk_access, evaluate_quitcon_desk
+
+    assert_desk_access(user)
+    return {"result": evaluate_quitcon_desk(payload.model_dump())}
+
+
+@router.post("/quitcon/desk/solicitations", status_code=201)
+def quitcon_desk_store(payload: QuitConDeskStoreRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.quitcon_desk_service import list_documents, solicitation_view, store_solicitation
+
+    item = store_solicitation(db, user, payload.model_dump())
+    audit(db, user, "quitcon_desk.solicitation_created", "quitcon_solicitation", item.id, {
+        "registry_office": item.registry_office,
+        "quitacao_vp_amount": str(item.quitacao_vp_amount),
+    })
+    db.commit()
+    db.refresh(item)
+    return solicitation_view(item, list_documents(db, item.id))
+
+
+@router.get("/quitcon/desk/solicitations")
+def quitcon_desk_list(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.quitcon_desk_service import list_documents, list_solicitations, solicitation_view
+
+    return [solicitation_view(item, list_documents(db, item.id)) for item in list_solicitations(db, user)]
+
+
+@router.get("/quitcon/desk/solicitations/{solicitation_id}")
+def quitcon_desk_get(solicitation_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.quitcon_desk_service import get_solicitation, list_documents, solicitation_view
+
+    item = get_solicitation(db, user, solicitation_id)
+    return solicitation_view(item, list_documents(db, item.id))
+
+
+@router.patch("/quitcon/desk/solicitations/{solicitation_id}")
+def quitcon_desk_status(
+    solicitation_id: str,
+    payload: QuitConDeskStatusUpdate,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.quitcon_desk_service import get_solicitation, list_documents, solicitation_view, update_status
+
+    item = get_solicitation(db, user, solicitation_id)
+    update_status(db, user, item, payload.status, payload.status_notes)
+    audit(db, user, "quitcon_desk.status_updated", "quitcon_solicitation", item.id, {
+        "status": item.status,
+        "status_notes": item.status_notes,
+    })
+    db.commit()
+    db.refresh(item)
+    return solicitation_view(item, list_documents(db, item.id))
+
+
+@router.post("/quitcon/desk/solicitations/{solicitation_id}/documents")
+async def quitcon_desk_upload_doc(
+    solicitation_id: str,
+    file: UploadFile = File(...),
+    doc_type: str = Form("QUITCON_SUPPORT"),
+    comment: str | None = Form(None),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.quitcon_desk_service import add_document, get_solicitation, list_documents, solicitation_view
+
+    item = get_solicitation(db, user, solicitation_id)
+    await add_document(db, user, item, upload=file, doc_type=doc_type, comment=comment)
+    audit(db, user, "quitcon_desk.document_uploaded", "quitcon_solicitation", item.id, {
+        "filename": file.filename,
+        "doc_type": doc_type,
+        "status": item.status,
+    })
+    db.commit()
+    db.refresh(item)
+    return solicitation_view(item, list_documents(db, item.id))
+
+
+@router.post("/quitcon/desk/solicitations/{solicitation_id}/sale", status_code=201)
+def quitcon_desk_create_sale(
+    solicitation_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.quitcon_desk_service import create_sale_from_quitcon, get_solicitation, list_documents, solicitation_view
+
+    item = get_solicitation(db, user, solicitation_id)
+    sale = create_sale_from_quitcon(db, user, item)
+    audit(db, user, "quitcon_desk.sale_created", "quitcon_solicitation", item.id, {
+        "proposal_id": sale["proposal_id"],
+        "quitcon_operacao_id": sale["quitcon_operacao_id"],
+    })
+    db.commit()
+    db.refresh(item)
+    return {
+        "solicitation": solicitation_view(item, list_documents(db, item.id)),
+        **sale,
+        "message": "Operação QuitCon aberta em AGUARDANDO_TAPAF",
     }
 
 

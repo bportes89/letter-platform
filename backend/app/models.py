@@ -376,6 +376,52 @@ class FlashSolicitationDocument(TimestampMixin, Base):
     uploaded_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"))
 
 
+class QuitConSolicitation(TimestampMixin, Base):
+    """Mesa comercial QuitCon: solicitação → docs → operação AGUARDANDO_TAPAF."""
+
+    __tablename__ = "quitcon_solicitations"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    partner_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), index=True)
+    created_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"))
+    status: Mapped[str] = mapped_column(String(40), default="AWAITING_DOCS", index=True)
+    status_notes: Mapped[str | None] = mapped_column(Text)
+    contact_name: Mapped[str] = mapped_column(String(180))
+    contact_email: Mapped[str] = mapped_column(String(180), index=True)
+    contact_phone: Mapped[str] = mapped_column(String(40), default="")
+    document: Mapped[str | None] = mapped_column(String(20))
+    person_type: Mapped[str] = mapped_column(String(10), default="PF")
+    address: Mapped[str | None] = mapped_column(Text)
+    occupation: Mapped[str | None] = mapped_column(String(180))
+    income_value: Mapped[float] = mapped_column(Numeric(15, 2), default=0)
+    outstanding_balance: Mapped[float] = mapped_column(Numeric(15, 2))
+    meses_restantes: Mapped[int] = mapped_column(Integer, default=48)
+    registry_number: Mapped[str] = mapped_column(String(80))
+    registry_office: Mapped[str] = mapped_column(String(180))
+    property_type: Mapped[str] = mapped_column(String(40), default="CONSORCIO")
+    appraisal_value: Mapped[float] = mapped_column(Numeric(15, 2), default=0)
+    operational_service: Mapped[bool] = mapped_column(Boolean, default=False)
+    contemplada: Mapped[bool] = mapped_column(Boolean, default=True)
+    bem_faturado: Mapped[bool] = mapped_column(Boolean, default=True)
+    parcelas_em_dia: Mapped[bool] = mapped_column(Boolean, default=True)
+    docs_complete: Mapped[bool] = mapped_column(Boolean, default=True)
+    quitacao_vp_amount: Mapped[float] = mapped_column(Numeric(15, 2), default=0)
+    evaluation_json: Mapped[str] = mapped_column(Text, default="{}")
+    proposal_id: Mapped[str | None] = mapped_column(ForeignKey("proposals.id"), index=True)
+    quitcon_operacao_id: Mapped[str | None] = mapped_column(ForeignKey("operacoes_quitcon.id"), index=True)
+
+
+class QuitConSolicitationDocument(TimestampMixin, Base):
+    __tablename__ = "quitcon_solicitation_documents"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    solicitation_id: Mapped[str] = mapped_column(ForeignKey("quitcon_solicitations.id"), index=True)
+    document_id: Mapped[str] = mapped_column(ForeignKey("documents.id"), index=True)
+    doc_type: Mapped[str] = mapped_column(String(80), default="QUITCON_SUPPORT")
+    comment: Mapped[str | None] = mapped_column(Text)
+    uploaded_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"))
+
+
 class QuotaReservation(TimestampMixin, Base):
     __tablename__ = "quota_reservations"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)

@@ -2216,6 +2216,37 @@ class FlashDeskSaleCreate(BaseModel):
     consent_confirmation: bool = False
 
 
+class QuitConDeskEvaluateRequest(BaseModel):
+    outstanding_balance: Decimal = Field(gt=0)
+    meses_restantes: int = Field(default=48, ge=1, le=240)
+    registry_number: str = Field(min_length=1, max_length=80)
+    registry_office: str = Field(min_length=2, max_length=180)
+    property_type: str = "CONSORCIO"
+    appraisal_value: Decimal | None = Field(default=None, gt=0)
+    operational_service: bool = False
+    contemplada: bool = True
+    bem_faturado: bool = True
+    parcelas_em_dia: bool = True
+    docs_complete: bool = True
+
+
+class QuitConDeskStoreRequest(QuitConDeskEvaluateRequest):
+    contact_name: str = Field(min_length=2, max_length=180)
+    contact_email: str = Field(min_length=5, max_length=180)
+    contact_phone: str = Field(min_length=8, max_length=40)
+    document: str | None = None
+    person_type: str = "PF"
+    address: str | None = None
+    occupation: str | None = None
+    income_value: Decimal = Field(ge=0, default=0)
+    partner_user_id: str | None = None
+
+
+class QuitConDeskStatusUpdate(BaseModel):
+    status: str = Field(min_length=3, max_length=40)
+    status_notes: str | None = Field(default=None, max_length=4000)
+
+
 class BISummaryView(BaseModel):
     funnel: dict; portfolio: dict; risk: dict; funding: dict; recovery: dict
 
