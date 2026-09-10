@@ -371,8 +371,25 @@ export function AttendanceBotSection() {
 
   const onContract = async (flowIndex: number, itemIndex: number, item: ChatItem, accepted: boolean) => {
     if (!isCurrent(flowIndex) || busy) return;
-    if (accepted) await advance(item.next ?? 0, 0, { flowIndex, itemIndex, value: "Contrato assinado" });
-    else await advance(93, 0, { flowIndex, itemIndex, value: "Dúvidas" });
+    const nextForm = { ...form };
+    if (accepted) {
+      const save = item.accept_save || "accept";
+      nextForm.option_save = save;
+      nextForm.option_id = save;
+      setForm(nextForm);
+      await advance(item.next ?? 0, 0, { flowIndex, itemIndex, value: "Contrato assinado" }, nextForm);
+      return;
+    }
+    const save = item.decline_save || "decline";
+    nextForm.option_save = save;
+    nextForm.option_id = save;
+    setForm(nextForm);
+    await advance(
+      item.next_decline ?? item.next ?? 0,
+      0,
+      { flowIndex, itemIndex, value: "Dúvidas" },
+      nextForm,
+    );
   };
 
   const renderOptions = (flowIndex: number, itemIndex: number, item: ChatItem) => {

@@ -62,6 +62,9 @@ export type ChatItem = {
   html?: string;
   back?: number;
   video?: string;
+  next_decline?: number;
+  accept_save?: string;
+  decline_save?: string;
 };
 
 export type ChatSiteInfo = {
@@ -133,6 +136,14 @@ export function whatsappHref(info?: ChatSiteInfo): string | null {
 
 export function mapLegacyLink(link: string): string {
   if (isVenderCotaLink(link)) return venderCotaHref("/vender-minha-cota");
+  if (link.startsWith("/api/v1/")) {
+    const base = API_URL.replace(/\/$/, "");
+    // API_URL already ends with /api/v1 — strip duplicate prefix from link
+    if (base.endsWith("/api/v1")) {
+      return `${base}${link.slice("/api/v1".length)}`;
+    }
+    return `${base.replace(/\/api\/v1$/, "")}${link}`;
+  }
   return link;
 }
 

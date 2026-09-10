@@ -17,9 +17,12 @@ import { shouldForceWalletOnboarding, type WalletPeek } from "@/lib/wallet-onboa
 function CadastroForm() {
   const searchParams = useSearchParams();
   const refFromUrl = searchParams.get("ref")?.trim() ?? "";
+  const emailFromUrl = searchParams.get("email")?.trim() ?? "";
+  const nameFromUrl = searchParams.get("name")?.trim() ?? "";
+  const leadIdFromUrl = searchParams.get("lead_id")?.trim() ?? "";
 
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
+  const [name, setName] = useState(nameFromUrl);
+  const [email, setEmail] = useState(emailFromUrl);
   const [phone, setPhone] = useState("");
   const [document, setDocument] = useState("");
   const [password, setPassword] = useState("");
@@ -28,6 +31,21 @@ function CadastroForm() {
   const [referralPreview, setReferralPreview] = useState<PublicReferralPreview | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (emailFromUrl) setEmail(emailFromUrl);
+    if (nameFromUrl) setName(nameFromUrl);
+  }, [emailFromUrl, nameFromUrl]);
+
+  useEffect(() => {
+    if (leadIdFromUrl && typeof window !== "undefined") {
+      try {
+        sessionStorage.setItem("letter_chat_lead_id", leadIdFromUrl);
+      } catch {
+        /* ignore quota / private mode */
+      }
+    }
+  }, [leadIdFromUrl]);
 
   useEffect(() => {
     if (!getToken()) return;

@@ -3685,6 +3685,47 @@ def test_public_site_chat_native_marketplace_flow(client, auth_headers):
     )
     assert confirm.status_code == 200, confirm.text
     assert "reservei" in confirm.json()["OBJ"]["chat_next"][0]["text"].lower()
+    assert confirm.json()["OBJ"]["chat_next"][0].get("next") == 10014
+
+    resumo = client.post("/api/v1/public/site/chat/home/10014", json={"lead_id": lead_id})
+    assert resumo.status_code == 200, resumo.text
+    resumo_item = resumo.json()["OBJ"]["chat_next"][0]
+    assert resumo_item.get("resumo") is True
+    assert resumo_item.get("quotas")
+    assert resumo_item.get("next") == 10015
+
+    contract = client.post("/api/v1/public/site/chat/home/10015", json={"lead_id": lead_id})
+    assert contract.status_code == 200, contract.text
+    contract_item = contract.json()["OBJ"]["chat_next"][0]
+    assert contract_item.get("contract") is True
+    assert contract_item.get("html")
+    assert contract_item.get("accept_save") == "accept"
+
+    accept = client.post(
+        "/api/v1/public/site/chat/home/10015",
+        json={"lead_id": lead_id, "option_save": "accept", "option_id": "accept"},
+    )
+    assert accept.status_code == 200, accept.text
+    assert accept.json()["OBJ"]["chat_next"][0].get("next") == 10016
+
+    account = client.post("/api/v1/public/site/chat/home/10016", json={"lead_id": lead_id})
+    assert account.status_code == 200, account.text
+    account_opts = account.json()["OBJ"]["chat_next"][0].get("options") or []
+    assert any("/cadastro?" in str(o.get("link") or "") for o in account_opts)
+    assert any(o.get("next") == 10017 for o in account_opts)
+
+    boleto = client.post("/api/v1/public/site/chat/home/10017", json={"lead_id": lead_id})
+    assert boleto.status_code == 200, boleto.text
+    boleto_item = boleto.json()["OBJ"]["chat_next"][0]
+    assert "boleto" in boleto_item["text"].lower()
+    boleto_opts = boleto_item.get("options") or []
+    pdf_links = [o.get("link") for o in boleto_opts if o.get("link") and "boleto" in str(o.get("link"))]
+    assert pdf_links, "handoff deveria expor link PDF do boleto"
+    pdf_get = client.get(pdf_links[0])
+    assert pdf_get.status_code == 200, pdf_get.text
+
+    done = client.post("/api/v1/public/site/chat/home/10018", json={"lead_id": lead_id})
+    assert done.status_code == 200, done.text
 
     leads = client.get("/api/v1/leads", headers=auth_headers).json()
     lead = next(l for l in leads if l["id"] == lead_id)

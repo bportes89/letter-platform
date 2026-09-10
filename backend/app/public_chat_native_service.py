@@ -39,7 +39,13 @@ STEP_INCOME = "10010"
 STEP_ASSET = "10011"
 STEP_MATCH = "10012"
 STEP_CONFIRM = "10013"
-STEP_DONE = "10014"
+STEP_HANDOFF_RESUMO = "10014"
+STEP_CONTRACT_PLACEHOLDER = "10015"
+STEP_ACCOUNT_CTA = "10016"
+STEP_BOLETO_HANDOFF = "10017"
+STEP_DONE_FINAL = "10018"
+# legado (renomeado)
+STEP_DONE = STEP_HANDOFF_RESUMO
 
 # Capital de Giro (SDC) — faixa paralela ao Marketplace.
 STEP_SDC_ASSET_TYPE = "10020"
@@ -657,28 +663,211 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
                 if quota.status == "AVAILABLE":
                     reserve_quota(db, actor, quota, proposal.id, RESERVE_TTL)
             lead.status = "PROPOSAL"
-            snap["chosen_quota_ids"] = quota_ids
-            snap["proposal_id"] = proposal.id
-            _save_lead_snapshot(lead, snap)
-            db.flush()
             proposal_id = proposal.id
         else:
             proposal_id = existing.id
+            snap = _lead_snapshot(lead)
+
+        snap["chosen_quota_ids"] = quota_ids
+        snap["proposal_id"] = proposal_id
+        snap["handoff_credit"] = str(total)
+        snap["handoff_entrada"] = str(total_entrada)
+        from app.marketplace_service import pricing_for_quota as _pfq
+
+        snap["handoff_quotas"] = [
+            {
+                "id": q.id,
+                "administradora": getattr(q, "administrator_name_txt", None),
+                "tipo_credito": "Imóvel" if q.category == "REAL_ESTATE" else "Veículo",
+                "price": _brl(q.credit_value),
+                "price_entrada": _brl(_pfq(q, suppliers=suppliers)["entrada_final"]),
+                "parcelas": q.remaining_installments,
+                "price_parcela": _brl(q.installment_value or 0),
+            }
+            for q in quotas
+        ]
+        _save_lead_snapshot(lead, snap)
+        db.flush()
         return _wrap(
             [
                 {
                     "text": (
                         f"Perfeito! Reservei a(s) cota(s) por {RESERVE_TTL} minutos. "
-                        "Nossa equipe entra em contato para finalizar documentos e pagamento da entrada."
+                        "Vamos revisar o resumo e seguir com contrato, conta e boleto da entrada."
+                    ),
+                    "button": "Continuar",
+                    "next": int(STEP_HANDOFF_RESUMO),
+                }
+            ],
+            lead_id=lead.id,
+        )
+
+    if step == STEP_HANDOFF_RESUMO:
+        if not lead:
+            raise HTTPException(422, "Sessão do chat expirada. Recomece pelo início.")
+        snap = _lead_snapshot(lead)
+        quotas_ui = snap.get("handoff_quotas") or []
+        credit = snap.get("handoff_credit")
+        entrada = snap.get("handoff_entrada")
+        text = "Confira o resumo da sua opção:"
+        if credit or entrada:
+            text = (
+                f"Confira o resumo: crédito {_brl(credit or 0)} · entrada {_brl(entrada or 0)}."
+            )
+        return _wrap(
+            [
+                {
+                    "text": text,
+                    "resumo": True,
+                    "quotas": quotas_ui,
+                    "button": "Continuar para o contrato",
+                    "next": int(STEP_CONTRACT_PLACEHOLDER),
+                }
+            ],
+            lead_id=lead.id,
+        )
+
+    if step == STEP_CONTRACT_PLACEHOLDER:
+        if not lead:
+            raise HTTPException(422, "Sessão do chat expirada. Recomece pelo início.")
+        snap = _lead_snapshot(lead)
+        accepted = str(data.get("option_save") or data.get("option_id") or data.get("contract") or "").strip().lower()
+        # primeiro render: mostra contrato; avanço com aceite vem no próximo POST com option_save=accept
+        if accepted in {"accept", "1", "true", "aceito", "contrato_aceito"}:
+            from datetime import UTC, datetime
+
+            snap["contract_accepted_at"] = datetime.now(UTC).isoformat()
+            _save_lead_snapshot(lead, snap)
+            proposal = db.get(Proposal, snap.get("proposal_id")) if snap.get("proposal_id") else None
+            if proposal:
+                terms = seed_marketplace_lifecycle(json.loads(proposal.terms_json or "{}"))
+                terms["contract_ack"] = {
+                    "accepted_at": snap["contract_accepted_at"],
+                    "channel": SOURCE,
+                }
+                proposal.terms_json = json.dumps(terms, ensure_ascii=False)
+            db.flush()
+            return _wrap(
+                [
+                    {
+                        "text": "Contrato de intermediação registrado. Agora crie sua conta para acompanhar a compra.",
+                        "button": "Continuar",
+                        "next": int(STEP_ACCOUNT_CTA),
+                    }
+                ],
+                lead_id=lead.id,
+            )
+        if accepted in {"decline", "0", "false", "duvidas"}:
+            return _wrap(
+                [
+                    {
+                        "text": (
+                            "Sem problemas. Você pode falar com nosso time ou voltar ao resumo. "
+                            "O boleto da entrada fica disponível depois do aceite."
+                        ),
+                        "options": [
+                            {"name": "Voltar ao resumo", "next": int(STEP_HANDOFF_RESUMO)},
+                            {"name": "Falar no WhatsApp", "link": f"https://wa.me/55{_digits(settings.company_phone)}"},
+                            {"name": "Aceitar e continuar", "next": int(STEP_CONTRACT_PLACEHOLDER), "save": "accept"},
+                        ],
+                    }
+                ],
+                lead_id=lead.id,
+            )
+        credit = snap.get("handoff_credit") or "—"
+        entrada = snap.get("handoff_entrada") or "—"
+        html = (
+            "<p><strong>LETTER — Termo de intermediação (resumo)</strong></p>"
+            f"<p>Crédito: {_brl(credit) if credit not in (None, '—') else '—'}<br/>"
+            f"Entrada: {_brl(entrada) if entrada not in (None, '—') else '—'}<br/>"
+            f"Reserva: {RESERVE_TTL} minutos</p>"
+            "<p>Ao aceitar, você confirma o interesse na intermediação da cota contemplada. "
+            "O contrato completo e a assinatura digital ficam disponíveis na sua conta.</p>"
+        )
+        return _wrap(
+            [
+                {
+                    "text": "Leia o resumo do contrato de intermediação:",
+                    "contract": True,
+                    "html": html,
+                    "next": int(STEP_CONTRACT_PLACEHOLDER),
+                    "next_decline": int(STEP_CONTRACT_PLACEHOLDER),
+                    "accept_save": "accept",
+                    "decline_save": "decline",
+                }
+            ],
+            lead_id=lead.id,
+        )
+
+    if step == STEP_ACCOUNT_CTA:
+        if not lead:
+            raise HTTPException(422, "Sessão do chat expirada. Recomece pelo início.")
+        snap = _lead_snapshot(lead)
+        email = str(snap.get("email") or "").strip()
+        from urllib.parse import quote
+
+        qs = f"email={quote(email)}&name={quote(lead.name or '')}&lead_id={quote(lead.id)}"
+        return _wrap(
+            [
+                {
+                    "text": (
+                        "Crie sua conta LETTER para acompanhar boleto, documentos e status da compra. "
+                        "Se já tiver conta, entre e continue."
                     ),
                     "options": [
-                        {"name": "Falar no WhatsApp", "link": f"https://wa.me/55{_digits(settings.company_phone)}"},
-                        {"name": "Criar conta / acompanhar", "link": "/login"},
-                        {"name": "Nova simulação", "next": 0},
+                        {"name": "Criar conta", "link": f"/cadastro?{qs}"},
+                        {"name": "Já tenho conta", "link": "/login"},
+                        {"name": "Continuar para o boleto", "next": int(STEP_BOLETO_HANDOFF)},
                     ],
                 }
             ],
             lead_id=lead.id,
+        )
+
+    if step == STEP_BOLETO_HANDOFF:
+        if not lead:
+            raise HTTPException(422, "Sessão do chat expirada. Recomece pelo início.")
+        from app.inter_boleto_service import issue_marketplace_boleto
+
+        issued = issue_marketplace_boleto(db, actor, lead.id)
+        boleto = issued.get("boleto") or {}
+        token = boleto.get("download_token")
+        pdf_path = f"/api/v1/marketplace/cadastros/{lead.id}/boleto/{token}" if token else None
+        amount = boleto.get("amount")
+        text = "Boleto da entrada gerado."
+        if amount:
+            text = f"Boleto da entrada gerado no valor de {_brl(amount)}."
+        options = []
+        if pdf_path:
+            options.append({"name": "Baixar boleto (PDF)", "link": pdf_path})
+        options.extend(
+            [
+                {"name": "Falar no WhatsApp", "link": f"https://wa.me/55{_digits(settings.company_phone)}"},
+                {"name": "Criar / acessar conta", "link": "/cadastro"},
+                {"name": "Concluir", "next": int(STEP_DONE_FINAL)},
+            ]
+        )
+        db.flush()
+        return _wrap(
+            [{"text": text + " Guarde o comprovante; após o pagamento a venda segue para transferência.", "options": options}],
+            lead_id=lead.id,
+        )
+
+    if step == STEP_DONE_FINAL:
+        return _wrap(
+            [
+                {
+                    "text": (
+                        "Pronto! Sua reserva está ativa. Acompanhe pelo painel ou fale conosco se precisar de ajuda."
+                    ),
+                    "options": [
+                        {"name": "Falar no WhatsApp", "link": f"https://wa.me/55{_digits(settings.company_phone)}"},
+                        {"name": "Criar / acessar conta", "link": "/cadastro"},
+                        {"name": "Nova simulação", "next": 0},
+                    ],
+                }
+            ],
+            lead_id=lead.id if lead else None,
         )
 
     # --- Capital de Giro (SDC) ---
