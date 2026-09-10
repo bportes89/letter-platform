@@ -274,12 +274,16 @@ export function AttendanceBotSection() {
         return;
       }
       if (step === 0) {
+        setForm({});
         const data = await fetchChatHome({});
         pushFlow(data.chat_next, data.info);
         return;
       }
       const payload = { ...mergedForm, back };
       const data = await fetchChatStep(step, payload);
+      if (data.lead_id) {
+        setForm({ ...mergedForm, lead_id: data.lead_id });
+      }
       pushFlow(data.chat_next, data.info);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Não foi possível avançar no atendimento.");
@@ -336,7 +340,7 @@ export function AttendanceBotSection() {
       }
       return;
     }
-    await advance(next, 0, { flowIndex, itemIndex, value: optionLabel(option) });
+    await advance(next, 0, { flowIndex, itemIndex, value: optionLabel(option) }, nextForm);
   };
 
   const onButton = async (flowIndex: number, itemIndex: number, item: ChatItem) => {

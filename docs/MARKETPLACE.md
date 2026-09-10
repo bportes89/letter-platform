@@ -108,3 +108,15 @@ Lista operacional das vendas Marketplace (chat / venda direta):
 - `GET/PATCH /api/v1/marketplace/cadastros/{lead_id}`
 
 Abas espelham o pacote Paulo: Clientes, Novos, Em negociação, Concluído, Incompleto, Compras. Compra (crédito/entrada/cotas) é somente leitura; dados do cliente são editáveis.
+
+## Chat público nativo (site)
+
+Substitui o proxy `letter.app.br` quando `LETTER_CHAT_NATIVE_ENABLED=true` (padrão).
+
+Jornada no site (`POST /api/v1/public/site/chat/home` e `.../home/{step}`):
+
+1. Nome → e-mail (cria Lead `source=SITE_CHAT`) → WhatsApp → categoria
+2. Ano (veículo) / restrição SPC → crédito → entrada → renda → valor do bem
+3. Match **Esteira 2** (mesmo motor do admin) → escolha → proposta + trava 60 min
+
+Resposta compatível com o widget legado (`OBJ.chat_next` + `OBJ.info` + `OBJ.lead_id`). Fallback legado: `LETTER_CHAT_NATIVE_ENABLED=false`.

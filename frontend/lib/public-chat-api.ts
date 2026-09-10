@@ -74,6 +74,7 @@ export type ChatSiteInfo = {
 export type ChatHomeResponse = {
   chat_next: ChatItem[];
   info?: ChatSiteInfo;
+  lead_id?: string;
 };
 
 async function chatFetch<T>(path: string, body: Record<string, unknown> = {}): Promise<T> {
@@ -95,24 +96,26 @@ async function chatFetch<T>(path: string, body: Record<string, unknown> = {}): P
 }
 
 export async function fetchChatHome(body: Record<string, unknown> = {}): Promise<ChatHomeResponse> {
-  const data = await chatFetch<{ OBJ?: { chat_next?: ChatItem[]; info?: ChatSiteInfo } }>(
+  const data = await chatFetch<{ OBJ?: { chat_next?: ChatItem[]; info?: ChatSiteInfo; lead_id?: string } }>(
     "/public/site/chat/home",
     body,
   );
   return {
     chat_next: data.OBJ?.chat_next ?? [],
     info: data.OBJ?.info,
+    lead_id: typeof data.OBJ?.lead_id === "string" ? data.OBJ.lead_id : undefined,
   };
 }
 
 export async function fetchChatStep(step: number | string, body: Record<string, unknown> = {}): Promise<ChatHomeResponse> {
-  const data = await chatFetch<{ OBJ?: { chat_next?: ChatItem[]; info?: ChatSiteInfo } }>(
+  const data = await chatFetch<{ OBJ?: { chat_next?: ChatItem[]; info?: ChatSiteInfo; lead_id?: string } }>(
     `/public/site/chat/home/${step}`,
     body,
   );
   return {
     chat_next: data.OBJ?.chat_next ?? [],
     info: data.OBJ?.info,
+    lead_id: typeof data.OBJ?.lead_id === "string" ? data.OBJ.lead_id : undefined,
   };
 }
 

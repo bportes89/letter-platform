@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     worker_poll_seconds: int = 5
     worker_batch_size: int = 20
     public_rate_limit_per_minute: int = 300
+    chat_native_enabled: bool = True
     login_rate_limit_per_minute: int = 20
     integration_circuit_failure_threshold: int = 3
     integration_circuit_cooldown_seconds: int = 60

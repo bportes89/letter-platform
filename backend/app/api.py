@@ -2816,24 +2816,34 @@ def quitcon_desk_create_sale(
 
 
 @router.post("/public/site/chat/home")
-def public_site_chat_home(request: Request, payload: dict | None = None):
-    from app.public_chat_proxy import proxy_legacy_chat
-
+def public_site_chat_home(request: Request, payload: dict | None = None, db: Session = Depends(get_db)):
     ip = request.client.host if request.client else "unknown"
     allowed, retry = rate_limiter.allow(f"public-chat:{ip}", settings.public_rate_limit_per_minute)
     if not allowed:
         raise HTTPException(429, "Limite do atendimento atingido", headers={"Retry-After": str(retry)})
+    if settings.chat_native_enabled:
+        from app.public_chat_native_service import home_native
+
+        return home_native()
+    from app.public_chat_proxy import proxy_legacy_chat
+
     return proxy_legacy_chat(None, payload or {})
 
 
 @router.post("/public/site/chat/home/{step}")
-def public_site_chat_step(step: str, request: Request, payload: dict | None = None):
-    from app.public_chat_proxy import proxy_legacy_chat
-
+def public_site_chat_step(step: str, request: Request, payload: dict | None = None, db: Session = Depends(get_db)):
     ip = request.client.host if request.client else "unknown"
     allowed, retry = rate_limiter.allow(f"public-chat:{ip}", settings.public_rate_limit_per_minute)
     if not allowed:
         raise HTTPException(429, "Limite do atendimento atingido", headers={"Retry-After": str(retry)})
+    if settings.chat_native_enabled:
+        from app.public_chat_native_service import handle_step
+
+        result = handle_step(db, step, payload or {})
+        db.commit()
+        return result
+    from app.public_chat_proxy import proxy_legacy_chat
+
     return proxy_legacy_chat(step, payload or {})
 
 

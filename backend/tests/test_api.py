@@ -3101,6 +3101,9 @@ def test_public_site_sdc_simulate_manual_quota_ids_still_supported(client):
 def test_public_site_chat_home_proxy(client, monkeypatch):
     import httpx
 
+    monkeypatch.setattr("app.api.settings.chat_native_enabled", False)
+    monkeypatch.setattr("app.core.config.settings.chat_native_enabled", False)
+
     payload = {
         "OBJ": {
             "chat_next": [{"text": "O que você deseja:", "mascote": 1}],
@@ -3133,6 +3136,89 @@ def test_public_site_chat_home_proxy(client, monkeypatch):
     response = client.post("/api/v1/public/site/chat/home", json={})
     assert response.status_code == 200
     assert response.json()["OBJ"]["chat_next"][0]["text"] == "O que você deseja:"
+
+
+def test_public_site_chat_native_marketplace_flow(client, auth_headers):
+    """Chat nativo: lead SITE_CHAT → Esteira 2 → proposta + trava."""
+    home = client.post("/api/v1/public/site/chat/home", json={})
+    assert home.status_code == 200
+    body = home.json()
+    assert body.get("native") is True
+    assert body["OBJ"]["chat_next"]
+
+    name = client.post("/api/v1/public/site/chat/home/10001", json={"name": "Maria Silva Chat"})
+    assert name.status_code == 200
+    assert "prazer" in name.json()["OBJ"]["chat_next"][0]["text"].lower()
+
+    email = client.post(
+        "/api/v1/public/site/chat/home/10003",
+        json={"name": "Maria Silva Chat", "email": "maria.chat@letter.test"},
+    )
+    assert email.status_code == 200
+    lead_id = email.json()["OBJ"]["lead_id"]
+    assert lead_id
+
+    phone = client.post(
+        "/api/v1/public/site/chat/home/10004",
+        json={"lead_id": lead_id, "phone": "32988776655", "email": "maria.chat@letter.test"},
+    )
+    assert phone.status_code == 200
+    assert any(o.get("save") == "REAL_ESTATE" for o in phone.json()["OBJ"]["chat_next"][0]["options"])
+
+    dirty = client.post(
+        "/api/v1/public/site/chat/home/10007",
+        json={"lead_id": lead_id, "option_id": "REAL_ESTATE", "option_save": "REAL_ESTATE"},
+    )
+    assert dirty.status_code == 200
+
+    dirty_ans = client.post(
+        "/api/v1/public/site/chat/home/10008",
+        json={"lead_id": lead_id, "option_id": "dirty_no", "option_save": "0"},
+    )
+    assert dirty_ans.status_code == 200
+
+    credit = client.post(
+        "/api/v1/public/site/chat/home/10008",
+        json={"lead_id": lead_id, "target_amount": "400000"},
+    )
+    assert credit.status_code == 200
+
+    entrada = client.post(
+        "/api/v1/public/site/chat/home/10009",
+        json={"lead_id": lead_id, "target_entrada": "80000"},
+    )
+    assert entrada.status_code == 200
+
+    income = client.post(
+        "/api/v1/public/site/chat/home/10010",
+        json={"lead_id": lead_id, "monthly_income": "50000"},
+    )
+    assert income.status_code == 200
+
+    match = client.post(
+        "/api/v1/public/site/chat/home/10011",
+        json={"lead_id": lead_id, "asset_value": "900000"},
+    )
+    assert match.status_code == 200, match.text
+    options = match.json()["OBJ"]["chat_next"][0].get("options") or []
+    assert options, "chat nativo deveria retornar cotas da Esteira 2"
+    chosen = options[0]
+    quota_key = chosen["id"]
+    for qid in str(quota_key).split("|"):
+        scan = client.post(f"/api/v1/quotas/{qid}/nina-scan", headers=auth_headers)
+        assert scan.status_code == 200, scan.text
+
+    confirm = client.post(
+        "/api/v1/public/site/chat/home/10013",
+        json={"lead_id": lead_id, "option_id": quota_key, "option_save": quota_key},
+    )
+    assert confirm.status_code == 200, confirm.text
+    assert "reservei" in confirm.json()["OBJ"]["chat_next"][0]["text"].lower()
+
+    leads = client.get("/api/v1/leads", headers=auth_headers).json()
+    lead = next(l for l in leads if l["id"] == lead_id)
+    assert lead["source"] == "SITE_CHAT"
+    assert lead["status"] == "PROPOSAL"
 
 
 def test_escrow_asaas_status_not_configured(client, auth_headers, monkeypatch):
