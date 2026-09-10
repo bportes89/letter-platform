@@ -44,6 +44,12 @@ STEP_CONTRACT_PLACEHOLDER = "10015"
 STEP_ACCOUNT_CTA = "10016"
 STEP_BOLETO_HANDOFF = "10017"
 STEP_DONE_FINAL = "10018"
+# Pós-match — dados do pagador / conta (Paulo 15–25, faixa dedicada).
+STEP_PERSON_TYPE = "10030"
+STEP_DOCUMENT = "10031"
+STEP_RAZAO = "10032"
+STEP_ZIPCODE = "10033"
+STEP_ADDRESS_NUMBER = "10034"
 # legado (renomeado)
 STEP_DONE = STEP_HANDOFF_RESUMO
 
@@ -57,6 +63,27 @@ STEP_SDC_DOCS = "10025"
 STEP_SDC_EVAL = "10026"
 STEP_SDC_CONFIRM = "10027"
 STEP_SDC_DONE = "10028"
+
+KNOWN_CEPS = {
+    "36010000": {
+        "street": "Rua Halfeld",
+        "neighborhood": "Centro",
+        "city": "Juiz de Fora",
+        "uf": "MG",
+    },
+    "29090130": {
+        "street": "Avenida Nossa Senhora da Penha",
+        "neighborhood": "Santa Lucia",
+        "city": "Vitoria",
+        "uf": "ES",
+    },
+    "01310100": {
+        "street": "Avenida Paulista",
+        "neighborhood": "Bela Vista",
+        "city": "Sao Paulo",
+        "uf": "SP",
+    },
+}
 
 
 def _brl(value: Decimal | str | float | int) -> str:
@@ -87,6 +114,83 @@ def _money_input(raw: Any) -> Decimal:
     if value < 0:
         raise HTTPException(422, "Digite um valor válido!")
     return money(value)
+
+
+def _lookup_cep(cep: str) -> dict:
+    digits = _digits(cep)
+    if len(digits) != 8:
+        raise HTTPException(422, "Digite um CEP válido!")
+    if digits in KNOWN_CEPS:
+        return dict(KNOWN_CEPS[digits])
+    try:
+        import urllib.request
+
+        req = urllib.request.Request(
+            f"https://viacep.com.br/ws/{digits}/json/",
+            headers={"User-Agent": "letter-platform/chat"},
+        )
+        with urllib.request.urlopen(req, timeout=4) as resp:  # noqa: S310 — API pública de CEP
+            payload = json.loads(resp.read().decode("utf-8"))
+        if not isinstance(payload, dict) or payload.get("erro"):
+            raise HTTPException(422, "CEP não encontrado. Confira os 8 dígitos.")
+        return {
+            "street": str(payload.get("logradouro") or "").strip(),
+            "neighborhood": str(payload.get("bairro") or "").strip(),
+            "city": str(payload.get("localidade") or "").strip(),
+            "uf": str(payload.get("uf") or "").strip().upper(),
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(422, "Não foi possível consultar o CEP. Tente novamente.") from exc
+
+
+def _contract_html(lead: Lead, snap: dict) -> str:
+    person = str(snap.get("person_type") or "PF").upper()
+    doc = _digits(lead.document or snap.get("document") or "")
+    address = snap.get("address") if isinstance(snap.get("address"), dict) else {}
+    nome = str(snap.get("razao_social") or lead.name or "")
+    if person != "PJ":
+        nome = lead.name or nome
+    credit = snap.get("handoff_credit")
+    entrada = snap.get("handoff_entrada")
+    quotas = snap.get("handoff_quotas") or []
+    admins = ", ".join(
+        sorted({str(q.get("administradora") or "").strip() for q in quotas if q.get("administradora")})
+    ) or "—"
+    parcelas_txt = "; ".join(
+        f"{q.get('parcelas') or '—'}x de {q.get('price_parcela') or '—'}" for q in quotas
+    ) or "—"
+    end_txt = (
+        f"{address.get('street') or '—'}, {address.get('number') or '—'} "
+        f"{address.get('complement') or ''} — {address.get('neighborhood') or '—'}, "
+        f"{address.get('city') or '—'}/{address.get('uf') or '—'} CEP {address.get('zipcode') or '—'}"
+    ).strip()
+    from datetime import date
+
+    today = date.today()
+    meses = (
+        "janeiro fevereiro março abril maio junho julho agosto setembro outubro novembro dezembro"
+    ).split()
+    data_extenso = f"{today.day} de {meses[today.month - 1]} de {today.year}"
+    return (
+        "<p><strong>LETTER BANK LTDA</strong> — CNPJ 41.163.819/0001-57<br/>"
+        "Representada por Sr. Paulo Stutz Netto Souza — foro em Nanuque/MG</p>"
+        "<p><strong>Termo de intermediação de cota contemplada</strong></p>"
+        f"<p><strong>Contratante:</strong> {nome}<br/>"
+        f"<strong>Documento:</strong> {doc or '—'} ({'CNPJ' if person == 'PJ' else 'CPF'})<br/>"
+        f"<strong>Endereço:</strong> {end_txt}<br/>"
+        f"<strong>E-mail:</strong> {snap.get('email') or '—'} · <strong>WhatsApp:</strong> {lead.phone or '—'}</p>"
+        f"<p><strong>Objeto:</strong> intermediação de cota(s) contemplada(s).<br/>"
+        f"Administradora(s): {admins}<br/>"
+        f"Crédito: {_brl(credit or 0)} · Entrada: {_brl(entrada or 0)}<br/>"
+        f"Parcelas: {parcelas_txt}<br/>"
+        f"Reserva das cotas: {RESERVE_TTL} minutos a partir da escolha.</p>"
+        "<p>PIX de referência LETTER: <strong>COMERCIAL@LETTER.APP.BR</strong> (Banco Inter).</p>"
+        "<p>Ao aceitar, o contratante confirma ciência das condições de intermediação. "
+        "A assinatura digital completa (ZapSign) pode ser enviada após a criação da conta LETTER.</p>"
+        f"<p>{address.get('city') or 'Brasil'}, {data_extenso}.</p>"
+    )
 
 
 def _site_info() -> dict:
@@ -204,10 +308,11 @@ def _retry(
     input_name: str | None = None,
     label: str | None = None,
     lead_id: str | None = None,
+    input_type: str = "text",
 ) -> dict:
     item: dict[str, Any] = {"text": message, "next": int(step)}
     if input_name:
-        item["input"] = {"name": input_name, "label": label or input_name, "type": "text"}
+        item["input"] = {"name": input_name, "label": label or input_name, "type": input_type}
     else:
         item["button"] = "Tentar de novo"
     return _wrap([item], lead_id=lead_id)
@@ -720,6 +825,232 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
                     "text": text,
                     "resumo": True,
                     "quotas": quotas_ui,
+                    "button": "Continuar",
+                    "next": int(STEP_PERSON_TYPE),
+                }
+            ],
+            lead_id=lead.id,
+        )
+
+    if step == STEP_PERSON_TYPE:
+        if not lead:
+            raise HTTPException(422, "Sessão do chat expirada. Recomece pelo início.")
+        snap = _lead_snapshot(lead)
+        choice = str(data.get("option_save") or data.get("option_id") or "").strip().upper()
+        if choice in {"PF", "PJ"}:
+            snap["person_type"] = choice
+            _save_lead_snapshot(lead, snap)
+            db.flush()
+            label = "CPF" if choice == "PF" else "CNPJ"
+            return _wrap(
+                [
+                    {
+                        "text": f"Informe o {label} do comprador:",
+                        "input": {"name": "document", "label": label, "type": "text"},
+                        "next": int(STEP_DOCUMENT),
+                    }
+                ],
+                lead_id=lead.id,
+            )
+        return _wrap(
+            [
+                {
+                    "text": "A compra é para pessoa física ou jurídica?",
+                    "options": [
+                        {"name": "Pessoa física (CPF)", "save": "PF", "next": int(STEP_PERSON_TYPE)},
+                        {"name": "Pessoa jurídica (CNPJ)", "save": "PJ", "next": int(STEP_PERSON_TYPE)},
+                    ],
+                }
+            ],
+            lead_id=lead.id,
+        )
+
+    if step == STEP_DOCUMENT:
+        if not lead:
+            raise HTTPException(422, "Sessão do chat expirada. Recomece pelo início.")
+        snap = _lead_snapshot(lead)
+        person = str(snap.get("person_type") or "PF").upper()
+        raw_doc = data.get("document")
+        if raw_doc is None or str(raw_doc).strip() == "":
+            label = "CPF" if person == "PF" else "CNPJ"
+            return _wrap(
+                [
+                    {
+                        "text": f"Informe o {label} do comprador:",
+                        "input": {"name": "document", "label": label, "type": "text"},
+                        "next": int(STEP_DOCUMENT),
+                    }
+                ],
+                lead_id=lead.id,
+            )
+        try:
+            from app.account_uniqueness import assert_valid_cpf_or_cnpj
+
+            doc = assert_valid_cpf_or_cnpj(str(raw_doc), field_label="CPF" if person == "PF" else "CNPJ")
+        except HTTPException as exc:
+            label = "CPF" if person == "PF" else "CNPJ"
+            return _retry(str(exc.detail), STEP_DOCUMENT, input_name="document", label=label, lead_id=lead.id)
+        if person == "PF" and len(doc) != 11:
+            return _retry("CPF inválido (informe 11 dígitos).", STEP_DOCUMENT, input_name="document", label="CPF", lead_id=lead.id)
+        if person == "PJ" and len(doc) != 14:
+            return _retry("CNPJ inválido (informe 14 dígitos).", STEP_DOCUMENT, input_name="document", label="CNPJ", lead_id=lead.id)
+        lead.document = doc
+        snap["document"] = doc
+        _save_lead_snapshot(lead, snap)
+        db.flush()
+        if person == "PJ":
+            return _wrap(
+                [
+                    {
+                        "text": "Qual a razão social da empresa?",
+                        "input": {"name": "razao_social", "label": "Razão social", "type": "text"},
+                        "next": int(STEP_RAZAO),
+                    }
+                ],
+                lead_id=lead.id,
+            )
+        return _wrap(
+            [
+                {
+                    "text": "Qual o CEP do endereço de cobrança?",
+                    "input": {"name": "zipcode", "label": "CEP", "type": "text"},
+                    "next": int(STEP_ZIPCODE),
+                }
+            ],
+            lead_id=lead.id,
+        )
+
+    if step == STEP_RAZAO:
+        if not lead:
+            raise HTTPException(422, "Sessão do chat expirada. Recomece pelo início.")
+        snap = _lead_snapshot(lead)
+        razao = str(data.get("razao_social") or "").strip()
+        if len(razao) < 2:
+            return _retry(
+                "Informe a razão social.",
+                STEP_RAZAO,
+                input_name="razao_social",
+                label="Razão social",
+                lead_id=lead.id,
+            )
+        snap["razao_social"] = razao
+        _save_lead_snapshot(lead, snap)
+        db.flush()
+        return _wrap(
+            [
+                {
+                    "text": "Qual o CEP do endereço de cobrança?",
+                    "input": {"name": "zipcode", "label": "CEP", "type": "text"},
+                    "next": int(STEP_ZIPCODE),
+                }
+            ],
+            lead_id=lead.id,
+        )
+
+    if step == STEP_ZIPCODE:
+        if not lead:
+            raise HTTPException(422, "Sessão do chat expirada. Recomece pelo início.")
+        snap = _lead_snapshot(lead)
+        raw_cep = data.get("zipcode")
+        if raw_cep is None or str(raw_cep).strip() == "":
+            return _wrap(
+                [
+                    {
+                        "text": "Qual o CEP do endereço de cobrança?",
+                        "input": {"name": "zipcode", "label": "CEP", "type": "text"},
+                        "next": int(STEP_ZIPCODE),
+                    }
+                ],
+                lead_id=lead.id,
+            )
+        try:
+            looked = _lookup_cep(str(raw_cep))
+        except HTTPException as exc:
+            return _retry(str(exc.detail), STEP_ZIPCODE, input_name="zipcode", label="CEP", lead_id=lead.id)
+        if not looked.get("street") or not looked.get("city") or not looked.get("uf"):
+            return _retry(
+                "CEP incompleto no serviço de consulta. Tente outro CEP.",
+                STEP_ZIPCODE,
+                input_name="zipcode",
+                label="CEP",
+                lead_id=lead.id,
+            )
+        address = snap.get("address") if isinstance(snap.get("address"), dict) else {}
+        address.update(
+            {
+                "zipcode": _digits(str(raw_cep))[:8],
+                "street": looked["street"],
+                "neighborhood": looked.get("neighborhood") or "Centro",
+                "city": looked["city"],
+                "uf": looked["uf"],
+            }
+        )
+        snap["address"] = address
+        _save_lead_snapshot(lead, snap)
+        db.flush()
+        return _wrap(
+            [
+                {
+                    "text": (
+                        f"Encontrei {looked['street']} — {looked.get('neighborhood') or ''}, "
+                        f"{looked['city']}/{looked['uf']}. Qual o número?"
+                    ),
+                    "input": {"name": "number", "label": "Número", "type": "text"},
+                    "next": int(STEP_ADDRESS_NUMBER),
+                }
+            ],
+            lead_id=lead.id,
+        )
+
+    if step == STEP_ADDRESS_NUMBER:
+        if not lead:
+            raise HTTPException(422, "Sessão do chat expirada. Recomece pelo início.")
+        snap = _lead_snapshot(lead)
+        number = str(data.get("number") or "").strip()
+        if not number:
+            return _retry(
+                "Informe o número do endereço.",
+                STEP_ADDRESS_NUMBER,
+                input_name="number",
+                label="Número",
+                lead_id=lead.id,
+            )
+        address = snap.get("address") if isinstance(snap.get("address"), dict) else {}
+        if not address.get("street") or not address.get("zipcode"):
+            return _wrap(
+                [
+                    {
+                        "text": "Precisamos do CEP antes do número.",
+                        "input": {"name": "zipcode", "label": "CEP", "type": "text"},
+                        "next": int(STEP_ZIPCODE),
+                    }
+                ],
+                lead_id=lead.id,
+            )
+        # número pode vir como "123 apto 4" — separa complemento simples
+        complement = str(data.get("complement") or "").strip()
+        if not complement and " " in number:
+            parts = number.split(None, 1)
+            if len(parts) == 2 and parts[0].isdigit():
+                number, complement = parts[0], parts[1]
+        address["number"] = number[:20]
+        if complement:
+            address["complement"] = complement[:40]
+        snap["address"] = address
+        _save_lead_snapshot(lead, snap)
+        proposal = db.get(Proposal, snap.get("proposal_id")) if snap.get("proposal_id") else None
+        if proposal:
+            terms = seed_marketplace_lifecycle(json.loads(proposal.terms_json or "{}"))
+            terms["person_type"] = snap.get("person_type") or "PF"
+            terms["client_email"] = snap.get("email")
+            if snap.get("razao_social"):
+                terms["razao_social"] = snap["razao_social"]
+            proposal.terms_json = json.dumps(terms, ensure_ascii=False)
+        db.flush()
+        return _wrap(
+            [
+                {
+                    "text": "Endereço salvo. Vamos ao contrato de intermediação.",
                     "button": "Continuar para o contrato",
                     "next": int(STEP_CONTRACT_PLACEHOLDER),
                 }
@@ -731,12 +1062,36 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
         if not lead:
             raise HTTPException(422, "Sessão do chat expirada. Recomece pelo início.")
         snap = _lead_snapshot(lead)
+        if not snap.get("person_type") or not (lead.document or snap.get("document")):
+            return _wrap(
+                [
+                    {
+                        "text": "Antes do contrato, precisamos dos dados do comprador.",
+                        "button": "Informar dados",
+                        "next": int(STEP_PERSON_TYPE),
+                    }
+                ],
+                lead_id=lead.id,
+            )
+        address = snap.get("address") if isinstance(snap.get("address"), dict) else {}
+        if not address.get("zipcode") or not address.get("number"):
+            return _wrap(
+                [
+                    {
+                        "text": "Antes do contrato, informe o endereço de cobrança.",
+                        "input": {"name": "zipcode", "label": "CEP", "type": "text"},
+                        "next": int(STEP_ZIPCODE),
+                    }
+                ],
+                lead_id=lead.id,
+            )
         accepted = str(data.get("option_save") or data.get("option_id") or data.get("contract") or "").strip().lower()
-        # primeiro render: mostra contrato; avanço com aceite vem no próximo POST com option_save=accept
         if accepted in {"accept", "1", "true", "aceito", "contrato_aceito"}:
             from datetime import UTC, datetime
 
             snap["contract_accepted_at"] = datetime.now(UTC).isoformat()
+            html = _contract_html(lead, snap)
+            snap["contract_html"] = html
             _save_lead_snapshot(lead, snap)
             proposal = db.get(Proposal, snap.get("proposal_id")) if snap.get("proposal_id") else None
             if proposal:
@@ -744,13 +1099,16 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
                 terms["contract_ack"] = {
                     "accepted_at": snap["contract_accepted_at"],
                     "channel": SOURCE,
+                    "provider": "SITE_CHAT_ACK",
                 }
+                terms["contract_html"] = html
+                terms["person_type"] = snap.get("person_type") or "PF"
                 proposal.terms_json = json.dumps(terms, ensure_ascii=False)
             db.flush()
             return _wrap(
                 [
                     {
-                        "text": "Contrato de intermediação registrado. Agora crie sua conta para acompanhar a compra.",
+                        "text": "Contrato de intermediação registrado. Agora vamos criar o acesso ao escritório virtual.",
                         "button": "Continuar",
                         "next": int(STEP_ACCOUNT_CTA),
                     }
@@ -774,20 +1132,11 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
                 ],
                 lead_id=lead.id,
             )
-        credit = snap.get("handoff_credit") or "—"
-        entrada = snap.get("handoff_entrada") or "—"
-        html = (
-            "<p><strong>LETTER — Termo de intermediação (resumo)</strong></p>"
-            f"<p>Crédito: {_brl(credit) if credit not in (None, '—') else '—'}<br/>"
-            f"Entrada: {_brl(entrada) if entrada not in (None, '—') else '—'}<br/>"
-            f"Reserva: {RESERVE_TTL} minutos</p>"
-            "<p>Ao aceitar, você confirma o interesse na intermediação da cota contemplada. "
-            "O contrato completo e a assinatura digital ficam disponíveis na sua conta.</p>"
-        )
+        html = _contract_html(lead, snap)
         return _wrap(
             [
                 {
-                    "text": "Leia o resumo do contrato de intermediação:",
+                    "text": "Leia o contrato de intermediação e aceite para continuar:",
                     "contract": True,
                     "html": html,
                     "next": int(STEP_CONTRACT_PLACEHOLDER),
@@ -806,19 +1155,145 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
         email = str(snap.get("email") or "").strip()
         from urllib.parse import quote
 
+        from app.account_uniqueness import find_user_by_email
+
         qs = f"email={quote(email)}&name={quote(lead.name or '')}&lead_id={quote(lead.id)}"
+        existing = find_user_by_email(db, email) if email else None
+
+        # já vinculado
+        if lead.client_user_id:
+            return _wrap(
+                [
+                    {
+                        "text": "Sua conta já está vinculada a esta compra. Vamos ao boleto da entrada.",
+                        "button": "Continuar para o boleto",
+                        "next": int(STEP_BOLETO_HANDOFF),
+                    }
+                ],
+                lead_id=lead.id,
+            )
+
+        password = data.get("password")
+        if password is not None and str(password).strip() != "":
+            if existing and existing.last_login_at is not None:
+                return _wrap(
+                    [
+                        {
+                            "text": "Este e-mail já tem conta LETTER. Entre no escritório virtual para continuar.",
+                            "options": [
+                                {
+                                    "name": "Ir para o login",
+                                    "link": f"/login?lead_id={quote(lead.id)}&next=/modules/minhas-compras",
+                                },
+                                {"name": "Continuar para o boleto", "next": int(STEP_BOLETO_HANDOFF)},
+                            ],
+                        }
+                    ],
+                    lead_id=lead.id,
+                )
+            pwd = str(password)
+            if len(pwd) < 10:
+                return _retry(
+                    "A senha deve ter ao menos 10 caracteres.",
+                    STEP_ACCOUNT_CTA,
+                    input_name="password",
+                    label="Senha",
+                    lead_id=lead.id,
+                    input_type="password",
+                )
+            try:
+                from app.public_site_service import register_public_client
+
+                register_public_client(
+                    db,
+                    name=lead.name or "Cliente LETTER",
+                    email=email,
+                    phone=lead.phone or "",
+                    password=pwd,
+                    document=lead.document or snap.get("document"),
+                    chat_lead_id=lead.id,
+                )
+            except HTTPException as exc:
+                detail = str(exc.detail)
+                if "já cadastrado" in detail.lower() or exc.status_code == 409:
+                    return _wrap(
+                        [
+                            {
+                                "text": "Este e-mail já tem conta. Entre no escritório virtual.",
+                                "options": [
+                                    {
+                                        "name": "Ir para o login",
+                                        "link": f"/login?lead_id={quote(lead.id)}&next=/modules/minhas-compras",
+                                    },
+                                    {"name": "Continuar para o boleto", "next": int(STEP_BOLETO_HANDOFF)},
+                                ],
+                            }
+                        ],
+                        lead_id=lead.id,
+                    )
+                return _retry(
+                    detail,
+                    STEP_ACCOUNT_CTA,
+                    input_name="password",
+                    label="Senha",
+                    lead_id=lead.id,
+                    input_type="password",
+                )
+            db.flush()
+            return _wrap(
+                [
+                    {
+                        "text": "Conta criada e compra vinculada. Agora emitimos o boleto da entrada.",
+                        "button": "Continuar para o boleto",
+                        "next": int(STEP_BOLETO_HANDOFF),
+                    }
+                ],
+                lead_id=lead.id,
+            )
+
+        if existing and existing.last_login_at is not None:
+            return _wrap(
+                [
+                    {
+                        "text": (
+                            "Este e-mail já tem conta LETTER. Entre no escritório virtual para "
+                            "acompanhar boleto e documentos."
+                        ),
+                        "options": [
+                            {
+                                "name": "Ir para o login",
+                                "link": f"/login?lead_id={quote(lead.id)}&next=/modules/minhas-compras",
+                            },
+                            {"name": "Abrir cadastro", "link": f"/cadastro?{qs}"},
+                            {"name": "Continuar para o boleto", "next": int(STEP_BOLETO_HANDOFF)},
+                        ],
+                    }
+                ],
+                lead_id=lead.id,
+            )
+
+        # primeira visita: pede senha in-chat
+        if "password" not in data:
+            return _wrap(
+                [
+                    {
+                        "text": (
+                            "Cadastre uma senha para acessar o escritório virtual LETTER "
+                            "(mínimo 10 caracteres)."
+                        ),
+                        "input": {"name": "password", "label": "Senha", "type": "password"},
+                        "next": int(STEP_ACCOUNT_CTA),
+                    }
+                ],
+                lead_id=lead.id,
+            )
+
         return _wrap(
             [
                 {
-                    "text": (
-                        "Crie sua conta LETTER para acompanhar boleto, documentos e status da compra. "
-                        "Se já tiver conta, entre e continue."
-                    ),
-                    "options": [
-                        {"name": "Criar conta", "link": f"/cadastro?{qs}"},
-                        {"name": "Já tenho conta", "link": f"/login?lead_id={quote(lead.id)}&next=/modules/minhas-compras"},
-                        {"name": "Continuar para o boleto", "next": int(STEP_BOLETO_HANDOFF)},
-                    ],
+                    "text": "Cadastre uma senha para acessar o escritório virtual.",
+                    "input": {"name": "password", "label": "Senha", "type": "password"},
+                    "next": int(STEP_ACCOUNT_CTA),
                 }
             ],
             lead_id=lead.id,

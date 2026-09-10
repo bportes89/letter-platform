@@ -3692,13 +3692,41 @@ def test_public_site_chat_native_marketplace_flow(client, auth_headers):
     resumo_item = resumo.json()["OBJ"]["chat_next"][0]
     assert resumo_item.get("resumo") is True
     assert resumo_item.get("quotas")
-    assert resumo_item.get("next") == 10015
+    assert resumo_item.get("next") == 10030
+
+    person = client.post(
+        "/api/v1/public/site/chat/home/10030",
+        json={"lead_id": lead_id, "option_save": "PF", "option_id": "PF"},
+    )
+    assert person.status_code == 200, person.text
+    assert person.json()["OBJ"]["chat_next"][0].get("next") == 10031
+
+    document = client.post(
+        "/api/v1/public/site/chat/home/10031",
+        json={"lead_id": lead_id, "document": "52998224725"},
+    )
+    assert document.status_code == 200, document.text
+    assert document.json()["OBJ"]["chat_next"][0].get("next") == 10033
+
+    zipcode = client.post(
+        "/api/v1/public/site/chat/home/10033",
+        json={"lead_id": lead_id, "zipcode": "36010000"},
+    )
+    assert zipcode.status_code == 200, zipcode.text
+    assert zipcode.json()["OBJ"]["chat_next"][0].get("next") == 10034
+
+    number = client.post(
+        "/api/v1/public/site/chat/home/10034",
+        json={"lead_id": lead_id, "number": "100"},
+    )
+    assert number.status_code == 200, number.text
+    assert number.json()["OBJ"]["chat_next"][0].get("next") == 10015
 
     contract = client.post("/api/v1/public/site/chat/home/10015", json={"lead_id": lead_id})
     assert contract.status_code == 200, contract.text
     contract_item = contract.json()["OBJ"]["chat_next"][0]
     assert contract_item.get("contract") is True
-    assert contract_item.get("html")
+    assert "LETTER BANK" in (contract_item.get("html") or "")
     assert contract_item.get("accept_save") == "accept"
 
     accept = client.post(
@@ -3710,9 +3738,15 @@ def test_public_site_chat_native_marketplace_flow(client, auth_headers):
 
     account = client.post("/api/v1/public/site/chat/home/10016", json={"lead_id": lead_id})
     assert account.status_code == 200, account.text
-    account_opts = account.json()["OBJ"]["chat_next"][0].get("options") or []
-    assert any("/cadastro?" in str(o.get("link") or "") for o in account_opts)
-    assert any(o.get("next") == 10017 for o in account_opts)
+    account_item = account.json()["OBJ"]["chat_next"][0]
+    assert account_item.get("input", {}).get("name") == "password"
+
+    created = client.post(
+        "/api/v1/public/site/chat/home/10016",
+        json={"lead_id": lead_id, "password": "ClienteSite1!"},
+    )
+    assert created.status_code == 200, created.text
+    assert created.json()["OBJ"]["chat_next"][0].get("next") == 10017
 
     boleto = client.post("/api/v1/public/site/chat/home/10017", json={"lead_id": lead_id})
     assert boleto.status_code == 200, boleto.text
@@ -3731,6 +3765,14 @@ def test_public_site_chat_native_marketplace_flow(client, auth_headers):
     lead = next(l for l in leads if l["id"] == lead_id)
     assert lead["source"] == "SITE_CHAT"
     assert lead["status"] == "PROPOSAL"
+
+    detail = client.get(f"/api/v1/marketplace/cadastros/{lead_id}", headers=auth_headers)
+    assert detail.status_code == 200, detail.text
+    body = detail.json()
+    assert body.get("document") == "52998224725"
+    assert (body.get("snapshot") or {}).get("person_type") == "PF"
+    assert (body.get("snapshot") or {}).get("address", {}).get("zipcode") == "36010000"
+    assert body.get("boleto")
 
 
 def test_marketplace_client_office_bind_boleto_finalize(client, auth_headers):
