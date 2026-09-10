@@ -2130,6 +2130,51 @@ class MarketplaceEsteira2Response(BaseModel):
     message: str
 
 
+class VendaDiretaRoboSearchRequest(MarketplaceClientProfile):
+    name: str = Field(min_length=2, max_length=180)
+    email: str = Field(min_length=5, max_length=180)
+    phone: str = Field(min_length=8, max_length=40)
+    person_type: str = Field(default="PF", max_length=2)
+    document: str = Field(min_length=11, max_length=20)
+    target_amount: Decimal = Field(gt=0)
+    target_entrada: Decimal = Field(gt=0)
+    category: str
+    zipcode: str | None = Field(default=None, max_length=12)
+    street: str | None = Field(default=None, max_length=200)
+    number: str | None = Field(default=None, max_length=30)
+    neighborhood: str | None = Field(default=None, max_length=120)
+    city: str | None = Field(default=None, max_length=120)
+    uf: str | None = Field(default=None, max_length=2)
+
+
+class VendaDiretaRoboSearchResponse(BaseModel):
+    lead_id: str
+    client_name: str
+    esteira: str
+    eligible: bool
+    blockers: list[str] = Field(default_factory=list)
+    matches: list[MarketplaceMatchView] = Field(default_factory=list)
+    credit_matches: list[MarketplaceMatchView] = Field(default_factory=list)
+    entrada_matches: list[MarketplaceMatchView] = Field(default_factory=list)
+    band_percent: str = "5"
+    message: str
+
+
+class VendaDiretaRoboConfirmRequest(BaseModel):
+    lead_id: str
+    quota_ids: list[str] = Field(min_length=1, max_length=8)
+    match_lane: str | None = None
+
+
+class VendaDiretaRoboConfirmResponse(BaseModel):
+    lead_id: str
+    proposal_id: str
+    quota_ids: list[str]
+    reservation_ids: list[str] = Field(default_factory=list)
+    requested_amount: str
+    message: str
+
+
 class VenderCotaCalculateRequest(BaseModel):
     tipo_consorcio: str
     credit_value: Decimal = Field(gt=0)

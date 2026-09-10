@@ -33,6 +33,7 @@ export const PRODUCT_NAV: ProductNavItem[] = [
     commercial: true,
     children: [
       { key: "marketplace", name: "Marketplace (esteiras)" },
+      { key: "venda-direta-robo", name: "Venda Direta Robô", internalOnly: true },
       { key: "inventory", name: "Inventário (admin)", internalOnly: true },
       { key: "vender-cota", name: "Vender minha cota (admin)", internalOnly: true },
     ],

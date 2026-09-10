@@ -68,5 +68,14 @@ Cadastro (Inventário + fornecedor) → Sync Bacen (opcional) → Varredura Nina
 
 ## UI
 
-- **COMERCIAL:** Cartas contempladas → Marketplace (esteiras) | Inventário (admin)
+- **COMERCIAL:** Cartas contempladas → Marketplace (esteiras) | **Venda Direta Robô** (admin) | Inventário (admin)
 - **Propostas e simulações** → cadastro comercial unificado
+
+## Venda Direta Robô (admin)
+
+Wizard de 2 passos sobre o mesmo motor da Esteira 2:
+
+1. `POST /api/v1/marketplace/venda-direta-robo/search` — dados do cliente + filtros → cria Lead (`source=VENDA_DIRETA_ROBO`) e devolve `credit_matches` / `entrada_matches`.
+2. `POST /api/v1/marketplace/venda-direta-robo/confirm` — escolhe `quota_ids` → proposta `MARKETPLACE` + trava 60 min → finalize em Propostas.
+
+Sem match no passo 1, a API responde **404** (não deixa pré-cadastro órfão).

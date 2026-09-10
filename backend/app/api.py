@@ -85,6 +85,7 @@ from app.schemas import (
     NetworkNodeCreate, NetworkNodeView, NetworkDownlineMemberView, PayoutApprove, PayoutCreate, PayoutView, ProposalCreate, ProposalUpdate,
     ReconciliationBatchView, ReconciliationItemView, ReconciliationResolveRequest,
     MarketplaceEsteira1Request, MarketplaceEsteira1Response, MarketplaceEsteira2Request, MarketplaceEsteira2Response,
+    VendaDiretaRoboSearchRequest, VendaDiretaRoboSearchResponse, VendaDiretaRoboConfirmRequest, VendaDiretaRoboConfirmResponse,
     VenderCotaCalculateRequest, VenderCotaStoreRequest, QuotaOfferRangeUpdate, QuotaSellOfferUpdate, VenderCotaCloseRequest,
     SdcDeskEvaluateRequest, SdcDeskStoreRequest, SdcDeskStatusUpdate, SdcDeskSaleCreate,
     FlashDeskEvaluateRequest, FlashDeskStoreRequest, FlashDeskStatusUpdate, FlashDeskSaleCreate,
@@ -1704,6 +1705,55 @@ def marketplace_esteira2(payload: MarketplaceEsteira2Request, user: User = Depen
         target_entrada=payload.target_entrada,
     )
     audit(db, user, "marketplace.esteira2", "marketplace", "match", {"matches": len(result["matches"])})
+    db.commit()
+    return result
+
+
+@router.post("/marketplace/venda-direta-robo/search", response_model=VendaDiretaRoboSearchResponse)
+def venda_direta_robo_search(payload: VendaDiretaRoboSearchRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.sales_direct_robo_service import search_cotas
+
+    result = search_cotas(
+        db,
+        user,
+        name=payload.name,
+        email=payload.email,
+        phone=payload.phone,
+        person_type=payload.person_type,
+        document=payload.document,
+        target_amount=payload.target_amount,
+        target_entrada=payload.target_entrada,
+        category=payload.category,
+        monthly_income=payload.monthly_income,
+        monthly_commitment=payload.monthly_commitment,
+        asset_value=payload.asset_value,
+        asset_year=payload.asset_year,
+        has_credit_restriction=payload.has_credit_restriction,
+        asset_is_zero_km=payload.asset_is_zero_km,
+        zipcode=payload.zipcode,
+        street=payload.street,
+        number=payload.number,
+        neighborhood=payload.neighborhood,
+        city=payload.city,
+        uf=payload.uf,
+    )
+    audit(db, user, "marketplace.venda_direta_robo.search", "lead", result["lead_id"], {"matches": len(result.get("matches") or [])})
+    db.commit()
+    return result
+
+
+@router.post("/marketplace/venda-direta-robo/confirm", response_model=VendaDiretaRoboConfirmResponse)
+def venda_direta_robo_confirm(payload: VendaDiretaRoboConfirmRequest, user: User = Depends(require_scope("proposals:write")), db: Session = Depends(get_db)):
+    from app.sales_direct_robo_service import confirm_cota
+
+    result = confirm_cota(
+        db,
+        user,
+        lead_id=payload.lead_id,
+        quota_ids=payload.quota_ids,
+        match_lane=payload.match_lane,
+    )
+    audit(db, user, "marketplace.venda_direta_robo.confirm", "proposal", result["proposal_id"], {"quota_ids": result["quota_ids"]})
     db.commit()
     return result
 

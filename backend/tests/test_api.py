@@ -528,6 +528,71 @@ def test_marketplace_esteira2_robot_band_rollover_and_markup(client, auth_header
         assert abs(Decimal(m["total_credit"]) - Decimal("1000000")) / Decimal("1000000") * 100 <= Decimal("5")
 
 
+def test_venda_direta_robo_search_and_confirm(client, auth_headers):
+    """Wizard admin: busca Esteira 2 → confirma → lead + proposta + trava."""
+    payload = {
+        "name": "Cliente Venda Robô",
+        "email": "cliente.robo@letter.test",
+        "phone": "32988887777",
+        "person_type": "PF",
+        "document": "39053344705",
+        "target_amount": "400000",
+        "target_entrada": "80000",
+        "category": "REAL_ESTATE",
+        "monthly_income": "50000",
+        "monthly_commitment": "0",
+        "asset_value": "900000",
+        "asset_year": 2020,
+        "has_credit_restriction": False,
+        "asset_is_zero_km": False,
+        "zipcode": "36010000",
+        "street": "Rua Teste",
+        "number": "100",
+        "neighborhood": "Centro",
+        "city": "Juiz de Fora",
+        "uf": "MG",
+    }
+    search = client.post("/api/v1/marketplace/venda-direta-robo/search", headers=auth_headers, json=payload)
+    assert search.status_code == 200, search.text
+    body = search.json()
+    assert body["eligible"] is True
+    assert body["lead_id"]
+    options = body.get("credit_matches") or body.get("matches") or []
+    assert options, "robô deveria retornar opções no inventário seed"
+    chosen = options[0]
+    for qid in chosen["quota_ids"]:
+        scan = client.post(f"/api/v1/quotas/{qid}/nina-scan", headers=auth_headers)
+        assert scan.status_code == 200, scan.text
+
+    confirm = client.post(
+        "/api/v1/marketplace/venda-direta-robo/confirm",
+        headers=auth_headers,
+        json={"lead_id": body["lead_id"], "quota_ids": chosen["quota_ids"], "match_lane": chosen.get("lane")},
+    )
+    assert confirm.status_code == 200, confirm.text
+    done = confirm.json()
+    assert done["proposal_id"]
+    assert done["reservation_ids"]
+    assert set(done["quota_ids"]) == set(chosen["quota_ids"])
+
+    leads = client.get("/api/v1/leads", headers=auth_headers).json()
+    lead = next(l for l in leads if l["id"] == body["lead_id"])
+    assert lead["source"] == "VENDA_DIRETA_ROBO"
+    assert lead["status"] == "PROPOSAL"
+
+    proposals = client.get("/api/v1/proposals", headers=auth_headers).json()
+    prop = next(p for p in proposals if p["id"] == done["proposal_id"])
+    assert prop["product"] == "MARKETPLACE"
+    assert prop["status"] == "SUBMITTED"
+
+    miss = client.post(
+        "/api/v1/marketplace/venda-direta-robo/search",
+        headers=auth_headers,
+        json={**payload, "target_amount": "9999999", "asset_value": "9999999", "document": "52998224725"},
+    )
+    assert miss.status_code == 404
+
+
 def test_marketplace_income_three_times_installment_blocks(client, auth_headers):
     quota = next(q for q in client.get("/api/v1/quotas", headers=auth_headers).json() if q["status"] == "AVAILABLE")
     client.patch(
