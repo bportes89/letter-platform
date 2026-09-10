@@ -10,7 +10,6 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.administrator_service import parse_rules
-from app.bacen_administrator_rules_sync import rules_sync_due, sync_administrator_rules
 from app.models import Administrator, CalculationMemory, Quota, QuotaReservation, User
 from app.services import utcnow
 
@@ -19,7 +18,7 @@ NINA_SCAN_MAX_AGE_MINUTES = 30
 
 
 def run_nina_quota_scan(db: Session, user: User, quota: Quota) -> dict:
-    """Varredura Nina: valida dados cadastrais antes de permitir trava."""
+    """Varredura Nina: valida dados cadastrais e regras internas da administradora antes da trava."""
     if quota.status not in {"AVAILABLE", "RESERVED"}:
         raise HTTPException(status_code=409, detail="Cota não elegível para varredura Nina.")
 
@@ -27,9 +26,7 @@ def run_nina_quota_scan(db: Session, user: User, quota: Quota) -> dict:
     if not admin:
         raise HTTPException(status_code=422, detail="Administradora não encontrada para a cota.")
 
-    if rules_sync_due(admin):
-        sync_administrator_rules(db, admin)
-
+    # Regras vêm do painel (rules_json). Sync Bacen é manual/cron — não roda aqui.
     rules = parse_rules(admin.rules_json)
     credit_rules = rules.get("credit_utilization_rules") if isinstance(rules.get("credit_utilization_rules"), dict) else {}
 
@@ -42,11 +39,16 @@ def run_nina_quota_scan(db: Session, user: User, quota: Quota) -> dict:
         blockers.append(f"Administradora com status {admin.authorization_status}.")
     allowed_categories = rules.get("allowed_categories") or []
     if allowed_categories and quota.category not in allowed_categories:
-        blockers.append(f"Categoria {quota.category} não permitida pelo regulamento Bacen de {admin.name}.")
+        blockers.append(
+            f"Categoria {quota.category} não permitida pelas regras internas de {admin.name}."
+        )
+    products = rules.get("products_enabled") or []
+    if products and "MARKETPLACE" not in products:
+        blockers.append(f"Administradora {admin.name} sem produto MARKETPLACE nas regras internas.")
     max_credit = credit_rules.get("max_credit_per_operation_brl")
     if max_credit and float(quota.credit_value or 0) > float(max_credit):
         blockers.append(
-            f"Crédito da cota excede o teto de utilização ({max_credit}) da administradora {admin.name}."
+            f"Crédito da cota excede o teto de utilização ({max_credit}) das regras internas de {admin.name}."
         )
 
     if blockers:
@@ -61,10 +63,11 @@ def run_nina_quota_scan(db: Session, user: User, quota: Quota) -> dict:
     quota.nina_scan_detail_json = json.dumps(
         {
             "administrator": admin.name,
+            "rules_source": "internal_admin_panel",
             "rules_version": admin.bacen_rules_version,
-            "bacen_rules_synced_at": admin.bacen_rules_synced_at.isoformat() if admin.bacen_rules_synced_at else None,
             "category": quota.category,
             "credit_value": str(quota.credit_value),
+            "installment_value": str(quota.installment_value or 0),
             "installment_due_date": quota.installment_due_date.isoformat() if quota.installment_due_date else None,
             "scanned_by": user.id,
         },
@@ -74,7 +77,7 @@ def run_nina_quota_scan(db: Session, user: User, quota: Quota) -> dict:
         "quota_id": quota.id,
         "status": "CLEARED",
         "scanned_at": now.isoformat(),
-        "message": "Varredura Nina concluída. Cota liberada para trava de 60 minutos.",
+        "message": "Varredura Nina concluída (regras internas). Cota liberada para trava de 60 minutos.",
     }
 
 

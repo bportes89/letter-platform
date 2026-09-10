@@ -862,6 +862,7 @@ class QuotaCreate(BaseModel):
     credit_value: Decimal = Field(gt=0)
     outstanding_balance: Decimal = Field(ge=0, default=0)
     premium_value: Decimal = Field(ge=0, default=0)
+    installment_value: Decimal = Field(ge=0, default=0)
     installment_due_date: date | None = None
 
 
@@ -869,6 +870,7 @@ class QuotaUpdate(BaseModel):
     credit_value: Decimal | None = Field(default=None, gt=0)
     outstanding_balance: Decimal | None = Field(default=None, ge=0)
     premium_value: Decimal | None = Field(default=None, ge=0)
+    installment_value: Decimal | None = Field(default=None, ge=0)
     installment_due_date: date | None = None
     status: str | None = None
 
@@ -882,6 +884,7 @@ class QuotaView(ORMModel):
     credit_value: Decimal
     outstanding_balance: Decimal
     premium_value: Decimal
+    installment_value: Decimal = Decimal("0")
     installment_due_date: date | None
     nina_scan_status: str | None
     nina_scanned_at: datetime | None
@@ -2042,6 +2045,8 @@ class MarketplaceClientProfile(BaseModel):
     monthly_commitment: Decimal = Field(ge=0, default=0)
     asset_value: Decimal = Field(gt=0)
     asset_year: int = Field(ge=1980, le=2100)
+    has_credit_restriction: bool = False
+    asset_is_zero_km: bool = False
 
 
 class MarketplaceEsteira1Request(MarketplaceClientProfile):
@@ -2055,6 +2060,7 @@ class MarketplaceQuotaBrief(BaseModel):
     category: str
     credit_value: str
     premium_value: str
+    installment_value: str = "0.00"
     installment_due_date: str | None
     administrator_name: str | None
     status: str

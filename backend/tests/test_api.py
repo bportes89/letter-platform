@@ -59,13 +59,15 @@ def test_marketplace_esteira1_and_esteira2(client, auth_headers):
     client.patch(
         f"/api/v1/quotas/{quota['id']}",
         headers=auth_headers,
-        json={"installment_due_date": "2026-09-10"},
+        json={"installment_due_date": "2026-09-10", "installment_value": "2800"},
     )
     profile = {
         "monthly_income": "50000",
         "monthly_commitment": "5000",
         "asset_value": "900000",
         "asset_year": 2020,
+        "has_credit_restriction": False,
+        "asset_is_zero_km": False,
     }
     esteira1 = client.post(
         "/api/v1/marketplace/esteira-1/assess",
@@ -76,6 +78,7 @@ def test_marketplace_esteira1_and_esteira2(client, auth_headers):
     body1 = esteira1.json()
     assert body1["esteira"] == "SELF_SELECT"
     assert body1["quota"]["quota_id"] == quota["id"]
+    assert body1["quota"]["installment_value"] == "2800.00"
     assert "message" in body1
 
     esteira2 = client.post(
@@ -89,9 +92,117 @@ def test_marketplace_esteira1_and_esteira2(client, auth_headers):
     assert isinstance(body2["matches"], list)
 
 
-def test_quota_lock_requires_nina_scan(client, auth_headers):
+def test_marketplace_income_three_times_installment_blocks(client, auth_headers):
     quota = next(q for q in client.get("/api/v1/quotas", headers=auth_headers).json() if q["status"] == "AVAILABLE")
-    blocked = client.post("/api/v1/reservations", headers=auth_headers, json={"quota_id": quota["id"], "ttl_minutes": 60})
+    client.patch(
+        f"/api/v1/quotas/{quota['id']}",
+        headers=auth_headers,
+        json={"installment_due_date": "2026-09-10", "installment_value": "5000"},
+    )
+    # renda 10000 → teto de parcela 10000/3 ≈ 3333; parcela 5000 bloqueia
+    blocked = client.post(
+        "/api/v1/marketplace/esteira-1/assess",
+        headers=auth_headers,
+        json={
+            "quota_id": quota["id"],
+            "monthly_income": "10000",
+            "monthly_commitment": "0",
+            "asset_value": "900000",
+            "asset_year": 2020,
+        },
+    )
+    assert blocked.status_code == 200
+    assert blocked.json()["eligible"] is False
+    assert any("3" in b or "parcela" in b.lower() for b in blocked.json()["blockers"])
+
+
+def test_marketplace_dirty_name_uses_internal_admin_rules(client, auth_headers):
+    quota = next(q for q in client.get("/api/v1/quotas", headers=auth_headers).json() if q["status"] == "AVAILABLE")
+    admin_id = quota["administrator_id"]
+    admin = next(a for a in client.get("/api/v1/administrators", headers=auth_headers).json() if a["id"] == admin_id)
+    rules = dict(admin.get("rules") or {})
+    rules["accepts_dirty_name"] = False
+    patched = client.patch(f"/api/v1/administrators/{admin_id}/rules", headers=auth_headers, json={"rules": rules})
+    assert patched.status_code == 200
+
+    client.patch(
+        f"/api/v1/quotas/{quota['id']}",
+        headers=auth_headers,
+        json={"installment_due_date": "2026-09-10", "installment_value": "1000"},
+    )
+    result = client.post(
+        "/api/v1/marketplace/esteira-1/assess",
+        headers=auth_headers,
+        json={
+            "quota_id": quota["id"],
+            "monthly_income": "50000",
+            "asset_value": "900000",
+            "asset_year": 2020,
+            "has_credit_restriction": True,
+        },
+    )
+    assert result.status_code == 200
+    assert result.json()["eligible"] is False
+    assert any("SPC" in b or "Serasa" in b or "restrição" in b.lower() for b in result.json()["blockers"])
+
+
+def test_marketplace_vehicle_age_from_admin_rules(client, auth_headers):
+    admins = client.get("/api/v1/administrators", headers=auth_headers).json()
+    admin = admins[0]
+    rules = dict(admin.get("rules") or {})
+    rules["max_asset_age_years"] = 5
+    rules["allowed_categories"] = ["REAL_ESTATE", "VEHICLE"]
+    client.patch(f"/api/v1/administrators/{admin['id']}/rules", headers=auth_headers, json={"rules": rules})
+
+    created = client.post(
+        "/api/v1/quotas",
+        headers=auth_headers,
+        json={
+            "administrator_id": admin["id"],
+            "group_code": "VEH",
+            "quota_code": "AGE01",
+            "category": "VEHICLE",
+            "credit_value": "80000",
+            "installment_value": "900",
+            "installment_due_date": "2026-10-01",
+        },
+    )
+    assert created.status_code == 201
+    qid = created.json()["id"]
+    # bem de 2010 → idade ~16 > 5
+    result = client.post(
+        "/api/v1/marketplace/esteira-1/assess",
+        headers=auth_headers,
+        json={
+            "quota_id": qid,
+            "monthly_income": "20000",
+            "asset_value": "120000",
+            "asset_year": 2010,
+        },
+    )
+    assert result.status_code == 200
+    assert result.json()["eligible"] is False
+    assert any("anos" in b.lower() for b in result.json()["blockers"])
+
+
+def test_quota_lock_requires_nina_scan(client, auth_headers):
+    # Sessão de testes compartilha o DB: garante uma cota sem varredura Nina fresca.
+    admins = client.get("/api/v1/administrators", headers=auth_headers).json()
+    created = client.post(
+        "/api/v1/quotas",
+        headers=auth_headers,
+        json={
+            "administrator_id": admins[0]["id"],
+            "group_code": "LOCK",
+            "quota_code": "NEEDSCAN",
+            "category": "REAL_ESTATE",
+            "credit_value": "100000",
+            "installment_value": "800",
+            "installment_due_date": "2026-11-01",
+        },
+    )
+    assert created.status_code == 201
+    blocked = client.post("/api/v1/reservations", headers=auth_headers, json={"quota_id": created.json()["id"], "ttl_minutes": 60})
     assert blocked.status_code == 422
 
 

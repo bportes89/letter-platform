@@ -25,6 +25,10 @@ DEFAULT_RULES = {
     "max_asset_age_years": 15,
     "allowed_categories": ["REAL_ESTATE", "VEHICLE"],
     "min_commitment_margin": 0.30,
+    # Marketplace / robô interno (fonte = painel da administradora; Bacen só sincroniza se admin pedir)
+    "accepts_dirty_name": False,
+    "accepts_zero_km": True,
+    "min_income_to_installment_ratio": 3,
     "bacen_scr_required": True,
     "products_enabled": ["SDC", "QUITCON", "MARKETPLACE"],
     "approval_rules": {

@@ -1605,6 +1605,8 @@ def marketplace_esteira1(payload: MarketplaceEsteira1Request, user: User = Depen
         monthly_commitment=payload.monthly_commitment,
         asset_value=payload.asset_value,
         asset_year=payload.asset_year,
+        has_credit_restriction=payload.has_credit_restriction,
+        asset_is_zero_km=payload.asset_is_zero_km,
     )
     audit(db, user, "marketplace.esteira1", "quota", payload.quota_id, {"eligible": result["eligible"]})
     db.commit()
@@ -1624,6 +1626,8 @@ def marketplace_esteira2(payload: MarketplaceEsteira2Request, user: User = Depen
         monthly_income=payload.monthly_income,
         monthly_commitment=payload.monthly_commitment,
         asset_value=payload.asset_value,
+        has_credit_restriction=payload.has_credit_restriction,
+        asset_is_zero_km=payload.asset_is_zero_km,
     )
     audit(db, user, "marketplace.esteira2", "marketplace", "match", {"matches": len(result["matches"])})
     db.commit()
