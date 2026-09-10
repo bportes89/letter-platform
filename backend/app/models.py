@@ -326,6 +326,56 @@ class SdcSolicitationDocument(TimestampMixin, Base):
     uploaded_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"))
 
 
+class FlashSolicitation(TimestampMixin, Base):
+    """Mesa comercial Flash Capital: solicitação → docs → proposta + partes PJ."""
+
+    __tablename__ = "flash_solicitations"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    partner_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), index=True)
+    created_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"))
+    status: Mapped[str] = mapped_column(String(40), default="AWAITING_DOCS", index=True)
+    status_notes: Mapped[str | None] = mapped_column(Text)
+    contact_name: Mapped[str] = mapped_column(String(180))
+    contact_email: Mapped[str] = mapped_column(String(180), index=True)
+    contact_phone: Mapped[str] = mapped_column(String(40), default="")
+    document: Mapped[str | None] = mapped_column(String(20))
+    person_type: Mapped[str] = mapped_column(String(10), default="PF")
+    address: Mapped[str | None] = mapped_column(Text)
+    occupation: Mapped[str | None] = mapped_column(String(180))
+    income_value: Mapped[float] = mapped_column(Numeric(15, 2), default=0)
+    asset_type: Mapped[str] = mapped_column(String(40), index=True)
+    asset_category: Mapped[str] = mapped_column(String(20), default="REAL_ESTATE", index=True)
+    asset_value: Mapped[float] = mapped_column(Numeric(15, 2))
+    asset_year: Mapped[int | None] = mapped_column(Integer)
+    asset_paid_off: Mapped[bool] = mapped_column(Boolean, default=True)
+    asset_has_lien: Mapped[bool] = mapped_column(Boolean, default=False)
+    docs_complete: Mapped[bool] = mapped_column(Boolean, default=True)
+    capital_source: Mapped[str] = mapped_column(String(20), default="RETAIL")
+    term_months: Mapped[int] = mapped_column(Integer, default=36)
+    principal: Mapped[float] = mapped_column(Numeric(15, 2), default=0)
+    ltv_percent: Mapped[float] = mapped_column(Numeric(8, 4), default=0)
+    platform_fee: Mapped[float] = mapped_column(Numeric(15, 2), default=0)
+    itbi_provision: Mapped[float] = mapped_column(Numeric(15, 2), default=0)
+    net_payout: Mapped[float] = mapped_column(Numeric(15, 2), default=0)
+    installment_estimated: Mapped[float] = mapped_column(Numeric(15, 2), default=0)
+    interest_rate_monthly: Mapped[float] = mapped_column(Numeric(8, 4), default=0)
+    evaluation_json: Mapped[str] = mapped_column(Text, default="{}")
+    parties_json: Mapped[str] = mapped_column(Text, default="{}")
+    proposal_id: Mapped[str | None] = mapped_column(ForeignKey("proposals.id"), index=True)
+
+
+class FlashSolicitationDocument(TimestampMixin, Base):
+    __tablename__ = "flash_solicitation_documents"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    solicitation_id: Mapped[str] = mapped_column(ForeignKey("flash_solicitations.id"), index=True)
+    document_id: Mapped[str] = mapped_column(ForeignKey("documents.id"), index=True)
+    doc_type: Mapped[str] = mapped_column(String(80), default="FLASH_SUPPORT")
+    comment: Mapped[str | None] = mapped_column(Text)
+    uploaded_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"))
+
+
 class QuotaReservation(TimestampMixin, Base):
     __tablename__ = "quota_reservations"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)

@@ -87,6 +87,7 @@ from app.schemas import (
     MarketplaceEsteira1Request, MarketplaceEsteira1Response, MarketplaceEsteira2Request, MarketplaceEsteira2Response,
     VenderCotaCalculateRequest, VenderCotaStoreRequest, QuotaOfferRangeUpdate, QuotaSellOfferUpdate, VenderCotaCloseRequest,
     SdcDeskEvaluateRequest, SdcDeskStoreRequest, SdcDeskStatusUpdate, SdcDeskSaleCreate,
+    FlashDeskEvaluateRequest, FlashDeskStoreRequest, FlashDeskStatusUpdate, FlashDeskSaleCreate,
     ProposalView, QuotaCreate, QuotaUpdate, QuotaView, NinaQuotaScanView, RecoveredAssetCreate, RecoveredAssetView, RefreshRequest,
     CommercialClientView,
     ReservationCreate, ReservationView, SdcCalculationRequest, SessionView, SignatureComplete,
@@ -2364,6 +2365,108 @@ def sdc_desk_create_sale(
         "solicitation": solicitation_view(item, list_documents(db, item.id)),
         **sale,
         "message": "Cadastro de venda Cap Giro criado e vinculado ao SDC",
+    }
+
+
+@router.post("/flash/desk/evaluate")
+def flash_desk_evaluate(payload: FlashDeskEvaluateRequest, user: User = Depends(get_current_user)):
+    from app.flash_desk_service import assert_desk_access, evaluate_flash_desk
+
+    assert_desk_access(user)
+    return {"result": evaluate_flash_desk(payload.model_dump())}
+
+
+@router.post("/flash/desk/solicitations", status_code=201)
+def flash_desk_store(payload: FlashDeskStoreRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.flash_desk_service import list_documents, solicitation_view, store_solicitation
+
+    item = store_solicitation(db, user, payload.model_dump())
+    audit(db, user, "flash_desk.solicitation_created", "flash_solicitation", item.id, {
+        "asset_type": item.asset_type,
+        "principal": str(item.principal),
+    })
+    db.commit()
+    db.refresh(item)
+    return solicitation_view(item, list_documents(db, item.id))
+
+
+@router.get("/flash/desk/solicitations")
+def flash_desk_list(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.flash_desk_service import list_documents, list_solicitations, solicitation_view
+
+    return [solicitation_view(item, list_documents(db, item.id)) for item in list_solicitations(db, user)]
+
+
+@router.get("/flash/desk/solicitations/{solicitation_id}")
+def flash_desk_get(solicitation_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.flash_desk_service import get_solicitation, list_documents, solicitation_view
+
+    item = get_solicitation(db, user, solicitation_id)
+    return solicitation_view(item, list_documents(db, item.id))
+
+
+@router.patch("/flash/desk/solicitations/{solicitation_id}")
+def flash_desk_status(
+    solicitation_id: str,
+    payload: FlashDeskStatusUpdate,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.flash_desk_service import get_solicitation, list_documents, solicitation_view, update_status
+
+    item = get_solicitation(db, user, solicitation_id)
+    update_status(db, user, item, payload.status, payload.status_notes)
+    audit(db, user, "flash_desk.status_updated", "flash_solicitation", item.id, {
+        "status": item.status,
+        "status_notes": item.status_notes,
+    })
+    db.commit()
+    db.refresh(item)
+    return solicitation_view(item, list_documents(db, item.id))
+
+
+@router.post("/flash/desk/solicitations/{solicitation_id}/documents")
+async def flash_desk_upload_doc(
+    solicitation_id: str,
+    file: UploadFile = File(...),
+    doc_type: str = Form("FLASH_SUPPORT"),
+    comment: str | None = Form(None),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.flash_desk_service import add_document, get_solicitation, list_documents, solicitation_view
+
+    item = get_solicitation(db, user, solicitation_id)
+    await add_document(db, user, item, upload=file, doc_type=doc_type, comment=comment)
+    audit(db, user, "flash_desk.document_uploaded", "flash_solicitation", item.id, {
+        "filename": file.filename,
+        "doc_type": doc_type,
+        "status": item.status,
+    })
+    db.commit()
+    db.refresh(item)
+    return solicitation_view(item, list_documents(db, item.id))
+
+
+@router.post("/flash/desk/solicitations/{solicitation_id}/sale", status_code=201)
+def flash_desk_create_sale(
+    solicitation_id: str,
+    payload: FlashDeskSaleCreate,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.flash_desk_service import create_sale_from_flash, get_solicitation, list_documents, solicitation_view
+
+    item = get_solicitation(db, user, solicitation_id)
+    parties = payload.model_dump(exclude_none=True)
+    sale = create_sale_from_flash(db, user, item, parties=parties if parties.get("borrower_cnpj") else None)
+    audit(db, user, "flash_desk.sale_created", "flash_solicitation", item.id, sale)
+    db.commit()
+    db.refresh(item)
+    return {
+        "solicitation": solicitation_view(item, list_documents(db, item.id)),
+        **sale,
+        "message": "Proposta Flash Capital criada e vinculada à solicitação",
     }
 
 

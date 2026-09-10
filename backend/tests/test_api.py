@@ -266,6 +266,92 @@ def test_sdc_desk_evaluate_store_approve_and_sale(client, auth_headers):
     assert again.status_code == 409
 
 
+def test_flash_desk_evaluate_store_approve_and_sale(client, auth_headers):
+    bad = client.post("/api/v1/flash/desk/evaluate", headers=auth_headers, json={
+        "asset_type": "imovel",
+        "asset_value": "1000000",
+        "requested_amount": "500000",
+        "asset_paid_off": True,
+        "asset_has_lien": False,
+        "docs_complete": True,
+        "term_months": 36,
+        "capital_source": "RETAIL",
+    })
+    assert bad.status_code == 200
+    assert bad.json()["result"]["viable"] is False
+
+    ok = client.post("/api/v1/flash/desk/evaluate", headers=auth_headers, json={
+        "asset_type": "imovel",
+        "asset_value": "1000000",
+        "asset_paid_off": True,
+        "asset_has_lien": False,
+        "docs_complete": True,
+        "term_months": 36,
+        "capital_source": "RETAIL",
+    })
+    assert ok.status_code == 200
+    result = ok.json()["result"]
+    assert result["viable"] is True
+    assert result["principal"] == "400000.00"
+    assert result["platform_fee"] == "40000.00"
+    assert result["itbi_provision"] == "12000.00"
+    assert result["net_payout"] == "348000.00"
+    assert result["ltv_percent"] == "40.00"
+    assert any(d["code"] == "MATRICULA_ENOTARIADO" for d in result["required_docs"])
+
+    stored = client.post("/api/v1/flash/desk/solicitations", headers=auth_headers, json={
+        "asset_type": "imovel",
+        "asset_value": "1000000",
+        "asset_paid_off": True,
+        "asset_has_lien": False,
+        "docs_complete": True,
+        "term_months": 36,
+        "capital_source": "RETAIL",
+        "contact_name": "Cliente Flash Desk",
+        "contact_email": "cliente.flash.desk@example.com",
+        "contact_phone": "31977665544",
+        "document": "12345678000199",
+        "person_type": "PJ",
+        "income_value": "80000",
+    })
+    assert stored.status_code == 201, stored.text
+    item = stored.json()
+    assert item["status"] == "AWAITING_DOCS"
+    assert item["principal"] == "400000.00"
+    sid = item["id"]
+
+    approved = client.patch(
+        f"/api/v1/flash/desk/solicitations/{sid}",
+        headers=auth_headers,
+        json={"status": "APPROVED"},
+    )
+    assert approved.status_code == 200
+    assert approved.json()["can_create_sale"] is True
+
+    sale = client.post(
+        f"/api/v1/flash/desk/solicitations/{sid}/sale",
+        headers=auth_headers,
+        json={
+            "borrower_cnpj": "12.345.678/0001-99",
+            "property_owner_type": "PJ_BORROWER",
+            "property_owner_document": "12345678000199",
+            "consent_confirmation": True,
+        },
+    )
+    assert sale.status_code == 201, sale.text
+    assert sale.json()["proposal_id"]
+    assert sale.json()["calculation_id"]
+    assert sale.json()["flash_route"]["route"] == "DIRECT_CLEAN"
+    assert sale.json()["solicitation"]["can_create_sale"] is False
+
+    again = client.post(
+        f"/api/v1/flash/desk/solicitations/{sid}/sale",
+        headers=auth_headers,
+        json={},
+    )
+    assert again.status_code == 409
+
+
 def test_marketplace_esteira1_and_esteira2(client, auth_headers):
     quota = next(q for q in client.get("/api/v1/quotas", headers=auth_headers).json() if q["status"] == "AVAILABLE")
     client.patch(

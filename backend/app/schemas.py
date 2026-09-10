@@ -2177,6 +2177,45 @@ class SdcDeskSaleCreate(BaseModel):
     quota_id: str = Field(min_length=8, max_length=36)
 
 
+class FlashDeskEvaluateRequest(BaseModel):
+    asset_type: str = Field(min_length=2, max_length=40)
+    asset_value: Decimal = Field(gt=0)
+    requested_amount: Decimal | None = Field(default=None, gt=0)
+    asset_year: int | None = Field(default=None, ge=1950, le=2100)
+    asset_paid_off: bool = True
+    asset_has_lien: bool = False
+    docs_complete: bool = True
+    term_months: int = Field(default=36)
+    capital_source: str = "RETAIL"
+
+
+class FlashDeskStoreRequest(FlashDeskEvaluateRequest):
+    contact_name: str = Field(min_length=2, max_length=180)
+    contact_email: str = Field(min_length=5, max_length=180)
+    contact_phone: str = Field(min_length=8, max_length=40)
+    document: str | None = None
+    person_type: str = "PF"
+    address: str | None = None
+    occupation: str | None = None
+    income_value: Decimal = Field(ge=0, default=0)
+    partner_user_id: str | None = None
+
+
+class FlashDeskStatusUpdate(BaseModel):
+    status: str = Field(min_length=3, max_length=40)
+    status_notes: str | None = Field(default=None, max_length=4000)
+
+
+class FlashDeskSaleCreate(BaseModel):
+    borrower_cnpj: str | None = Field(default=None, min_length=14, max_length=18)
+    property_owner_type: str | None = None
+    property_owner_document: str | None = Field(default=None, min_length=11, max_length=20)
+    legal_representative_document: str | None = Field(default=None, max_length=20)
+    liveness_reference: str | None = Field(default=None, max_length=200)
+    qsa_representative_match: bool | None = None
+    consent_confirmation: bool = False
+
+
 class BISummaryView(BaseModel):
     funnel: dict; portfolio: dict; risk: dict; funding: dict; recovery: dict
 
