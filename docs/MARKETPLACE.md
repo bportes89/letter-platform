@@ -168,8 +168,8 @@ Jornada no site (`POST /api/v1/public/site/chat/home` e `.../home/{step}`):
 3. Match **Esteira 2** (mesmo motor do admin) → escolha → proposta + trava 60 min (`10013`)
 4. Handoff pós-match (`10014–10018` + dados `10030–10034`):
    - `10014` resumo (crédito / entrada / cotas)
-   - `10030–10034` PF/PJ → CPF/CNPJ (+ razão social PJ) → CEP (ViaCEP / tabela local) → número
-   - `10015` contrato templated (HTML com dados do comprador/cota; ack em `terms_json.contract_html` + `contract_ack`)
+   - `10030–10037` PF/PJ → CPF/CNPJ (+ razão social PJ) → CEP → número → profissão/atividade → renda/faturamento → comprovação (Holerite/IR/Decore/Extrato)
+   - `10015` contrato templated (HTML com dados do comprador/cota/renda; ack em `terms_json.contract_html` + `contract_ack`)
    - `10016` senha in-chat → `register_public_client` + bind; se e-mail já existe → CTA login
    - `10017` emite boleto Inter com pagador real (documento/endereço do snapshot)
    - `10018` encerramento

@@ -3720,13 +3720,44 @@ def test_public_site_chat_native_marketplace_flow(client, auth_headers):
         json={"lead_id": lead_id, "number": "100"},
     )
     assert number.status_code == 200, number.text
-    assert number.json()["OBJ"]["chat_next"][0].get("next") == 10015
+    assert number.json()["OBJ"]["chat_next"][0].get("next") == 10035
+
+    profession = client.post(
+        "/api/v1/public/site/chat/home/10035",
+        json={"lead_id": lead_id, "profession": "Engenheira"},
+    )
+    assert profession.status_code == 200, profession.text
+    assert profession.json()["OBJ"]["chat_next"][0].get("next") == 10036
+
+    income = client.post(
+        "/api/v1/public/site/chat/home/10036",
+        json={"lead_id": lead_id, "declared_income": "15000"},
+    )
+    assert income.status_code == 200, income.text
+    proof_opts = income.json()["OBJ"]["chat_next"][0].get("options") or []
+    assert any(o.get("save") == "holerite" for o in proof_opts)
+
+    mark = client.post(
+        "/api/v1/public/site/chat/home/10037",
+        json={"lead_id": lead_id, "option_save": "holerite", "option_id": "holerite"},
+    )
+    assert mark.status_code == 200, mark.text
+    assert any(o.get("save") == "done" for o in (mark.json()["OBJ"]["chat_next"][0].get("options") or []))
+
+    proof_done = client.post(
+        "/api/v1/public/site/chat/home/10037",
+        json={"lead_id": lead_id, "option_save": "done", "option_id": "done"},
+    )
+    assert proof_done.status_code == 200, proof_done.text
+    assert proof_done.json()["OBJ"]["chat_next"][0].get("next") == 10015
 
     contract = client.post("/api/v1/public/site/chat/home/10015", json={"lead_id": lead_id})
     assert contract.status_code == 200, contract.text
     contract_item = contract.json()["OBJ"]["chat_next"][0]
     assert contract_item.get("contract") is True
     assert "LETTER BANK" in (contract_item.get("html") or "")
+    assert "Engenheira" in (contract_item.get("html") or "")
+    assert "Holerite" in (contract_item.get("html") or "")
     assert contract_item.get("accept_save") == "accept"
 
     accept = client.post(
@@ -3771,6 +3802,8 @@ def test_public_site_chat_native_marketplace_flow(client, auth_headers):
     body = detail.json()
     assert body.get("document") == "52998224725"
     assert (body.get("snapshot") or {}).get("person_type") == "PF"
+    assert (body.get("snapshot") or {}).get("profession") == "Engenheira"
+    assert (body.get("snapshot") or {}).get("income_proof") == ["holerite"]
     assert (body.get("snapshot") or {}).get("address", {}).get("zipcode") == "36010000"
     assert body.get("boleto")
 

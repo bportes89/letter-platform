@@ -50,6 +50,9 @@ STEP_DOCUMENT = "10031"
 STEP_RAZAO = "10032"
 STEP_ZIPCODE = "10033"
 STEP_ADDRESS_NUMBER = "10034"
+STEP_PROFESSION = "10035"
+STEP_INCOME_AMOUNT = "10036"
+STEP_INCOME_PROOF = "10037"
 # legado (renomeado)
 STEP_DONE = STEP_HANDOFF_RESUMO
 
@@ -83,6 +86,13 @@ KNOWN_CEPS = {
         "city": "Sao Paulo",
         "uf": "SP",
     },
+}
+
+INCOME_PROOF_OPTIONS = {
+    "holerite": "Holerite",
+    "ir": "IR",
+    "decore": "Decore",
+    "extrato": "Extrato",
 }
 
 
@@ -166,6 +176,10 @@ def _contract_html(lead: Lead, snap: dict) -> str:
         f"{address.get('complement') or ''} — {address.get('neighborhood') or '—'}, "
         f"{address.get('city') or '—'}/{address.get('uf') or '—'} CEP {address.get('zipcode') or '—'}"
     ).strip()
+    profissao = str(snap.get("profession") or snap.get("activity") or "—")
+    renda = snap.get("declared_income")
+    proofs = snap.get("income_proof") or []
+    proof_labels = ", ".join(INCOME_PROOF_OPTIONS.get(str(p), str(p)) for p in proofs) or "—"
     from datetime import date
 
     today = date.today()
@@ -179,6 +193,10 @@ def _contract_html(lead: Lead, snap: dict) -> str:
         "<p><strong>Termo de intermediação de cota contemplada</strong></p>"
         f"<p><strong>Contratante:</strong> {nome}<br/>"
         f"<strong>Documento:</strong> {doc or '—'} ({'CNPJ' if person == 'PJ' else 'CPF'})<br/>"
+        f"<strong>{'Ramo de atividade' if person == 'PJ' else 'Profissão'}:</strong> {profissao}<br/>"
+        f"<strong>{'Faturamento mensal' if person == 'PJ' else 'Renda mensal'}:</strong> "
+        f"{_brl(renda) if renda not in (None, '') else '—'}<br/>"
+        f"<strong>Comprovação de renda:</strong> {proof_labels}<br/>"
         f"<strong>Endereço:</strong> {end_txt}<br/>"
         f"<strong>E-mail:</strong> {snap.get('email') or '—'} · <strong>WhatsApp:</strong> {lead.phone or '—'}</p>"
         f"<p><strong>Objeto:</strong> intermediação de cota(s) contemplada(s).<br/>"
@@ -191,6 +209,25 @@ def _contract_html(lead: Lead, snap: dict) -> str:
         "A assinatura digital completa (ZapSign) pode ser enviada após a criação da conta LETTER.</p>"
         f"<p>{address.get('city') or 'Brasil'}, {data_extenso}.</p>"
     )
+
+
+def _income_proof_item(selected: list[str]) -> dict:
+    marked = ", ".join(INCOME_PROOF_OPTIONS[k] for k in selected if k in INCOME_PROOF_OPTIONS)
+    text = "Como você comprova a renda? (pode marcar mais de uma)"
+    if marked:
+        text = f"Marcado: {marked}. Quer adicionar outra forma ou continuar?"
+    options = [
+        {"name": label, "save": key, "next": int(STEP_INCOME_PROOF)}
+        for key, label in INCOME_PROOF_OPTIONS.items()
+        if key not in selected
+    ]
+    if selected:
+        options.append({"name": "Continuar", "save": "done", "next": int(STEP_INCOME_PROOF)})
+    return {"text": text, "options": options}
+
+
+def _income_proof_prompt(lead: Lead, selected: list[str]) -> dict:
+    return _wrap([_income_proof_item(selected)], lead_id=lead.id)
 
 
 def _site_info() -> dict:
@@ -1047,16 +1084,144 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
                 terms["razao_social"] = snap["razao_social"]
             proposal.terms_json = json.dumps(terms, ensure_ascii=False)
         db.flush()
+        person = str(snap.get("person_type") or "PF").upper()
+        if person == "PJ":
+            prompt = "Qual o ramo de atividade da empresa?"
+            label = "Ramo de atividade"
+        else:
+            prompt = "Qual a sua profissão?"
+            label = "Profissão"
         return _wrap(
             [
                 {
-                    "text": "Endereço salvo. Vamos ao contrato de intermediação.",
-                    "button": "Continuar para o contrato",
-                    "next": int(STEP_CONTRACT_PLACEHOLDER),
+                    "text": prompt,
+                    "input": {"name": "profession", "label": label, "type": "text"},
+                    "next": int(STEP_PROFESSION),
                 }
             ],
             lead_id=lead.id,
         )
+
+    if step == STEP_PROFESSION:
+        if not lead:
+            raise HTTPException(422, "Sessão do chat expirada. Recomece pelo início.")
+        snap = _lead_snapshot(lead)
+        person = str(snap.get("person_type") or "PF").upper()
+        label = "Ramo de atividade" if person == "PJ" else "Profissão"
+        raw = str(data.get("profession") or data.get("activity") or "").strip()
+        if len(raw) < 2:
+            return _retry(
+                f"Informe {label.lower()}.",
+                STEP_PROFESSION,
+                input_name="profession",
+                label=label,
+                lead_id=lead.id,
+            )
+        if person == "PJ":
+            snap["activity"] = raw
+            snap["profession"] = raw
+        else:
+            snap["profession"] = raw
+        _save_lead_snapshot(lead, snap)
+        db.flush()
+        income_label = "Faturamento mensal" if person == "PJ" else "Renda mensal"
+        return _wrap(
+            [
+                {
+                    "text": f"Qual o {income_label.lower()}?",
+                    "input": {"name": "declared_income", "label": income_label, "type": "text"},
+                    "next": int(STEP_INCOME_AMOUNT),
+                }
+            ],
+            lead_id=lead.id,
+        )
+
+    if step == STEP_INCOME_AMOUNT:
+        if not lead:
+            raise HTTPException(422, "Sessão do chat expirada. Recomece pelo início.")
+        snap = _lead_snapshot(lead)
+        person = str(snap.get("person_type") or "PF").upper()
+        income_label = "Faturamento mensal" if person == "PJ" else "Renda mensal"
+        if data.get("declared_income") is None or str(data.get("declared_income") or "").strip() == "":
+            return _wrap(
+                [
+                    {
+                        "text": f"Qual o {income_label.lower()}?",
+                        "input": {"name": "declared_income", "label": income_label, "type": "text"},
+                        "next": int(STEP_INCOME_AMOUNT),
+                    }
+                ],
+                lead_id=lead.id,
+            )
+        try:
+            amount = _money_input(data.get("declared_income"))
+        except HTTPException as exc:
+            return _retry(
+                str(exc.detail),
+                STEP_INCOME_AMOUNT,
+                input_name="declared_income",
+                label=income_label,
+                lead_id=lead.id,
+            )
+        if amount <= 0:
+            return _retry(
+                f"{income_label} precisa ser maior que zero.",
+                STEP_INCOME_AMOUNT,
+                input_name="declared_income",
+                label=income_label,
+                lead_id=lead.id,
+            )
+        snap["declared_income"] = str(amount)
+        _save_lead_snapshot(lead, snap)
+        db.flush()
+        return _income_proof_prompt(lead, snap.get("income_proof") or [])
+
+    if step == STEP_INCOME_PROOF:
+        if not lead:
+            raise HTTPException(422, "Sessão do chat expirada. Recomece pelo início.")
+        snap = _lead_snapshot(lead)
+        selected = [str(x) for x in (snap.get("income_proof") or []) if str(x) in INCOME_PROOF_OPTIONS]
+        choice = str(data.get("option_save") or data.get("option_id") or "").strip().lower()
+        if choice == "done":
+            if not selected:
+                return _wrap(
+                    [
+                        {
+                            "text": "Selecione pelo menos uma forma de comprovação!",
+                            **_income_proof_item(selected),
+                        }
+                    ],
+                    lead_id=lead.id,
+                )
+            snap["income_proof"] = selected
+            _save_lead_snapshot(lead, snap)
+            proposal = db.get(Proposal, snap.get("proposal_id")) if snap.get("proposal_id") else None
+            if proposal:
+                terms = seed_marketplace_lifecycle(json.loads(proposal.terms_json or "{}"))
+                terms["profession"] = snap.get("profession")
+                terms["activity"] = snap.get("activity")
+                terms["declared_income"] = snap.get("declared_income")
+                terms["income_proof"] = selected
+                proposal.terms_json = json.dumps(terms, ensure_ascii=False)
+            db.flush()
+            return _wrap(
+                [
+                    {
+                        "text": "Dados profissionais salvos. Vamos ao contrato de intermediação.",
+                        "button": "Continuar para o contrato",
+                        "next": int(STEP_CONTRACT_PLACEHOLDER),
+                    }
+                ],
+                lead_id=lead.id,
+            )
+        if choice in INCOME_PROOF_OPTIONS:
+            if choice not in selected:
+                selected.append(choice)
+            snap["income_proof"] = selected
+            _save_lead_snapshot(lead, snap)
+            db.flush()
+            return _income_proof_prompt(lead, selected)
+        return _income_proof_prompt(lead, selected)
 
     if step == STEP_CONTRACT_PLACEHOLDER:
         if not lead:
@@ -1085,6 +1250,34 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
                 ],
                 lead_id=lead.id,
             )
+        if not snap.get("profession") and not snap.get("activity"):
+            person = str(snap.get("person_type") or "PF").upper()
+            label = "Ramo de atividade" if person == "PJ" else "Profissão"
+            return _wrap(
+                [
+                    {
+                        "text": f"Antes do contrato, informe {label.lower()}.",
+                        "input": {"name": "profession", "label": label, "type": "text"},
+                        "next": int(STEP_PROFESSION),
+                    }
+                ],
+                lead_id=lead.id,
+            )
+        if not snap.get("declared_income"):
+            person = str(snap.get("person_type") or "PF").upper()
+            income_label = "Faturamento mensal" if person == "PJ" else "Renda mensal"
+            return _wrap(
+                [
+                    {
+                        "text": f"Antes do contrato, informe o {income_label.lower()}.",
+                        "input": {"name": "declared_income", "label": income_label, "type": "text"},
+                        "next": int(STEP_INCOME_AMOUNT),
+                    }
+                ],
+                lead_id=lead.id,
+            )
+        if not (snap.get("income_proof") or []):
+            return _income_proof_prompt(lead, [])
         accepted = str(data.get("option_save") or data.get("option_id") or data.get("contract") or "").strip().lower()
         if accepted in {"accept", "1", "true", "aceito", "contrato_aceito"}:
             from datetime import UTC, datetime
