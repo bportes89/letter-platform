@@ -122,7 +122,7 @@ from app.compliance_property_service import (
 )
 from app.flash_valid_lss_service import (
     approve_flash_policy, approve_terms, cancel_subscription, configure_flash_parties, evaluate_subscription,
-    create_flash_policy, create_plan, create_terms, issue_stamp, subscribe,
+    create_flash_policy, create_plan, create_terms, issue_stamp, lss_entitlement_view, subscribe,
     subscription_allocation, verify_stamp,
 )
 from app.identity_service import (
@@ -3647,6 +3647,11 @@ def lss_allocation(plan_id:str,user:User=Depends(get_current_user),db:Session=De
     item=db.scalar(select(SaaSPlan).where(SaaSPlan.id==plan_id,SaaSPlan.organization_id==user.organization_id))
     if not item:raise HTTPException(404,"Plano não encontrado")
     return subscription_allocation(item)
+
+
+@router.get("/lss/entitlement")
+def lss_entitlement(user:User=Depends(get_current_user),db:Session=Depends(get_db)):
+    return lss_entitlement_view(db, user.organization_id)
 
 
 @router.post("/proposals/{proposal_id}/contracts", response_model=ContractView, status_code=201)

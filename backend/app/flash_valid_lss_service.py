@@ -168,3 +168,89 @@ def subscription_allocation(plan:SaaSPlan)->dict:
 
     execution = "ASAAS_RECURRING" if lss_billing_live() else "PREVIEW_ONLY"
     return {"monthly_price":str(price.quantize(Decimal('.01'))),"central_share":str(central),"network_pool":str(network),"execution":execution}
+
+
+LSS_ENTITLED_STATUSES = frozenset({
+    "ACTIVE",
+    "ACTIVE_SANDBOX",
+    "CANCELLATION_SCHEDULED",
+    "PAST_DUE",  # grace — acesso mantido até evaluate → SUSPENDED
+})
+
+LSS_BLOCKED_STATUSES = frozenset({
+    "PENDING_PAYMENT",
+    "SUSPENDED",
+    "SUSPENDED_PAST_DUE_SANDBOX",
+    "CANCELLED",
+})
+
+
+def org_has_lss_entitlement(db: Session, organization_id: str) -> bool:
+    rows = list(
+        db.scalars(
+            select(SaaSSubscription).where(
+                SaaSSubscription.organization_id == organization_id,
+                SaaSSubscription.status.in_(list(LSS_ENTITLED_STATUSES)),
+            )
+        )
+    )
+    return bool(rows)
+
+
+def lss_entitlement_view(db: Session, organization_id: str) -> dict:
+    from app.lss_billing_service import lss_billing_live
+
+    subs = list(
+        db.scalars(
+            select(SaaSSubscription)
+            .where(SaaSSubscription.organization_id == organization_id)
+            .order_by(SaaSSubscription.created_at.desc())
+        )
+    )
+    entitled = any(s.status in LSS_ENTITLED_STATUSES for s in subs)
+    primary = next((s for s in subs if s.status in LSS_ENTITLED_STATUSES), None)
+    if not primary and subs:
+        primary = subs[0]
+    blocked = bool(primary and primary.status in LSS_BLOCKED_STATUSES and not entitled)
+    reason = None
+    if entitled:
+        reason = "OK"
+    elif primary and primary.status == "PENDING_PAYMENT":
+        reason = "PENDING_PAYMENT"
+    elif primary and primary.status in {"SUSPENDED", "SUSPENDED_PAST_DUE_SANDBOX"}:
+        reason = "SUSPENDED"
+    elif primary and primary.status == "CANCELLED":
+        reason = "CANCELLED"
+    elif not subs:
+        reason = "NO_SUBSCRIPTION"
+    return {
+        "entitled": entitled,
+        "billing_live": lss_billing_live(),
+        "reason": reason,
+        "subscription_id": primary.id if primary else None,
+        "subscription_status": primary.status if primary else None,
+        "payment_checkout_url": primary.payment_checkout_url if primary else None,
+        "message": (
+            "Acesso LSS liberado"
+            if entitled
+            else (
+                "Conclua o pagamento da primeira mensalidade para ativar o LSS"
+                if reason == "PENDING_PAYMENT"
+                else (
+                    "Assinatura suspensa por inadimplência — regularize o pagamento"
+                    if reason == "SUSPENDED"
+                    else (
+                        "Assinatura cancelada"
+                        if reason == "CANCELLED"
+                        else "Nenhuma assinatura LSS ativa — contrate o plano empresarial"
+                    )
+                )
+            )
+        ),
+    }
+
+
+def require_lss_entitlement(db: Session, organization_id: str) -> None:
+    if not org_has_lss_entitlement(db, organization_id):
+        view = lss_entitlement_view(db, organization_id)
+        raise HTTPException(status_code=402, detail=view["message"])

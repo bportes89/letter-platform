@@ -1783,6 +1783,8 @@ def test_lss_clickwrap_subscription_allocation_and_cancellation(client,auth_head
     assert allocation=={"monthly_price":"199.90","central_share":"139.93","network_pool":"59.97","execution":"PREVIEW_ONLY"}
     cancelled=client.post(f"/api/v1/lss/subscriptions/{subscribed.json()['id']}/cancel",headers=auth_headers)
     assert cancelled.status_code==200 and cancelled.json()["status"]=="CANCELLATION_SCHEDULED" and cancelled.json()["cancel_at_period_end"] is True
+    entitlement=client.get("/api/v1/lss/entitlement",headers=auth_headers).json()
+    assert entitlement["entitled"] is True and entitlement["subscription_status"]=="CANCELLATION_SCHEDULED" and entitlement["reason"]=="OK"
 
 
 def test_lss_asaas_subscription_and_payment_webhook(client, auth_headers, monkeypatch):
@@ -1870,6 +1872,9 @@ def test_lss_asaas_subscription_and_payment_webhook(client, auth_headers, monkey
     assert body["status"] == "PENDING_PAYMENT"
     assert body["asaas_subscription_id"] == "sub_lss_001"
     assert body["payment_checkout_url"] == "https://sandbox.asaas.com/i/pay_lss_001"
+    # Entitlement é por organização (qualquer ACTIVE*); PENDING_PAYMENT sozinho não libera.
+    from app.flash_valid_lss_service import LSS_BLOCKED_STATUSES, LSS_ENTITLED_STATUSES
+    assert "PENDING_PAYMENT" in LSS_BLOCKED_STATUSES and "ACTIVE" in LSS_ENTITLED_STATUSES
 
     allocation = client.get(f"/api/v1/lss/plans/{plan['id']}/allocation-preview", headers=auth_headers).json()
     assert allocation["execution"] == "ASAAS_RECURRING"
@@ -1897,6 +1902,8 @@ def test_lss_asaas_subscription_and_payment_webhook(client, auth_headers, monkey
     active = next(item for item in listed if item["id"] == body["id"])
     assert active["status"] == "ACTIVE"
     assert active["last_payment_status"] == "CONFIRMED"
+    active_entitlement = client.get("/api/v1/lss/entitlement", headers=auth_headers).json()
+    assert active_entitlement["entitled"] is True and active_entitlement["reason"] == "OK"
 
     cancelled = client.post(f"/api/v1/lss/subscriptions/{body['id']}/cancel", headers=auth_headers)
     assert cancelled.status_code == 200

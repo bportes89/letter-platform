@@ -258,6 +258,21 @@ export type SellerEvidenceAudit = { id:string; contract_id:string; status:string
 export type StructuredProperty = { id:string; operation_id:string|null; case_reference:string; buyer_document_masked:string; seller_document_masked:string; has_lien_debt:boolean; unregistered_construction:boolean; route:string; land_appraisal_value:string; future_appraisal_value:string; gross_payout:string; estimated_debt:string; phase1_amount:string; phase2_amount:string; iq_status:string; phase_status:string; registration_deadline_at:string|null; legal_hold:boolean; evidence_hash:string; created_at:string };
 export type StructuredPropertyEvent = { id:string; case_id:string; event_key:string; event_type:string; status:string; evidence_hash:string; occurred_at:string };
 export type SaaSPlan = {id:string;code:string;name:string;monthly_price:string;central_share_percent:string;network_pool_percent:string;active:boolean};
+export type LssEntitlement = {
+  entitled: boolean;
+  billing_live: boolean;
+  reason: string | null;
+  subscription_id: string | null;
+  subscription_status: string | null;
+  payment_checkout_url: string | null;
+  message: string;
+};
+export type LssAllocationPreview = {
+  monthly_price: string;
+  central_share: string;
+  network_pool: string;
+  execution: string;
+};
 export type CompanyProfile = {legal_name:string;trade_name:string;cnpj:string;email?:string;phone?:string;footer_line:string;address_line?:string;city_state?:string};
 export type LegalManualPublic = {slug:string;title:string;category:string;product:string;audience:string;description:string;document_type:string;requires_login:boolean};
 export type LegalManual = LegalManualPublic & {filename:string;available:boolean;size_bytes:number};
