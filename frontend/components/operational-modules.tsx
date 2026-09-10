@@ -25,14 +25,14 @@ export function LeadsModule() {
 export function InventoryModule() {
   const [items,setItems]=useState<Quota[]>([]);const [admins,setAdmins]=useState<Administrator[]>([]);const [reservations,setReservations]=useState<Reservation[]>([]);const [error,setError]=useState("");const [notice,setNotice]=useState("");const [formKey,setFormKey]=useState(0);
   const load=()=>Promise.all([api<Quota[]>("/quotas"),api<Administrator[]>("/administrators"),api<Reservation[]>("/reservations")]).then(([q,a,r])=>{setItems(q);setAdmins(a);setReservations(r)}).catch(e=>setError(e.message));useEffect(()=>{void load()},[]);
-  async function submit(e:FormEvent<HTMLFormElement>){e.preventDefault();const form=e.currentTarget;const fd=new FormData(form);await api("/quotas",{method:"POST",body:JSON.stringify({administrator_id:fd.get("administrator_id"),group_code:fd.get("group_code"),quota_code:fd.get("quota_code"),category:fd.get("category"),credit_value:fd.get("credit_value"),outstanding_balance:fd.get("outstanding_balance")||"0",premium_value:fd.get("premium_value")||"0",installment_value:fd.get("installment_value")||"0",installment_due_date:fd.get("installment_due_date")||null})});form.reset();setFormKey(k=>k+1);setNotice("Cota cadastrada no inventário.");load()}
+  async function submit(e:FormEvent<HTMLFormElement>){e.preventDefault();const form=e.currentTarget;const fd=new FormData(form);await api("/quotas",{method:"POST",body:JSON.stringify({administrator_id:fd.get("administrator_id"),group_code:fd.get("group_code"),quota_code:fd.get("quota_code"),category:fd.get("category"),credit_value:fd.get("credit_value"),outstanding_balance:fd.get("outstanding_balance")||"0",premium_value:fd.get("premium_value")||"0",installment_value:fd.get("installment_value")||"0",installment_due_date:fd.get("installment_due_date")||null,remaining_installments:fd.get("remaining_installments")?Number(fd.get("remaining_installments")):null,supplier_source:fd.get("supplier_source")||null})});form.reset();setFormKey(k=>k+1);setNotice("Cota cadastrada no inventário.");load()}
   async function ninaScan(quota:Quota){setError("");try{const result=await api<{message:string}>("/quotas/"+quota.id+"/nina-scan",{method:"POST"});setNotice(result.message);load()}catch(e){setError(e instanceof Error?e.message:"Varredura Nina reprovada.")}}
   async function reserve(quota:Quota){setError("");try{await api("/reservations",{method:"POST",body:JSON.stringify({quota_id:quota.id,ttl_minutes:60})});setNotice(`Cota ${quota.group_code}/${quota.quota_code} travada por 60 minutos.`);load()}catch(e){setError(e instanceof Error?e.message:"Falha na trava")}}
   async function release(quota:Quota){const res=reservations.find(r=>r.quota_id===quota.id&&r.status==="ACTIVE");if(res){await api(`/reservations/${res.id}/release`,{method:"POST"});load()}}
   const fmtDate=(value?:string|null)=>value?new Date(value+"T12:00:00").toLocaleDateString("pt-BR"):"—";
   return <OperationalLayout title="Inventário (admin)" subtitle="Cadastro interno de cotas, varredura Nina e trava de 60 min — estrutura operacional, não é a jornada comercial do parceiro." icon={<WalletCards/>}>
     <div className="notice"><Clock3/>Fluxo: <b>1.</b> Cadastro (admin) · <b>2.</b> Varredura Nina (regras internas da administradora) · <b>3.</b> Trava 60 min · <b>4.</b> Proposta em SDC/Marketplace · <b>5.</b> Contrato registra a venda · Ofertas públicas em <b>Vender minha cota</b> (/vender-minha-cota)</div>
-    <form key={formKey} className="quick-form quota-form" onSubmit={submit}><select name="administrator_id" required>{admins.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select><input name="group_code" placeholder="Grupo" required/><input name="quota_code" placeholder="Cota" required/><select name="category"><option value="REAL_ESTATE">Imóvel</option><option value="VEHICLE">Veículo</option></select><CurrencyFormField name="credit_value" placeholder="Crédito (R$)" required/><CurrencyFormField name="premium_value" placeholder="Ágio (R$)"/><CurrencyFormField name="installment_value" placeholder="Parcela (R$)"/><CurrencyFormField name="outstanding_balance" placeholder="Saldo devedor (R$)"/><input name="installment_due_date" type="date" placeholder="Vencimento parcela" required title="Vencimento da parcela"/><button><Plus/>Cadastrar cota</button></form>
+    <form key={formKey} className="quick-form quota-form" onSubmit={submit}><select name="administrator_id" required>{admins.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select><input name="group_code" placeholder="Grupo" required/><input name="quota_code" placeholder="Cota" required/><select name="category"><option value="REAL_ESTATE">Imóvel</option><option value="VEHICLE">Veículo</option></select><CurrencyFormField name="credit_value" placeholder="Crédito (R$)" required/><CurrencyFormField name="premium_value" placeholder="Entrada/ágio (R$)"/><CurrencyFormField name="installment_value" placeholder="Parcela (R$)"/><CurrencyFormField name="outstanding_balance" placeholder="Saldo devedor (R$)"/><input name="installment_due_date" type="date" placeholder="Vencimento parcela" required title="Vencimento da parcela"/><input name="remaining_installments" type="number" min="0" placeholder="Parcelas restantes"/><select name="supplier_source"><option value="">Fornecedor API</option><option value="FRAGA">Fraga (+3%)</option><option value="BITTELO">Bittelo (+3%)</option><option value="LANCE">Lance (+3%)</option><option value="UNI_CONTEMPLADOS">Uni Contemplados (+10%)</option><option value="CONTEMPLADO_SP">Contemplado SP (+10%)</option><option value="LUME">Lume (+10%)</option></select><button><Plus/>Cadastrar cota</button></form>
     {notice&&<div className="notice"><CheckCircle2/>{notice}</div>}{error&&<div className="error">{error}</div>}<DataTable headers={["Identificação","Categoria","Crédito","Parcela","Ágio","Vencimento","Nina","Status","Ações"]}>{items.map(x=><tr key={x.id}><td><b>Grupo {x.group_code}</b><small>Cota {x.quota_code}</small></td><td>{x.category==="REAL_ESTATE"?"Imóvel":"Veículo"}</td><td>{brl.format(Number(x.credit_value))}</td><td>{brl.format(Number(x.installment_value||0))}</td><td>{brl.format(Number(x.premium_value))}</td><td>{fmtDate(x.installment_due_date)}</td><td><Pill value={x.nina_scan_status??"PENDENTE"}/></td><td><Pill value={x.status}/></td><td className="actions-cell">{x.status==="AVAILABLE"?<><button className="table-action" onClick={()=>ninaScan(x)} disabled={!x.installment_due_date}><RefreshCw/>Varredura Nina</button><button className="table-action lock" onClick={()=>reserve(x)} disabled={x.nina_scan_status!=="CLEARED"}><LockKeyhole/>Travar 60 min</button></>:x.status==="RESERVED"?<button className="table-action" onClick={()=>release(x)}><Unlock/>Liberar</button>:x.status==="SOLD"?"Vendida":"—"}</td></tr>)}</DataTable>
   </OperationalLayout>
 }
@@ -40,13 +40,36 @@ export function InventoryModule() {
 type MarketplaceMatch = {
   quota_ids: string[];
   total_credit: string;
+  total_entrada?: string | null;
   deviation_percent: string;
+  entrada_deviation_percent?: string | null;
   score: number;
   administrator_id: string;
   administrator_name?: string;
   explanation: string;
   message?: string;
-  quotas: { quota_id: string; group_code: string; quota_code: string; category: string; credit_value: string; premium_value: string; installment_value?: string; installment_due_date?: string | null; administrator_name?: string; status: string; nina_scan_status?: string | null }[];
+  lane?: string | null;
+  rollover_applied?: boolean;
+  markup_amount?: string | null;
+  remaining_installments?: number | null;
+  quotas: {
+    quota_id: string;
+    group_code: string;
+    quota_code: string;
+    category: string;
+    credit_value: string;
+    premium_value: string;
+    entrada_final?: string | null;
+    installment_value?: string;
+    installment_due_date?: string | null;
+    remaining_installments?: number | null;
+    supplier_source?: string | null;
+    markup_percent?: string | null;
+    rollover_applied?: boolean;
+    administrator_name?: string;
+    status: string;
+    nina_scan_status?: string | null;
+  }[];
 };
 
 type MarketplaceEsteira1Result = {
@@ -63,6 +86,9 @@ type MarketplaceEsteira2Result = {
   eligible: boolean;
   blockers: string[];
   matches: MarketplaceMatch[];
+  credit_matches?: MarketplaceMatch[];
+  entrada_matches?: MarketplaceMatch[];
+  band_percent?: string;
   message: string;
 };
 
@@ -86,6 +112,7 @@ export function MarketplaceModule() {
   const [flags,setFlags]=useState({e1_dirty:false,e1_zero:false,e2_dirty:false,e2_zero:false});
   const [selectedQuota,setSelectedQuota]=useState("");
   const [targetAmount,setTargetAmount]=useState("800000");
+  const [targetEntrada,setTargetEntrada]=useState("160000");
   const [category,setCategory]=useState("REAL_ESTATE");
   const [result1,setResult1]=useState<MarketplaceEsteira1Result|null>(null);
   const [result2,setResult2]=useState<MarketplaceEsteira2Result|null>(null);
@@ -101,16 +128,16 @@ export function MarketplaceModule() {
     asset_is_zero_km:flags[`${prefix}_zero`],
   });
   async function assessEsteira1(e:FormEvent){e.preventDefault();setError("");setNotice("");try{const data=await api<MarketplaceEsteira1Result>("/marketplace/esteira-1/assess",{method:"POST",body:JSON.stringify({quota_id:selectedQuota,...profilePayload("e1")})});setResult1(data);setNotice(data.message)}catch(err){setError(err instanceof Error?err.message:"Falha na Esteira 1")}}
-  async function matchEsteira2(e:FormEvent){e.preventDefault();setError("");setNotice("");try{const data=await api<MarketplaceEsteira2Result>("/marketplace/esteira-2/match",{method:"POST",body:JSON.stringify({target_amount:targetAmount,category,...profilePayload("e2")})});setResult2(data);setNotice(data.message)}catch(err){setError(err instanceof Error?err.message:"Falha na Esteira 2")}}
+  async function matchEsteira2(e:FormEvent){e.preventDefault();setError("");setNotice("");try{const data=await api<MarketplaceEsteira2Result>("/marketplace/esteira-2/match",{method:"POST",body:JSON.stringify({target_amount:targetAmount,target_entrada:targetEntrada||undefined,category,...profilePayload("e2")})});setResult2(data);setNotice(data.message)}catch(err){setError(err instanceof Error?err.message:"Falha na Esteira 2")}}
   async function reserveQuota(quotaId:string){setError("");try{await api("/reservations",{method:"POST",body:JSON.stringify({quota_id:quotaId,ttl_minutes:60})});setNotice("Cota travada por 60 minutos. Prossiga em Propostas.");load()}catch(err){setError(err instanceof Error?err.message:"Falha na trava")}}
   function MatchCard({match,onReserve}:{match:MarketplaceMatch;onReserve:(id:string)=>void}) {
-    return <article className="backlog-item"><div><strong>{match.administrator_name??"Administradora"} · {brl.format(Number(match.total_credit))}</strong><p>{match.explanation}{match.message?` — ${match.message}`:""}</p><small>Score Nina: {match.score} · Desvio {match.deviation_percent}%</small><div>{match.quotas.map(q=><label key={q.quota_id} style={{display:"block",marginTop:"0.5rem"}}><span>{q.group_code}/{q.quota_code} · crédito {brl.format(Number(q.credit_value))} · parcela {brl.format(Number(q.installment_value||0))} · Nina {q.nina_scan_status??"PENDENTE"}</span>{q.status==="AVAILABLE"&&q.nina_scan_status==="CLEARED"?<button type="button" className="table-action lock" style={{marginLeft:"0.75rem"}} onClick={()=>onReserve(q.quota_id)}><LockKeyhole/>Travar 60 min</button>:null}</label>)}</div></div></article>;
+    return <article className="backlog-item"><div><strong>{match.administrator_name??"Administradora"} · crédito {brl.format(Number(match.total_credit))}{match.total_entrada?` · entrada ${brl.format(Number(match.total_entrada))}`:""}</strong><p>{match.explanation}{match.message?` — ${match.message}`:""}</p><small>Lane {match.lane??"—"} · Score {match.score} · Desvio crédito {match.deviation_percent}%{match.entrada_deviation_percent!=null?` · Desvio entrada ${match.entrada_deviation_percent}%`:""}{match.rollover_applied?" · Rollover 7d":""}{match.markup_amount?` · Markup ${brl.format(Number(match.markup_amount))}`:""}</small><div>{match.quotas.map(q=><label key={q.quota_id} style={{display:"block",marginTop:"0.5rem"}}><span>{q.group_code}/{q.quota_code} · crédito {brl.format(Number(q.credit_value))} · entrada {brl.format(Number(q.entrada_final??q.premium_value))} · parcela {brl.format(Number(q.installment_value||0))}{q.supplier_source?` · ${q.supplier_source}`:""}{q.markup_percent&&Number(q.markup_percent)>0?` (+${q.markup_percent}%)`:""}{q.rollover_applied?" · rollover":""} · Nina {q.nina_scan_status??"PENDENTE"}</span>{q.status==="AVAILABLE"&&q.nina_scan_status==="CLEARED"?<button type="button" className="table-action lock" style={{marginLeft:"0.75rem"}} onClick={()=>onReserve(q.quota_id)}><LockKeyhole/>Travar 60 min</button>:null}</label>)}</div></div></article>;
   }
-  return <OperationalLayout title="Marketplace — Cartas contempladas" subtitle="Análise pelas regras internas da administradora (painel). Renda comprovada deve cobrir no mínimo 3× a parcela." icon={<WalletCards/>}>
-    <div className="notice"><Clock3/>Admin cadastra cotas e regras em <b>Inventário</b> / <b>Administradoras</b>. Bacen sync é opcional e não roda na análise. Finalize a venda em <b>Propostas e simulações</b>.</div>
+  return <OperationalLayout title="Marketplace — Cartas contempladas" subtitle="Esteira 2 (robô): régua 5%, lanes crédito/entrada, rollover 7 dias e markup do fornecedor. Regras Bacen via approval_rules sincronizadas." icon={<WalletCards/>}>
+    <div className="notice"><Clock3/>Admin cadastra cotas (fornecedor + prazo restante) em <b>Inventário</b>. Sync Bacen em <b>Administradoras</b> alimenta approval_rules usadas no matching. Finalize a venda em <b>Propostas</b>.</div>
     <div className="marketplace-tabs">
       <button type="button" className={`marketplace-tab${tab==="esteira1"?" active":""}`} onClick={()=>setTab("esteira1")}>Esteira 1 — Escolha do parceiro</button>
-      <button type="button" className={`marketplace-tab${tab==="esteira2"?" active":""}`} onClick={()=>setTab("esteira2")}>Esteira 2 — Curadoria Nina</button>
+      <button type="button" className={`marketplace-tab${tab==="esteira2"?" active":""}`} onClick={()=>setTab("esteira2")}>Esteira 2 — Robô Nina</button>
     </div>
     {notice&&<div className="notice"><CheckCircle2/>{notice}</div>}{error&&<div className="error">{error}</div>}
     {tab==="esteira1"&&<form className="marketplace-form" onSubmit={assessEsteira1}>
@@ -122,14 +149,15 @@ export function MarketplaceModule() {
     </form>}
     {tab==="esteira2"&&<form className="marketplace-form" onSubmit={matchEsteira2}>
       <div className="marketplace-form-row">
-        <label className="marketplace-field">Valor desejado (R$)<CurrencyInput value={targetAmount} onChange={setTargetAmount} required/></label>
+        <label className="marketplace-field">Crédito desejado (R$)<CurrencyInput value={targetAmount} onChange={setTargetAmount} required/></label>
+        <label className="marketplace-field">Entrada desejada (R$)<CurrencyInput value={targetEntrada} onChange={setTargetEntrada}/></label>
         <label className="marketplace-field marketplace-field-compact">Categoria<select value={category} onChange={e=>setCategory(e.target.value)}><option value="REAL_ESTATE">Imóvel</option><option value="VEHICLE">Veículo</option></select></label>
         <ClientProfileFields prefix="e2" values={profile} flags={flags} onChange={(k,v)=>setProfile(p=>({...p,[k]:v}))} onFlag={(k,v)=>setFlags(p=>({...p,[k]:v}))}/>
-        <button type="submit" className="marketplace-submit"><RefreshCw/>Buscar opções Nina</button>
+        <button type="submit" className="marketplace-submit"><RefreshCw/>Buscar opções robô</button>
       </div>
     </form>}
     {result1&&tab==="esteira1"&&<section className="panel"><div className="panel-title"><h2>Resultado Esteira 1</h2></div><div className="notice">{result1.message}</div>{result1.blockers.length>0&&<div className="error">{result1.blockers.map(b=><div key={b}>{b}</div>)}</div>}<p><Pill value={result1.eligible?"CLEARED":"BLOCKED"}/> Carta {result1.quota.group_code}/{result1.quota.quota_code} · {brl.format(Number(result1.quota.credit_value))} · parcela {brl.format(Number(result1.quota.installment_value||0))}</p>{result1.eligible&&result1.quota.status==="AVAILABLE"&&result1.quota.nina_scan_status==="CLEARED"?<button className="table-action lock" onClick={()=>reserveQuota(result1.quota.quota_id)}><LockKeyhole/>Travar 60 min</button>:null}{result1.alternatives.length>0&&<><h3>Alternativas Nina</h3>{result1.alternatives.map(m=><MatchCard key={m.quota_ids.join("-")} match={m} onReserve={reserveQuota}/>)}</>}</section>}
-    {result2&&tab==="esteira2"&&<section className="panel"><div className="panel-title"><h2>Opções Nina (Esteira 2)</h2></div><div className="notice">{result2.message}</div>{result2.blockers.map(b=><div className="error" key={b}>{b}</div>)}{result2.matches.map(m=><MatchCard key={m.quota_ids.join("-")} match={m} onReserve={reserveQuota}/>)}</section>}
+    {result2&&tab==="esteira2"&&<section className="panel"><div className="panel-title"><h2>Opções robô Esteira 2 (régua {result2.band_percent??"5"}%)</h2></div><div className="notice">{result2.message}</div>{result2.blockers.map(b=><div className="error" key={b}>{b}</div>)}{(result2.credit_matches?.length??0)>0&&<h3>Lane crédito</h3>}{(result2.credit_matches??[]).map(m=><MatchCard key={`c-${m.quota_ids.join("-")}`} match={m} onReserve={reserveQuota}/>)}{(result2.entrada_matches?.length??0)>0&&<h3>Lane entrada</h3>}{(result2.entrada_matches??[]).map(m=><MatchCard key={`e-${m.quota_ids.join("-")}`} match={m} onReserve={reserveQuota}/>)}{!(result2.credit_matches?.length||result2.entrada_matches?.length)&&result2.matches.map(m=><MatchCard key={m.quota_ids.join("-")} match={m} onReserve={reserveQuota}/>)}</section>}
   </OperationalLayout>
 }
 

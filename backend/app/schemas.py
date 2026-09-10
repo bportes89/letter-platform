@@ -871,6 +871,8 @@ class QuotaCreate(BaseModel):
     premium_value: Decimal = Field(ge=0, default=0)
     installment_value: Decimal = Field(ge=0, default=0)
     installment_due_date: date | None = None
+    remaining_installments: int | None = Field(default=None, ge=0)
+    supplier_source: str | None = Field(default=None, max_length=80)
 
 
 class QuotaUpdate(BaseModel):
@@ -879,6 +881,8 @@ class QuotaUpdate(BaseModel):
     premium_value: Decimal | None = Field(default=None, ge=0)
     installment_value: Decimal | None = Field(default=None, ge=0)
     installment_due_date: date | None = None
+    remaining_installments: int | None = Field(default=None, ge=0)
+    supplier_source: str | None = Field(default=None, max_length=80)
     status: str | None = None
 
 
@@ -893,6 +897,8 @@ class QuotaView(ORMModel):
     premium_value: Decimal
     installment_value: Decimal = Decimal("0")
     installment_due_date: date | None
+    remaining_installments: int | None = None
+    supplier_source: str | None = None
     nina_scan_status: str | None
     nina_scanned_at: datetime | None
     status: str
@@ -2067,8 +2073,14 @@ class MarketplaceQuotaBrief(BaseModel):
     category: str
     credit_value: str
     premium_value: str
+    entrada_final: str | None = None
     installment_value: str = "0.00"
     installment_due_date: str | None
+    remaining_installments: int | None = None
+    supplier_source: str | None = None
+    markup_percent: str | None = None
+    markup_amount: str | None = None
+    rollover_applied: bool = False
     administrator_name: str | None
     status: str
     nina_scan_status: str | None
@@ -2077,12 +2089,18 @@ class MarketplaceQuotaBrief(BaseModel):
 class MarketplaceMatchView(BaseModel):
     quota_ids: list[str]
     total_credit: str
+    total_entrada: str | None = None
     deviation_percent: str
+    entrada_deviation_percent: str | None = None
     score: int
     administrator_id: str
     administrator_name: str | None = None
     explanation: str
     message: str | None = None
+    lane: str | None = None
+    rollover_applied: bool = False
+    markup_amount: str | None = None
+    remaining_installments: int | None = None
     quotas: list[MarketplaceQuotaBrief] = Field(default_factory=list)
 
 
@@ -2098,6 +2116,7 @@ class MarketplaceEsteira1Response(BaseModel):
 class MarketplaceEsteira2Request(MarketplaceClientProfile):
     target_amount: Decimal = Field(gt=0)
     category: str
+    target_entrada: Decimal | None = Field(default=None, gt=0)
 
 
 class MarketplaceEsteira2Response(BaseModel):
@@ -2105,6 +2124,9 @@ class MarketplaceEsteira2Response(BaseModel):
     eligible: bool
     blockers: list[str] = Field(default_factory=list)
     matches: list[MarketplaceMatchView] = Field(default_factory=list)
+    credit_matches: list[MarketplaceMatchView] = Field(default_factory=list)
+    entrada_matches: list[MarketplaceMatchView] = Field(default_factory=list)
+    band_percent: str = "5"
     message: str
 
 

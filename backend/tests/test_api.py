@@ -460,6 +460,72 @@ def test_marketplace_esteira1_and_esteira2(client, auth_headers):
     body2 = esteira2.json()
     assert body2["esteira"] == "NINA_CURATED"
     assert isinstance(body2["matches"], list)
+    assert body2.get("band_percent") == "5"
+    assert "credit_matches" in body2 and "entrada_matches" in body2
+
+
+def test_marketplace_esteira2_robot_band_rollover_and_markup(client, auth_headers):
+    """Paulo: régua 5%, rollover ≤7d, markup Fraga +3% / Uni +10%."""
+    from datetime import date, timedelta
+
+    quotas = client.get("/api/v1/quotas", headers=auth_headers).json()
+    fraga = next(q for q in quotas if q.get("supplier_source") == "FRAGA" or q["quota_code"] == "001")
+    due = (date.today() + timedelta(days=3)).isoformat()
+    client.patch(
+        f"/api/v1/quotas/{fraga['id']}",
+        headers=auth_headers,
+        json={
+            "installment_due_date": due,
+            "installment_value": "2800",
+            "premium_value": "80000",
+            "remaining_installments": 48,
+            "supplier_source": "FRAGA",
+            "credit_value": "400000",
+        },
+    )
+    profile = {
+        "monthly_income": "50000",
+        "monthly_commitment": "0",
+        "asset_value": "900000",
+        "asset_year": 2020,
+        "target_amount": "400000",
+        "target_entrada": "83000",
+        "category": "REAL_ESTATE",
+    }
+    res = client.post("/api/v1/marketplace/esteira-2/match", headers=auth_headers, json=profile)
+    assert res.status_code == 200
+    body = res.json()
+    assert body["band_percent"] == "5"
+    assert body["eligible"] is True
+    assert len(body["credit_matches"]) <= 2
+    # Fraga: entrada base 80000 + parcela 2800 (rollover) + 3% de 400000 = 12000 → 94800
+    fraga_match = next(
+        (m for m in body["matches"] if fraga["id"] in m["quota_ids"] and len(m["quota_ids"]) == 1),
+        None,
+    )
+    assert fraga_match is not None
+    assert fraga_match["rollover_applied"] is True
+    assert Decimal(fraga_match["total_entrada"]) == Decimal("94800.00")
+    qbrief = fraga_match["quotas"][0]
+    assert qbrief["markup_percent"] == "3"
+    assert qbrief["remaining_installments"] == 47
+
+    # Fora da banda 5%: alvo 1M não casa com inventário ~400k
+    miss = client.post(
+        "/api/v1/marketplace/esteira-2/match",
+        headers=auth_headers,
+        json={
+            "monthly_income": "50000",
+            "monthly_commitment": "0",
+            "asset_value": "2000000",
+            "asset_year": 2020,
+            "target_amount": "1000000",
+            "category": "REAL_ESTATE",
+        },
+    )
+    assert miss.status_code == 200
+    for m in miss.json()["matches"]:
+        assert abs(Decimal(m["total_credit"]) - Decimal("1000000")) / Decimal("1000000") * 100 <= Decimal("5")
 
 
 def test_marketplace_income_three_times_installment_blocks(client, auth_headers):

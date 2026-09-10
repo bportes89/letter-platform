@@ -1,12 +1,17 @@
-"""Marketplace cartas contempladas — Esteira 1 (escolha do parceiro) e Esteira 2 (curadoria Nina).
+"""Marketplace cartas contempladas — Esteira 1 (parceiro) e Esteira 2 (robô Nina / Paulo).
 
-A análise usa as regras cadastradas em Administrator.rules_json (painel interno).
-Bacen não é chamado no matching — só atualiza rules_json via sync manual/cron.
+Esteira 2 (WhatsApp Paulo Stutz):
+- Régua de corte 5% em crédito e entrada
+- ~2 opções por crédito + ~2 por entrada (dedupe)
+- Parcela vencendo em ≤7 dias: −1 prazo + valor na entrada
+- Markup sobre crédito na entrada: Fraga/Bittelo/Lance +3%; Uni/Contemplado SP/Lume +10%
+- Regras Bacen via approval_rules já sincronizadas em Administrator.rules_json
 """
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+import itertools
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 from fastapi import HTTPException
@@ -15,23 +20,164 @@ from sqlalchemy.orm import Session
 
 from app.administrator_service import APPROVED_STATUSES, parse_rules
 from app.models import Administrator, Quota, User
-from app.nina_bi_service import rank_quota_combinations
 from app.quota_inventory_service import run_nina_quota_scan
 from app.services import money
 
 DEFAULT_INCOME_RATIO = Decimal("3")
+ESTEIRA2_BAND_PERCENT = Decimal("5")
+ESTEIRA2_CREDIT_LANE_LIMIT = 2
+ESTEIRA2_ENTRADA_LANE_LIMIT = 2
+INSTALLMENT_ROLLOVER_DAYS = 7
+
+# Markup na entrada = % do crédito (Paulo). Chaves normalizadas.
+SUPPLIER_ENTRADA_MARKUP_PERCENT: dict[str, Decimal] = {
+    "FRAGA": Decimal("3"),
+    "BITTELO": Decimal("3"),
+    "LANCE": Decimal("3"),
+    "UNI_CONTEMPLADOS": Decimal("10"),
+    "UNI CONTEMPLADOS": Decimal("10"),
+    "CONTEMPLADO_SP": Decimal("10"),
+    "CONTEMPLADO SP": Decimal("10"),
+    "LUME": Decimal("10"),
+}
 
 
-def _quota_summary(quota: Quota, admin: Administrator | None) -> dict:
+def normalize_supplier_key(value: str | None) -> str:
+    return (value or "").strip().upper().replace("-", "_")
+
+
+def supplier_markup_percent(supplier_source: str | None) -> Decimal:
+    key = normalize_supplier_key(supplier_source)
+    if key in SUPPLIER_ENTRADA_MARKUP_PERCENT:
+        return SUPPLIER_ENTRADA_MARKUP_PERCENT[key]
+    # tenta match parcial (ex.: "API FRAGA")
+    for known, pct in SUPPLIER_ENTRADA_MARKUP_PERCENT.items():
+        if known.replace("_", " ") in key.replace("_", " ") or known in key:
+            return pct
+    return Decimal("0")
+
+
+def _within_band(value: Decimal, target: Decimal, band_percent: Decimal = ESTEIRA2_BAND_PERCENT) -> bool:
+    if target <= 0:
+        return False
+    deviation = abs((value - target) / target * 100)
+    return deviation <= band_percent
+
+
+def _deviation_percent(value: Decimal, target: Decimal) -> Decimal:
+    if target <= 0:
+        return Decimal("100")
+    return money(abs((value - target) / target * 100))
+
+
+def apply_installment_rollover(
+    *,
+    entrada_base: Decimal,
+    installment_value: Decimal,
+    installment_due_date: date | None,
+    remaining_installments: int | None,
+    as_of: date | None = None,
+) -> dict:
+    """Se parcela vence em ≤7 dias: −1 prazo e soma a parcela na entrada."""
+    today = as_of or datetime.now(UTC).date()
+    applied = False
+    entrada = money(entrada_base)
+    remaining = remaining_installments
+    days_to_due = None
+    if installment_due_date:
+        days_to_due = (installment_due_date - today).days
+        if 0 <= days_to_due <= INSTALLMENT_ROLLOVER_DAYS:
+            applied = True
+            entrada = money(entrada + money(installment_value))
+            if remaining is not None and remaining > 0:
+                remaining = remaining - 1
+    return {
+        "applied": applied,
+        "entrada": entrada,
+        "remaining_installments": remaining,
+        "days_to_due": days_to_due,
+    }
+
+
+def apply_supplier_markup(*, entrada: Decimal, credit: Decimal, supplier_source: str | None) -> dict:
+    pct = supplier_markup_percent(supplier_source)
+    add_on = money(credit * pct / Decimal("100")) if pct > 0 else Decimal("0.00")
+    return {
+        "markup_percent": str(pct),
+        "markup_amount": str(add_on),
+        "entrada": money(entrada + add_on),
+    }
+
+
+def pricing_for_quota(quota: Quota, *, as_of: date | None = None) -> dict:
+    """Entrada efetiva após rollover 7 dias + markup do fornecedor."""
+    credit = money(Decimal(str(quota.credit_value)))
+    base_entrada = money(Decimal(str(quota.premium_value or 0)))
+    installment = money(Decimal(str(quota.installment_value or 0)))
+    rollover = apply_installment_rollover(
+        entrada_base=base_entrada,
+        installment_value=installment,
+        installment_due_date=quota.installment_due_date,
+        remaining_installments=quota.remaining_installments,
+        as_of=as_of,
+    )
+    markup = apply_supplier_markup(
+        entrada=rollover["entrada"],
+        credit=credit,
+        supplier_source=quota.supplier_source,
+    )
+    return {
+        "credit": credit,
+        "entrada_base": base_entrada,
+        "entrada_after_rollover": rollover["entrada"],
+        "entrada_final": markup["entrada"],
+        "installment": installment,
+        "rollover_applied": rollover["applied"],
+        "remaining_installments": rollover["remaining_installments"],
+        "days_to_due": rollover["days_to_due"],
+        "markup_percent": markup["markup_percent"],
+        "markup_amount": markup["markup_amount"],
+        "supplier_source": quota.supplier_source,
+    }
+
+
+def pricing_for_combo(quotas: list[Quota], *, as_of: date | None = None) -> dict:
+    rows = [pricing_for_quota(q, as_of=as_of) for q in quotas]
+    credit = money(sum((r["credit"] for r in rows), Decimal("0")))
+    entrada_final = money(sum((r["entrada_final"] for r in rows), Decimal("0")))
+    installment = money(sum((r["installment"] for r in rows), Decimal("0")))
+    return {
+        "credit": credit,
+        "entrada_final": entrada_final,
+        "installment": installment,
+        "rollover_applied": any(r["rollover_applied"] for r in rows),
+        "remaining_installments": (
+            sum(r["remaining_installments"] for r in rows if r["remaining_installments"] is not None)
+            if any(r["remaining_installments"] is not None for r in rows)
+            else None
+        ),
+        "markup_amount": money(sum((Decimal(r["markup_amount"]) for r in rows), Decimal("0"))),
+        "quotas_pricing": rows,
+    }
+
+
+def _quota_summary(quota: Quota, admin: Administrator | None, *, as_of: date | None = None) -> dict:
+    pricing = pricing_for_quota(quota, as_of=as_of)
     return {
         "quota_id": quota.id,
         "group_code": quota.group_code,
         "quota_code": quota.quota_code,
         "category": quota.category,
-        "credit_value": str(money(Decimal(str(quota.credit_value)))),
-        "premium_value": str(money(Decimal(str(quota.premium_value)))),
-        "installment_value": str(money(Decimal(str(quota.installment_value or 0)))),
+        "credit_value": str(pricing["credit"]),
+        "premium_value": str(pricing["entrada_base"]),
+        "entrada_final": str(pricing["entrada_final"]),
+        "installment_value": str(pricing["installment"]),
         "installment_due_date": quota.installment_due_date.isoformat() if quota.installment_due_date else None,
+        "remaining_installments": pricing["remaining_installments"],
+        "supplier_source": quota.supplier_source,
+        "markup_percent": pricing["markup_percent"],
+        "markup_amount": pricing["markup_amount"],
+        "rollover_applied": pricing["rollover_applied"],
         "administrator_name": admin.name if admin else None,
         "status": quota.status,
         "nina_scan_status": quota.nina_scan_status,
@@ -56,7 +202,7 @@ def admin_profile_blockers(
     target_amount: Decimal | None = None,
     combo_size: int = 1,
 ) -> list[str]:
-    """Bloqueios a partir das regras internas da administradora + perfil do cliente."""
+    """Bloqueios a partir de rules_json (painel + approval_rules Bacen sincronizadas)."""
     blockers: list[str] = []
     check_amount = target_amount or credit_total
 
@@ -105,6 +251,20 @@ def admin_profile_blockers(
         )
 
     ratio = Decimal(str(rules.get("min_income_to_installment_ratio") or DEFAULT_INCOME_RATIO))
+    approval = rules.get("approval_rules") if isinstance(rules.get("approval_rules"), dict) else {}
+    # Bacen sync: margem de renda em approval_rules.min_income_margin (ex.: 0.30 = 30%)
+    if approval.get("min_income_margin") is not None:
+        try:
+            margin = Decimal(str(approval["min_income_margin"]))
+            if margin > 0:
+                # se veio como 30 (percentual) ou 0.30 (fração)
+                if margin > 1:
+                    ratio = max(ratio, Decimal("100") / margin)
+                else:
+                    ratio = max(ratio, Decimal("1") / margin)
+        except Exception:
+            pass
+
     if installment_total > 0 and monthly_income > 0:
         max_installment = money(monthly_income / ratio)
         if installment_total > max_installment:
@@ -112,6 +272,16 @@ def admin_profile_blockers(
                 f"Renda comprovada (R$ {money(monthly_income)}) precisa cobrir no mínimo "
                 f"{ratio:g}× a parcela (R$ {installment_total}); teto da parcela: R$ {max_installment}."
             )
+
+    max_ltv = approval.get("max_ltv_percent")
+    # LTV Bacen (ex.: 40%) vale para crédito fiduciário (Flash/SDC), não para matching de carta contemplada.
+    # No Marketplace o lastro continua sendo crédito ≤ valor do bem (teto 100%).
+    _ = max_ltv
+
+    if approval.get("scr_clear_required") and has_credit_restriction:
+        blockers.append(
+            f"Regras Bacen de {admin.name} exigem SCR limpo — cliente com restrição cadastral."
+        )
 
     credit_rules = rules.get("credit_utilization_rules") if isinstance(rules.get("credit_utilization_rules"), dict) else {}
     max_credit = credit_rules.get("max_credit_per_operation_brl")
@@ -128,6 +298,62 @@ def admin_profile_blockers(
     return blockers
 
 
+def _eligible_combo_candidate(
+    db: Session,
+    quotas: tuple[Quota, ...],
+    *,
+    category: str,
+    asset_value: Decimal,
+    asset_year: int,
+    monthly_income: Decimal,
+    has_credit_restriction: bool,
+    asset_is_zero_km: bool,
+    target_amount: Decimal,
+    as_of: date | None = None,
+) -> dict | None:
+    if len({q.administrator_id for q in quotas}) > 1:
+        return None
+    admin = db.get(Administrator, quotas[0].administrator_id)
+    pricing = pricing_for_combo(list(quotas), as_of=as_of)
+    blockers = admin_profile_blockers(
+        admin,
+        category=category,
+        asset_year=asset_year,
+        asset_is_zero_km=asset_is_zero_km,
+        has_credit_restriction=has_credit_restriction,
+        credit_total=pricing["credit"],
+        installment_total=pricing["installment"],
+        monthly_income=monthly_income,
+        asset_value=asset_value,
+        target_amount=target_amount,
+        combo_size=len(quotas),
+    )
+    if blockers:
+        return None
+    credit_dev = _deviation_percent(pricing["credit"], target_amount)
+    score = max(0, 1000 - int(credit_dev * 20) - len(quotas) * 5)
+    return {
+        "quota_ids": [q.id for q in quotas],
+        "quotas": [_quota_summary(q, db.get(Administrator, q.administrator_id), as_of=as_of) for q in quotas],
+        "total_credit": str(pricing["credit"]),
+        "total_entrada": str(pricing["entrada_final"]),
+        "deviation_percent": str(credit_dev),
+        "entrada_deviation_percent": None,
+        "score": score,
+        "administrator_id": quotas[0].administrator_id,
+        "administrator_name": admin.name if admin else None,
+        "lane": None,
+        "rollover_applied": pricing["rollover_applied"],
+        "markup_amount": str(pricing["markup_amount"]),
+        "remaining_installments": pricing["remaining_installments"],
+        "explanation": (
+            f"Nina selecionou {len(quotas)} cota(s) · crédito R$ {pricing['credit']} "
+            f"(desvio {credit_dev}%) · entrada efetiva R$ {pricing['entrada_final']}."
+        ),
+        "message": "Combinação compatível com perfil, Bacen/approval_rules e régua de 5%.",
+    }
+
+
 def _rank_alternatives(
     db: Session,
     user: User,
@@ -141,43 +367,51 @@ def _rank_alternatives(
     asset_is_zero_km: bool,
     exclude_quota_id: str | None = None,
     limit: int = 5,
+    target_entrada: Decimal | None = None,
+    band_percent: Decimal = ESTEIRA2_BAND_PERCENT,
+    as_of: date | None = None,
 ) -> list[dict]:
-    ranked = rank_quota_combinations(db, user, target_amount, category, limit=limit * 4)
-    alternatives: list[dict] = []
-    for item in ranked:
-        if exclude_quota_id and exclude_quota_id in item["quota_ids"]:
-            continue
-        quotas = list(db.scalars(select(Quota).where(Quota.id.in_(item["quota_ids"]))))
-        if not quotas:
-            continue
-        total_credit = Decimal(str(item["total_credit"]))
-        admin = db.get(Administrator, item["administrator_id"])
-        blockers = admin_profile_blockers(
-            admin,
-            category=category,
-            asset_year=asset_year,
-            asset_is_zero_km=asset_is_zero_km,
-            has_credit_restriction=has_credit_restriction,
-            credit_total=total_credit,
-            installment_total=_installment_total(quotas),
-            monthly_income=monthly_income,
-            asset_value=asset_value,
-            target_amount=target_amount,
-            combo_size=len(quotas),
+    """Candidatos na banda de crédito (e entrada, se informada)."""
+    quotas = list(
+        db.scalars(
+            select(Quota).where(
+                Quota.organization_id == user.organization_id,
+                Quota.status == "AVAILABLE",
+                Quota.category == category,
+            )
         )
-        if blockers:
-            continue
-        alternatives.append(
-            {
-                **item,
-                "administrator_name": admin.name if admin else None,
-                "quotas": [_quota_summary(q, db.get(Administrator, q.administrator_id)) for q in quotas],
-                "message": "Combinação compatível com o perfil e as regras internas da administradora.",
-            }
-        )
-        if len(alternatives) >= limit:
-            break
-    return alternatives
+    )
+    candidates: list[dict] = []
+    for size in range(1, min(3, len(quotas)) + 1):
+        for combo in itertools.combinations(quotas, size):
+            if exclude_quota_id and exclude_quota_id in {q.id for q in combo}:
+                continue
+            item = _eligible_combo_candidate(
+                db,
+                combo,
+                category=category,
+                asset_value=asset_value,
+                asset_year=asset_year,
+                monthly_income=monthly_income,
+                has_credit_restriction=has_credit_restriction,
+                asset_is_zero_km=asset_is_zero_km,
+                target_amount=target_amount,
+                as_of=as_of,
+            )
+            if not item:
+                continue
+            credit = Decimal(item["total_credit"])
+            if not _within_band(credit, target_amount, band_percent):
+                continue
+            if target_entrada is not None and target_entrada > 0:
+                entrada = Decimal(item["total_entrada"])
+                if not _within_band(entrada, target_entrada, band_percent):
+                    # ainda pode servir na lane de crédito; marca desvio de entrada
+                    item["entrada_deviation_percent"] = str(_deviation_percent(entrada, target_entrada))
+                else:
+                    item["entrada_deviation_percent"] = str(_deviation_percent(entrada, target_entrada))
+            candidates.append(item)
+    return sorted(candidates, key=lambda x: (-x["score"], Decimal(x["deviation_percent"])))[: max(limit * 4, 20)]
 
 
 def esteira1_partner_select(
@@ -193,7 +427,7 @@ def esteira1_partner_select(
     asset_is_zero_km: bool = False,
 ) -> dict:
     """Esteira 1: parceiro escolhe a carta → Nina varre → sugere alternativas se perfil não couber."""
-    del monthly_commitment  # mantido no payload por compatibilidade; filtro operacional é renda × parcela
+    del monthly_commitment
     quota = db.scalar(select(Quota).where(Quota.id == quota_id, Quota.organization_id == user.organization_id))
     if not quota:
         raise HTTPException(status_code=404, detail="Cota não encontrada.")
@@ -221,6 +455,7 @@ def esteira1_partner_select(
                     has_credit_restriction=has_credit_restriction,
                     asset_is_zero_km=asset_is_zero_km,
                     exclude_quota_id=quota.id,
+                    band_percent=Decimal("100"),  # alternativas Esteira 1: ranking amplo
                 ),
                 "message": "Varredura cadastral Nina reprovou a cota escolhida.",
             }
@@ -253,6 +488,7 @@ def esteira1_partner_select(
             has_credit_restriction=has_credit_restriction,
             asset_is_zero_km=asset_is_zero_km,
             exclude_quota_id=quota.id,
+            band_percent=Decimal("100"),
         )
 
     return {
@@ -262,9 +498,9 @@ def esteira1_partner_select(
         "blockers": blockers,
         "alternatives": alternatives,
         "message": (
-            "Cliente apto para a carta escolhida pelas regras internas da administradora. Prossiga com trava de 60 min e proposta."
+            "Cliente apto para a carta escolhida (regras internas + Bacen/approval_rules). Prossiga com trava de 60 min e proposta."
             if eligible
-            else "Cliente sem perfil para esta carta. Nina indicou alternativas compatíveis com as regras internas."
+            else "Cliente sem perfil para esta carta. Nina indicou alternativas compatíveis."
         ),
     }
 
@@ -281,9 +517,11 @@ def esteira2_nina_curated_match(
     asset_value: Decimal,
     has_credit_restriction: bool = False,
     asset_is_zero_km: bool = False,
+    target_entrada: Decimal | None = None,
     limit: int = 8,
+    as_of: date | None = None,
 ) -> dict:
-    """Esteira 2: cliente/parceiro informa valor e ano do bem → Nina entrega opções."""
+    """Esteira 2 robô: banda 5%, lanes crédito/entrada, rollover 7d e markup fornecedor."""
     del monthly_commitment
     if category not in {"REAL_ESTATE", "VEHICLE"}:
         raise HTTPException(status_code=422, detail="Categoria deve ser REAL_ESTATE ou VEHICLE.")
@@ -294,6 +532,9 @@ def esteira2_nina_curated_match(
             "eligible": False,
             "blockers": ["Informe a renda mensal comprovada do cliente."],
             "matches": [],
+            "credit_matches": [],
+            "entrada_matches": [],
+            "band_percent": str(ESTEIRA2_BAND_PERCENT),
             "message": "Perfil incompleto para matching.",
         }
     if asset_value <= 0:
@@ -302,6 +543,9 @@ def esteira2_nina_curated_match(
             "eligible": False,
             "blockers": ["Informe o valor de avaliação do bem."],
             "matches": [],
+            "credit_matches": [],
+            "entrada_matches": [],
+            "band_percent": str(ESTEIRA2_BAND_PERCENT),
             "message": "Perfil incompleto para matching.",
         }
     if target_amount > asset_value:
@@ -312,10 +556,13 @@ def esteira2_nina_curated_match(
                 f"Crédito alvo (R$ {money(target_amount)}) excede o valor do bem (R$ {money(asset_value)})."
             ],
             "matches": [],
+            "credit_matches": [],
+            "entrada_matches": [],
+            "band_percent": str(ESTEIRA2_BAND_PERCENT),
             "message": "Perfil do cliente não permite matching automático. Ajuste renda, bem ou valor alvo.",
         }
 
-    matches = _rank_alternatives(
+    pool = _rank_alternatives(
         db,
         user,
         target_amount=target_amount,
@@ -325,18 +572,83 @@ def esteira2_nina_curated_match(
         monthly_income=monthly_income,
         has_credit_restriction=has_credit_restriction,
         asset_is_zero_km=asset_is_zero_km,
-        limit=limit,
+        limit=max(limit, 12),
+        target_entrada=target_entrada,
+        band_percent=ESTEIRA2_BAND_PERCENT,
+        as_of=as_of,
     )
 
+    credit_lane: list[dict] = []
+    for item in sorted(pool, key=lambda x: (Decimal(x["deviation_percent"]), -x["score"])):
+        row = {**item, "lane": "CREDIT"}
+        credit_lane.append(row)
+        if len(credit_lane) >= ESTEIRA2_CREDIT_LANE_LIMIT:
+            break
+
+    entrada_lane: list[dict] = []
+    if target_entrada is not None and target_entrada > 0:
+        ranked_entrada = sorted(
+            [
+                x
+                for x in pool
+                if x.get("entrada_deviation_percent") is not None
+                and Decimal(x["entrada_deviation_percent"]) <= ESTEIRA2_BAND_PERCENT
+            ],
+            key=lambda x: (Decimal(x["entrada_deviation_percent"]), -x["score"]),
+        )
+        seen = {tuple(x["quota_ids"]) for x in credit_lane}
+        for item in ranked_entrada:
+            key = tuple(item["quota_ids"])
+            if key in seen:
+                # ainda conta na lane entrada se couber na banda
+                pass
+            row = {**item, "lane": "ENTRADA"}
+            entrada_lane.append(row)
+            seen.add(key)
+            if len(entrada_lane) >= ESTEIRA2_ENTRADA_LANE_LIMIT:
+                break
+    else:
+        # Sem entrada alvo: completa com as próximas melhores por crédito (até 2 extras)
+        seen = {tuple(x["quota_ids"]) for x in credit_lane}
+        for item in pool:
+            key = tuple(item["quota_ids"])
+            if key in seen:
+                continue
+            entrada_lane.append({**item, "lane": "CREDIT_EXTRA"})
+            seen.add(key)
+            if len(entrada_lane) >= ESTEIRA2_ENTRADA_LANE_LIMIT:
+                break
+
+    # matches = união ordenada credit + entrada (dedupe preservando ordem)
+    matches: list[dict] = []
+    seen_ids: set[tuple[str, ...]] = set()
+    for item in credit_lane + entrada_lane:
+        key = tuple(item["quota_ids"])
+        if key in seen_ids:
+            continue
+        seen_ids.add(key)
+        matches.append(item)
+        if len(matches) >= limit:
+            break
+
+    band_msg = (
+        f"régua {ESTEIRA2_BAND_PERCENT}% · até {ESTEIRA2_CREDIT_LANE_LIMIT} por crédito"
+        + (f" + {ESTEIRA2_ENTRADA_LANE_LIMIT} por entrada" if target_entrada else "")
+        + f" · rollover {INSTALLMENT_ROLLOVER_DAYS}d · markup fornecedor"
+    )
     return {
         "esteira": "NINA_CURATED",
         "eligible": bool(matches),
-        "blockers": [] if matches else ["Nenhuma combinação disponível no inventário para o perfil e as regras internas."],
+        "blockers": [] if matches else ["Nenhuma combinação na régua de 5% para o perfil e as regras Bacen/internas."],
         "matches": matches,
+        "credit_matches": credit_lane,
+        "entrada_matches": entrada_lane,
+        "band_percent": str(ESTEIRA2_BAND_PERCENT),
         "message": (
-            f"Nina encontrou {len(matches)} opção(ões) para crédito alvo de R$ {money(target_amount)} "
-            f"(filtro: regras da administradora + renda ≥ 3× parcela)."
+            f"Robô Nina: {len(matches)} opção(ões) para crédito R$ {money(target_amount)}"
+            + (f" / entrada R$ {money(target_entrada)}" if target_entrada else "")
+            + f" ({band_msg})."
             if matches
-            else "Sem opções no inventário — cadastre novas cotas, ajuste a parcela/renda ou as regras da administradora."
+            else f"Sem opções na {band_msg}. Cadastre cotas ou ajuste alvos."
         ),
     }

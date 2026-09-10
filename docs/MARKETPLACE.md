@@ -4,55 +4,69 @@ Duas esteiras operacionais para parceiros e clientes.
 
 ## Fonte das regras
 
-A análise do robô / Nina lê **sempre** as regras internas da administradora (`Administrator.rules_json` no painel).
+A análise lê `Administrator.rules_json` (painel), **incluindo** `approval_rules` vindas do sync Bacen (renda/SCR).
 
-- Sync Bacen (botão ou cron) **pode atualizar** esse JSON, mas **não roda** na Esteira 1/2 nem na varredura Nina.
-- Campos relevantes: `max_asset_age_years`, `allowed_categories`, `accepts_dirty_name`, `accepts_zero_km`, `min_income_to_installment_ratio` (padrão **3**), `products_enabled`, `credit_utilization_rules`.
+- Sync Bacen (botão ou cron) atualiza o JSON; o matching **consome** `approval_rules.min_income_margin` e `scr_clear_required`.
+- LTV Bacen (`max_ltv_percent`) permanece para produtos de crédito fiduciário — no Marketplace o lastro é **crédito ≤ valor do bem**.
+- Campos relevantes: `max_asset_age_years`, `allowed_categories`, `accepts_dirty_name`, `accepts_zero_km`, `min_income_to_installment_ratio` (padrão **3**), `products_enabled`, `credit_utilization_rules`, `approval_rules`.
 
 ## Esteira 1 — Escolha do parceiro (`SELF_SELECT`)
 
 1. Parceiro seleciona a carta/cota no inventário.
-2. Nina executa **varredura cadastral** (se ainda não estiver `CLEARED`) — regras internas.
-3. Nina valida **perfil do cliente** contra as regras da administradora da cota + lastro do bem.
-4. **Renda comprovada ≥ N × parcela** da cota (N = `min_income_to_installment_ratio`, padrão 3).
-5. Se o cliente **não tiver perfil** para aquela carta, Nina retorna **alternativas compatíveis** ranqueadas por desvio de crédito.
+2. Nina executa **varredura cadastral** (se ainda não estiver `CLEARED`).
+3. Nina valida **perfil do cliente** contra regras internas + Bacen/approval_rules + lastro.
+4. **Renda comprovada ≥ N × parcela** (N interno ou margem Bacen).
+5. Se o cliente **não tiver perfil**, Nina retorna **alternativas** ranqueadas.
 6. Parceiro trava a cota por **60 minutos** e segue em **Propostas** → contrato.
 
 **API:** `POST /api/v1/marketplace/esteira-1/assess`
 
-## Esteira 2 — Curadoria Nina (`NINA_CURATED`)
+## Esteira 2 — Robô Nina (`NINA_CURATED`) — regras Paulo Stutz
 
-1. Parceiro ou cliente informa: **valor desejado**, **categoria**, **ano do bem**, perfil financeiro, SPC/Serasa e zero km.
-2. Nina entrega **opções ranqueadas** do inventário filtradas pelas regras internas.
-3. Parceiro trava a opção escolhida e segue em Propostas.
+1. Informe **crédito alvo**, **entrada alvo** (opcional), categoria, ano do bem e perfil.
+2. **Régua de corte 5%** em crédito e em entrada.
+3. Entrega até **2 opções na lane crédito** + **2 na lane entrada** (dedupe).
+4. Combinação de cotas (junção) só na mesma administradora (até `max_combined_quotas`).
+5. **Rollover 7 dias:** se `installment_due_date` ≤ 7 dias, reduz 1 em `remaining_installments` e soma a parcela na entrada.
+6. **Markup na entrada** (% do crédito), conforme `supplier_source`:
+   - Fraga / Bittelo / Lance → **+3%**
+   - Uni Contemplados / Contemplado SP / Lume → **+10%**
+7. Parceiro trava a opção e segue em Propostas.
 
-**API:** `POST /api/v1/marketplace/esteira-2/match`
+**API:** `POST /api/v1/marketplace/esteira-2/match`  
+Payload extra: `target_entrada` (opcional).  
+Resposta: `matches`, `credit_matches`, `entrada_matches`, `band_percent`.
 
 ## Regras de perfil (operacionais)
 
 | Regra | Fonte |
 |-------|--------|
-| Idade máxima do bem (veículo) | `max_asset_age_years` da administradora |
+| Idade máxima do bem (veículo) | `max_asset_age_years` |
 | Categorias aceitas | `allowed_categories` |
-| Nome sujo / SPC | só se `accepts_dirty_name` |
-| Zero km | só se `accepts_zero_km` |
-| Renda × parcela | `monthly_income >= ratio × installment_value` |
+| Nome sujo / SPC | `accepts_dirty_name` + `approval_rules.scr_clear_required` |
+| Zero km | `accepts_zero_km` |
+| Renda × parcela | `min_income_to_installment_ratio` / `approval_rules.min_income_margin` |
 | Lastro | crédito alvo ≤ valor do bem |
 | Teto de crédito / combo | `credit_utilization_rules` |
+| Banda 5% / lanes / rollover / markup | motor Esteira 2 |
 
 ## Inventário
 
-Cada cota deve ter **valor da parcela** (`installment_value`) para o filtro de renda funcionar.
+Cada cota deve ter:
+
+- `installment_value` — filtro de renda
+- `installment_due_date` — rollover 7 dias
+- `remaining_installments` — prazo ajustado no rollover
+- `supplier_source` — markup do fornecedor API
+- `premium_value` — entrada/ágio base
 
 ## Fluxo completo
 
 ```
-Cadastro (admin/Inventário + regras Administradoras) → Varredura Nina → Marketplace (Esteira 1 ou 2) → Trava 60 min → Proposta → Contrato (SOLD)
+Cadastro (Inventário + fornecedor) → Sync Bacen (opcional) → Varredura Nina → Marketplace (Esteira 1 ou 2) → Trava 60 min → Proposta → Contrato (SOLD)
 ```
 
 ## UI
 
-- **COMERCIAL (parceiros)** no menu lateral:
-  - **Cartas contempladas** → Marketplace (esteiras) | Inventário (admin, interno)
-  - **Propostas e simulações** → cadastro comercial unificado (Marketplace, SDC, Flash)
-- **SDC — estrutura interna** (menu PRODUTOS, só admin/staff/franqueadora) → pré-análise fiduciária
+- **COMERCIAL:** Cartas contempladas → Marketplace (esteiras) | Inventário (admin)
+- **Propostas e simulações** → cadastro comercial unificado

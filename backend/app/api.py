@@ -1701,6 +1701,7 @@ def marketplace_esteira2(payload: MarketplaceEsteira2Request, user: User = Depen
         asset_value=payload.asset_value,
         has_credit_restriction=payload.has_credit_restriction,
         asset_is_zero_km=payload.asset_is_zero_km,
+        target_entrada=payload.target_entrada,
     )
     audit(db, user, "marketplace.esteira2", "marketplace", "match", {"matches": len(result["matches"])})
     db.commit()

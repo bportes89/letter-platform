@@ -227,6 +227,8 @@ class Quota(TimestampMixin, Base):
     premium_value: Mapped[float] = mapped_column(Numeric(15, 2), default=0)
     installment_value: Mapped[float] = mapped_column(Numeric(15, 2), default=0)
     installment_due_date: Mapped[date | None] = mapped_column(Date)
+    remaining_installments: Mapped[int | None] = mapped_column(Integer)
+    supplier_source: Mapped[str | None] = mapped_column(String(80), index=True)
     nina_scan_status: Mapped[str | None] = mapped_column(String(30))
     nina_scanned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     nina_scan_detail_json: Mapped[str] = mapped_column(Text, default="{}")
