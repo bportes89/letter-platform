@@ -86,6 +86,7 @@ from app.schemas import (
     ReconciliationBatchView, ReconciliationItemView, ReconciliationResolveRequest,
     MarketplaceEsteira1Request, MarketplaceEsteira1Response, MarketplaceEsteira2Request, MarketplaceEsteira2Response,
     VenderCotaCalculateRequest, VenderCotaStoreRequest, QuotaOfferRangeUpdate, QuotaSellOfferUpdate, VenderCotaCloseRequest,
+    SdcDeskEvaluateRequest, SdcDeskStoreRequest, SdcDeskStatusUpdate, SdcDeskSaleCreate,
     ProposalView, QuotaCreate, QuotaUpdate, QuotaView, NinaQuotaScanView, RecoveredAssetCreate, RecoveredAssetView, RefreshRequest,
     CommercialClientView,
     ReservationCreate, ReservationView, SdcCalculationRequest, SessionView, SignatureComplete,
@@ -2261,6 +2262,108 @@ def vender_cota_offer_close(
             + ("; cota criada no inventário" if item.inventory_quota_id else "")
             + (f"; {result['commission_entries']} comissão(ões) provisionada(s)" if result["commission_entries"] else "")
         ),
+    }
+
+
+@router.post("/sdc/desk/evaluate")
+def sdc_desk_evaluate(payload: SdcDeskEvaluateRequest, user: User = Depends(get_current_user)):
+    from app.sdc_desk_service import assert_desk_access, evaluate_sdc_desk
+
+    assert_desk_access(user)
+    result = evaluate_sdc_desk(payload.model_dump())
+    return {"result": result}
+
+
+@router.post("/sdc/desk/solicitations", status_code=201)
+def sdc_desk_store(payload: SdcDeskStoreRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.sdc_desk_service import list_documents, solicitation_view, store_solicitation
+
+    item = store_solicitation(db, user, payload.model_dump())
+    audit(db, user, "sdc_desk.solicitation_created", "sdc_solicitation", item.id, {
+        "asset_type": item.asset_type,
+        "credit_estimated": str(item.credit_estimated),
+    })
+    db.commit()
+    db.refresh(item)
+    return solicitation_view(item, list_documents(db, item.id))
+
+
+@router.get("/sdc/desk/solicitations")
+def sdc_desk_list(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.sdc_desk_service import list_documents, list_solicitations, solicitation_view
+
+    return [solicitation_view(item, list_documents(db, item.id)) for item in list_solicitations(db, user)]
+
+
+@router.get("/sdc/desk/solicitations/{solicitation_id}")
+def sdc_desk_get(solicitation_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.sdc_desk_service import get_solicitation, list_documents, solicitation_view
+
+    item = get_solicitation(db, user, solicitation_id)
+    return solicitation_view(item, list_documents(db, item.id))
+
+
+@router.patch("/sdc/desk/solicitations/{solicitation_id}")
+def sdc_desk_status(
+    solicitation_id: str,
+    payload: SdcDeskStatusUpdate,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.sdc_desk_service import get_solicitation, list_documents, solicitation_view, update_status
+
+    item = get_solicitation(db, user, solicitation_id)
+    update_status(db, user, item, payload.status, payload.status_notes)
+    audit(db, user, "sdc_desk.status_updated", "sdc_solicitation", item.id, {
+        "status": item.status,
+        "status_notes": item.status_notes,
+    })
+    db.commit()
+    db.refresh(item)
+    return solicitation_view(item, list_documents(db, item.id))
+
+
+@router.post("/sdc/desk/solicitations/{solicitation_id}/documents")
+async def sdc_desk_upload_doc(
+    solicitation_id: str,
+    file: UploadFile = File(...),
+    doc_type: str = Form("SDC_SUPPORT"),
+    comment: str | None = Form(None),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.sdc_desk_service import add_document, get_solicitation, list_documents, solicitation_view
+
+    item = get_solicitation(db, user, solicitation_id)
+    await add_document(db, user, item, upload=file, doc_type=doc_type, comment=comment)
+    audit(db, user, "sdc_desk.document_uploaded", "sdc_solicitation", item.id, {
+        "filename": file.filename,
+        "doc_type": doc_type,
+        "status": item.status,
+    })
+    db.commit()
+    db.refresh(item)
+    return solicitation_view(item, list_documents(db, item.id))
+
+
+@router.post("/sdc/desk/solicitations/{solicitation_id}/sale", status_code=201)
+def sdc_desk_create_sale(
+    solicitation_id: str,
+    payload: SdcDeskSaleCreate,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.sdc_desk_service import create_sale_from_sdc, get_solicitation, list_documents, solicitation_view
+
+    item = get_solicitation(db, user, solicitation_id)
+    sale = create_sale_from_sdc(db, user, item, quota_id=payload.quota_id)
+    audit(db, user, "sdc_desk.sale_created", "sdc_solicitation", item.id, sale)
+    db.commit()
+    db.refresh(item)
+    return {
+        "solicitation": solicitation_view(item, list_documents(db, item.id)),
+        **sale,
+        "message": "Cadastro de venda Cap Giro criado e vinculado ao SDC",
     }
 
 

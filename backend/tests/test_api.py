@@ -191,6 +191,81 @@ def test_vender_minha_cota_calculate_and_store(client, auth_headers):
     assert any(q["id"] == body["inventory_quota_id"] for q in quotas.json())
 
 
+def test_sdc_desk_evaluate_store_approve_and_sale(client, auth_headers):
+    bad = client.post("/api/v1/sdc/desk/evaluate", headers=auth_headers, json={
+        "asset_type": "veiculo_leve",
+        "asset_value": "80000",
+        "asset_year": 2000,
+        "asset_paid_off": True,
+        "asset_has_lien": False,
+        "docs_complete": True,
+    })
+    assert bad.status_code == 200
+    assert bad.json()["result"]["viable"] is False
+
+    ok = client.post("/api/v1/sdc/desk/evaluate", headers=auth_headers, json={
+        "asset_type": "imovel",
+        "asset_value": "500000",
+        "asset_paid_off": True,
+        "asset_has_lien": False,
+        "docs_complete": True,
+    })
+    assert ok.status_code == 200
+    assert ok.json()["result"]["viable"] is True
+    assert ok.json()["result"]["credito_estimado"] == "175000.00"
+    assert ok.json()["result"]["prazo_meses"] == 180
+    assert ok.json()["result"]["taxa_juros_mensal"] == "1.60"
+
+    stored = client.post("/api/v1/sdc/desk/solicitations", headers=auth_headers, json={
+        "asset_type": "imovel",
+        "asset_value": "500000",
+        "asset_paid_off": True,
+        "asset_has_lien": False,
+        "docs_complete": True,
+        "contact_name": "Cliente SDC Desk",
+        "contact_email": "cliente.sdc.desk@example.com",
+        "contact_phone": "31988776655",
+        "document": "12345678901",
+        "person_type": "PF",
+        "income_value": "15000",
+    })
+    assert stored.status_code == 201, stored.text
+    item = stored.json()
+    assert item["status"] == "AWAITING_DOCS"
+    assert item["credit_estimated"] == "175000.00"
+    sid = item["id"]
+
+    listed = client.get("/api/v1/sdc/desk/solicitations", headers=auth_headers)
+    assert listed.status_code == 200
+    assert any(row["id"] == sid for row in listed.json())
+
+    approved = client.patch(
+        f"/api/v1/sdc/desk/solicitations/{sid}",
+        headers=auth_headers,
+        json={"status": "APPROVED", "status_notes": "Docs ok"},
+    )
+    assert approved.status_code == 200
+    assert approved.json()["status"] == "APPROVED"
+    assert approved.json()["can_create_sale"] is True
+
+    quota = next(q for q in client.get("/api/v1/quotas", headers=auth_headers).json() if q["status"] == "AVAILABLE")
+    sale = client.post(
+        f"/api/v1/sdc/desk/solicitations/{sid}/sale",
+        headers=auth_headers,
+        json={"quota_id": quota["id"]},
+    )
+    assert sale.status_code == 201, sale.text
+    assert sale.json()["proposal_id"]
+    assert sale.json()["solicitation"]["can_create_sale"] is False
+
+    again = client.post(
+        f"/api/v1/sdc/desk/solicitations/{sid}/sale",
+        headers=auth_headers,
+        json={"quota_id": quota["id"]},
+    )
+    assert again.status_code == 409
+
+
 def test_marketplace_esteira1_and_esteira2(client, auth_headers):
     quota = next(q for q in client.get("/api/v1/quotas", headers=auth_headers).json() if q["status"] == "AVAILABLE")
     client.patch(

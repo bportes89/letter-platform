@@ -42,7 +42,7 @@ export const PRODUCT_NAV: ProductNavItem[] = [
     name: "Propostas e simulações",
     commercial: true,
   },
-  { key: "sdc", name: "SDC — estrutura interna", internalOnly: true },
+  { key: "sdc", name: "SDC — Capital de Giro", commercial: true },
   { key: "flash-capital", name: "Flash Capital" },
   { key: "quitcon", name: "QuitCon" },
   { key: "flash-invest", name: "Flash Invest", bank: true },

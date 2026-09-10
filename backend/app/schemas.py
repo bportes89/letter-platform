@@ -2147,6 +2147,36 @@ class VenderCotaCloseRequest(BaseModel):
     notes: str | None = Field(default=None, max_length=4000)
 
 
+class SdcDeskEvaluateRequest(BaseModel):
+    asset_type: str = Field(min_length=2, max_length=40)
+    asset_value: Decimal = Field(gt=0)
+    asset_year: int | None = Field(default=None, ge=1950, le=2100)
+    asset_paid_off: bool = True
+    asset_has_lien: bool = False
+    docs_complete: bool = True
+
+
+class SdcDeskStoreRequest(SdcDeskEvaluateRequest):
+    contact_name: str = Field(min_length=2, max_length=180)
+    contact_email: str = Field(min_length=5, max_length=180)
+    contact_phone: str = Field(min_length=8, max_length=40)
+    document: str | None = None
+    person_type: str = "PF"
+    address: str | None = None
+    occupation: str | None = None
+    income_value: Decimal = Field(ge=0, default=0)
+    partner_user_id: str | None = None
+
+
+class SdcDeskStatusUpdate(BaseModel):
+    status: str = Field(min_length=3, max_length=40)
+    status_notes: str | None = Field(default=None, max_length=4000)
+
+
+class SdcDeskSaleCreate(BaseModel):
+    quota_id: str = Field(min_length=8, max_length=36)
+
+
 class BISummaryView(BaseModel):
     funnel: dict; portfolio: dict; risk: dict; funding: dict; recovery: dict
 

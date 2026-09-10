@@ -282,6 +282,50 @@ class QuotaSellOffer(TimestampMixin, Base):
     commission_reference: Mapped[str | None] = mapped_column(String(120))
 
 
+class SdcSolicitation(TimestampMixin, Base):
+    """Mesa comercial SDC (legado customers_sdc): solicitação → docs → venda Cap Giro."""
+
+    __tablename__ = "sdc_solicitations"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    partner_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), index=True)
+    created_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"))
+    status: Mapped[str] = mapped_column(String(40), default="AWAITING_DOCS", index=True)
+    status_notes: Mapped[str | None] = mapped_column(Text)
+    contact_name: Mapped[str] = mapped_column(String(180))
+    contact_email: Mapped[str] = mapped_column(String(180), index=True)
+    contact_phone: Mapped[str] = mapped_column(String(40), default="")
+    document: Mapped[str | None] = mapped_column(String(20))
+    person_type: Mapped[str] = mapped_column(String(10), default="PF")
+    address: Mapped[str | None] = mapped_column(Text)
+    occupation: Mapped[str | None] = mapped_column(String(180))
+    income_value: Mapped[float] = mapped_column(Numeric(15, 2), default=0)
+    asset_type: Mapped[str] = mapped_column(String(40), index=True)
+    asset_value: Mapped[float] = mapped_column(Numeric(15, 2))
+    asset_year: Mapped[int | None] = mapped_column(Integer)
+    asset_paid_off: Mapped[bool] = mapped_column(Boolean, default=True)
+    asset_has_lien: Mapped[bool] = mapped_column(Boolean, default=False)
+    docs_complete: Mapped[bool] = mapped_column(Boolean, default=True)
+    credit_estimated: Mapped[float] = mapped_column(Numeric(15, 2), default=0)
+    installment_estimated: Mapped[float] = mapped_column(Numeric(15, 2), default=0)
+    term_months: Mapped[int] = mapped_column(Integer, default=0)
+    interest_rate_monthly: Mapped[float] = mapped_column(Numeric(8, 4), default=0)
+    evaluation_json: Mapped[str] = mapped_column(Text, default="{}")
+    proposal_id: Mapped[str | None] = mapped_column(ForeignKey("proposals.id"), index=True)
+    quota_id: Mapped[str | None] = mapped_column(ForeignKey("quotas.id"), index=True)
+
+
+class SdcSolicitationDocument(TimestampMixin, Base):
+    __tablename__ = "sdc_solicitation_documents"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    solicitation_id: Mapped[str] = mapped_column(ForeignKey("sdc_solicitations.id"), index=True)
+    document_id: Mapped[str] = mapped_column(ForeignKey("documents.id"), index=True)
+    doc_type: Mapped[str] = mapped_column(String(80), default="SDC_SUPPORT")
+    comment: Mapped[str | None] = mapped_column(Text)
+    uploaded_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"))
+
+
 class QuotaReservation(TimestampMixin, Base):
     __tablename__ = "quota_reservations"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
