@@ -2235,6 +2235,74 @@ class QuotaSupplierView(BaseModel):
     updated_at: datetime | None = None
 
 
+class VendaDiretaManualCotaOption(BaseModel):
+    quota_id: str
+    group_code: str
+    quota_code: str
+    category: str
+    credit_value: str
+    premium_value: str
+    entrada_final: str
+    installment_value: str
+    remaining_installments: int | None = None
+    supplier_source: str | None = None
+    markup_percent: str | None = None
+    markup_amount: str | None = None
+    administrator_id: str
+    administrator_name: str | None = None
+    nina_scan_status: str | None = None
+    installment_due_date: str | None = None
+    label: str
+
+
+class VendaDiretaManualCadastroOption(BaseModel):
+    lead_id: str
+    name: str
+    document: str | None = None
+    phone: str
+    email: str | None = None
+    person_type: str = "PF"
+    address: dict = Field(default_factory=dict)
+    label: str
+    source: str
+    status: str
+
+
+class VendaDiretaManualPartnerOption(BaseModel):
+    id: str
+    name: str
+    role: str
+    email: str | None = None
+
+
+class VendaDiretaManualStoreRequest(BaseModel):
+    name: str = Field(min_length=2, max_length=180)
+    email: str = Field(min_length=5, max_length=180)
+    phone: str = Field(min_length=8, max_length=40)
+    person_type: str = Field(default="PF", max_length=2)
+    document: str = Field(min_length=11, max_length=20)
+    quota_id: str
+    partner_user_id: str | None = None
+    zipcode: str = Field(min_length=8, max_length=12)
+    street: str = Field(min_length=2, max_length=200)
+    number: str = Field(min_length=1, max_length=30)
+    neighborhood: str = Field(min_length=2, max_length=120)
+    city: str = Field(min_length=2, max_length=120)
+    uf: str = Field(min_length=2, max_length=2)
+    occupation: str | None = Field(default=None, max_length=120)
+    monthly_income: Decimal | None = Field(default=None, ge=0)
+
+
+class VendaDiretaManualStoreResponse(BaseModel):
+    lead_id: str
+    proposal_id: str
+    quota_id: str
+    reservation_id: str
+    requested_amount: str
+    entrada_final: str
+    message: str
+
+
 class VenderCotaCalculateRequest(BaseModel):
     tipo_consorcio: str
     credit_value: Decimal = Field(gt=0)

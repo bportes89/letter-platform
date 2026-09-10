@@ -87,6 +87,8 @@ from app.schemas import (
     MarketplaceEsteira1Request, MarketplaceEsteira1Response, MarketplaceEsteira2Request, MarketplaceEsteira2Response,
     VendaDiretaRoboSearchRequest, VendaDiretaRoboSearchResponse, VendaDiretaRoboConfirmRequest, VendaDiretaRoboConfirmResponse,
     QuotaSupplierCreate, QuotaSupplierUpdate, QuotaSupplierView,
+    VendaDiretaManualCotaOption, VendaDiretaManualCadastroOption, VendaDiretaManualPartnerOption,
+    VendaDiretaManualStoreRequest, VendaDiretaManualStoreResponse,
     VenderCotaCalculateRequest, VenderCotaStoreRequest, QuotaOfferRangeUpdate, QuotaSellOfferUpdate, VenderCotaCloseRequest,
     SdcDeskEvaluateRequest, SdcDeskStoreRequest, SdcDeskStatusUpdate, SdcDeskSaleCreate,
     FlashDeskEvaluateRequest, FlashDeskStoreRequest, FlashDeskStatusUpdate, FlashDeskSaleCreate,
@@ -1794,6 +1796,55 @@ def venda_direta_robo_confirm(payload: VendaDiretaRoboConfirmRequest, user: User
         match_lane=payload.match_lane,
     )
     audit(db, user, "marketplace.venda_direta_robo.confirm", "proposal", result["proposal_id"], {"quota_ids": result["quota_ids"]})
+    db.commit()
+    return result
+
+
+@router.get("/marketplace/venda-direta-manual/cotas", response_model=list[VendaDiretaManualCotaOption])
+def venda_direta_manual_cotas(category: str = "REAL_ESTATE", user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.sales_direct_manual_service import list_cotas_options
+
+    return list_cotas_options(db, user, category=category)
+
+
+@router.get("/marketplace/venda-direta-manual/cadastros", response_model=list[VendaDiretaManualCadastroOption])
+def venda_direta_manual_cadastros(q: str | None = None, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.sales_direct_manual_service import list_cadastros
+
+    return list_cadastros(db, user, q=q)
+
+
+@router.get("/marketplace/venda-direta-manual/partners", response_model=list[VendaDiretaManualPartnerOption])
+def venda_direta_manual_partners(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.sales_direct_manual_service import list_partners
+
+    return list_partners(db, user)
+
+
+@router.post("/marketplace/venda-direta-manual/store", response_model=VendaDiretaManualStoreResponse)
+def venda_direta_manual_store(payload: VendaDiretaManualStoreRequest, user: User = Depends(require_scope("proposals:write")), db: Session = Depends(get_db)):
+    from app.sales_direct_manual_service import store_manual
+
+    result = store_manual(
+        db,
+        user,
+        name=payload.name,
+        email=payload.email,
+        phone=payload.phone,
+        person_type=payload.person_type,
+        document=payload.document,
+        quota_id=payload.quota_id,
+        partner_user_id=payload.partner_user_id,
+        zipcode=payload.zipcode,
+        street=payload.street,
+        number=payload.number,
+        neighborhood=payload.neighborhood,
+        city=payload.city,
+        uf=payload.uf,
+        occupation=payload.occupation,
+        monthly_income=payload.monthly_income,
+    )
+    audit(db, user, "marketplace.venda_direta_manual.store", "proposal", result["proposal_id"], {"quota_id": result["quota_id"]})
     db.commit()
     return result
 

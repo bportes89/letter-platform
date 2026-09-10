@@ -78,7 +78,7 @@ Cadastro (Fornecedores + Inventário) → Sync Bacen (opcional) → Varredura Ni
 
 ## UI
 
-- **COMERCIAL:** Cartas contempladas → Marketplace (esteiras) | **Venda Direta Robô** (admin) | Inventário (admin)
+- **COMERCIAL:** Cartas contempladas → Marketplace | Venda Direta Robô | Venda Direta Manual | Fornecedores | Inventário
 - **Propostas e simulações** → cadastro comercial unificado
 
 ## Venda Direta Robô (admin)
@@ -89,3 +89,13 @@ Wizard de 2 passos sobre o mesmo motor da Esteira 2:
 2. `POST /api/v1/marketplace/venda-direta-robo/confirm` — escolhe `quota_ids` → proposta `MARKETPLACE` + trava 60 min → finalize em Propostas.
 
 Sem match no passo 1, a API responde **404** (não deixa pré-cadastro órfão).
+
+## Venda Direta Manual (admin)
+
+Formulário único: parceiro opcional → categoria → **uma cota** do inventário → cliente + endereço → Gravar.
+
+1. `GET /api/v1/marketplace/venda-direta-manual/cotas?category=`
+2. `GET /api/v1/marketplace/venda-direta-manual/cadastros` / `partners`
+3. `POST /api/v1/marketplace/venda-direta-manual/store` — lead + proposta + Nina + trava 60 min
+
+Entrada exibida já aplica markup/comissão do fornecedor. **Não** embute markup de afiliado na entrada (só vínculo do parceiro para comissão na finalização).

@@ -593,6 +593,59 @@ def test_venda_direta_robo_search_and_confirm(client, auth_headers):
     assert miss.status_code == 404
 
 
+def test_venda_direta_manual_store(client, auth_headers):
+    """Admin escolhe cota específica → lead + proposta + trava."""
+    cotas = client.get(
+        "/api/v1/marketplace/venda-direta-manual/cotas?category=REAL_ESTATE",
+        headers=auth_headers,
+    )
+    assert cotas.status_code == 200, cotas.text
+    options = cotas.json()
+    assert options, "inventário seed deve ter cotas AVAILABLE"
+    chosen = options[0]
+
+    partners = client.get("/api/v1/marketplace/venda-direta-manual/partners", headers=auth_headers)
+    assert partners.status_code == 200
+    partner_id = next((p["id"] for p in partners.json() if p["role"] == "PARTNER"), None)
+
+    store = client.post(
+        "/api/v1/marketplace/venda-direta-manual/store",
+        headers=auth_headers,
+        json={
+            "name": "Cliente Venda Manual",
+            "email": "cliente.manual@letter.test",
+            "phone": "32977776666",
+            "person_type": "PF",
+            "document": "39053344705",
+            "quota_id": chosen["quota_id"],
+            "partner_user_id": partner_id,
+            "zipcode": "36010000",
+            "street": "Rua Manual",
+            "number": "50",
+            "neighborhood": "Centro",
+            "city": "Juiz de Fora",
+            "uf": "MG",
+            "occupation": "Comerciante",
+            "monthly_income": "15000",
+        },
+    )
+    assert store.status_code == 200, store.text
+    body = store.json()
+    assert body["proposal_id"]
+    assert body["reservation_id"]
+    assert body["quota_id"] == chosen["quota_id"]
+    assert Decimal(body["entrada_final"]) == Decimal(chosen["entrada_final"])
+
+    leads = client.get("/api/v1/leads", headers=auth_headers).json()
+    lead = next(l for l in leads if l["id"] == body["lead_id"])
+    assert lead["source"] == "VENDA_DIRETA_MANUAL"
+    assert lead["status"] == "PROPOSAL"
+
+    quotas = client.get("/api/v1/quotas", headers=auth_headers).json()
+    locked = next(q for q in quotas if q["id"] == chosen["quota_id"])
+    assert locked["status"] == "RESERVED"
+
+
 def test_marketplace_suppliers_crud_and_markup_override(client, auth_headers):
     """Fornecedores: CRUD + markup cadastrado prevalece; cliente embute % plataforma."""
     from decimal import Decimal
