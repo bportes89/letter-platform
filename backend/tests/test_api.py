@@ -677,6 +677,84 @@ def test_marketplace_cadastros_pipeline(client, auth_headers):
     assert patched.json()["address"].get("city") == "Barbacena"
 
 
+def test_marketplace_cadastro_situation_lifecycle(client, auth_headers):
+    """Situação explícita: Pagou → Concluído bloqueado sem fornecedor; force libera stub."""
+    # Garante uma venda Marketplace via venda direta manual
+    cotas = client.get(
+        "/api/v1/marketplace/venda-direta-manual/cotas?category=REAL_ESTATE",
+        headers=auth_headers,
+    )
+    assert cotas.status_code == 200
+    chosen = cotas.json()[0]
+    store = client.post(
+        "/api/v1/marketplace/venda-direta-manual/store",
+        headers=auth_headers,
+        json={
+            "name": "Ciclo Situacao",
+            "email": "ciclo.situacao@letter.test",
+            "phone": "32977776666",
+            "person_type": "PF",
+            "document": "52998224725",
+            "quota_id": chosen["quota_id"],
+            "zipcode": "36010000",
+            "street": "Rua Ciclo",
+            "number": "10",
+            "neighborhood": "Centro",
+            "city": "Juiz de Fora",
+            "uf": "MG",
+        },
+    )
+    assert store.status_code == 200, store.text
+    lead_id = store.json()["lead_id"]
+
+    detail = client.get(f"/api/v1/marketplace/cadastros/{lead_id}", headers=auth_headers)
+    assert detail.status_code == 200
+    assert detail.json()["situation"] == "AGUARDANDO_PAGAMENTO"
+    assert detail.json()["lifecycle_editable"] is True
+
+    paid = client.patch(
+        f"/api/v1/marketplace/cadastros/{lead_id}",
+        headers=auth_headers,
+        json={"situation": "PAGO"},
+    )
+    assert paid.status_code == 200, paid.text
+    assert paid.json()["situation"] == "PAGO"
+    assert paid.json()["pipeline"] == "NEGOCIACAO"
+    assert paid.json()["paid_at"]
+    assert paid.json()["commission_release_status"] == "PENDING"
+
+    # Idempotente
+    paid2 = client.patch(
+        f"/api/v1/marketplace/cadastros/{lead_id}",
+        headers=auth_headers,
+        json={"situation": "PAGO"},
+    )
+    assert paid2.status_code == 200
+    assert paid2.json()["paid_at"] == paid.json()["paid_at"]
+
+    blocked = client.patch(
+        f"/api/v1/marketplace/cadastros/{lead_id}",
+        headers=auth_headers,
+        json={"situation": "CONCLUIDO", "force_admin_conclude": False},
+    )
+    assert blocked.status_code == 409
+
+    done = client.patch(
+        f"/api/v1/marketplace/cadastros/{lead_id}",
+        headers=auth_headers,
+        json={"situation": "CONCLUIDO", "force_admin_conclude": True},
+    )
+    assert done.status_code == 200, done.text
+    assert done.json()["situation"] == "CONCLUIDO"
+    assert done.json()["pipeline"] == "CONCLUIDO"
+    assert done.json()["supplier_transfer_confirmed"] is True
+    assert done.json()["commission_release_status"] == "RELEASED_STUB"
+
+    compras = client.get("/api/v1/marketplace/cadastros?pipeline=COMPRAS", headers=auth_headers)
+    assert compras.status_code == 200
+    assert any(r["lead_id"] == lead_id for r in compras.json())
+
+
 def test_marketplace_suppliers_crud_and_markup_override(client, auth_headers):
     """Fornecedores: CRUD + markup cadastrado prevalece; cliente embute % plataforma."""
     from decimal import Decimal

@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.commission_attribution import apply_proposal_attribution
 from app.marketplace_service import esteira2_nina_curated_match
+from app.cadastro_service import seed_marketplace_lifecycle
 from app.models import Lead, Proposal, Quota, User
 from app.services import reserve_quota
 
@@ -203,29 +204,31 @@ def confirm_cota(
         requested_amount=total_credit,
         status="SUBMITTED",
         terms_json=json.dumps(
-            {
-                "channel": SOURCE,
-                "match_lane": match_lane,
-                "quota_ids": ids,
-                "total_credit": str(total_credit),
-                "total_entrada_base": str(total_entrada),
-                "client_email": snapshot.get("email"),
-                "person_type": snapshot.get("person_type"),
-                "filters": snapshot,
-                "quotas": [
-                    {
-                        "quota_id": q.id,
-                        "group_code": q.group_code,
-                        "quota_code": q.quota_code,
-                        "credit_value": str(q.credit_value),
-                        "premium_value": str(q.premium_value),
-                        "installment_value": str(q.installment_value or 0),
-                        "supplier_source": q.supplier_source,
-                        "administrator_id": q.administrator_id,
-                    }
-                    for q in quotas
-                ],
-            },
+            seed_marketplace_lifecycle(
+                {
+                    "channel": SOURCE,
+                    "match_lane": match_lane,
+                    "quota_ids": ids,
+                    "total_credit": str(total_credit),
+                    "total_entrada_base": str(total_entrada),
+                    "client_email": snapshot.get("email"),
+                    "person_type": snapshot.get("person_type"),
+                    "filters": snapshot,
+                    "quotas": [
+                        {
+                            "quota_id": q.id,
+                            "group_code": q.group_code,
+                            "quota_code": q.quota_code,
+                            "credit_value": str(q.credit_value),
+                            "premium_value": str(q.premium_value),
+                            "installment_value": str(q.installment_value or 0),
+                            "supplier_source": q.supplier_source,
+                            "administrator_id": q.administrator_id,
+                        }
+                        for q in quotas
+                    ],
+                }
+            ),
             ensure_ascii=False,
         ),
         sale_channel="PARTNER_OFFICE",

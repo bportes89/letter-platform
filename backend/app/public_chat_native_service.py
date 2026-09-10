@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.cadastro_service import seed_marketplace_lifecycle
 from app.marketplace_service import esteira2_nina_curated_match
 from app.models import Lead, Organization, Proposal, Quota, Role, User
 from app.public_site_service import headquarters_org
@@ -628,13 +629,15 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
                 requested_amount=total,
                 status="SUBMITTED",
                 terms_json=json.dumps(
-                    {
-                        "channel": SOURCE,
-                        "quota_ids": quota_ids,
-                        "total_credit": str(total),
-                        "client_email": snap.get("email"),
-                        "filters": snap,
-                    },
+                    seed_marketplace_lifecycle(
+                        {
+                            "channel": SOURCE,
+                            "quota_ids": quota_ids,
+                            "total_credit": str(total),
+                            "client_email": snap.get("email"),
+                            "filters": snap,
+                        }
+                    ),
                     ensure_ascii=False,
                 ),
                 sale_channel="SELF_SERVICE",

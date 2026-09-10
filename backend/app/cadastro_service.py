@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from fastapi import HTTPException
@@ -32,13 +33,31 @@ MARKETPLACE_SOURCES = frozenset(
     }
 )
 
+SIT_AGUARDANDO = "AGUARDANDO_PAGAMENTO"
+SIT_PAGO = "PAGO"
+SIT_CONCLUIDO = "CONCLUIDO"
+SIT_CANCELADO = "CANCELADO"
+SIT_CANCELADO_FALTA = "CANCELADO_FALTA_PAGAMENTO"
+SIT_INCOMPLETO = "INCOMPLETO"
+
+SALE_SITUATIONS = frozenset({SIT_AGUARDANDO, SIT_PAGO, SIT_CONCLUIDO, SIT_CANCELADO, SIT_CANCELADO_FALTA})
+
 SITUATION_LABELS = {
-    "INCOMPLETO": "Incompleto",
-    "AGUARDANDO_PAGAMENTO": "Aguardando pagamento",
+    SIT_INCOMPLETO: "Incompleto",
+    SIT_AGUARDANDO: "Aguardando pagamento",
+    SIT_PAGO: "Pagou",
     "EM_NEGOCIACAO": "Em negociação",
+    SIT_CONCLUIDO: "Concluído",
     "CONCLUIDA": "Concluída",
+    SIT_CANCELADO: "Cancelado",
+    SIT_CANCELADO_FALTA: "Cancelado (falta de pagamento)",
     "CANCELADA": "Cancelada",
 }
+
+COMM_NOT_DUE = "NOT_DUE"
+COMM_PENDING = "PENDING"
+COMM_RELEASED_STUB = "RELEASED_STUB"
+COMM_SKIPPED = "SKIPPED"
 
 
 def _parse_json(raw: str | None) -> dict:
@@ -47,6 +66,39 @@ def _parse_json(raw: str | None) -> dict:
         return data if isinstance(data, dict) else {}
     except json.JSONDecodeError:
         return {}
+
+
+def seed_marketplace_lifecycle(terms: dict | None = None) -> dict:
+    """Garante bloco lifecycle em terms_json de proposta Marketplace."""
+    data = dict(terms or {})
+    life = data.get("lifecycle")
+    if not isinstance(life, dict):
+        life = {}
+    if not life.get("situation"):
+        life["situation"] = SIT_AGUARDANDO
+    life.setdefault("supplier_transfer_confirmed", False)
+    life.setdefault("commission_release_status", COMM_NOT_DUE)
+    life.setdefault("paid_at", None)
+    life.setdefault("supplier_transfer_confirmed_at", None)
+    life.setdefault("commission_released_at", None)
+    life.setdefault("force_admin_conclude", False)
+    data["lifecycle"] = life
+    return data
+
+
+def _lifecycle(terms: dict) -> dict:
+    life = terms.get("lifecycle")
+    return life if isinstance(life, dict) else {}
+
+
+def _write_lifecycle(proposal: Proposal, **fields) -> dict:
+    terms = seed_marketplace_lifecycle(_parse_json(proposal.terms_json))
+    life = terms["lifecycle"]
+    for key, value in fields.items():
+        life[key] = value
+    terms["lifecycle"] = life
+    proposal.terms_json = json.dumps(terms, ensure_ascii=False)
+    return life
 
 
 def _snapshot_from_lead(lead: Lead) -> dict:
@@ -58,20 +110,42 @@ def _snapshot_from_lead(lead: Lead) -> dict:
     return {}
 
 
-def _classify(lead: Lead, proposal: Proposal | None, contract: Contract | None, quotas: list[Quota]) -> tuple[str, str]:
-    """Retorna (pipeline_bucket, situation_code)."""
+def _pipeline_for_situation(situation: str) -> str:
+    if situation == SIT_AGUARDANDO:
+        return PIPELINE_NOVOS
+    if situation == SIT_PAGO:
+        return PIPELINE_NEGOCIACAO
+    if situation in {SIT_CONCLUIDO, "CONCLUIDA"}:
+        return PIPELINE_CONCLUIDO
+    if situation in {SIT_CANCELADO, SIT_CANCELADO_FALTA, "CANCELADA"}:
+        return PIPELINE_ALL  # só aparece em ALL
+    return PIPELINE_INCOMPLETO
+
+
+def _classify(lead: Lead, proposal: Proposal | None, contract: Contract | None, quotas: list[Quota], terms: dict | None = None) -> tuple[str, str]:
+    """Retorna (pipeline_bucket, situation_code). Prefere lifecycle explícito."""
+    terms = terms or (_parse_json(proposal.terms_json) if proposal else {})
+    life = _lifecycle(terms)
+    stored = str(life.get("situation") or "").strip().upper()
+    if stored in SALE_SITUATIONS or stored in {"CONCLUIDA", "CANCELADA", "EM_NEGOCIACAO"}:
+        if stored == "CONCLUIDA":
+            stored = SIT_CONCLUIDO
+        if stored == "CANCELADA":
+            stored = SIT_CANCELADO
+        if stored == "EM_NEGOCIACAO":
+            stored = SIT_PAGO
+        bucket = _pipeline_for_situation(stored)
+        return bucket, stored
+
     if any(q.status == "SOLD" for q in quotas) or (contract and contract.status in {"ACCEPTED", "SIGNED", "ACTIVE", "COMPLETED"}):
-        return PIPELINE_CONCLUIDO, "CONCLUIDA"
+        return PIPELINE_CONCLUIDO, SIT_CONCLUIDO
     if proposal and (contract or any(q.status == "RESERVED" for q in quotas) or proposal.status in {"APPROVED", "UNDER_REVIEW"}):
-        return PIPELINE_NEGOCIACAO, "EM_NEGOCIACAO"
+        return PIPELINE_NEGOCIACAO, SIT_PAGO
     if proposal and proposal.product == "MARKETPLACE":
-        return PIPELINE_NOVOS, "AGUARDANDO_PAGAMENTO"
-    if lead.status in {"NEW", "CONTACTED"} or not proposal:
-        if lead.product_interest == "MARKETPLACE" or lead.source in MARKETPLACE_SOURCES:
-            return PIPELINE_INCOMPLETO, "INCOMPLETO"
+        return PIPELINE_NOVOS, SIT_AGUARDANDO
     if lead.product_interest == "MARKETPLACE" or lead.source in MARKETPLACE_SOURCES:
-        return PIPELINE_INCOMPLETO, "INCOMPLETO"
-    return PIPELINE_INCOMPLETO, "INCOMPLETO"
+        return PIPELINE_INCOMPLETO, SIT_INCOMPLETO
+    return PIPELINE_INCOMPLETO, SIT_INCOMPLETO
 
 
 def _is_marketplace_row(lead: Lead, proposal: Proposal | None) -> bool:
@@ -82,6 +156,100 @@ def _is_marketplace_row(lead: Lead, proposal: Proposal | None) -> bool:
     if proposal and proposal.product == "MARKETPLACE":
         return True
     return False
+
+
+def _on_first_pago(db: Session, proposal: Proposal, terms: dict, life: dict) -> None:
+    if life.get("paid_at"):
+        return
+    now = datetime.now(UTC).isoformat()
+    _write_lifecycle(
+        proposal,
+        situation=SIT_PAGO,
+        paid_at=now,
+        commission_release_status=COMM_PENDING,
+    )
+    quota_ids = [str(x) for x in (terms.get("quota_ids") or [])]
+    if not quota_ids:
+        for row in terms.get("quotas") or []:
+            if isinstance(row, dict) and row.get("quota_id"):
+                quota_ids.append(str(row["quota_id"]))
+    if quota_ids:
+        quotas = list(db.scalars(select(Quota).where(Quota.id.in_(quota_ids))))
+        for quota in quotas:
+            if quota.status in {"AVAILABLE", "RESERVED"}:
+                quota.status = "SOLD"
+
+
+def _on_concluir(db: Session, user: User, proposal: Proposal, life: dict, *, force_admin: bool) -> None:
+    confirmed = bool(life.get("supplier_transfer_confirmed"))
+    if not confirmed and not force_admin:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Não é possível concluir a venda: o fornecedor ainda não confirmou a transferência da cota. "
+                "Marque a confirmação ou use forçar conclusão (admin)."
+            ),
+        )
+    now = datetime.now(UTC).isoformat()
+    fields = {
+        "situation": SIT_CONCLUIDO,
+        "commission_release_status": COMM_RELEASED_STUB,
+        "commission_released_at": now,
+        "concluded_by": user.id,
+    }
+    if force_admin and not confirmed:
+        fields["supplier_transfer_confirmed"] = True
+        fields["supplier_transfer_confirmed_at"] = now
+        fields["force_admin_conclude"] = True
+    _write_lifecycle(proposal, **fields)
+
+
+def apply_situation_transition(
+    db: Session,
+    user: User,
+    lead: Lead,
+    proposal: Proposal,
+    new_situation: str,
+    *,
+    force_admin_conclude: bool = False,
+) -> None:
+    situation = str(new_situation or "").strip().upper()
+    if situation not in SALE_SITUATIONS:
+        raise HTTPException(status_code=422, detail=f"Situação inválida: {new_situation}")
+
+    terms = seed_marketplace_lifecycle(_parse_json(proposal.terms_json))
+    proposal.terms_json = json.dumps(terms, ensure_ascii=False)
+    life = terms["lifecycle"]
+    current = str(life.get("situation") or SIT_AGUARDANDO).upper()
+    if current == situation:
+        return  # idempotente
+
+    if situation == SIT_PAGO:
+        _on_first_pago(db, proposal, terms, life)
+        lead.status = "PROPOSAL"
+        return
+
+    if situation == SIT_CONCLUIDO:
+        # refresh life after possible prior writes
+        life = _lifecycle(_parse_json(proposal.terms_json))
+        if str(life.get("situation") or "") == SIT_AGUARDANDO:
+            _on_first_pago(db, proposal, _parse_json(proposal.terms_json), life)
+            life = _lifecycle(_parse_json(proposal.terms_json))
+        _on_concluir(db, user, proposal, life, force_admin=force_admin_conclude)
+        lead.status = "CONVERTED"
+        return
+
+    if situation in {SIT_CANCELADO, SIT_CANCELADO_FALTA}:
+        status = life.get("commission_release_status") or COMM_NOT_DUE
+        if status not in {COMM_RELEASED_STUB}:
+            status = COMM_SKIPPED
+        _write_lifecycle(proposal, situation=situation, commission_release_status=status)
+        lead.status = "CANCELLED"
+        return
+
+    if situation == SIT_AGUARDANDO:
+        _write_lifecycle(proposal, situation=SIT_AGUARDANDO)
+        return
 
 
 def list_cadastros(db: Session, user: User, *, pipeline: str = PIPELINE_ALL, q: str | None = None) -> list[dict]:
@@ -116,7 +284,7 @@ def list_cadastros(db: Session, user: User, *, pipeline: str = PIPELINE_ALL, q: 
     all_quota_ids: set[str] = set()
     terms_by_proposal: dict[str, dict] = {}
     for proposal in proposal_by_lead.values():
-        terms = _parse_json(proposal.terms_json)
+        terms = seed_marketplace_lifecycle(_parse_json(proposal.terms_json))
         terms_by_proposal[proposal.id] = terms
         for qid in terms.get("quota_ids") or []:
             all_quota_ids.add(str(qid))
@@ -140,8 +308,11 @@ def list_cadastros(db: Session, user: User, *, pipeline: str = PIPELINE_ALL, q: 
         quota_ids = [str(x) for x in (terms.get("quota_ids") or [])]
         linked_quotas = [quota_by_id[qid] for qid in quota_ids if qid in quota_by_id]
         contract = contract_by_proposal.get(proposal.id) if proposal else None
-        bucket, situation = _classify(lead, proposal, contract, linked_quotas)
+        bucket, situation = _classify(lead, proposal, contract, linked_quotas, terms)
+        life = _lifecycle(terms)
 
+        if situation in {SIT_CANCELADO, SIT_CANCELADO_FALTA} and pipeline not in {PIPELINE_ALL}:
+            continue
         if pipeline == PIPELINE_COMPRAS:
             if bucket != PIPELINE_CONCLUIDO:
                 continue
@@ -180,7 +351,13 @@ def list_cadastros(db: Session, user: User, *, pipeline: str = PIPELINE_ALL, q: 
                 "email": email,
                 "source": lead.source,
                 "lead_status": lead.status,
-                "pipeline": bucket,
+                "pipeline": (
+                    "CANCELADO"
+                    if situation in {SIT_CANCELADO, SIT_CANCELADO_FALTA}
+                    else bucket
+                    if bucket != PIPELINE_ALL
+                    else PIPELINE_INCOMPLETO
+                ),
                 "situation": situation,
                 "situation_label": SITUATION_LABELS.get(situation, situation),
                 "credit_value": str(money(Decimal(str(credit)))) if credit not in (None, "") else None,
@@ -195,6 +372,10 @@ def list_cadastros(db: Session, user: User, *, pipeline: str = PIPELINE_ALL, q: 
                 "quota_codes": [f"{q.group_code}/{q.quota_code}" for q in linked_quotas],
                 "supplier_sources": suppliers,
                 "person_type": snap.get("person_type") or terms.get("person_type"),
+                "supplier_transfer_confirmed": bool(life.get("supplier_transfer_confirmed")),
+                "commission_release_status": life.get("commission_release_status"),
+                "paid_at": life.get("paid_at"),
+                "lifecycle_editable": bool(proposal),
             }
         )
     return rows
@@ -205,7 +386,6 @@ def get_cadastro_detail(db: Session, user: User, lead_id: str) -> dict:
     rows = list_cadastros(db, user, pipeline=PIPELINE_ALL)
     row = next((r for r in rows if r["lead_id"] == lead_id), None)
     if not row:
-        # lead existe mas não é marketplace — ainda assim devolve base
         owners = owner_map(db, {lead.owner_id} if lead.owner_id else set())
         owner = owners.get(lead.owner_id) if lead.owner_id else None
         row = {
@@ -218,7 +398,7 @@ def get_cadastro_detail(db: Session, user: User, lead_id: str) -> dict:
             "source": lead.source,
             "lead_status": lead.status,
             "pipeline": PIPELINE_INCOMPLETO,
-            "situation": "INCOMPLETO",
+            "situation": SIT_INCOMPLETO,
             "situation_label": "Incompleto",
             "credit_value": None,
             "entrada_value": None,
@@ -232,12 +412,17 @@ def get_cadastro_detail(db: Session, user: User, lead_id: str) -> dict:
             "quota_codes": [],
             "supplier_sources": [],
             "person_type": None,
+            "supplier_transfer_confirmed": False,
+            "commission_release_status": None,
+            "paid_at": None,
+            "lifecycle_editable": False,
         }
     snap = _snapshot_from_lead(lead)
     proposal = None
     if row.get("proposal_id"):
         proposal = db.get(Proposal, row["proposal_id"])
-    terms = _parse_json(proposal.terms_json) if proposal else {}
+    terms = seed_marketplace_lifecycle(_parse_json(proposal.terms_json)) if proposal else {}
+    life = _lifecycle(terms)
     return {
         **row,
         "snapshot": snap,
@@ -250,6 +435,11 @@ def get_cadastro_detail(db: Session, user: User, lead_id: str) -> dict:
             "supplier_sources": row.get("supplier_sources"),
             "channel": terms.get("channel") or lead.source,
         },
+        "supplier_transfer_confirmed": bool(life.get("supplier_transfer_confirmed")),
+        "commission_release_status": life.get("commission_release_status"),
+        "paid_at": life.get("paid_at"),
+        "lifecycle_editable": bool(proposal),
+        "can_conclude": bool(proposal) and bool(life.get("supplier_transfer_confirmed")),
     }
 
 
@@ -269,6 +459,9 @@ def update_cadastro(
     neighborhood: str | None = None,
     city: str | None = None,
     uf: str | None = None,
+    situation: str | None = None,
+    force_admin_conclude: bool = False,
+    supplier_transfer_confirmed: bool | None = None,
 ) -> dict:
     lead = get_lead_for_user(db, user, lead_id)
     if name is not None:
@@ -305,5 +498,35 @@ def update_cadastro(
     snap["address"] = address
     detail[key] = snap
     lead.scr_detail_json = json.dumps(detail, ensure_ascii=False)
+
+    proposal = db.scalar(
+        select(Proposal)
+        .where(
+            Proposal.lead_id == lead.id,
+            Proposal.organization_id == user.organization_id,
+            Proposal.product == "MARKETPLACE",
+        )
+        .order_by(Proposal.created_at.desc())
+    )
+    if proposal:
+        terms = seed_marketplace_lifecycle(_parse_json(proposal.terms_json))
+        proposal.terms_json = json.dumps(terms, ensure_ascii=False)
+        if supplier_transfer_confirmed is not None:
+            now = datetime.now(UTC).isoformat() if supplier_transfer_confirmed else None
+            _write_lifecycle(
+                proposal,
+                supplier_transfer_confirmed=bool(supplier_transfer_confirmed),
+                supplier_transfer_confirmed_at=now if supplier_transfer_confirmed else None,
+            )
+        if situation is not None:
+            apply_situation_transition(
+                db,
+                user,
+                lead,
+                proposal,
+                situation,
+                force_admin_conclude=bool(force_admin_conclude),
+            )
+
     db.flush()
     return get_cadastro_detail(db, user, lead.id)

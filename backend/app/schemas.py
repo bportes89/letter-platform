@@ -2355,6 +2355,10 @@ class CadastroListItem(BaseModel):
     quota_codes: list[str] = Field(default_factory=list)
     supplier_sources: list[str] = Field(default_factory=list)
     person_type: str | None = None
+    supplier_transfer_confirmed: bool = False
+    commission_release_status: str | None = None
+    paid_at: str | None = None
+    lifecycle_editable: bool = False
 
 
 class CadastroDetailView(CadastroListItem):
@@ -2362,6 +2366,7 @@ class CadastroDetailView(CadastroListItem):
     terms: dict = Field(default_factory=dict)
     address: dict = Field(default_factory=dict)
     purchase_readonly: dict = Field(default_factory=dict)
+    can_conclude: bool = False
 
 
 class CadastroUpdateRequest(BaseModel):
@@ -2376,6 +2381,9 @@ class CadastroUpdateRequest(BaseModel):
     neighborhood: str | None = None
     city: str | None = None
     uf: str | None = Field(default=None, max_length=2)
+    situation: str | None = Field(default=None, max_length=40)
+    force_admin_conclude: bool = False
+    supplier_transfer_confirmed: bool | None = None
 
 
 class VenderCotaCalculateRequest(BaseModel):

@@ -26,13 +26,26 @@ type CadastroRow = {
   proposal_status: string | null;
   quota_codes: string[];
   supplier_sources: string[];
+  supplier_transfer_confirmed?: boolean;
+  commission_release_status?: string | null;
+  paid_at?: string | null;
+  lifecycle_editable?: boolean;
 };
 
 type CadastroDetail = CadastroRow & {
   address: Record<string, string>;
   purchase_readonly: Record<string, unknown>;
   snapshot: Record<string, unknown>;
+  can_conclude?: boolean;
 };
+
+const SALE_SITUATIONS = [
+  { value: "AGUARDANDO_PAGAMENTO", label: "Aguardando pagamento" },
+  { value: "PAGO", label: "Pagou" },
+  { value: "CONCLUIDO", label: "Concluído" },
+  { value: "CANCELADO", label: "Cancelado" },
+  { value: "CANCELADO_FALTA_PAGAMENTO", label: "Cancelado (falta de pagamento)" },
+] as const;
 
 const TABS = [
   { key: "ALL", label: "Clientes" },
@@ -92,6 +105,9 @@ export function CadastroMarketplaceModule() {
           neighborhood: fd.get("neighborhood") || null,
           city: fd.get("city") || null,
           uf: fd.get("uf") || null,
+          situation: selected.lifecycle_editable ? String(fd.get("situation") || selected.situation) : undefined,
+          supplier_transfer_confirmed: selected.lifecycle_editable ? fd.get("supplier_transfer_confirmed") === "1" : undefined,
+          force_admin_conclude: selected.lifecycle_editable ? fd.get("force_admin_conclude") === "1" : false,
         }),
       });
       setSelected(updated);
@@ -242,6 +258,7 @@ export function CadastroMarketplaceModule() {
               {selected.entrada_value ? brl.format(Number(selected.entrada_value)) : "—"} · cotas{" "}
               {(selected.quota_codes || []).join(", ") || "—"} · fornecedores{" "}
               {(selected.supplier_sources || []).join(", ") || "—"}
+              {selected.commission_release_status ? ` · comissão ${selected.commission_release_status}` : ""}
               {selected.proposal_id ? (
                 <>
                   {" "}
@@ -266,6 +283,34 @@ export function CadastroMarketplaceModule() {
                 E-mail
                 <input name="email" type="email" defaultValue={selected.email || ""} />
               </label>
+              {selected.lifecycle_editable ? (
+                <>
+                  <label className="marketplace-field marketplace-field-compact">
+                    Situação da venda
+                    <select name="situation" defaultValue={selected.situation}>
+                      {SALE_SITUATIONS.map((s) => (
+                        <option key={s.value} value={s.value}>
+                          {s.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="marketplace-field marketplace-field-compact">
+                    Fornecedor confirmou transferência
+                    <select name="supplier_transfer_confirmed" defaultValue={selected.supplier_transfer_confirmed ? "1" : "0"}>
+                      <option value="0">Não</option>
+                      <option value="1">Sim</option>
+                    </select>
+                  </label>
+                  <label className="marketplace-field marketplace-field-wide">
+                    Forçar conclusão sem confirmação do fornecedor
+                    <select name="force_admin_conclude" defaultValue="0">
+                      <option value="0">Não</option>
+                      <option value="1">Sim (admin)</option>
+                    </select>
+                  </label>
+                </>
+              ) : null}
               <label className="marketplace-field marketplace-field-compact">
                 Status lead
                 <select name="lead_status" defaultValue={selected.lead_status}>
@@ -303,7 +348,7 @@ export function CadastroMarketplaceModule() {
             </div>
             <button type="submit" className="marketplace-submit" disabled={busy}>
               <RefreshCw />
-              {busy ? "Salvando…" : "Salvar dados do cliente"}
+              {busy ? "Salvando…" : "Salvar cadastro"}
             </button>
             <button type="button" className="table-action" style={{ marginLeft: "0.75rem" }} onClick={() => setSelected(null)}>
               Fechar

@@ -109,6 +109,19 @@ Lista operacional das vendas Marketplace (chat / venda direta):
 
 Abas espelham o pacote Paulo: Clientes, Novos, Em negociação, Concluído, Incompleto, Compras. Compra (crédito/entrada/cotas) é somente leitura; dados do cliente são editáveis.
 
+### Situação da venda (pós-venda)
+
+Campo explícito em `proposal.terms_json.lifecycle` (não só heurística de cota/contrato):
+
+| Situação | Aba | Efeito |
+|----------|-----|--------|
+| `AGUARDANDO_PAGAMENTO` | Novos | padrão ao criar proposta Marketplace |
+| `PAGO` | Em negociação | `paid_at`; cotas `RESERVED/AVAILABLE` → `SOLD` (1ª vez) |
+| `CONCLUIDO` | Concluído / Compras | exige `supplier_transfer_confirmed` **ou** `force_admin_conclude` |
+| `CANCELADO` / `CANCELADO_FALTA_PAGAMENTO` | só Clientes (ALL) | sem estorno de stub de comissão |
+
+Comissão neste MVP: stub `commission_release_status=RELEASED_STUB` (sem wallet/extrato). Liberação real fica para frente seguinte.
+
 ## Chat público nativo (site)
 
 Substitui o proxy `letter.app.br` quando `LETTER_CHAT_NATIVE_ENABLED=true` (padrão).

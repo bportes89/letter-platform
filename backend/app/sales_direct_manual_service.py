@@ -10,6 +10,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.cadastro_service import seed_marketplace_lifecycle
 from app.commission_attribution import apply_proposal_attribution
 from app.marketplace_service import pricing_for_quota
 from app.models import Administrator, Lead, Proposal, Quota, Role, User
@@ -273,31 +274,33 @@ def store_manual(
         requested_amount=pricing["credit"],
         status="SUBMITTED",
         terms_json=json.dumps(
-            {
-                "channel": SOURCE,
-                "quota_ids": [quota.id],
-                "total_credit": str(pricing["credit"]),
-                "total_entrada": str(pricing["entrada_final"]),
-                "client_email": email.strip(),
-                "person_type": person,
-                "partner_user_id": partner.id if partner else None,
-                "porc_a_mais": "0",
-                "porc_a_mais_sellers": "0",
-                "filters": snapshot,
-                "quotas": [
-                    {
-                        "quota_id": quota.id,
-                        "group_code": quota.group_code,
-                        "quota_code": quota.quota_code,
-                        "credit_value": str(quota.credit_value),
-                        "premium_value": str(quota.premium_value),
-                        "entrada_final": str(pricing["entrada_final"]),
-                        "installment_value": str(quota.installment_value or 0),
-                        "supplier_source": quota.supplier_source,
-                        "administrator_id": quota.administrator_id,
-                    }
-                ],
-            },
+            seed_marketplace_lifecycle(
+                {
+                    "channel": SOURCE,
+                    "quota_ids": [quota.id],
+                    "total_credit": str(pricing["credit"]),
+                    "total_entrada": str(pricing["entrada_final"]),
+                    "client_email": email.strip(),
+                    "person_type": person,
+                    "partner_user_id": partner.id if partner else None,
+                    "porc_a_mais": "0",
+                    "porc_a_mais_sellers": "0",
+                    "filters": snapshot,
+                    "quotas": [
+                        {
+                            "quota_id": quota.id,
+                            "group_code": quota.group_code,
+                            "quota_code": quota.quota_code,
+                            "credit_value": str(quota.credit_value),
+                            "premium_value": str(quota.premium_value),
+                            "entrada_final": str(pricing["entrada_final"]),
+                            "installment_value": str(quota.installment_value or 0),
+                            "supplier_source": quota.supplier_source,
+                            "administrator_id": quota.administrator_id,
+                        }
+                    ],
+                }
+            ),
             ensure_ascii=False,
         ),
         sale_channel="PARTNER_OFFICE",
