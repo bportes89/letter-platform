@@ -16,9 +16,16 @@ async function publicFetch<T>(path: string, options: RequestInit = {}): Promise<
     );
   }
   if (!response.ok) {
-    const body = (await response.json().catch(() => ({}))) as { detail?: string | { msg?: string }[] };
+    const body = (await response.json().catch(() => ({}))) as {
+      detail?: string | { msg?: string }[] | { message?: string; motivos?: string[] };
+    };
     if (typeof body.detail === "string") throw new Error(body.detail);
     if (Array.isArray(body.detail) && body.detail[0]?.msg) throw new Error(body.detail[0].msg);
+    if (body.detail && typeof body.detail === "object" && !Array.isArray(body.detail)) {
+      const d = body.detail as { message?: string; motivos?: string[] };
+      const extra = d.motivos?.length ? ` ${d.motivos.join(" ")}` : "";
+      throw new Error(`${d.message || "Não foi possível concluir a solicitação."}${extra}`);
+    }
     throw new Error("Não foi possível concluir a solicitação.");
   }
   return response.json() as Promise<T>;
@@ -198,4 +205,47 @@ export async function acceptPartnerInvitation(payload: {
 
 export function invitationContractPreviewUrl(token: string): string {
   return `${API_URL}/auth/invitations/preview/contract?token=${encodeURIComponent(token)}`;
+}
+
+export type VenderCotaBootstrap = {
+  title: string;
+  administrators: { id: string; name: string }[];
+  tipos: { id: string; label: string }[];
+  rules_summary: string;
+};
+
+export type VenderCotaResult = {
+  viable: boolean;
+  motivos: string[];
+  tipo_faixa: string;
+  credit_value: string;
+  paid_percent: string;
+  offer_percent: string;
+  offer_value: string;
+  range_name?: string;
+};
+
+export async function fetchVenderCotaBootstrap(): Promise<VenderCotaBootstrap> {
+  return publicFetch("/public/site/vender-minha-cota");
+}
+
+export async function calculateVenderCota(payload: Record<string, unknown>): Promise<{ result: VenderCotaResult }> {
+  return publicFetch("/public/site/vender-minha-cota/calculate", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function storeVenderCota(payload: Record<string, unknown>): Promise<{
+  offer_id: string;
+  status: string;
+  offer_value: string;
+  offer_percent: string;
+  message: string;
+  link_dashboard: string;
+}> {
+  return publicFetch("/public/site/vender-minha-cota/store", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }

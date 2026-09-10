@@ -234,6 +234,50 @@ class Quota(TimestampMixin, Base):
     administrator: Mapped[Administrator] = relationship()
 
 
+class QuotaOfferRange(TimestampMixin, Base):
+    """Faixas editáveis do robô 'Vender minha cota' (tipo × prazo × % pago → % oferta)."""
+
+    __tablename__ = "quota_offer_ranges"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    name: Mapped[str] = mapped_column(String(180))
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    tipo: Mapped[str] = mapped_column(String(20), index=True)  # imovel | veiculo
+    prazo_init: Mapped[int] = mapped_column(Integer)
+    prazo_final: Mapped[int] = mapped_column(Integer)
+    pago_init: Mapped[float] = mapped_column(Numeric(8, 2), default=0)
+    pago_final: Mapped[float] = mapped_column(Numeric(8, 2))
+    porc: Mapped[float] = mapped_column(Numeric(8, 2))  # % do crédito que a Letter paga
+
+
+class QuotaSellOffer(TimestampMixin, Base):
+    """Oferta pública de venda de cota contemplada à Letter."""
+
+    __tablename__ = "quota_sell_offers"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    administrator_id: Mapped[str | None] = mapped_column(ForeignKey("administrators.id"), index=True)
+    partner_referral_code: Mapped[str | None] = mapped_column(String(80))
+    status: Mapped[str] = mapped_column(String(40), default="AWAITING_STATEMENT", index=True)
+    # AWAITING_STATEMENT → UNDER_REVIEW → ACCEPTED | REJECTED
+    contact_name: Mapped[str] = mapped_column(String(180))
+    contact_email: Mapped[str] = mapped_column(String(180), index=True)
+    contact_phone: Mapped[str] = mapped_column(String(40))
+    document: Mapped[str | None] = mapped_column(String(20))
+    person_type: Mapped[str] = mapped_column(String(10), default="PF")  # PF | PJ
+    tipo_consorcio: Mapped[str] = mapped_column(String(30))
+    credit_value: Mapped[float] = mapped_column(Numeric(15, 2))
+    paid_value: Mapped[float] = mapped_column(Numeric(15, 2), default=0)
+    outstanding_balance: Mapped[float] = mapped_column(Numeric(15, 2), default=0)
+    term_months: Mapped[int] = mapped_column(Integer)
+    contemplated: Mapped[bool] = mapped_column(Boolean, default=False)
+    paid_percent: Mapped[float] = mapped_column(Numeric(8, 2), default=0)
+    offer_percent: Mapped[float] = mapped_column(Numeric(8, 2), default=0)
+    offer_value: Mapped[float] = mapped_column(Numeric(15, 2), default=0)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
 class QuotaReservation(TimestampMixin, Base):
     __tablename__ = "quota_reservations"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)

@@ -371,6 +371,7 @@ export function SiteNav() {
         <a href="#atendimento">Atendimento</a>
         <a href="#solucoes">Soluções</a>
         <a href="#simulador">Simuladores</a>
+        <Link href="/vender-minha-cota">Vender cota</Link>
         <a href="#manuais">Manuais</a>
         <a href="#nina">Nina Engine</a>
         <a href="#leilao">Leilão</a>

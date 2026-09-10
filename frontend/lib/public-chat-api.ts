@@ -127,6 +127,6 @@ export function whatsappHref(info?: ChatSiteInfo): string | null {
 }
 
 export function mapLegacyLink(link: string): string {
-  if (link === "/vender_minha_cota") return "/login";
+  if (link === "/vender_minha_cota") return "/vender-minha-cota";
   return link;
 }

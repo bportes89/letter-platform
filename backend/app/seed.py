@@ -132,6 +132,10 @@ def seed():
             if org:
                 _ensure_profile_demo_users(db, org.id, password)
                 _ensure_master_trees(db, org.id, password)
+                from app.vender_cota_service import ensure_default_ranges
+
+                ensure_default_ranges(db, org.id)
+                db.commit()
             _sync_headquarters_org(db)
             _sync_demo_phones(db)
             _sync_demo_passwords(db, password)
@@ -200,6 +204,10 @@ def seed():
                 base_type="INTERMEDIATION_FEE", pool_rate_percent=Decimal("3"), levels_json=json.dumps(LEVEL_SHARES), active=True,
             ),
         ])
+        db.commit()
+        from app.vender_cota_service import ensure_default_ranges
+
+        ensure_default_ranges(db, org.id)
         db.commit()
         _ensure_master_trees(db, org.id, password)
         print("Seed concluído: admin@letter.com.br / (senha de LETTER_DEMO_PASSWORD ou Letter@123)")

@@ -54,6 +54,74 @@ def test_quota_reservation_blocks_duplicate(client, auth_headers):
     assert released.json()["status"] == "RELEASED"
 
 
+def test_vender_minha_cota_calculate_and_store(client, auth_headers):
+    boot = client.get("/api/v1/public/site/vender-minha-cota")
+    assert boot.status_code == 200
+    assert boot.json()["tipos"]
+    admins = boot.json()["administrators"]
+    assert admins
+
+    # crédito 100k, pago 10k (10%), imóvel 120m → faixa 20% → oferta 20k
+    calc = client.post("/api/v1/public/site/vender-minha-cota/calculate", json={
+        "tipo_consorcio": "imovel",
+        "credit_value": "100000",
+        "paid_value": "10000",
+        "term_months": 120,
+        "contemplated": True,
+    })
+    assert calc.status_code == 200
+    assert calc.json()["result"]["viable"] is True
+    assert calc.json()["result"]["offer_percent"] == "20.00"
+    assert calc.json()["result"]["offer_value"] == "20000.00"
+
+    # 72 meses autos entra na faixa 72+
+    calc72 = client.post("/api/v1/public/site/vender-minha-cota/calculate", json={
+        "tipo_consorcio": "autos",
+        "credit_value": "50000",
+        "paid_value": "5000",
+        "term_months": 72,
+        "contemplated": True,
+    })
+    assert calc72.status_code == 200
+    assert calc72.json()["result"]["viable"] is True
+    assert calc72.json()["result"]["offer_percent"] == "15.00"
+
+    # pago > 35% recusa
+    refuse = client.post("/api/v1/public/site/vender-minha-cota/calculate", json={
+        "tipo_consorcio": "autos",
+        "credit_value": "50000",
+        "paid_value": "20000",
+        "term_months": 72,
+        "contemplated": True,
+    })
+    assert refuse.status_code == 200
+    assert refuse.json()["result"]["viable"] is False
+
+    stored = client.post("/api/v1/public/site/vender-minha-cota/store", json={
+        "tipo_consorcio": "imovel",
+        "administrator_id": admins[0]["id"],
+        "credit_value": "100000",
+        "paid_value": "10000",
+        "outstanding_balance": "90000",
+        "term_months": 120,
+        "contemplated": True,
+        "contact_name": "Maria Silva",
+        "contact_email": "maria.cota@example.com",
+        "contact_phone": "33999887766",
+        "person_type": "PF",
+    })
+    assert stored.status_code == 201
+    assert stored.json()["offer_value"] == "20000.00"
+
+    offers = client.get("/api/v1/funding/vender-cota/offers", headers=auth_headers)
+    assert offers.status_code == 200
+    assert any(o["contact_email"] == "maria.cota@example.com" for o in offers.json())
+
+    ranges = client.get("/api/v1/funding/vender-cota/ranges", headers=auth_headers)
+    assert ranges.status_code == 200
+    assert len(ranges.json()) >= 30
+
+
 def test_marketplace_esteira1_and_esteira2(client, auth_headers):
     quota = next(q for q in client.get("/api/v1/quotas", headers=auth_headers).json() if q["status"] == "AVAILABLE")
     client.patch(

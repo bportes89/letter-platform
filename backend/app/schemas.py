@@ -2100,6 +2100,35 @@ class MarketplaceEsteira2Response(BaseModel):
     matches: list[MarketplaceMatchView] = Field(default_factory=list)
     message: str
 
+
+class VenderCotaCalculateRequest(BaseModel):
+    tipo_consorcio: str
+    credit_value: Decimal = Field(gt=0)
+    paid_value: Decimal = Field(ge=0, default=0)
+    outstanding_balance: Decimal = Field(ge=0, default=0)
+    term_months: int = Field(gt=0, le=9999)
+    contemplated: bool = True
+
+
+class VenderCotaStoreRequest(VenderCotaCalculateRequest):
+    administrator_id: str | None = None
+    contact_name: str = Field(min_length=2, max_length=180)
+    contact_email: str = Field(min_length=5, max_length=180)
+    contact_phone: str = Field(min_length=8, max_length=40)
+    document: str | None = None
+    person_type: str = "PF"
+    partner_referral_code: str | None = None
+
+
+class QuotaOfferRangeUpdate(BaseModel):
+    active: bool | None = None
+    name: str | None = None
+    porc: Decimal | None = Field(default=None, ge=0, le=100)
+    pago_final: Decimal | None = Field(default=None, ge=0, le=100)
+    prazo_init: int | None = Field(default=None, ge=1)
+    prazo_final: int | None = Field(default=None, ge=1)
+
+
 class BISummaryView(BaseModel):
     funnel: dict; portfolio: dict; risk: dict; funding: dict; recovery: dict
 

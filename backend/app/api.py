@@ -85,6 +85,7 @@ from app.schemas import (
     NetworkNodeCreate, NetworkNodeView, NetworkDownlineMemberView, PayoutApprove, PayoutCreate, PayoutView, ProposalCreate, ProposalUpdate,
     ReconciliationBatchView, ReconciliationItemView, ReconciliationResolveRequest,
     MarketplaceEsteira1Request, MarketplaceEsteira1Response, MarketplaceEsteira2Request, MarketplaceEsteira2Response,
+    VenderCotaCalculateRequest, VenderCotaStoreRequest, QuotaOfferRangeUpdate,
     ProposalView, QuotaCreate, QuotaUpdate, QuotaView, NinaQuotaScanView, RecoveredAssetCreate, RecoveredAssetView, RefreshRequest,
     CommercialClientView,
     ReservationCreate, ReservationView, SdcCalculationRequest, SessionView, SignatureComplete,
@@ -1953,6 +1954,112 @@ def public_site_sdc_simulate(payload: PublicSdcSimulateRequest, request: Request
         quota_ids=payload.quota_ids,
         scr_restrictions=payload.scr_restrictions,
     )
+
+
+@router.get("/public/site/vender-minha-cota")
+def public_vender_cota_bootstrap(request: Request, db: Session = Depends(get_db)):
+    ip = request.client.host if request.client else "unknown"
+    allowed, retry = rate_limiter.allow(f"public-vmc:{ip}", settings.public_rate_limit_per_minute)
+    if not allowed:
+        raise HTTPException(429, "Limite atingido", headers={"Retry-After": str(retry)})
+    from app.vender_cota_service import bootstrap_page
+
+    data = bootstrap_page(db)
+    db.commit()
+    return data
+
+
+@router.post("/public/site/vender-minha-cota/calculate")
+def public_vender_cota_calculate(payload: VenderCotaCalculateRequest, request: Request, db: Session = Depends(get_db)):
+    ip = request.client.host if request.client else "unknown"
+    allowed, retry = rate_limiter.allow(f"public-vmc-calc:{ip}", settings.public_rate_limit_per_minute)
+    if not allowed:
+        raise HTTPException(429, "Limite atingido", headers={"Retry-After": str(retry)})
+    from app.vender_cota_service import default_organization_id, evaluate_offer
+
+    org_id = default_organization_id(db)
+    result = evaluate_offer(
+        db,
+        organization_id=org_id,
+        tipo_consorcio=payload.tipo_consorcio,
+        credit_value=payload.credit_value,
+        paid_value=payload.paid_value,
+        term_months=payload.term_months,
+        contemplated=payload.contemplated,
+    )
+    db.commit()
+    return {"result": result}
+
+
+@router.post("/public/site/vender-minha-cota/store", status_code=201)
+def public_vender_cota_store(payload: VenderCotaStoreRequest, request: Request, db: Session = Depends(get_db)):
+    ip = request.client.host if request.client else "unknown"
+    allowed, retry = rate_limiter.allow(f"public-vmc-store:{ip}", settings.public_rate_limit_per_minute)
+    if not allowed:
+        raise HTTPException(429, "Limite atingido", headers={"Retry-After": str(retry)})
+    from app.vender_cota_service import store_offer
+
+    data = store_offer(
+        db,
+        administrator_id=payload.administrator_id,
+        tipo_consorcio=payload.tipo_consorcio,
+        credit_value=payload.credit_value,
+        paid_value=payload.paid_value,
+        outstanding_balance=payload.outstanding_balance,
+        term_months=payload.term_months,
+        contemplated=payload.contemplated,
+        contact_name=payload.contact_name,
+        contact_email=payload.contact_email,
+        contact_phone=payload.contact_phone,
+        document=payload.document,
+        person_type=payload.person_type,
+        partner_referral_code=payload.partner_referral_code,
+    )
+    db.commit()
+    return data
+
+
+@router.get("/funding/vender-cota/ranges")
+def vender_cota_ranges(user: User = Depends(require_scope("inventory:write")), db: Session = Depends(get_db)):
+    from app.vender_cota_service import list_ranges, range_view
+
+    return [range_view(r) for r in list_ranges(db, user.organization_id)]
+
+
+@router.patch("/funding/vender-cota/ranges/{range_id}")
+def vender_cota_range_update(
+    range_id: str,
+    payload: QuotaOfferRangeUpdate,
+    user: User = Depends(require_scope("inventory:write")),
+    db: Session = Depends(get_db),
+):
+    from app.models import QuotaOfferRange
+    from app.vender_cota_service import range_view
+
+    item = db.scalar(
+        select(QuotaOfferRange).where(
+            QuotaOfferRange.id == range_id,
+            QuotaOfferRange.organization_id == user.organization_id,
+        )
+    )
+    if not item:
+        raise HTTPException(status_code=404, detail="Faixa não encontrada")
+    data = payload.model_dump(exclude_unset=True)
+    for key, value in data.items():
+        setattr(item, key, value)
+    audit(db, user, "vender_cota.range_updated", "quota_offer_range", item.id, data)
+    db.commit()
+    db.refresh(item)
+    return range_view(item)
+
+
+@router.get("/funding/vender-cota/offers")
+def vender_cota_offers(user: User = Depends(require_scope("inventory:write")), db: Session = Depends(get_db)):
+    from app.models import Administrator
+    from app.vender_cota_service import list_offers, offer_view
+
+    items = list_offers(db, user.organization_id)
+    return [offer_view(o, db.get(Administrator, o.administrator_id) if o.administrator_id else None) for o in items]
 
 
 @router.post("/public/site/chat/home")
