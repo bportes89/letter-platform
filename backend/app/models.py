@@ -270,6 +270,39 @@ class QuotaSupplier(TimestampMixin, Base):
     last_sync_detail_json: Mapped[str] = mapped_column(Text, default="{}")
     portal_token_hash: Mapped[str | None] = mapped_column(String(64), index=True)
     portal_token_created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    balance_available: Mapped[float] = mapped_column(Numeric(15, 2), default=0)
+
+
+class SupplierLedgerEntry(TimestampMixin, Base):
+    """Lançamentos de extrato do fornecedor (crédito liberação / débito saque)."""
+
+    __tablename__ = "supplier_ledger_entries"
+    __table_args__ = (UniqueConstraint("supplier_id", "reference", "kind", name="uq_supplier_ledger_ref_kind"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    supplier_id: Mapped[str] = mapped_column(ForeignKey("quota_suppliers.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(20), index=True)  # CREDIT | DEBIT
+    amount: Mapped[float] = mapped_column(Numeric(15, 2))
+    reference: Mapped[str] = mapped_column(String(120), index=True)
+    proposal_id: Mapped[str | None] = mapped_column(ForeignKey("proposals.id"), index=True)
+    description: Mapped[str] = mapped_column(String(255), default="")
+    meta_json: Mapped[str] = mapped_column(Text, default="{}")
+
+
+class SupplierWithdrawal(TimestampMixin, Base):
+    """Pedido de saque do fornecedor (PIX)."""
+
+    __tablename__ = "supplier_withdrawals"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    supplier_id: Mapped[str] = mapped_column(ForeignKey("quota_suppliers.id"), index=True)
+    amount: Mapped[float] = mapped_column(Numeric(15, 2))
+    status: Mapped[str] = mapped_column(String(20), default="PENDING", index=True)  # PENDING | PAID | CANCELLED
+    pix_key: Mapped[str] = mapped_column(String(180))
+    notes: Mapped[str | None] = mapped_column(Text)
+    ledger_entry_id: Mapped[str | None] = mapped_column(ForeignKey("supplier_ledger_entries.id"))
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    processed_by_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"))
 
 
 class QuotaOfferRange(TimestampMixin, Base):

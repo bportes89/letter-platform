@@ -76,6 +76,9 @@ def supplier_participates(db: Session, proposal: Proposal, supplier: QuotaSuppli
 
 
 def portal_me(supplier: QuotaSupplier) -> dict:
+    from app.supplier_wallet_service import portal_wallet
+
+    wallet = portal_wallet(supplier)
     return {
         "id": supplier.id,
         "name": supplier.name,
@@ -83,6 +86,8 @@ def portal_me(supplier: QuotaSupplier) -> dict:
         "source_key": supplier.source_key,
         "email": supplier.email,
         "document": supplier.document,
+        "balance_available": wallet["balance_available"],
+        "pix_key": wallet["pix_key"],
     }
 
 

@@ -130,17 +130,21 @@ Na **primeira** transição para `CONCLUIDO`:
 
 Extrato admin: `GET /api/v1/marketplace/extrato` (linhas fornecedor/plataforma + afiliados).
 
-Fora do escopo desta frente: crédito BANK/SEFAZ, saldo persistente / extrato-saque do fornecedor, scrape Uni/Lume.
+Na mesma liberação, credita **saldo do fornecedor** (`QuotaSupplier.balance_available` + `supplier_ledger_entries`, idempotente por `MARKETPLACE_RELEASE:{proposal_id}`).
 
-## Portal do fornecedor (confirmar transferência)
+Fora do escopo desta frente: crédito BANK/SEFAZ, scrape Uni/Lume, PIX automático Asaas.
+
+## Portal do fornecedor (confirmar transferência + saldo/saque)
 
 Fecha o gate de `CONCLUIDO` sem depender só do admin:
 
 - Admin: `POST /api/v1/marketplace/suppliers/{id}/portal-token` → token `SUP-…` (uma vez) + URL `/portal-fornecedor?token=…`
 - Fornecedor (`Authorization: Bearer <token>`):
-  - `GET /api/v1/supplier-portal/me`
+  - `GET /api/v1/supplier-portal/me` (inclui `balance_available`)
   - `GET /api/v1/supplier-portal/transfers?status=pending|confirmed|all`
   - `POST /api/v1/supplier-portal/transfers/{lead_id}/confirm` → `supplier_transfer_confirmed=true` (exige `PAGO`; **não** conclui nem libera comissão)
+  - `GET /api/v1/supplier-portal/ledger` · `GET/POST /api/v1/supplier-portal/withdrawals` (saque reserva saldo; status `PENDING`)
+- Admin saques: `GET /api/v1/marketplace/supplier-withdrawals` · `POST .../{id}/process` com `action=PAID|CANCELLED` (cancelado devolve saldo)
 
 Match: `normalize_supplier_key(quota.supplier_source)` = `QuotaSupplier.source_key`. UI: `/portal-fornecedor`.
 

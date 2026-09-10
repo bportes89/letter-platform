@@ -2242,6 +2242,7 @@ class QuotaSupplierView(BaseModel):
     last_sync_detail_json: str = "{}"
     has_portal_token: bool = False
     portal_token_created_at: datetime | None = None
+    balance_available: str = "0.00"
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -2261,6 +2262,8 @@ class SupplierPortalMeView(BaseModel):
     source_key: str
     email: str | None = None
     document: str
+    balance_available: str = "0.00"
+    pix_key: str | None = None
 
 
 class SupplierPortalTransferItem(BaseModel):
@@ -2277,6 +2280,41 @@ class SupplierPortalTransferItem(BaseModel):
     supplier_transfer_confirmed_at: str | None = None
     paid_at: str | None = None
     confirmed_by_source_key: str | None = None
+
+
+class SupplierLedgerItem(BaseModel):
+    id: str
+    kind: str
+    amount: str
+    reference: str
+    proposal_id: str | None = None
+    description: str
+    created_at: str | None = None
+
+
+class SupplierWithdrawalRequest(BaseModel):
+    amount: Decimal = Field(gt=0)
+    pix_key: str | None = Field(default=None, max_length=180)
+    notes: str | None = Field(default=None, max_length=500)
+
+
+class SupplierWithdrawalView(BaseModel):
+    id: str
+    supplier_id: str
+    amount: str
+    status: str
+    pix_key: str
+    notes: str | None = None
+    ledger_entry_id: str | None = None
+    processed_at: str | None = None
+    created_at: str | None = None
+    supplier_name: str | None = None
+    supplier_source_key: str | None = None
+
+
+class SupplierWithdrawalProcessRequest(BaseModel):
+    action: str = Field(min_length=3, max_length=20)  # PAID | CANCELLED
+    notes: str | None = Field(default=None, max_length=500)
 
 
 class QuotaInventorySyncView(BaseModel):

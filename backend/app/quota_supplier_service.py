@@ -75,6 +75,7 @@ def supplier_view(item: QuotaSupplier) -> dict:
         "last_sync_detail_json": item.last_sync_detail_json or "{}",
         "has_portal_token": bool(item.portal_token_hash),
         "portal_token_created_at": item.portal_token_created_at,
+        "balance_available": str(money(Decimal(str(item.balance_available or 0)))),
         "created_at": item.created_at,
         "updated_at": item.updated_at,
     }

@@ -25,6 +25,19 @@ type QuotaSupplier = {
   last_sync_at: string | null;
   last_sync_status: string | null;
   has_portal_token?: boolean;
+  balance_available?: string;
+};
+
+type SupplierWithdrawal = {
+  id: string;
+  supplier_id: string;
+  amount: string;
+  status: string;
+  pix_key: string;
+  notes: string | null;
+  created_at: string | null;
+  supplier_name: string | null;
+  supplier_source_key: string | null;
 };
 
 type SyncResult = {
@@ -41,6 +54,7 @@ type SyncResult = {
 
 export function FornecedoresModule() {
   const [items, setItems] = useState<QuotaSupplier[]>([]);
+  const [withdrawals, setWithdrawals] = useState<SupplierWithdrawal[]>([]);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [editing, setEditing] = useState<QuotaSupplier | null>(null);
@@ -50,9 +64,31 @@ export function FornecedoresModule() {
     setItems(await api<QuotaSupplier[]>("/marketplace/suppliers"));
   }, []);
 
+  const loadWithdrawals = useCallback(async () => {
+    setWithdrawals(await api<SupplierWithdrawal[]>("/marketplace/supplier-withdrawals?status=PENDING&limit=50"));
+  }, []);
+
   useEffect(() => {
     load().catch((e) => setError(e instanceof Error ? e.message : "Falha ao carregar fornecedores"));
-  }, [load]);
+    loadWithdrawals().catch(() => undefined);
+  }, [load, loadWithdrawals]);
+
+  async function processWithdrawal(id: string, action: "PAID" | "CANCELLED") {
+    setError("");
+    setBusy(true);
+    try {
+      await api(`/marketplace/supplier-withdrawals/${id}/process`, {
+        method: "POST",
+        body: JSON.stringify({ action }),
+      });
+      setNotice(action === "PAID" ? "Saque marcado como pago." : "Saque cancelado — saldo devolvido.");
+      await Promise.all([load(), loadWithdrawals()]);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Falha ao processar saque");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function ensureDefaults() {
     setError("");
@@ -334,6 +370,7 @@ export function FornecedoresModule() {
                 <th>Source</th>
                 <th>Sync</th>
                 <th>Markup</th>
+                <th>Saldo</th>
                 <th>Último sync</th>
                 <th>Ações</th>
               </tr>
@@ -356,6 +393,7 @@ export function FornecedoresModule() {
                     {x.api_url ? <small title={x.api_url}>URL ok</small> : <small>—</small>}
                   </td>
                   <td>{x.markup_percent}%</td>
+                  <td>R$ {x.balance_available ?? "0.00"}</td>
                   <td>
                     {x.last_sync_status || "—"}
                     <small>{x.last_sync_at ? new Date(x.last_sync_at).toLocaleString("pt-BR") : ""}</small>
@@ -381,6 +419,68 @@ export function FornecedoresModule() {
                   </td>
                 </tr>
               ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="panel operational-panel" style={{ marginTop: "1.25rem" }}>
+        <div className="page-heading" style={{ marginBottom: "0.75rem" }}>
+          <div>
+            <span className="eyebrow dark">PEDIDOS</span>
+            <h2 style={{ margin: 0, fontSize: "1.15rem" }}>Saques de fornecedores</h2>
+            <p style={{ margin: "0.35rem 0 0" }}>Pendentes do portal — marcar pago ou cancelar (devolve saldo).</p>
+          </div>
+          <button type="button" className="table-action" onClick={() => loadWithdrawals()} disabled={busy}>
+            <RefreshCw /> Atualizar
+          </button>
+        </div>
+        <div className="table-wrap">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Fornecedor</th>
+                <th>Valor</th>
+                <th>Pix</th>
+                <th>Quando</th>
+                <th>Ações</th>
+              </tr>
+            </thead>
+            <tbody>
+              {withdrawals.map((w) => (
+                <tr key={w.id}>
+                  <td>
+                    <b>{w.supplier_name || "—"}</b>
+                    <small>
+                      <code>{w.supplier_source_key || w.supplier_id.slice(0, 8)}</code>
+                    </small>
+                  </td>
+                  <td>R$ {w.amount}</td>
+                  <td>
+                    <code>{w.pix_key || "—"}</code>
+                    {w.notes ? <small>{w.notes}</small> : null}
+                  </td>
+                  <td>{w.created_at ? new Date(w.created_at).toLocaleString("pt-BR") : "—"}</td>
+                  <td className="actions-cell">
+                    <button type="button" className="table-action" disabled={busy} onClick={() => processWithdrawal(w.id, "PAID")}>
+                      Pago
+                    </button>
+                    <button
+                      type="button"
+                      className="table-action"
+                      disabled={busy}
+                      onClick={() => processWithdrawal(w.id, "CANCELLED")}
+                    >
+                      Cancelar
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {!withdrawals.length && (
+                <tr>
+                  <td colSpan={5}>Nenhum saque pendente.</td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>

@@ -209,7 +209,15 @@ def release_marketplace_commissions(db: Session, actor: User, proposal: Proposal
     reference = release_reference(proposal.id)
 
     if life.get("commission_release_status") == COMM_RELEASED and isinstance(life.get("commission_release"), dict):
-        return life["commission_release"]
+        snap = life["commission_release"]
+        from app.supplier_wallet_service import credit_supplier_releases_from_snapshot
+
+        snap["supplier_wallet_credits"] = credit_supplier_releases_from_snapshot(db, proposal, snap)
+        life["commission_release"] = snap
+        terms["lifecycle"] = life
+        proposal.terms_json = json.dumps(terms, ensure_ascii=False)
+        db.flush()
+        return snap
 
     existing = _existing_entries(db, proposal, reference)
     lines = compute_supplier_platform_lines(db, proposal)
@@ -283,6 +291,14 @@ def release_marketplace_commissions(db: Session, actor: User, proposal: Proposal
     life["commission_released_at"] = snapshot["released_at"]
     life["commission_release"] = snapshot
     # limpa legado stub se ainda presente no blob
+    terms["lifecycle"] = life
+    proposal.terms_json = json.dumps(terms, ensure_ascii=False)
+    db.flush()
+
+    from app.supplier_wallet_service import credit_supplier_releases_from_snapshot
+
+    snapshot["supplier_wallet_credits"] = credit_supplier_releases_from_snapshot(db, proposal, snapshot)
+    life["commission_release"] = snapshot
     terms["lifecycle"] = life
     proposal.terms_json = json.dumps(terms, ensure_ascii=False)
     db.flush()

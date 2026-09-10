@@ -1,7 +1,7 @@
 "use client";
 
 import { CheckCircle2, RefreshCw, Truck } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { API_URL } from "@/lib/api";
 
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
@@ -19,7 +19,31 @@ type Transfer = {
   paid_at: string | null;
 };
 
-type Me = { id: string; name: string; source_key: string; email: string | null };
+type Me = {
+  id: string;
+  name: string;
+  source_key: string;
+  email: string | null;
+  balance_available?: string;
+  pix_key?: string | null;
+};
+
+type LedgerRow = {
+  id: string;
+  kind: string;
+  amount: string;
+  reference: string;
+  description: string;
+  created_at: string | null;
+};
+
+type Withdrawal = {
+  id: string;
+  amount: string;
+  status: string;
+  pix_key: string;
+  created_at: string | null;
+};
 
 function portalFetch<T>(path: string, token: string, init?: RequestInit): Promise<T> {
   return fetch(`${API_URL}${path}`, {
@@ -48,6 +72,10 @@ export default function PortalFornecedorPage() {
   const [tokenInput, setTokenInput] = useState(initialToken);
   const [me, setMe] = useState<Me | null>(null);
   const [rows, setRows] = useState<Transfer[]>([]);
+  const [ledger, setLedger] = useState<LedgerRow[]>([]);
+  const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([]);
+  const [saqueAmount, setSaqueAmount] = useState("");
+  const [saquePix, setSaquePix] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
@@ -55,8 +83,13 @@ export default function PortalFornecedorPage() {
   const load = useCallback(async (auth: string) => {
     const profile = await portalFetch<Me>("/supplier-portal/me", auth);
     const transfers = await portalFetch<Transfer[]>("/supplier-portal/transfers?status=pending", auth);
+    const extrato = await portalFetch<LedgerRow[]>("/supplier-portal/ledger?limit=30", auth);
+    const saques = await portalFetch<Withdrawal[]>("/supplier-portal/withdrawals?limit=20", auth);
     setMe(profile);
     setRows(transfers);
+    setLedger(extrato);
+    setWithdrawals(saques);
+    setSaquePix(profile.pix_key || "");
   }, []);
 
   useEffect(() => {
@@ -80,19 +113,42 @@ export default function PortalFornecedorPage() {
     }
   }
 
+  async function requestSaque(e: FormEvent) {
+    e.preventDefault();
+    if (!token) return;
+    setBusy(true);
+    setError("");
+    try {
+      await portalFetch("/supplier-portal/withdrawals", token, {
+        method: "POST",
+        body: JSON.stringify({
+          amount: saqueAmount,
+          pix_key: saquePix || undefined,
+        }),
+      });
+      setNotice("Saque solicitado — aguardando pagamento pela LETTER.");
+      setSaqueAmount("");
+      await load(token);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Falha ao solicitar saque");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <main style={{ maxWidth: 960, margin: "2rem auto", padding: "0 1rem", fontFamily: "Georgia, serif" }}>
       <div style={{ display: "flex", gap: "1rem", alignItems: "center", marginBottom: "1.5rem" }}>
         <Truck />
         <div>
           <p style={{ margin: 0, letterSpacing: "0.08em", fontSize: "0.75rem" }}>LETTER · FORNECEDOR</p>
-          <h1 style={{ margin: "0.25rem 0 0" }}>Portal de transferências</h1>
+          <h1 style={{ margin: "0.25rem 0 0" }}>Portal do fornecedor</h1>
         </div>
       </div>
 
       {!me ? (
         <section style={{ borderTop: "1px solid #ccc", paddingTop: "1rem" }}>
-          <p>Cole o token gerado no admin (Fornecedores) para ver vendas Pagou aguardando confirmação.</p>
+          <p>Cole o token gerado no admin (Fornecedores) para ver vendas, saldo e saques.</p>
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -113,6 +169,10 @@ export default function PortalFornecedorPage() {
         <section>
           <div style={{ marginBottom: "1rem" }}>
             <strong>{me.name}</strong> · {me.source_key}
+            <span style={{ marginLeft: "1rem" }}>
+              Saldo disponível:{" "}
+              <strong>{brl.format(Number(me.balance_available || 0))}</strong>
+            </span>
             <button
               type="button"
               style={{ marginLeft: "1rem" }}
@@ -135,7 +195,9 @@ export default function PortalFornecedorPage() {
             </p>
           )}
           {error && <p style={{ color: "#a00" }}>{error}</p>}
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+
+          <h2>Transferências pendentes</h2>
+          <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: "2rem" }}>
             <thead>
               <tr>
                 <th align="left">Cliente</th>
@@ -166,6 +228,47 @@ export default function PortalFornecedorPage() {
               )}
             </tbody>
           </table>
+
+          <h2>Pedir saque</h2>
+          <form onSubmit={(ev) => void requestSaque(ev)} style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", marginBottom: "1.5rem" }}>
+            <input
+              value={saqueAmount}
+              onChange={(e) => setSaqueAmount(e.target.value)}
+              placeholder="Valor"
+              required
+              style={{ padding: "0.6rem", width: 140 }}
+            />
+            <input
+              value={saquePix}
+              onChange={(e) => setSaquePix(e.target.value)}
+              placeholder="Chave PIX"
+              style={{ padding: "0.6rem", flex: 1, minWidth: 200 }}
+            />
+            <button type="submit" disabled={busy}>
+              Solicitar
+            </button>
+          </form>
+
+          <h2>Extrato</h2>
+          <ul>
+            {ledger.map((row) => (
+              <li key={row.id}>
+                {row.kind} · {brl.format(Number(row.amount))} · {row.description}{" "}
+                <small>{row.created_at || ""}</small>
+              </li>
+            ))}
+            {!ledger.length && <li>Sem lançamentos ainda.</li>}
+          </ul>
+
+          <h2>Saques</h2>
+          <ul>
+            {withdrawals.map((w) => (
+              <li key={w.id}>
+                {brl.format(Number(w.amount))} · {w.status} · PIX {w.pix_key}
+              </li>
+            ))}
+            {!withdrawals.length && <li>Nenhum saque.</li>}
+          </ul>
         </section>
       )}
       {error && !me ? <p style={{ color: "#a00" }}>{error}</p> : null}

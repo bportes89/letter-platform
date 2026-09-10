@@ -89,6 +89,7 @@ from app.schemas import (
     VendaDiretaRoboSearchRequest, VendaDiretaRoboSearchResponse, VendaDiretaRoboConfirmRequest, VendaDiretaRoboConfirmResponse,
     QuotaSupplierCreate, QuotaSupplierUpdate, QuotaSupplierView, QuotaInventorySyncView,
     SupplierPortalTokenResponse, SupplierPortalMeView, SupplierPortalTransferItem,
+    SupplierLedgerItem, SupplierWithdrawalRequest, SupplierWithdrawalView, SupplierWithdrawalProcessRequest,
     VendaDiretaManualCotaOption, VendaDiretaManualCadastroOption, VendaDiretaManualPartnerOption,
     VendaDiretaManualStoreRequest, VendaDiretaManualStoreResponse,
     CadastroListItem, CadastroDetailView, CadastroUpdateRequest, MarketplaceExtratoItem,
@@ -1777,6 +1778,74 @@ def supplier_portal_confirm_transfer(
     from app.supplier_portal_service import confirm_supplier_transfer
 
     result = confirm_supplier_transfer(db, supplier, lead_id)
+    db.commit()
+    return result
+
+
+@router.get("/supplier-portal/ledger", response_model=list[SupplierLedgerItem])
+def supplier_portal_ledger(
+    limit: int = 100,
+    supplier: QuotaSupplier = Depends(get_current_supplier),
+    db: Session = Depends(get_db),
+):
+    from app.supplier_wallet_service import list_ledger
+
+    return list_ledger(db, supplier, limit=limit)
+
+
+@router.get("/supplier-portal/withdrawals", response_model=list[SupplierWithdrawalView])
+def supplier_portal_withdrawals(
+    limit: int = 50,
+    supplier: QuotaSupplier = Depends(get_current_supplier),
+    db: Session = Depends(get_db),
+):
+    from app.supplier_wallet_service import list_withdrawals_for_supplier
+
+    return list_withdrawals_for_supplier(db, supplier, limit=limit)
+
+
+@router.post("/supplier-portal/withdrawals", response_model=SupplierWithdrawalView, status_code=201)
+def supplier_portal_request_withdrawal(
+    payload: SupplierWithdrawalRequest,
+    supplier: QuotaSupplier = Depends(get_current_supplier),
+    db: Session = Depends(get_db),
+):
+    from app.supplier_wallet_service import request_withdrawal
+
+    result = request_withdrawal(
+        db,
+        supplier,
+        amount=payload.amount,
+        pix_key=payload.pix_key,
+        notes=payload.notes,
+    )
+    db.commit()
+    return result
+
+
+@router.get("/marketplace/supplier-withdrawals", response_model=list[SupplierWithdrawalView])
+def marketplace_supplier_withdrawals(
+    status: str | None = None,
+    limit: int = 100,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.supplier_wallet_service import list_withdrawals_admin
+
+    return list_withdrawals_admin(db, user, status=status, limit=limit)
+
+
+@router.post("/marketplace/supplier-withdrawals/{withdrawal_id}/process", response_model=SupplierWithdrawalView)
+def marketplace_process_supplier_withdrawal(
+    withdrawal_id: str,
+    payload: SupplierWithdrawalProcessRequest,
+    user: User = Depends(require_scope("inventory:write")),
+    db: Session = Depends(get_db),
+):
+    from app.supplier_wallet_service import process_withdrawal
+
+    result = process_withdrawal(db, user, withdrawal_id, action=payload.action, notes=payload.notes)
+    audit(db, user, "marketplace.supplier_withdrawal.process", "supplier_withdrawal", withdrawal_id, payload.model_dump())
     db.commit()
     return result
 

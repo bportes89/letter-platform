@@ -985,6 +985,49 @@ def test_supplier_portal_confirm_unlocks_conclude(client, auth_headers):
     assert done.json()["situation"] == "CONCLUIDO"
     assert done.json()["commission_release_status"] == "RELEASED"
 
+    # garante PIX no fornecedor e credita saldo na liberação
+    client.patch(
+        f"/api/v1/marketplace/suppliers/{supplier['id']}",
+        headers=auth_headers,
+        json={"pix_key": "fornecedor@letter.com.br"},
+    )
+    # reentrada idempotente da liberação (credita se ainda não)
+    done2 = client.patch(
+        f"/api/v1/marketplace/cadastros/{lead_id}",
+        headers=auth_headers,
+        json={"situation": "CONCLUIDO", "force_admin_conclude": False},
+    )
+    assert done2.status_code == 200
+
+    me_after = client.get("/api/v1/supplier-portal/me", headers=portal_headers)
+    assert me_after.status_code == 200
+    balance = Decimal(str(me_after.json().get("balance_available") or "0"))
+    assert balance > 0, me_after.json()
+
+    ledger = client.get("/api/v1/supplier-portal/ledger", headers=portal_headers)
+    assert ledger.status_code == 200
+    assert any(r["kind"] == "CREDIT" for r in ledger.json())
+
+    saque = client.post(
+        "/api/v1/supplier-portal/withdrawals",
+        headers=portal_headers,
+        json={"amount": str(balance), "pix_key": "fornecedor@letter.com.br"},
+    )
+    assert saque.status_code == 201, saque.text
+    assert saque.json()["status"] == "PENDING"
+    wd_id = saque.json()["id"]
+
+    me_zero = client.get("/api/v1/supplier-portal/me", headers=portal_headers)
+    assert Decimal(str(me_zero.json().get("balance_available") or "0")) == 0
+
+    paid_wd = client.post(
+        f"/api/v1/marketplace/supplier-withdrawals/{wd_id}/process",
+        headers=auth_headers,
+        json={"action": "PAID"},
+    )
+    assert paid_wd.status_code == 200, paid_wd.text
+    assert paid_wd.json()["status"] == "PAID"
+
 
 def test_marketplace_conclude_allocates_affiliate_commission(client, auth_headers):
     """Concluído com parceiro na árvore SALES gera CommissionEntry MARKETPLACE_RELEASE."""
