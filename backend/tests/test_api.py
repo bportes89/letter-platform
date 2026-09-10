@@ -137,6 +137,20 @@ def test_vender_minha_cota_calculate_and_store(client, auth_headers):
     )
     assert range_patch.status_code == 200
 
+    pdf = (b"%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF")
+    stmt = client.post(
+        f"/api/v1/public/site/vender-minha-cota/offers/{offer_id}/statement",
+        data={"contact_email": "maria.cota@example.com"},
+        files={"file": ("extrato.pdf", pdf, "application/pdf")},
+    )
+    assert stmt.status_code == 200
+    assert stmt.json()["status"] == "UNDER_REVIEW"
+    assert stmt.json()["statement_document_id"]
+
+    dl = client.get(f"/api/v1/funding/vender-cota/offers/{offer_id}/statement", headers=auth_headers)
+    assert dl.status_code == 200
+    assert dl.content.startswith(b"%PDF")
+
 
 def test_marketplace_esteira1_and_esteira2(client, auth_headers):
     quota = next(q for q in client.get("/api/v1/quotas", headers=auth_headers).json() if q["status"] == "AVAILABLE")

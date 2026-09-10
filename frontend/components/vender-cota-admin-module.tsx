@@ -1,8 +1,8 @@
 "use client";
 
-import { CheckCircle2, RefreshCw, SlidersHorizontal, WalletCards } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { api } from "@/lib/api";
+import { CheckCircle2, Download, RefreshCw, SlidersHorizontal, Upload, WalletCards } from "lucide-react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { api, apiForm, downloadApi } from "@/lib/api";
 
 type QuotaOfferRange = {
   id: string;
@@ -39,6 +39,8 @@ type QuotaSellOffer = {
   offer_value: string;
   partner_referral_code: string | null;
   notes: string | null;
+  statement_document_id: string | null;
+  statement_filename: string | null;
   created_at: string | null;
 };
 
@@ -64,6 +66,7 @@ export function VenderCotaAdminModule() {
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, Partial<QuotaOfferRange>>>({});
+  const fileRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
   const load = useCallback(async () => {
     const [o, r] = await Promise.all([
@@ -101,6 +104,33 @@ export function VenderCotaAdminModule() {
       setError(e instanceof Error ? e.message : "Falha ao atualizar oferta");
     } finally {
       setSavingId(null);
+    }
+  }
+
+  async function uploadStatement(offer: QuotaSellOffer, file: File) {
+    setError("");
+    setSavingId(offer.id);
+    try {
+      const body = new FormData();
+      body.append("file", file);
+      await apiForm(`/funding/vender-cota/offers/${offer.id}/statement`, body);
+      setNotice(`Extrato anexado em ${offer.contact_name}.`);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Falha no upload do extrato");
+    } finally {
+      setSavingId(null);
+    }
+  }
+
+  async function downloadStatement(offer: QuotaSellOffer) {
+    try {
+      await downloadApi(
+        `/funding/vender-cota/offers/${offer.id}/statement`,
+        offer.statement_filename || `extrato-${offer.id}.pdf`,
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Falha ao baixar extrato");
     }
   }
 
@@ -190,6 +220,7 @@ export function VenderCotaAdminModule() {
                   <th>Cliente</th>
                   <th>Cota</th>
                   <th>Oferta Letter</th>
+                  <th>Extrato</th>
                   <th>Parceiro</th>
                   <th>Status</th>
                   <th>Ações</th>
@@ -197,7 +228,7 @@ export function VenderCotaAdminModule() {
               </thead>
               <tbody>
                 {filteredOffers.length === 0 && (
-                  <tr><td colSpan={6} style={{ padding: 24, color: "var(--muted)" }}>Nenhuma oferta neste filtro.</td></tr>
+                  <tr><td colSpan={7} style={{ padding: 24, color: "var(--muted)" }}>Nenhuma oferta neste filtro.</td></tr>
                 )}
                 {filteredOffers.map((o) => (
                   <tr key={o.id}>
@@ -215,6 +246,35 @@ export function VenderCotaAdminModule() {
                       <b>{brl.format(Number(o.offer_value))}</b>
                       <small>{o.offer_percent}% do crédito</small>
                       <small>{o.created_at ? new Date(o.created_at).toLocaleString("pt-BR") : "—"}</small>
+                    </td>
+                    <td>
+                      {o.statement_document_id ? (
+                        <button type="button" className="table-action" onClick={() => void downloadStatement(o)}>
+                          <Download />{o.statement_filename || "Baixar"}
+                        </button>
+                      ) : (
+                        <>
+                          <input
+                            ref={(el) => { fileRefs.current[o.id] = el; }}
+                            type="file"
+                            accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg"
+                            style={{ display: "none" }}
+                            onChange={(e) => {
+                              const f = e.target.files?.[0];
+                              if (f) void uploadStatement(o, f);
+                              e.target.value = "";
+                            }}
+                          />
+                          <button
+                            type="button"
+                            className="table-action"
+                            disabled={savingId === o.id}
+                            onClick={() => fileRefs.current[o.id]?.click()}
+                          >
+                            <Upload />Anexar
+                          </button>
+                        </>
+                      )}
                     </td>
                     <td><small>{o.partner_referral_code || "—"}</small></td>
                     <td><span className={`pill pill-${o.status.toLowerCase()}`}>{STATUS_LABEL[o.status] ?? o.status}</span></td>

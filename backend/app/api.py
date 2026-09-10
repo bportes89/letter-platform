@@ -1997,7 +1997,8 @@ def public_vender_cota_store(payload: VenderCotaStoreRequest, request: Request, 
     allowed, retry = rate_limiter.allow(f"public-vmc-store:{ip}", settings.public_rate_limit_per_minute)
     if not allowed:
         raise HTTPException(429, "Limite atingido", headers={"Retry-After": str(retry)})
-    from app.vender_cota_service import store_offer
+    from app.models import QuotaSellOffer
+    from app.vender_cota_service import notify_new_offer, store_offer
 
     data = store_offer(
         db,
@@ -2015,8 +2016,44 @@ def public_vender_cota_store(payload: VenderCotaStoreRequest, request: Request, 
         person_type=payload.person_type,
         partner_referral_code=payload.partner_referral_code,
     )
+    offer = db.get(QuotaSellOffer, data["offer_id"])
+    if offer:
+        try:
+            data["notifications"] = notify_new_offer(db, offer)
+        except Exception:
+            data["notifications"] = {"sent": False, "reason": "notify_failed"}
     db.commit()
     return data
+
+
+@router.post("/public/site/vender-minha-cota/offers/{offer_id}/statement")
+async def public_vender_cota_statement(
+    offer_id: str,
+    request: Request,
+    contact_email: str = Form(...),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    ip = request.client.host if request.client else "unknown"
+    allowed, retry = rate_limiter.allow(f"public-vmc-stmt:{ip}", settings.public_rate_limit_per_minute)
+    if not allowed:
+        raise HTTPException(429, "Limite atingido", headers={"Retry-After": str(retry)})
+    from app.models import Administrator, Document, QuotaSellOffer
+    from app.vender_cota_service import attach_statement, offer_view, org_ops_user
+
+    offer = db.get(QuotaSellOffer, offer_id)
+    if not offer:
+        raise HTTPException(status_code=404, detail="Oferta não encontrada")
+    if offer.contact_email.strip().lower() != contact_email.strip().lower():
+        raise HTTPException(status_code=403, detail="E-mail não confere com a oferta")
+    uploader = org_ops_user(db, offer.organization_id)
+    if not uploader:
+        raise HTTPException(status_code=503, detail="Upload indisponível no momento")
+    await attach_statement(db, offer=offer, upload=file, uploader=uploader)
+    db.commit()
+    db.refresh(offer)
+    stmt = db.get(Document, offer.statement_document_id) if offer.statement_document_id else None
+    return offer_view(offer, db.get(Administrator, offer.administrator_id) if offer.administrator_id else None, stmt)
 
 
 @router.get("/funding/vender-cota/ranges")
@@ -2063,11 +2100,18 @@ def vender_cota_range_update(
 
 @router.get("/funding/vender-cota/offers")
 def vender_cota_offers(user: User = Depends(require_scope("inventory:write")), db: Session = Depends(get_db)):
-    from app.models import Administrator
+    from app.models import Administrator, Document
     from app.vender_cota_service import list_offers, offer_view
 
     items = list_offers(db, user.organization_id)
-    return [offer_view(o, db.get(Administrator, o.administrator_id) if o.administrator_id else None) for o in items]
+    return [
+        offer_view(
+            o,
+            db.get(Administrator, o.administrator_id) if o.administrator_id else None,
+            db.get(Document, o.statement_document_id) if o.statement_document_id else None,
+        )
+        for o in items
+    ]
 
 
 OFFER_STATUSES = {"AWAITING_STATEMENT", "UNDER_REVIEW", "ACCEPTED", "REJECTED", "CLOSED"}
@@ -2080,7 +2124,7 @@ def vender_cota_offer_update(
     user: User = Depends(require_scope("inventory:write")),
     db: Session = Depends(get_db),
 ):
-    from app.models import Administrator, QuotaSellOffer
+    from app.models import Administrator, Document, QuotaSellOffer
     from app.vender_cota_service import offer_view
 
     item = db.scalar(
@@ -2103,7 +2147,60 @@ def vender_cota_offer_update(
     db.commit()
     db.refresh(item)
     admin = db.get(Administrator, item.administrator_id) if item.administrator_id else None
-    return offer_view(item, admin)
+    stmt = db.get(Document, item.statement_document_id) if item.statement_document_id else None
+    return offer_view(item, admin, stmt)
+
+
+@router.post("/funding/vender-cota/offers/{offer_id}/statement")
+async def vender_cota_offer_statement_upload(
+    offer_id: str,
+    file: UploadFile = File(...),
+    user: User = Depends(require_scope("inventory:write")),
+    db: Session = Depends(get_db),
+):
+    from app.models import Administrator, Document, QuotaSellOffer
+    from app.vender_cota_service import attach_statement, offer_view
+
+    item = db.scalar(
+        select(QuotaSellOffer).where(
+            QuotaSellOffer.id == offer_id,
+            QuotaSellOffer.organization_id == user.organization_id,
+        )
+    )
+    if not item:
+        raise HTTPException(status_code=404, detail="Oferta não encontrada")
+    await attach_statement(db, offer=item, upload=file, uploader=user)
+    audit(db, user, "vender_cota.statement_uploaded", "quota_sell_offer", item.id, {"filename": file.filename})
+    db.commit()
+    db.refresh(item)
+    admin = db.get(Administrator, item.administrator_id) if item.administrator_id else None
+    stmt = db.get(Document, item.statement_document_id) if item.statement_document_id else None
+    return offer_view(item, admin, stmt)
+
+
+@router.get("/funding/vender-cota/offers/{offer_id}/statement")
+def vender_cota_offer_statement_download(
+    offer_id: str,
+    user: User = Depends(require_scope("inventory:write")),
+    db: Session = Depends(get_db),
+):
+    from app.models import QuotaSellOffer
+    from app.vender_cota_service import statement_payload
+
+    item = db.scalar(
+        select(QuotaSellOffer).where(
+            QuotaSellOffer.id == offer_id,
+            QuotaSellOffer.organization_id == user.organization_id,
+        )
+    )
+    if not item:
+        raise HTTPException(status_code=404, detail="Oferta não encontrada")
+    data, filename, media = statement_payload(db, item)
+    return Response(
+        content=data,
+        media_type=media,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.post("/public/site/chat/home")

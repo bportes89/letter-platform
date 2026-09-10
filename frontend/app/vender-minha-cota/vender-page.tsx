@@ -11,6 +11,7 @@ import {
   calculateVenderCota,
   fetchVenderCotaBootstrap,
   storeVenderCota,
+  uploadVenderCotaStatement,
   type VenderCotaBootstrap,
   type VenderCotaResult,
 } from "@/lib/public-site-api";
@@ -25,7 +26,13 @@ export default function VenderMinhaCotaPage() {
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<VenderCotaResult | null>(null);
-  const [done, setDone] = useState<{ message: string; offer_value: string } | null>(null);
+  const [done, setDone] = useState<{
+    message: string;
+    offer_value: string;
+    offer_id: string;
+    contact_email: string;
+  } | null>(null);
+  const [statementOk, setStatementOk] = useState(false);
 
   useEffect(() => {
     fetchVenderCotaBootstrap()
@@ -82,11 +89,36 @@ export default function VenderMinhaCotaPage() {
     const fd = new FormData(e.currentTarget);
     try {
       const stored = await storeVenderCota(formPayload(fd));
-      setDone({ message: stored.message, offer_value: stored.offer_value });
+      setDone({
+        message: stored.message,
+        offer_value: stored.offer_value,
+        offer_id: stored.offer_id,
+        contact_email: String(fd.get("contact_email") || ""),
+      });
+      setStatementOk(false);
       setResult(null);
       setNotice("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Falha ao enviar oferta");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function onUploadStatement(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!done) return;
+    setError("");
+    setLoading(true);
+    const fd = new FormData(e.currentTarget);
+    const file = fd.get("file");
+    try {
+      if (!(file instanceof File) || !file.size) throw new Error("Selecione o PDF ou imagem do extrato");
+      await uploadVenderCotaStatement(done.offer_id, done.contact_email, file);
+      setStatementOk(true);
+      setNotice("Extrato recebido. Nossa equipe vai analisar sua oferta.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Falha ao enviar extrato");
     } finally {
       setLoading(false);
     }
@@ -111,6 +143,19 @@ export default function VenderMinhaCotaPage() {
               <h2 style={{ color: "#008f5f" }}>Oferta enviada</h2>
               <p>Valor congelado pelo robô: <strong>{brl.format(Number(done.offer_value))}</strong></p>
               <p className="site-light-muted">{done.message}</p>
+              {!statementOk ? (
+                <form className="stack-form" onSubmit={onUploadStatement} style={{ textAlign: "left", marginTop: 20 }}>
+                  <label>
+                    Anexar extrato da cota (PDF, PNG ou JPG)
+                    <input name="file" type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" required />
+                  </label>
+                  <button type="submit" className="button" disabled={loading}>
+                    {loading ? "Enviando…" : "Enviar extrato"}
+                  </button>
+                </form>
+              ) : (
+                <div className="notice" style={{ marginTop: 16 }}>Extrato anexado com sucesso.</div>
+              )}
               <div style={{ display: "flex", gap: 12, justifyContent: "center", marginTop: 18 }}>
                 <Link className="button" href="/login">Ir para o escritório</Link>
                 <Link className="text-link" href="/">Voltar ao site</Link>

@@ -5,12 +5,26 @@ from __future__ import annotations
 import re
 from decimal import Decimal
 
-from fastapi import HTTPException
+from fastapi import HTTPException, UploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Administrator, Organization, QuotaOfferRange, QuotaSellOffer, uid
+from app.core.config import settings
+from app.document_service import persist_upload
+from app.models import (
+    Administrator,
+    CommunicationTemplate,
+    Document,
+    Organization,
+    QuotaOfferRange,
+    QuotaSellOffer,
+    Role,
+    User,
+    uid,
+)
 from app.services import money
+from app.storage_service import get_storage
+from app.tax_communication_service import mock_deliver, queue_delivery
 
 TIPOS_IMOVEL = frozenset({"imovel"})
 TIPOS_VEICULO = frozenset({"autos", "pesados", "maquinas", "produtos", "servicos"})
@@ -294,10 +308,158 @@ def store_offer(
         "status": offer.status,
         "offer_value": str(money(Decimal(str(offer.offer_value)))),
         "offer_percent": str(money(Decimal(str(offer.offer_percent)))),
-        "message": "Oferta enviada com sucesso! Anexe o extrato da cota no escritório quando disponível.",
+        "message": "Oferta enviada com sucesso! Você já pode anexar o extrato da cota abaixo.",
         "link_dashboard": "/login",
         "result": result,
     }
+
+
+def org_ops_user(db: Session, organization_id: str) -> User | None:
+    return db.scalar(
+        select(User)
+        .where(
+            User.organization_id == organization_id,
+            User.active.is_(True),
+            User.role.in_([Role.PLATFORM_ADMIN, Role.INTERNAL_STAFF, Role.MASTER_FRANCHISEE]),
+        )
+        .order_by(User.created_at.asc())
+        .limit(1)
+    )
+
+
+def _ensure_email_template(
+    db: Session, user: User, *, key: str, subject: str, body: str,
+) -> CommunicationTemplate:
+    item = db.scalar(
+        select(CommunicationTemplate).where(
+            CommunicationTemplate.organization_id == user.organization_id,
+            CommunicationTemplate.key == key,
+            CommunicationTemplate.channel == "EMAIL",
+            CommunicationTemplate.active.is_(True),
+        )
+    )
+    if item:
+        return item
+    current = db.scalar(
+        select(CommunicationTemplate.version).where(
+            CommunicationTemplate.organization_id == user.organization_id,
+            CommunicationTemplate.key == key,
+            CommunicationTemplate.channel == "EMAIL",
+        )
+    ) or 0
+    item = CommunicationTemplate(
+        organization_id=user.organization_id,
+        key=key,
+        channel="EMAIL",
+        version=current + 1,
+        subject=subject,
+        body=body,
+        purpose="TRANSACTIONAL",
+        active=True,
+    )
+    db.add(item)
+    db.flush()
+    return item
+
+
+def notify_new_offer(db: Session, offer: QuotaSellOffer) -> dict:
+    """Fila e-mails mock (admin + cliente). Nunca bloqueia a oferta."""
+    user = org_ops_user(db, offer.organization_id)
+    if not user:
+        return {"sent": False, "reason": "no_ops_user"}
+    variables = {
+        "name": offer.contact_name,
+        "email": offer.contact_email,
+        "phone": offer.contact_phone,
+        "offer_value": str(money(Decimal(str(offer.offer_value)))),
+        "offer_percent": str(money(Decimal(str(offer.offer_percent)))),
+        "credit_value": str(money(Decimal(str(offer.credit_value)))),
+        "tipo": TIPOS_LABEL.get(offer.tipo_consorcio, offer.tipo_consorcio),
+        "offer_id": offer.id,
+    }
+    admin_tpl = _ensure_email_template(
+        db, user,
+        key="VENDER_COTA_ADMIN",
+        subject="Nova oferta — Vender minha cota ({{name}})",
+        body=(
+            "Nova oferta pública recebida.\n"
+            "Cliente: {{name}} · {{email}} · {{phone}}\n"
+            "Tipo: {{tipo}} · Crédito R$ {{credit_value}}\n"
+            "Oferta Letter: R$ {{offer_value}} ({{offer_percent}}%)\n"
+            "ID: {{offer_id}}\n"
+            "Painel: /modules/vender-cota"
+        ),
+    )
+    client_tpl = _ensure_email_template(
+        db, user,
+        key="VENDER_COTA_CLIENT",
+        subject="Recebemos sua oferta de cota — LETTER",
+        body=(
+            "Olá {{name}},\n\n"
+            "Recebemos sua proposta de venda de cota contemplada.\n"
+            "Prévia da oferta Letter: R$ {{offer_value}} ({{offer_percent}}% do crédito).\n"
+            "Próximo passo: anexe o extrato da cota na página ou no escritório.\n\n"
+            "LETTER"
+        ),
+    )
+    admin_dest = (settings.company_email or "comercial@letter.app.br").strip().lower()
+    deliveries = []
+    for template, dest in (
+        (admin_tpl, admin_dest),
+        (client_tpl, offer.contact_email),
+    ):
+        try:
+            delivery, created = queue_delivery(
+                db, user, template,
+                subject_type="QUOTA_SELL_OFFER",
+                subject_id=offer.id,
+                destination=dest,
+                idempotency_key=f"vmc-{offer.id}-{template.key}-{dest}",
+                variables=variables,
+            )
+            if created:
+                mock_deliver(delivery)
+            deliveries.append({"key": template.key, "destination": delivery.destination_masked, "status": delivery.status})
+        except Exception:
+            deliveries.append({"key": template.key, "destination": dest, "status": "FAILED"})
+    return {"sent": True, "deliveries": deliveries}
+
+
+async def attach_statement(
+    db: Session,
+    *,
+    offer: QuotaSellOffer,
+    upload: UploadFile,
+    uploader: User,
+) -> QuotaSellOffer:
+    document = await persist_upload(upload, uploader, "quota_sell_offer", offer.id, "QUOTA_STATEMENT")
+    document.status = "CLEAN"
+    db.add(document)
+    db.flush()
+    offer.statement_document_id = document.id
+    if offer.status in {"AWAITING_STATEMENT", "UNDER_REVIEW"}:
+        offer.status = "UNDER_REVIEW"
+    db.flush()
+    return offer
+
+
+def statement_payload(db: Session, offer: QuotaSellOffer) -> tuple[bytes, str, str]:
+    if not offer.statement_document_id:
+        raise HTTPException(status_code=404, detail="Extrato ainda não anexado")
+    doc = db.get(Document, offer.statement_document_id)
+    if not doc or doc.organization_id != offer.organization_id:
+        raise HTTPException(status_code=404, detail="Documento do extrato não encontrado")
+    try:
+        data = get_storage().get(doc.storage_key)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Arquivo do extrato não encontrado no storage") from exc
+    name = (doc.filename or "extrato.pdf").lower()
+    media = "application/pdf"
+    if name.endswith(".png"):
+        media = "image/png"
+    elif name.endswith(".jpg") or name.endswith(".jpeg"):
+        media = "image/jpeg"
+    return data, doc.filename, media
 
 
 def list_ranges(db: Session, organization_id: str) -> list[QuotaOfferRange]:
@@ -336,7 +498,7 @@ def range_view(item: QuotaOfferRange) -> dict:
     }
 
 
-def offer_view(item: QuotaSellOffer, admin: Administrator | None = None) -> dict:
+def offer_view(item: QuotaSellOffer, admin: Administrator | None = None, statement: Document | None = None) -> dict:
     return {
         "id": item.id,
         "status": item.status,
@@ -359,5 +521,7 @@ def offer_view(item: QuotaSellOffer, admin: Administrator | None = None) -> dict
         "offer_value": str(money(Decimal(str(item.offer_value)))),
         "partner_referral_code": item.partner_referral_code,
         "notes": item.notes,
+        "statement_document_id": item.statement_document_id,
+        "statement_filename": statement.filename if statement else None,
         "created_at": item.created_at.isoformat() if item.created_at else None,
     }

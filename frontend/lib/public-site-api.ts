@@ -262,3 +262,21 @@ export async function storeVenderCota(payload: Record<string, unknown>): Promise
     body: JSON.stringify(payload),
   });
 }
+
+export async function uploadVenderCotaStatement(offerId: string, contactEmail: string, file: File): Promise<{
+  status: string;
+  statement_filename: string | null;
+}> {
+  const body = new FormData();
+  body.append("contact_email", contactEmail);
+  body.append("file", file);
+  const response = await fetch(
+    `${API_URL}/public/site/vender-minha-cota/offers/${encodeURIComponent(offerId)}/statement`,
+    { method: "POST", body },
+  );
+  if (!response.ok) {
+    const err = (await response.json().catch(() => ({}))) as { detail?: string };
+    throw new Error(typeof err.detail === "string" ? err.detail : "Falha ao enviar extrato");
+  }
+  return response.json();
+}
