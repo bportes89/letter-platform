@@ -121,6 +121,16 @@ Jornada no site (`POST /api/v1/public/site/chat/home` e `.../home/{step}`):
 
 Resposta compatível com o widget legado (`OBJ.chat_next` + `OBJ.info` + `OBJ.lead_id`). Fallback legado: `LETTER_CHAT_NATIVE_ENABLED=false`.
 
+### Chat — Capital de Giro (SDC)
+
+No passo de categoria, **Capital de Giro** abre a faixa `10020–10028` (paralela ao Marketplace):
+
+1. Tipo do bem → ano (se veículo/máquina) → valor → quitado → pendência → docs  
+2. `evaluate_sdc_desk` → card `sdc_result`  
+3. Confirmar → `store_solicitation` (mesa SDC, status `AWAITING_DOCS`, canal `SITE_CHAT`)
+
+Lead fica com `product_interest=SDC` / `source=SITE_CHAT`. Visibilidade operacional: **mesa SDC** (não Cadastros Marketplace).
+
 ## Sync de inventário (fornecedores API)
 
 Porta do cron Paulo (`QuotasApiCronsController`) para estoque vivo:

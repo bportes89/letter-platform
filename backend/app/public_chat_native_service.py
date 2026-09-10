@@ -17,6 +17,7 @@ from app.marketplace_service import esteira2_nina_curated_match
 from app.models import Lead, Organization, Proposal, Quota, Role, User
 from app.public_site_service import headquarters_org
 from app.quota_inventory_service import run_nina_quota_scan
+from app.sdc_desk_service import evaluate_sdc_desk, store_solicitation
 from app.services import money, reserve_quota
 
 SOURCE = "SITE_CHAT"
@@ -38,6 +39,17 @@ STEP_ASSET = "10011"
 STEP_MATCH = "10012"
 STEP_CONFIRM = "10013"
 STEP_DONE = "10014"
+
+# Capital de Giro (SDC) — faixa paralela ao Marketplace.
+STEP_SDC_ASSET_TYPE = "10020"
+STEP_SDC_YEAR = "10021"
+STEP_SDC_VALUE = "10022"
+STEP_SDC_PAID_OFF = "10023"
+STEP_SDC_LIEN = "10024"
+STEP_SDC_DOCS = "10025"
+STEP_SDC_EVAL = "10026"
+STEP_SDC_CONFIRM = "10027"
+STEP_SDC_DONE = "10028"
 
 
 def _brl(value: Decimal | str | float | int) -> str:
@@ -317,7 +329,7 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
                     "options": [
                         {"name": "Imóvel", "next": int(STEP_DIRTY), "save": "REAL_ESTATE", "id": "REAL_ESTATE"},
                         {"name": "Veículo", "next": int(STEP_YEAR), "save": "VEHICLE", "id": "VEHICLE"},
-                        {"name": "Capital de Giro (SDC)", "link": "/modules/sdc"},
+                        {"name": "Capital de Giro (SDC)", "next": int(STEP_SDC_ASSET_TYPE), "save": "SDC", "id": "SDC"},
                         {"name": "Vender minha cota", "link": "/vender-minha-cota", "save": "open_page"},
                     ],
                 }
@@ -647,6 +659,370 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
                     "text": (
                         f"Perfeito! Reservei a(s) cota(s) por {RESERVE_TTL} minutos. "
                         "Nossa equipe entra em contato para finalizar documentos e pagamento da entrada."
+                    ),
+                    "options": [
+                        {"name": "Falar no WhatsApp", "link": f"https://wa.me/55{_digits(settings.company_phone)}"},
+                        {"name": "Criar conta / acompanhar", "link": "/login"},
+                        {"name": "Nova simulação", "next": 0},
+                    ],
+                }
+            ],
+            lead_id=lead.id,
+        )
+
+    # --- Capital de Giro (SDC) ---
+    if step == STEP_SDC_ASSET_TYPE:
+        if not lead:
+            raise HTTPException(422, "Sessão do chat expirada. Recomece pelo início.")
+        lead.product_interest = "SDC"
+        snap = _lead_snapshot(lead)
+        snap["flow"] = "SDC"
+        snap["product"] = "SDC"
+        asset_type = str(data.get("option_save") or data.get("option_id") or "").strip().lower()
+        if asset_type in {"imovel", "veiculo_leve", "veiculo_pesado", "maquina"}:
+            snap["asset_type"] = asset_type
+            if asset_type == "imovel":
+                snap.pop("asset_year", None)
+            _save_lead_snapshot(lead, snap)
+            db.flush()
+            if asset_type == "imovel":
+                return _wrap(
+                    [
+                        {
+                            "text": "Qual o valor do bem dado em garantia?",
+                            "input": {"name": "asset_value", "label": "Valor do bem", "type": "text"},
+                            "next": int(STEP_SDC_VALUE),
+                        }
+                    ],
+                    lead_id=lead.id,
+                )
+            return _wrap(
+                [
+                    {
+                        "text": "Qual o ano de fabricação do bem?",
+                        "input": {"name": "asset_year", "label": "Ano", "type": "number"},
+                        "next": int(STEP_SDC_YEAR),
+                    }
+                ],
+                lead_id=lead.id,
+            )
+        _save_lead_snapshot(lead, snap)
+        db.flush()
+        return _wrap(
+            [
+                {
+                    "text": "Qual o tipo do bem em garantia?",
+                    "options": [
+                        {"name": "Imóvel", "next": int(STEP_SDC_ASSET_TYPE), "save": "imovel", "id": "imovel"},
+                        {"name": "Veículo leve", "next": int(STEP_SDC_ASSET_TYPE), "save": "veiculo_leve", "id": "veiculo_leve"},
+                        {"name": "Veículo pesado", "next": int(STEP_SDC_ASSET_TYPE), "save": "veiculo_pesado", "id": "veiculo_pesado"},
+                        {"name": "Máquina", "next": int(STEP_SDC_ASSET_TYPE), "save": "maquina", "id": "maquina"},
+                    ],
+                }
+            ],
+            lead_id=lead.id,
+        )
+
+    if step == STEP_SDC_YEAR:
+        if not lead:
+            raise HTTPException(422, "Sessão do chat expirada. Recomece pelo início.")
+        try:
+            year = int(str(data.get("asset_year") or data.get("option_id") or "0"))
+        except ValueError:
+            year = 0
+        if year < 1980 or year > date.today().year + 1:
+            return _retry(
+                "Informe um ano de fabricação válido!",
+                STEP_SDC_YEAR,
+                input_name="asset_year",
+                label="Ano",
+                lead_id=lead.id,
+            )
+        snap = _lead_snapshot(lead)
+        snap["asset_year"] = year
+        _save_lead_snapshot(lead, snap)
+        return _wrap(
+            [
+                {
+                    "text": "Qual o valor do bem dado em garantia?",
+                    "input": {"name": "asset_value", "label": "Valor do bem", "type": "text"},
+                    "next": int(STEP_SDC_VALUE),
+                }
+            ],
+            lead_id=lead.id,
+        )
+
+    if step == STEP_SDC_VALUE:
+        if not lead:
+            raise HTTPException(422, "Sessão do chat expirada. Recomece pelo início.")
+        try:
+            asset = _money_input(data.get("asset_value"))
+        except HTTPException:
+            return _retry("Informe o valor do bem!", STEP_SDC_VALUE, input_name="asset_value", label="Valor do bem", lead_id=lead.id)
+        if asset <= 0:
+            return _retry("Informe o valor do bem!", STEP_SDC_VALUE, input_name="asset_value", label="Valor do bem", lead_id=lead.id)
+        snap = _lead_snapshot(lead)
+        snap["asset_value"] = str(asset)
+        _save_lead_snapshot(lead, snap)
+        return _wrap(
+            [
+                {
+                    "text": "O bem está quitado?",
+                    "options": [
+                        {"name": "Sim", "next": int(STEP_SDC_LIEN), "save": "1", "id": "paid_yes"},
+                        {"name": "Não", "next": int(STEP_SDC_LIEN), "save": "0", "id": "paid_no"},
+                    ],
+                }
+            ],
+            lead_id=lead.id,
+        )
+
+    if step == STEP_SDC_PAID_OFF:
+        if not lead:
+            raise HTTPException(422, "Sessão do chat expirada. Recomece pelo início.")
+        snap = _lead_snapshot(lead)
+        snap["asset_paid_off"] = data.get("option_save") == "1" or data.get("option_id") == "paid_yes"
+        _save_lead_snapshot(lead, snap)
+        return _wrap(
+            [
+                {
+                    "text": "O bem possui alguma pendência (alienação, restrição)?",
+                    "options": [
+                        {"name": "Sim", "next": int(STEP_SDC_DOCS), "save": "1", "id": "lien_yes"},
+                        {"name": "Não", "next": int(STEP_SDC_DOCS), "save": "0", "id": "lien_no"},
+                    ],
+                }
+            ],
+            lead_id=lead.id,
+        )
+
+    if step == STEP_SDC_LIEN:
+        if not lead:
+            raise HTTPException(422, "Sessão do chat expirada. Recomece pelo início.")
+        snap = _lead_snapshot(lead)
+        oid = str(data.get("option_id") or "")
+        if oid in {"paid_yes", "paid_no"}:
+            snap["asset_paid_off"] = oid == "paid_yes"
+            _save_lead_snapshot(lead, snap)
+            return _wrap(
+                [
+                    {
+                        "text": "O bem possui alguma pendência (alienação, restrição)?",
+                        "options": [
+                            {"name": "Sim", "next": int(STEP_SDC_DOCS), "save": "1", "id": "lien_yes"},
+                            {"name": "Não", "next": int(STEP_SDC_DOCS), "save": "0", "id": "lien_no"},
+                        ],
+                    }
+                ],
+                lead_id=lead.id,
+            )
+        if oid in {"lien_yes", "lien_no"}:
+            snap["asset_has_lien"] = oid == "lien_yes"
+            _save_lead_snapshot(lead, snap)
+            return _wrap(
+                [
+                    {
+                        "text": "A documentação do bem está completa?",
+                        "options": [
+                            {"name": "Sim", "next": int(STEP_SDC_EVAL), "save": "1", "id": "docs_yes"},
+                            {"name": "Não", "next": int(STEP_SDC_EVAL), "save": "0", "id": "docs_no"},
+                        ],
+                    }
+                ],
+                lead_id=lead.id,
+            )
+        snap["asset_paid_off"] = data.get("option_save") == "1"
+        _save_lead_snapshot(lead, snap)
+        return _wrap(
+            [
+                {
+                    "text": "O bem possui alguma pendência (alienação, restrição)?",
+                    "options": [
+                        {"name": "Sim", "next": int(STEP_SDC_DOCS), "save": "1", "id": "lien_yes"},
+                        {"name": "Não", "next": int(STEP_SDC_DOCS), "save": "0", "id": "lien_no"},
+                    ],
+                }
+            ],
+            lead_id=lead.id,
+        )
+
+    if step == STEP_SDC_DOCS:
+        if not lead:
+            raise HTTPException(422, "Sessão do chat expirada. Recomece pelo início.")
+        snap = _lead_snapshot(lead)
+        oid = str(data.get("option_id") or "")
+        if oid in {"lien_yes", "lien_no"}:
+            snap["asset_has_lien"] = oid == "lien_yes"
+            _save_lead_snapshot(lead, snap)
+            return _wrap(
+                [
+                    {
+                        "text": "A documentação do bem está completa?",
+                        "options": [
+                            {"name": "Sim", "next": int(STEP_SDC_EVAL), "save": "1", "id": "docs_yes"},
+                            {"name": "Não", "next": int(STEP_SDC_EVAL), "save": "0", "id": "docs_no"},
+                        ],
+                    }
+                ],
+                lead_id=lead.id,
+            )
+        snap["docs_complete"] = oid == "docs_yes" or data.get("option_save") == "1"
+        _save_lead_snapshot(lead, snap)
+        data = {**data, "option_id": "docs_yes" if snap["docs_complete"] else "docs_no"}
+        step = STEP_SDC_EVAL
+
+    if step == STEP_SDC_EVAL:
+        if not lead:
+            raise HTTPException(422, "Sessão do chat expirada. Recomece pelo início.")
+        snap = _lead_snapshot(lead)
+        oid = str(data.get("option_id") or "")
+        if oid in {"docs_yes", "docs_no"}:
+            snap["docs_complete"] = oid == "docs_yes"
+            _save_lead_snapshot(lead, snap)
+        payload = {
+            "asset_type": snap.get("asset_type") or "imovel",
+            "asset_value": snap.get("asset_value") or "0",
+            "asset_year": snap.get("asset_year"),
+            "asset_paid_off": bool(snap.get("asset_paid_off")),
+            "asset_has_lien": bool(snap.get("asset_has_lien")),
+            "docs_complete": bool(snap.get("docs_complete")),
+        }
+        result = evaluate_sdc_desk(payload)
+        snap["sdc_evaluation"] = result
+        _save_lead_snapshot(lead, snap)
+        db.flush()
+        sdc_card = {
+            "viavel": bool(result.get("viable")),
+            "valor_alavancado_fmt": _brl(result.get("credito_estimado") or 0),
+            "prazo_fmt": f"{int(result.get('prazo_meses') or 0)} meses" if result.get("viable") else "—",
+            "parcela_fmt": _brl(result.get("parcela_estimada") or 0),
+            "taxa_fmt": f"{result.get('taxa_juros_mensal') or '0'}% a.m." if result.get("viable") else "—",
+            "motivos": list(result.get("motivos") or []),
+        }
+        item: dict[str, Any] = {
+            "text": result.get("message") or ("Operação viável" if result.get("viable") else "Operação não viável"),
+            "sdc_result": sdc_card,
+        }
+        if result.get("viable"):
+            item["next"] = int(STEP_SDC_CONFIRM)
+            item["button"] = "Continuar"
+        else:
+            item["options"] = [
+                {"name": "Mudar categoria", "next": int(STEP_CATEGORY)},
+                {"name": "Recomeçar", "next": 0},
+            ]
+        return _wrap([item], lead_id=lead.id)
+
+    if step == STEP_CATEGORY:
+        if not lead:
+            raise HTTPException(422, "Sessão do chat expirada. Recomece pelo início.")
+        return _wrap(
+            [
+                {
+                    "text": "O que você deseja financiar?",
+                    "options": [
+                        {"name": "Imóvel", "next": int(STEP_DIRTY), "save": "REAL_ESTATE", "id": "REAL_ESTATE"},
+                        {"name": "Veículo", "next": int(STEP_YEAR), "save": "VEHICLE", "id": "VEHICLE"},
+                        {"name": "Capital de Giro (SDC)", "next": int(STEP_SDC_ASSET_TYPE), "save": "SDC", "id": "SDC"},
+                        {"name": "Vender minha cota", "link": "/vender-minha-cota", "save": "open_page"},
+                    ],
+                }
+            ],
+            lead_id=lead.id,
+        )
+
+    if step == STEP_SDC_CONFIRM:
+        if not lead:
+            raise HTTPException(422, "Sessão do chat expirada. Recomece pelo início.")
+        snap = _lead_snapshot(lead)
+        if snap.get("sdc_solicitation_id"):
+            return _wrap(
+                [
+                    {
+                        "text": (
+                            "Sua solicitação de Capital de Giro já está na mesa SDC. "
+                            "Nossa equipe pede a documentação e segue a análise."
+                        ),
+                        "options": [
+                            {"name": "Falar no WhatsApp", "link": f"https://wa.me/55{_digits(settings.company_phone)}"},
+                            {"name": "Nova simulação", "next": 0},
+                        ],
+                    }
+                ],
+                lead_id=lead.id,
+            )
+        evaluation = snap.get("sdc_evaluation") or {}
+        if not evaluation.get("viable"):
+            return _wrap(
+                [
+                    {
+                        "text": "A operação não está viável com os dados atuais. Ajuste a garantia ou a categoria.",
+                        "options": [
+                            {"name": "Mudar categoria", "next": int(STEP_CATEGORY)},
+                            {"name": "Recomeçar", "next": 0},
+                        ],
+                    }
+                ],
+                lead_id=lead.id,
+            )
+        store_payload = {
+            "asset_type": snap.get("asset_type") or "imovel",
+            "asset_value": snap.get("asset_value") or "0",
+            "asset_year": snap.get("asset_year"),
+            "asset_paid_off": bool(snap.get("asset_paid_off")),
+            "asset_has_lien": bool(snap.get("asset_has_lien")),
+            "docs_complete": bool(snap.get("docs_complete")),
+            "contact_name": lead.name or snap.get("name") or "Visitante",
+            "contact_email": snap.get("email") or "site@letter.app.br",
+            "contact_phone": lead.phone or snap.get("phone") or "",
+            "person_type": "PF",
+        }
+        try:
+            solicitation = store_solicitation(db, actor, store_payload)
+        except HTTPException as exc:
+            detail = exc.detail
+            message = detail.get("message") if isinstance(detail, dict) else str(detail)
+            motivos = detail.get("motivos") if isinstance(detail, dict) else []
+            return _wrap(
+                [
+                    {
+                        "text": message or "Não foi possível registrar a solicitação SDC.",
+                        "sdc_result": {
+                            "viavel": False,
+                            "valor_alavancado_fmt": "R$ 0,00",
+                            "prazo_fmt": "—",
+                            "parcela_fmt": "R$ 0,00",
+                            "taxa_fmt": "—",
+                            "motivos": motivos or [message],
+                        },
+                        "options": [
+                            {"name": "Mudar categoria", "next": int(STEP_CATEGORY)},
+                            {"name": "Recomeçar", "next": 0},
+                        ],
+                    }
+                ],
+                lead_id=lead.id,
+            )
+        snap["sdc_solicitation_id"] = solicitation.id
+        lead.product_interest = "SDC"
+        lead.status = "QUALIFIED"
+        try:
+            detail = json.loads(solicitation.evaluation_json or "{}")
+            if isinstance(detail, dict):
+                detail["channel"] = SOURCE
+                detail["lead_id"] = lead.id
+                solicitation.evaluation_json = json.dumps(detail, ensure_ascii=False)
+        except json.JSONDecodeError:
+            pass
+        _save_lead_snapshot(lead, snap)
+        db.flush()
+        return _wrap(
+            [
+                {
+                    "text": (
+                        "Perfeito! Registrei sua solicitação de Capital de Giro na mesa SDC "
+                        f"(crédito estimado {_brl(solicitation.credit_estimated)}). "
+                        "Envie a documentação quando a equipe entrar em contato."
                     ),
                     "options": [
                         {"name": "Falar no WhatsApp", "link": f"https://wa.me/55{_digits(settings.company_phone)}"},

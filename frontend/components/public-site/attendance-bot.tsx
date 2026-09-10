@@ -568,7 +568,7 @@ export function AttendanceBotSection() {
                           ) : null}
                           {isCurrent(flowIndex) ? (
                             <div className="attendance-actions">
-                              <button type="button" className="attendance-primary" onClick={() => void advance(21, 1)}>
+                              <button type="button" className="attendance-primary" onClick={() => void advance(10005, 1)}>
                                 Mudar a categoria
                               </button>
                               <button type="button" className="attendance-secondary" onClick={resetChat}>

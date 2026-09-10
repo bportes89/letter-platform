@@ -3329,6 +3329,77 @@ def test_public_site_chat_native_marketplace_flow(client, auth_headers):
     assert lead["status"] == "PROPOSAL"
 
 
+def test_public_site_chat_native_sdc_flow(client, auth_headers):
+    """Chat nativo SDC: garantia → evaluate → solicitation na mesa."""
+    email = client.post(
+        "/api/v1/public/site/chat/home/10003",
+        json={"name": "Ana Costa Sdc", "email": "ana.sdc.chat@letter.test"},
+    )
+    assert email.status_code == 200
+    lead_id = email.json()["OBJ"]["lead_id"]
+
+    phone = client.post(
+        "/api/v1/public/site/chat/home/10004",
+        json={"lead_id": lead_id, "phone": "31999887766", "email": "ana.sdc.chat@letter.test"},
+    )
+    assert phone.status_code == 200
+    assert any(o.get("save") == "SDC" for o in phone.json()["OBJ"]["chat_next"][0]["options"])
+
+    tipo = client.post(
+        "/api/v1/public/site/chat/home/10020",
+        json={"lead_id": lead_id, "option_id": "SDC", "option_save": "SDC"},
+    )
+    assert tipo.status_code == 200
+
+    imovel = client.post(
+        "/api/v1/public/site/chat/home/10020",
+        json={"lead_id": lead_id, "option_id": "imovel", "option_save": "imovel"},
+    )
+    assert imovel.status_code == 200
+
+    valor = client.post(
+        "/api/v1/public/site/chat/home/10022",
+        json={"lead_id": lead_id, "asset_value": "500000"},
+    )
+    assert valor.status_code == 200
+
+    paid = client.post(
+        "/api/v1/public/site/chat/home/10024",
+        json={"lead_id": lead_id, "option_id": "paid_yes", "option_save": "1"},
+    )
+    assert paid.status_code == 200
+
+    lien = client.post(
+        "/api/v1/public/site/chat/home/10025",
+        json={"lead_id": lead_id, "option_id": "lien_no", "option_save": "0"},
+    )
+    assert lien.status_code == 200
+
+    eval_step = client.post(
+        "/api/v1/public/site/chat/home/10026",
+        json={"lead_id": lead_id, "option_id": "docs_yes", "option_save": "1"},
+    )
+    assert eval_step.status_code == 200, eval_step.text
+    card = eval_step.json()["OBJ"]["chat_next"][0]
+    assert card["sdc_result"]["viavel"] is True
+    assert card["next"] == 10027
+
+    confirm = client.post("/api/v1/public/site/chat/home/10027", json={"lead_id": lead_id})
+    assert confirm.status_code == 200, confirm.text
+    assert "mesa sdc" in confirm.json()["OBJ"]["chat_next"][0]["text"].lower()
+
+    listed = client.get("/api/v1/sdc/desk/solicitations", headers=auth_headers)
+    assert listed.status_code == 200
+    hit = next(r for r in listed.json() if r["contact_email"] == "ana.sdc.chat@letter.test")
+    assert hit["status"] == "AWAITING_DOCS"
+    assert hit["credit_estimated"] == "175000.00"
+
+    leads = client.get("/api/v1/leads", headers=auth_headers).json()
+    lead = next(l for l in leads if l["id"] == lead_id)
+    assert lead["product_interest"] == "SDC"
+    assert lead["source"] == "SITE_CHAT"
+
+
 def test_escrow_asaas_status_not_configured(client, auth_headers, monkeypatch):
     monkeypatch.setattr("app.asaas_common.settings.asaas_api_key", None)
     monkeypatch.setattr("app.asaas_common.settings.asaas_wallet_id", None)
