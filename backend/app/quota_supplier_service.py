@@ -68,6 +68,11 @@ def supplier_view(item: QuotaSupplier) -> dict:
         "bank_account": item.bank_account,
         "pix_key": item.pix_key,
         "notes": item.notes,
+        "sync_mode": item.sync_mode or "NONE",
+        "api_url": item.api_url,
+        "last_sync_at": item.last_sync_at,
+        "last_sync_status": item.last_sync_status,
+        "last_sync_detail_json": item.last_sync_detail_json or "{}",
         "created_at": item.created_at,
         "updated_at": item.updated_at,
     }
@@ -111,6 +116,12 @@ def create_supplier(db: Session, user: User, data: dict) -> QuotaSupplier:
     quem = int(data.get("quem_paga_comissao") or 0)
     if quem not in {0, 1}:
         raise HTTPException(status_code=422, detail="quem_paga_comissao deve ser 0 (fornecedor) ou 1 (cliente).")
+    sync_mode = str(data.get("sync_mode") or "NONE").upper()
+    if sync_mode not in {"NONE", "JSON", "SCRAPE"}:
+        raise HTTPException(status_code=422, detail="sync_mode deve ser NONE, JSON ou SCRAPE.")
+    api_url = (str(data["api_url"]).strip() if data.get("api_url") else None) or None
+    if sync_mode == "JSON" and not api_url:
+        raise HTTPException(status_code=422, detail="api_url obrigatória quando sync_mode=JSON.")
     item = QuotaSupplier(
         organization_id=user.organization_id,
         active=bool(data.get("active", True)),
@@ -129,6 +140,8 @@ def create_supplier(db: Session, user: User, data: dict) -> QuotaSupplier:
         bank_account=data.get("bank_account"),
         pix_key=data.get("pix_key"),
         notes=data.get("notes"),
+        sync_mode=sync_mode,
+        api_url=api_url,
     )
     db.add(item)
     db.flush()
@@ -179,6 +192,16 @@ def update_supplier(db: Session, user: User, supplier_id: str, data: dict) -> Qu
         if quem not in {0, 1}:
             raise HTTPException(status_code=422, detail="quem_paga_comissao deve ser 0 ou 1.")
         item.quem_paga_comissao = quem
+    if "sync_mode" in data and data["sync_mode"] is not None:
+        sync_mode = str(data["sync_mode"]).upper()
+        if sync_mode not in {"NONE", "JSON", "SCRAPE"}:
+            raise HTTPException(status_code=422, detail="sync_mode deve ser NONE, JSON ou SCRAPE.")
+        item.sync_mode = sync_mode
+    if "api_url" in data:
+        item.api_url = (str(data["api_url"]).strip() if data["api_url"] else None) or None
+    final_mode = item.sync_mode or "NONE"
+    if final_mode == "JSON" and not (item.api_url or "").strip():
+        raise HTTPException(status_code=422, detail="api_url obrigatória quando sync_mode=JSON.")
     db.flush()
     return item
 

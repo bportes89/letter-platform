@@ -752,6 +752,114 @@ def test_marketplace_suppliers_crud_and_markup_override(client, auth_headers):
     assert patched.json()["active"] is False
 
 
+def test_marketplace_supplier_json_sync_upsert_and_deactivate(client, auth_headers, monkeypatch):
+    """Sync JSON: cria/atualiza cotas e inativa as que sumiram; falha não zera estoque."""
+    import httpx
+
+    created = client.post(
+        "/api/v1/marketplace/suppliers",
+        headers=auth_headers,
+        json={
+            "name": "API Sync Demo",
+            "source_key": "SYNC_DEMO",
+            "document": "99888777000166",
+            "markup_percent": "3",
+            "sync_mode": "JSON",
+            "api_url": "https://supplier.test/cotas.json",
+        },
+    )
+    assert created.status_code == 201, created.text
+    supplier_id = created.json()["id"]
+
+    payload_round1 = [
+        {
+            "id": 101,
+            "valor_credito": "200000.00",
+            "entrada": "30000.00",
+            "parcelas": 48,
+            "valor_parcela": "2200.00",
+            "administradora": "Embracon",
+            "categoria": "Imóvel",
+            "reserva": "disponivel",
+        },
+        {
+            "id": 102,
+            "valor_credito": "150000",
+            "entrada": "20000",
+            "parcelas": 36,
+            "valor_parcela": "1800",
+            "administradora": "HS Consórcios",
+            "categoria": "Veículo",
+            "reserva": "reservar",
+        },
+    ]
+
+    class FakeResponse:
+        def __init__(self, data):
+            self._data = data
+            self.status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self._data
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def get(self, url):
+            assert "supplier.test" in url
+            return FakeResponse(payload_round1)
+
+    monkeypatch.setattr("app.quota_sync_service.httpx.Client", FakeClient)
+    sync1 = client.post(f"/api/v1/marketplace/suppliers/{supplier_id}/sync", headers=auth_headers)
+    assert sync1.status_code == 200, sync1.text
+    body1 = sync1.json()
+    assert body1["status"] == "OK"
+    assert body1["created"] == 2
+
+    quotas = client.get("/api/v1/quotas", headers=auth_headers).json()
+    synced = [q for q in quotas if q.get("supplier_source") == "SYNC_DEMO"]
+    # QuotaView may not expose external_ref — check via count AVAILABLE with SYNC group
+    sync_codes = [q for q in quotas if str(q.get("group_code", "")).startswith("SYNC-SYNC_DEMO")]
+    assert len(sync_codes) == 2
+    assert all(q["status"] == "AVAILABLE" for q in sync_codes)
+
+    payload_round1[:] = [payload_round1[0]]  # only id 101 remains
+    payload_round1[0]["entrada"] = "31000.00"
+
+    sync2 = client.post(f"/api/v1/marketplace/suppliers/{supplier_id}/sync", headers=auth_headers)
+    assert sync2.status_code == 200, sync2.text
+    body2 = sync2.json()
+    assert body2["updated"] >= 1
+    assert body2["deactivated"] == 1
+
+    quotas2 = client.get("/api/v1/quotas", headers=auth_headers).json()
+    sync_codes2 = [q for q in quotas2 if str(q.get("group_code", "")).startswith("SYNC-SYNC_DEMO")]
+    assert {q["quota_code"]: q["status"] for q in sync_codes2}["102"] == "INACTIVE"
+    assert {q["quota_code"]: q["status"] for q in sync_codes2}["101"] == "AVAILABLE"
+    assert str(next(q for q in sync_codes2 if q["quota_code"] == "101")["premium_value"]) in {"31000.00", "31000.0"}
+
+    class BoomClient(FakeClient):
+        def get(self, url):
+            raise httpx.ConnectError("offline")
+
+    monkeypatch.setattr("app.quota_sync_service.httpx.Client", BoomClient)
+    sync_fail = client.post(f"/api/v1/marketplace/suppliers/{supplier_id}/sync", headers=auth_headers)
+    assert sync_fail.status_code == 200, sync_fail.text
+    assert sync_fail.json()["status"] == "ERROR"
+    still = client.get("/api/v1/quotas", headers=auth_headers).json()
+    assert next(q for q in still if q.get("quota_code") == "101" and str(q.get("group_code", "")).startswith("SYNC-"))["status"] == "AVAILABLE"
+
+
 def test_marketplace_income_three_times_installment_blocks(client, auth_headers):
     quota = next(q for q in client.get("/api/v1/quotas", headers=auth_headers).json() if q["status"] == "AVAILABLE")
     client.patch(

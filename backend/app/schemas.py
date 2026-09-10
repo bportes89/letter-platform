@@ -2192,6 +2192,8 @@ class QuotaSupplierCreate(BaseModel):
     pix_key: str | None = Field(default=None, max_length=180)
     notes: str | None = None
     active: bool = True
+    sync_mode: str = Field(default="NONE", max_length=20)
+    api_url: str | None = Field(default=None, max_length=500)
 
 
 class QuotaSupplierUpdate(BaseModel):
@@ -2211,6 +2213,8 @@ class QuotaSupplierUpdate(BaseModel):
     pix_key: str | None = None
     notes: str | None = None
     active: bool | None = None
+    sync_mode: str | None = Field(default=None, max_length=20)
+    api_url: str | None = Field(default=None, max_length=500)
 
 
 class QuotaSupplierView(BaseModel):
@@ -2231,8 +2235,32 @@ class QuotaSupplierView(BaseModel):
     bank_account: str | None = None
     pix_key: str | None = None
     notes: str | None = None
+    sync_mode: str = "NONE"
+    api_url: str | None = None
+    last_sync_at: datetime | None = None
+    last_sync_status: str | None = None
+    last_sync_detail_json: str = "{}"
     created_at: datetime | None = None
     updated_at: datetime | None = None
+
+
+class QuotaInventorySyncView(BaseModel):
+    organization_id: str | None = None
+    supplier_id: str | None = None
+    source_key: str | None = None
+    status: str | None = None
+    suppliers: int | None = None
+    fetched: int | None = None
+    created: int = 0
+    updated: int = 0
+    deactivated: int = 0
+    skipped: int = 0
+    protected: int = 0
+    failed: int | None = None
+    results: list[dict] | None = None
+    error: str | None = None
+    message: str | None = None
+    synced_at: str | None = None
 
 
 class VendaDiretaManualCotaOption(BaseModel):

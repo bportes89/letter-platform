@@ -86,7 +86,7 @@ from app.schemas import (
     ReconciliationBatchView, ReconciliationItemView, ReconciliationResolveRequest,
     MarketplaceEsteira1Request, MarketplaceEsteira1Response, MarketplaceEsteira2Request, MarketplaceEsteira2Response,
     VendaDiretaRoboSearchRequest, VendaDiretaRoboSearchResponse, VendaDiretaRoboConfirmRequest, VendaDiretaRoboConfirmResponse,
-    QuotaSupplierCreate, QuotaSupplierUpdate, QuotaSupplierView,
+    QuotaSupplierCreate, QuotaSupplierUpdate, QuotaSupplierView, QuotaInventorySyncView,
     VendaDiretaManualCotaOption, VendaDiretaManualCadastroOption, VendaDiretaManualPartnerOption,
     VendaDiretaManualStoreRequest, VendaDiretaManualStoreResponse,
     CadastroListItem, CadastroDetailView, CadastroUpdateRequest,
@@ -1686,6 +1686,45 @@ def ensure_quota_supplier_defaults(user: User = Depends(require_scope("inventory
     audit(db, user, "marketplace.supplier.ensure_defaults", "quota_supplier", user.organization_id)
     db.commit()
     return [supplier_view(x) for x in list_suppliers(db, user)]
+
+
+@router.post("/marketplace/suppliers/{supplier_id}/sync", response_model=QuotaInventorySyncView)
+def sync_quota_supplier_inventory(
+    supplier_id: str,
+    user: User = Depends(require_scope("inventory:write")),
+    db: Session = Depends(get_db),
+):
+    from app.quota_sync_service import sync_supplier_inventory
+
+    result = sync_supplier_inventory(db, user, supplier_id)
+    audit(db, user, "marketplace.supplier.sync", "quota_supplier", supplier_id, result)
+    db.commit()
+    return QuotaInventorySyncView(**result)
+
+
+@router.post("/marketplace/inventory/sync", response_model=QuotaInventorySyncView)
+def sync_marketplace_inventory(user: User = Depends(require_scope("inventory:write")), db: Session = Depends(get_db)):
+    from app.quota_sync_service import sync_organization_inventory_for_user
+
+    result = sync_organization_inventory_for_user(db, user)
+    audit(db, user, "marketplace.inventory.sync", "organization", user.organization_id, {"suppliers": result.get("suppliers")})
+    db.commit()
+    return QuotaInventorySyncView(**result)
+
+
+@router.post("/system/cron/marketplace-quota-sync", response_model=QuotaInventorySyncView)
+def cron_marketplace_quota_sync(request: Request, db: Session = Depends(get_db)):
+    secret = settings.cron_secret
+    if secret:
+        provided = request.headers.get("x-cron-secret") or request.headers.get("authorization", "").removeprefix("Bearer ").strip()
+        if provided != secret:
+            raise HTTPException(status_code=401, detail="Cron secret inválido")
+    from app.quota_sync_service import default_sync_organization_id, sync_organization_inventory
+
+    org_id = default_sync_organization_id(db)
+    result = sync_organization_inventory(db, org_id)
+    db.commit()
+    return QuotaInventorySyncView(**result)
 
 
 @router.post("/quotas", response_model=QuotaView, status_code=201)

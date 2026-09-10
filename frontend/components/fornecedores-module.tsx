@@ -20,6 +20,22 @@ type QuotaSupplier = {
   bank_name: string | null;
   pix_key: string | null;
   notes: string | null;
+  sync_mode: string;
+  api_url: string | null;
+  last_sync_at: string | null;
+  last_sync_status: string | null;
+};
+
+type SyncResult = {
+  status?: string;
+  created?: number;
+  updated?: number;
+  deactivated?: number;
+  protected?: number;
+  failed?: number;
+  suppliers?: number;
+  error?: string;
+  message?: string;
 };
 
 export function FornecedoresModule() {
@@ -51,6 +67,44 @@ export function FornecedoresModule() {
     }
   }
 
+  async function syncAll() {
+    setError("");
+    setBusy(true);
+    try {
+      const result = await api<SyncResult>("/marketplace/inventory/sync", { method: "POST" });
+      setNotice(
+        `Sync geral: ${result.suppliers ?? 0} fornecedor(es) · +${result.created ?? 0} · ~${result.updated ?? 0} · −${result.deactivated ?? 0}` +
+          (result.failed ? ` · falhas ${result.failed}` : ""),
+      );
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Falha no sync de inventário");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function syncOne(item: QuotaSupplier) {
+    setError("");
+    setBusy(true);
+    try {
+      const result = await api<SyncResult>(`/marketplace/suppliers/${item.id}/sync`, { method: "POST" });
+      if (result.status === "ERROR") {
+        setError(result.error || `Falha no sync de ${item.source_key}`);
+      } else {
+        setNotice(
+          `${item.source_key}: ${result.status || "OK"} · +${result.created ?? 0} · ~${result.updated ?? 0} · −${result.deactivated ?? 0}` +
+            (result.message ? ` — ${result.message}` : ""),
+        );
+      }
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Falha no sync");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError("");
@@ -72,6 +126,8 @@ export function FornecedoresModule() {
       pix_key: String(fd.get("pix_key") || "") || null,
       notes: String(fd.get("notes") || "") || null,
       active: fd.get("active") === "1",
+      sync_mode: String(fd.get("sync_mode") || "NONE"),
+      api_url: String(fd.get("api_url") || "") || null,
     };
     try {
       if (editing) {
@@ -112,8 +168,8 @@ export function FornecedoresModule() {
           <span className="eyebrow dark">CADASTRO</span>
           <h1>Fornecedores de cotas</h1>
           <p>
-            Empresas que alimentam o inventário e o robô Esteira 2. Markup na entrada (% do crédito) e flag de quem
-            paga a comissão da plataforma.
+            Empresas que alimentam o inventário e o robô Esteira 2. Markup na entrada (% do crédito) e sync JSON da
+            API do fornecedor.
           </p>
         </div>
         <div className="operational-icon">
@@ -124,14 +180,17 @@ export function FornecedoresModule() {
       <section className="panel operational-panel">
         <div className="notice">
           <Truck />
-          Use o mesmo <b>source_key</b> da cota no Inventário (ex.: FRAGA). Markup cadastrado aqui prevalece sobre o
-          mapa padrão Paulo (3% / 10%). Se &quot;cliente paga comissão&quot;, some também o % da plataforma na entrada
-          exibida.
+          Use o mesmo <b>source_key</b> da cota no Inventário (ex.: FRAGA). Com <b>sync_mode=JSON</b> e{" "}
+          <b>api_url</b>, o botão Sincronizar importa/atualiza cotas e inativa as que sumiram (sem tocar em
+          RESERVED/SOLD). Markup continua no match — não é embutido no sync.
         </div>
 
         <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", marginBottom: "1rem" }}>
           <button type="button" className="table-action" onClick={ensureDefaults} disabled={busy}>
             <RefreshCw /> Garantir fornecedores API padrão
+          </button>
+          <button type="button" className="table-action" onClick={syncAll} disabled={busy}>
+            <RefreshCw /> Sincronizar todos (JSON)
           </button>
           {editing && (
             <button type="button" className="table-action" onClick={() => setEditing(null)}>
@@ -204,6 +263,18 @@ export function FornecedoresModule() {
                 title="Usado só se cliente paga a comissão"
               />
             </label>
+            <label className="marketplace-field marketplace-field-compact">
+              Sync
+              <select name="sync_mode" defaultValue={editing?.sync_mode || "NONE"}>
+                <option value="NONE">Manual</option>
+                <option value="JSON">API JSON</option>
+                <option value="SCRAPE">Scrape (em breve)</option>
+              </select>
+            </label>
+            <label className="marketplace-field marketplace-field-wide">
+              API URL
+              <input name="api_url" placeholder="https://..." defaultValue={editing?.api_url || ""} />
+            </label>
             <label className="marketplace-field">
               Banco
               <input name="bank_name" defaultValue={editing?.bank_name || ""} />
@@ -237,9 +308,9 @@ export function FornecedoresModule() {
                 <th>Status</th>
                 <th>Nome</th>
                 <th>Source</th>
-                <th>Documento</th>
+                <th>Sync</th>
                 <th>Markup</th>
-                <th>Comissão</th>
+                <th>Último sync</th>
                 <th>Ações</th>
               </tr>
             </thead>
@@ -256,14 +327,26 @@ export function FornecedoresModule() {
                   <td>
                     <code>{x.source_key}</code>
                   </td>
-                  <td>{x.document}</td>
+                  <td>
+                    <code>{x.sync_mode || "NONE"}</code>
+                    {x.api_url ? <small title={x.api_url}>URL ok</small> : <small>—</small>}
+                  </td>
                   <td>{x.markup_percent}%</td>
                   <td>
-                    {x.quem_paga_comissao === 1 ? `Cliente (+${x.platform_fee_percent}%)` : "Fornecedor"}
+                    {x.last_sync_status || "—"}
+                    <small>{x.last_sync_at ? new Date(x.last_sync_at).toLocaleString("pt-BR") : ""}</small>
                   </td>
                   <td className="actions-cell">
                     <button type="button" className="table-action" onClick={() => setEditing(x)}>
                       Editar
+                    </button>
+                    <button
+                      type="button"
+                      className="table-action"
+                      onClick={() => syncOne(x)}
+                      disabled={busy || (x.sync_mode || "NONE") === "NONE"}
+                    >
+                      Sincronizar
                     </button>
                     <button type="button" className="table-action" onClick={() => toggleActive(x)}>
                       {x.active ? "Inativar" : "Ativar"}

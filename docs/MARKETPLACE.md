@@ -120,3 +120,20 @@ Jornada no site (`POST /api/v1/public/site/chat/home` e `.../home/{step}`):
 3. Match **Esteira 2** (mesmo motor do admin) → escolha → proposta + trava 60 min
 
 Resposta compatível com o widget legado (`OBJ.chat_next` + `OBJ.info` + `OBJ.lead_id`). Fallback legado: `LETTER_CHAT_NATIVE_ENABLED=false`.
+
+## Sync de inventário (fornecedores API)
+
+Porta do cron Paulo (`QuotasApiCronsController`) para estoque vivo:
+
+1. No fornecedor: `sync_mode=JSON` + `api_url` (lista JSON com `id`, `valor_credito`, `entrada`, `parcelas`, `valor_parcela`, `administradora`, `categoria`, `reserva`).
+2. `POST /api/v1/marketplace/suppliers/{id}/sync` — um fornecedor.
+3. `POST /api/v1/marketplace/inventory/sync` — todos os JSON ativos da org.
+4. Cron: `POST /api/v1/system/cron/marketplace-quota-sync` (header `x-cron-secret` se configurado).
+
+Comportamento:
+
+- Upsert por `(supplier_source, external_ref)`; `sync_origin=JSON`
+- Someu do JSON → `INACTIVE` (não mexe em `RESERVED` / `SOLD`)
+- Lista vazia ou GET com falha → **não** zera o estoque daquele fornecedor
+- Markup **não** é somado no sync (Esteira 2 aplica no match)
+- `SCRAPE` (Uni/Lume HTML) reservado — ainda não portado

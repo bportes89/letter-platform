@@ -229,6 +229,10 @@ class Quota(TimestampMixin, Base):
     installment_due_date: Mapped[date | None] = mapped_column(Date)
     remaining_installments: Mapped[int | None] = mapped_column(Integer)
     supplier_source: Mapped[str | None] = mapped_column(String(80), index=True)
+    external_ref: Mapped[str | None] = mapped_column(String(120), index=True)
+    sync_origin: Mapped[str] = mapped_column(String(20), default="MANUAL", index=True)  # MANUAL | JSON | SCRAPE
+    synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    administrator_name_txt: Mapped[str | None] = mapped_column(String(180))
     nina_scan_status: Mapped[str | None] = mapped_column(String(30))
     nina_scanned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     nina_scan_detail_json: Mapped[str] = mapped_column(Text, default="{}")
@@ -259,6 +263,11 @@ class QuotaSupplier(TimestampMixin, Base):
     bank_account: Mapped[str | None] = mapped_column(String(40))
     pix_key: Mapped[str | None] = mapped_column(String(180))
     notes: Mapped[str | None] = mapped_column(Text)
+    sync_mode: Mapped[str] = mapped_column(String(20), default="NONE")  # NONE | JSON | SCRAPE
+    api_url: Mapped[str | None] = mapped_column(String(500))
+    last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_sync_status: Mapped[str | None] = mapped_column(String(40))
+    last_sync_detail_json: Mapped[str] = mapped_column(Text, default="{}")
 
 
 class QuotaOfferRange(TimestampMixin, Base):
