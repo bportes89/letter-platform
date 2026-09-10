@@ -66,6 +66,14 @@ class Settings(BaseSettings):
     asaas_bank_code: str = "461"
     asaas_bank_name: str = "Asaas IP S.A."
     asaas_default_agency: str = "0001"
+    inter_client_id: str | None = None
+    inter_client_secret: str | None = None
+    inter_conta_corrente: str | None = None
+    inter_cert_path: str | None = None
+    inter_key_path: str | None = None
+    inter_base_url: str = "https://cdpj.partners.bancointer.com.br"
+    inter_webhook_access_token: str | None = None
+    inter_boleto_vencimento_dias: int = 5
     zapsign_api_token: str | None = None
     zapsign_base_url: str = "https://api.zapsign.com.br/api/v1"
     zapsign_auth_mode: str = "assinaturaTela-tokenEmail"

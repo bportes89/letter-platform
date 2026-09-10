@@ -620,6 +620,13 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
             )
         )
         total = money(sum((Decimal(str(q.credit_value)) for q in quotas), Decimal("0")))
+        from app.marketplace_service import pricing_for_quota
+        from app.quota_supplier_service import suppliers_index
+
+        suppliers = suppliers_index(db, org.id)
+        total_entrada = money(
+            sum((pricing_for_quota(q, suppliers=suppliers)["entrada_final"] for q in quotas), Decimal("0"))
+        )
         if not existing:
             snap = _lead_snapshot(lead)
             proposal = Proposal(
@@ -634,6 +641,7 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
                             "channel": SOURCE,
                             "quota_ids": quota_ids,
                             "total_credit": str(total),
+                            "total_entrada": str(total_entrada),
                             "client_email": snap.get("email"),
                             "filters": snap,
                         }

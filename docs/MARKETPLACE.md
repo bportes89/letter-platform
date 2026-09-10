@@ -130,7 +130,20 @@ Na **primeira** transição para `CONCLUIDO`:
 
 Extrato admin: `GET /api/v1/marketplace/extrato` (linhas fornecedor/plataforma + afiliados).
 
-Fora do escopo desta frente: boleto Inter, portal do fornecedor, crédito BANK/SEFAZ, saldo persistente em `QuotaSupplier`.
+Fora do escopo desta frente: portal do fornecedor, crédito BANK/SEFAZ, saldo persistente em `QuotaSupplier`, scrape Uni/Lume.
+
+## Boleto Inter (entrada)
+
+Emissão da cobrança de entrada (boleto + PIX no Inter) e webhook **Pagou**:
+
+- `POST /api/v1/marketplace/cadastros/{lead_id}/boleto` — emite (ou reutiliza) boleto; sem credenciais Inter → `provider=MOCK` (`DEV-{proposal_id}`)
+- `GET /api/v1/marketplace/cadastros/{lead_id}/boleto/{token}` — PDF público com token HMAC
+- `POST /api/v1/webhooks/inter` — `situacao=RECEBIDO` → `apply_situation_transition(PAGO)` (header `x-inter-webhook-token` se `LETTER_INTER_WEBHOOK_ACCESS_TOKEN` estiver setado)
+- `POST /api/v1/marketplace/cadastros/{lead_id}/mock-inter-webhook` — simula Pagou em dev/testes
+
+Persistência em `proposal.terms_json.boleto` (`codigo_solicitacao`, `amount`, `seu_numero`, `local_path`). Match do webhook: código + valor (± R$ 0,01) + situação `AGUARDANDO_PAGAMENTO`.
+
+Env: `LETTER_INTER_CLIENT_ID`, `LETTER_INTER_CLIENT_SECRET`, `LETTER_INTER_CONTA_CORRENTE`, `LETTER_INTER_CERT_PATH`, `LETTER_INTER_KEY_PATH`, `LETTER_INTER_WEBHOOK_ACCESS_TOKEN`, `LETTER_INTER_BOLETO_VENCIMENTO_DIAS`.
 
 ## Chat público nativo (site)
 

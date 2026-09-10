@@ -2368,6 +2368,20 @@ class CadastroDetailView(CadastroListItem):
     purchase_readonly: dict = Field(default_factory=dict)
     can_conclude: bool = False
     commission_release: dict | None = None
+    boleto: dict | None = None
+
+
+class MarketplaceBoletoIssueResponse(BaseModel):
+    boleto: dict
+    created: bool
+    proposal_id: str
+
+
+class MarketplaceInterMockWebhookRequest(BaseModel):
+    codigo_solicitacao: str = Field(min_length=3, max_length=80)
+    valor_total_recebido: Decimal = Field(gt=0)
+    seu_numero: str | None = Field(default=None, max_length=40)
+    situacao: str = Field(default="RECEBIDO", max_length=40)
 
 
 class MarketplaceExtratoItem(BaseModel):

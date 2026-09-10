@@ -426,6 +426,11 @@ def get_cadastro_detail(db: Session, user: User, lead_id: str) -> dict:
         proposal = db.get(Proposal, row["proposal_id"])
     terms = seed_marketplace_lifecycle(_parse_json(proposal.terms_json)) if proposal else {}
     life = _lifecycle(terms)
+    boleto = None
+    if proposal:
+        from app.inter_boleto_service import boleto_view_from_terms
+
+        boleto = boleto_view_from_terms(terms, lead_id=lead.id)
     return {
         **row,
         "snapshot": snap,
@@ -444,6 +449,7 @@ def get_cadastro_detail(db: Session, user: User, lead_id: str) -> dict:
         "lifecycle_editable": bool(proposal),
         "can_conclude": bool(proposal) and bool(life.get("supplier_transfer_confirmed")),
         "commission_release": life.get("commission_release") if isinstance(life.get("commission_release"), dict) else None,
+        "boleto": boleto,
     }
 
 

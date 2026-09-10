@@ -773,6 +773,119 @@ def test_marketplace_cadastro_situation_lifecycle(client, auth_headers):
     assert any(r["lead_id"] == lead_id for r in compras.json())
 
 
+def test_marketplace_inter_boleto_mock_and_webhook_pago(client, auth_headers, monkeypatch):
+    """Boleto MOCK + webhook RECEBIDO marca Pagou; replay idempotente; token protege webhook."""
+    monkeypatch.setattr("app.core.config.settings.inter_client_id", None)
+    monkeypatch.setattr("app.core.config.settings.inter_webhook_access_token", "inter-test-token")
+
+    cotas = client.get(
+        "/api/v1/marketplace/venda-direta-manual/cotas?category=REAL_ESTATE",
+        headers=auth_headers,
+    )
+    assert cotas.status_code == 200
+    chosen = cotas.json()[0]
+    store = client.post(
+        "/api/v1/marketplace/venda-direta-manual/store",
+        headers=auth_headers,
+        json={
+            "name": "Ciclo Boleto Inter",
+            "email": "ciclo.boleto@letter.test",
+            "phone": "32955554444",
+            "person_type": "PF",
+            "document": "11144477735",
+            "quota_id": chosen["quota_id"],
+            "zipcode": "36010000",
+            "street": "Rua Boleto",
+            "number": "50",
+            "neighborhood": "Centro",
+            "city": "Juiz de Fora",
+            "uf": "MG",
+        },
+    )
+    assert store.status_code == 200, store.text
+    lead_id = store.json()["lead_id"]
+
+    issued = client.post(f"/api/v1/marketplace/cadastros/{lead_id}/boleto", headers=auth_headers)
+    assert issued.status_code == 200, issued.text
+    boleto = issued.json()["boleto"]
+    assert issued.json()["created"] is True
+    assert boleto["provider"] == "MOCK"
+    assert boleto["codigo_solicitacao"].startswith("DEV-")
+    assert Decimal(boleto["amount"]) > 0
+    assert boleto["download_token"]
+
+    again = client.post(f"/api/v1/marketplace/cadastros/{lead_id}/boleto", headers=auth_headers)
+    assert again.status_code == 200
+    assert again.json()["created"] is False
+    assert again.json()["boleto"]["codigo_solicitacao"] == boleto["codigo_solicitacao"]
+
+    pdf = client.get(f"/api/v1/marketplace/cadastros/{lead_id}/boleto/{boleto['download_token']}")
+    assert pdf.status_code == 200
+    assert pdf.headers.get("content-type", "").startswith("application/pdf")
+    assert pdf.content[:4] == b"%PDF"
+
+    bad_pdf = client.get(f"/api/v1/marketplace/cadastros/{lead_id}/boleto/token-invalido")
+    assert bad_pdf.status_code == 403
+
+    unauthorized = client.post(
+        "/api/v1/webhooks/inter",
+        json={
+            "situacao": "RECEBIDO",
+            "codigoSolicitacao": boleto["codigo_solicitacao"],
+            "seuNumero": boleto["seu_numero"],
+            "valorTotalRecebido": float(boleto["amount"]),
+        },
+    )
+    assert unauthorized.status_code == 401
+
+    paid = client.post(
+        "/api/v1/webhooks/inter",
+        headers={"x-inter-webhook-token": "inter-test-token"},
+        json={
+            "situacao": "RECEBIDO",
+            "codigoSolicitacao": boleto["codigo_solicitacao"],
+            "seuNumero": boleto["seu_numero"],
+            "valorTotalRecebido": float(boleto["amount"]),
+        },
+    )
+    assert paid.status_code == 200, paid.text
+    assert paid.json()["paid"] == 1
+
+    detail = client.get(f"/api/v1/marketplace/cadastros/{lead_id}", headers=auth_headers)
+    assert detail.status_code == 200
+    assert detail.json()["situation"] == "PAGO"
+    assert detail.json()["paid_at"]
+    assert detail.json()["pipeline"] == "NEGOCIACAO"
+
+    replay = client.post(
+        "/api/v1/webhooks/inter",
+        headers={"x-inter-webhook-token": "inter-test-token"},
+        json={
+            "situacao": "RECEBIDO",
+            "codigoSolicitacao": boleto["codigo_solicitacao"],
+            "seuNumero": boleto["seu_numero"],
+            "valorTotalRecebido": float(boleto["amount"]),
+        },
+    )
+    assert replay.status_code == 200
+    assert replay.json()["paid"] == 0
+    assert detail.json()["paid_at"] == client.get(
+        f"/api/v1/marketplace/cadastros/{lead_id}", headers=auth_headers
+    ).json()["paid_at"]
+
+    wrong_amount = client.post(
+        f"/api/v1/marketplace/cadastros/{lead_id}/mock-inter-webhook",
+        headers=auth_headers,
+        json={
+            "codigo_solicitacao": boleto["codigo_solicitacao"],
+            "valor_total_recebido": "0.01",
+            "situacao": "RECEBIDO",
+        },
+    )
+    # já está PAGO — mock também deve reportar não processado / idempotente
+    assert wrong_amount.status_code == 200
+
+
 def test_marketplace_conclude_allocates_affiliate_commission(client, auth_headers):
     """Concluído com parceiro na árvore SALES gera CommissionEntry MARKETPLACE_RELEASE."""
     partners = client.get("/api/v1/marketplace/venda-direta-manual/partners", headers=auth_headers)

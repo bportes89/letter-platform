@@ -3,7 +3,7 @@
 import { CheckCircle2, ClipboardList, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
-import { api } from "@/lib/api";
+import { api, API_URL } from "@/lib/api";
 
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
@@ -44,6 +44,14 @@ type CadastroDetail = CadastroRow & {
     affiliate_total?: string;
     affiliate_skipped?: string | null;
     lines?: Array<{ type?: string; amount?: string; supplier_name?: string | null; supplier_source?: string | null }>;
+  } | null;
+  boleto?: {
+    provider?: string;
+    codigo_solicitacao?: string;
+    amount?: string;
+    pdf_url?: string | null;
+    download_token?: string | null;
+    due_date?: string | null;
   } | null;
 };
 
@@ -89,6 +97,28 @@ export function CadastroMarketplaceModule() {
       setSelected(await api<CadastroDetail>(`/marketplace/cadastros/${leadId}`));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Falha ao abrir cadastro");
+    }
+  }
+
+  async function issueBoleto() {
+    if (!selected) return;
+    setBusy(true);
+    setError("");
+    try {
+      const result = await api<{ boleto: CadastroDetail["boleto"]; created: boolean }>(
+        `/marketplace/cadastros/${selected.lead_id}/boleto`,
+        { method: "POST" },
+      );
+      setSelected({ ...selected, boleto: result.boleto });
+      setNotice(result.created ? "Boleto emitido." : "Boleto já existia — reutilizado.");
+      const token = result.boleto?.download_token;
+      if (token) {
+        window.open(`${API_URL}/marketplace/cadastros/${selected.lead_id}/boleto/${token}`, "_blank");
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Falha ao emitir boleto");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -292,6 +322,18 @@ export function CadastroMarketplaceModule() {
                   ? ` (afiliado: ${selected.commission_release.affiliate_skipped})`
                   : ""}
                 {selected.commission_release.reference ? ` · ${selected.commission_release.reference}` : ""}
+              </div>
+            ) : null}
+            {selected.lifecycle_editable && selected.situation === "AGUARDANDO_PAGAMENTO" ? (
+              <div className="notice">
+                Boleto entrada:{" "}
+                {selected.boleto?.codigo_solicitacao
+                  ? `${selected.boleto.provider || "—"} · ${selected.boleto.codigo_solicitacao}`
+                  : "ainda não emitido"}
+                {selected.boleto?.amount ? ` · ${brl.format(Number(selected.boleto.amount))}` : ""}
+                <button type="button" className="table-action" style={{ marginLeft: "0.75rem" }} onClick={issueBoleto} disabled={busy}>
+                  {selected.boleto?.download_token ? "Ver boleto" : "Emitir boleto"}
+                </button>
               </div>
             ) : null}
             <div className="marketplace-form-row">

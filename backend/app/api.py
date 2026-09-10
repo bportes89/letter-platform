@@ -90,6 +90,7 @@ from app.schemas import (
     VendaDiretaManualCotaOption, VendaDiretaManualCadastroOption, VendaDiretaManualPartnerOption,
     VendaDiretaManualStoreRequest, VendaDiretaManualStoreResponse,
     CadastroListItem, CadastroDetailView, CadastroUpdateRequest, MarketplaceExtratoItem,
+    MarketplaceBoletoIssueResponse, MarketplaceInterMockWebhookRequest,
     VenderCotaCalculateRequest, VenderCotaStoreRequest, QuotaOfferRangeUpdate, QuotaSellOfferUpdate, VenderCotaCloseRequest,
     SdcDeskEvaluateRequest, SdcDeskStoreRequest, SdcDeskStatusUpdate, SdcDeskSaleCreate,
     FlashDeskEvaluateRequest, FlashDeskStoreRequest, FlashDeskStatusUpdate, FlashDeskSaleCreate,
@@ -1927,6 +1928,95 @@ def marketplace_extrato(
     from app.marketplace_commission_release_service import list_marketplace_extrato
 
     return list_marketplace_extrato(db, user, limit=limit)
+
+
+@router.post("/marketplace/cadastros/{lead_id}/boleto", response_model=MarketplaceBoletoIssueResponse)
+def marketplace_cadastro_issue_boleto(
+    lead_id: str,
+    force_new: bool = False,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.inter_boleto_service import issue_marketplace_boleto
+
+    result = issue_marketplace_boleto(db, user, lead_id, force_new=force_new)
+    audit(
+        db,
+        user,
+        "marketplace.boleto.issued",
+        "proposal",
+        result["proposal_id"],
+        {"created": result["created"], "provider": (result.get("boleto") or {}).get("provider")},
+    )
+    db.commit()
+    return result
+
+
+@router.get("/marketplace/cadastros/{lead_id}/boleto/{token}")
+def marketplace_cadastro_boleto_download(lead_id: str, token: str, db: Session = Depends(get_db)):
+    from app.inter_boleto_service import read_boleto_pdf_bytes
+
+    content, filename = read_boleto_pdf_bytes(db, lead_id, token)
+    db.commit()
+    return Response(
+        content=content,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
+
+
+@router.post("/webhooks/inter")
+async def inter_webhook(request: Request, db: Session = Depends(get_db)):
+    from app.inter_common import inter_webhook_token
+    from app.inter_webhook_service import handle_inter_webhook
+
+    expected = inter_webhook_token()
+    token = (
+        request.headers.get("x-inter-webhook-token")
+        or request.headers.get("inter-access-token")
+        or request.query_params.get("token")
+        or ""
+    )
+    auth = request.headers.get("authorization") or ""
+    if auth.lower().startswith("bearer "):
+        token = token or auth[7:].strip()
+    if expected and token != expected:
+        raise HTTPException(status_code=401, detail="Webhook Inter não autorizado")
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = []
+    result = handle_inter_webhook(db, payload)
+    db.commit()
+    return {"status": "ok", **result}
+
+
+@router.post("/marketplace/cadastros/{lead_id}/mock-inter-webhook")
+def marketplace_mock_inter_webhook(
+    lead_id: str,
+    payload: MarketplaceInterMockWebhookRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Simula RECEBIDO do Inter (dev/testes) sem certificado."""
+    from app.inter_boleto_service import issue_marketplace_boleto
+    from app.inter_webhook_service import apply_inter_payment_received
+
+    # garante boleto emitido se ainda não existir
+    issued = issue_marketplace_boleto(db, user, lead_id)
+    codigo = payload.codigo_solicitacao
+    if codigo.startswith("AUTO"):
+        codigo = (issued.get("boleto") or {}).get("codigo_solicitacao") or codigo
+    result = apply_inter_payment_received(
+        db,
+        codigo_solicitacao=codigo,
+        valor_recebido=payload.valor_total_recebido,
+        seu_numero=payload.seu_numero or (issued.get("boleto") or {}).get("seu_numero"),
+        data_hora=None,
+    )
+    audit(db, user, "marketplace.boleto.mock_webhook", "lead", lead_id, result)
+    db.commit()
+    return {"status": "ok", **result}
 
 
 @router.post("/quotas/{quota_id}/nina-scan", response_model=NinaQuotaScanView)
