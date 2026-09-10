@@ -96,28 +96,28 @@ export default function VenderMinhaCotaPage() {
     <div className="site-root">
       <main>
         <SiteNav />
-        <section className="panel" style={{ maxWidth: 920, margin: "32px auto", padding: "28px 22px" }}>
+        <section className="site-light-panel">
           <p className="eyebrow"><span /> Marketplace · compra de cota</p>
           <h1 style={{ fontSize: 34, margin: "8px 0 10px" }}>Venda sua cota contemplada</h1>
-          <p style={{ color: "var(--muted)", marginTop: 0 }}>
+          <p className="site-light-muted" style={{ marginTop: 0 }}>
             Preencha os dados e veja na hora quanto a Letter pagaria. Só cotas contempladas; percentual sobre o crédito; pago acima de 35% → recusa.
           </p>
-          {boot?.rules_summary && <p style={{ fontSize: 13, color: "var(--muted)" }}>{boot.rules_summary}</p>}
+          {boot?.rules_summary && <p className="site-light-muted" style={{ fontSize: 13 }}>{boot.rules_summary}</p>}
           {error && <div className="error" style={{ marginBottom: 12 }}>{error}</div>}
           {notice && <div className="notice" style={{ marginBottom: 12 }}>{notice}</div>}
 
           {done ? (
             <div style={{ textAlign: "center", padding: "28px 12px" }}>
-              <h2 style={{ color: "var(--green)" }}>Oferta enviada</h2>
+              <h2 style={{ color: "#008f5f" }}>Oferta enviada</h2>
               <p>Valor congelado pelo robô: <strong>{brl.format(Number(done.offer_value))}</strong></p>
-              <p style={{ color: "var(--muted)" }}>{done.message}</p>
+              <p className="site-light-muted">{done.message}</p>
               <div style={{ display: "flex", gap: 12, justifyContent: "center", marginTop: 18 }}>
                 <Link className="button" href="/login">Ir para o escritório</Link>
                 <Link className="text-link" href="/">Voltar ao site</Link>
               </div>
             </div>
           ) : (
-            <form className="stack-form" onSubmit={result?.viable ? onSubmit : onCalculate} style={{ display: "grid", gap: 12 }}>
+            <form className="stack-form" onSubmit={result?.viable ? onSubmit : onCalculate}>
               <label>
                 Administradora
                 <select name="administrator_id" required>
@@ -136,9 +136,18 @@ export default function VenderMinhaCotaPage() {
                   ))}
                 </select>
               </label>
-              <CurrencyFormField name="credit_value" placeholder="Valor atual do crédito (R$)" required />
-              <CurrencyFormField name="paid_value" placeholder="Total já pago em parcelas (R$)" required />
-              <CurrencyFormField name="outstanding_balance" placeholder="Saldo devedor total (R$)" />
+              <label>
+                Valor atual do crédito (R$)
+                <CurrencyFormField name="credit_value" placeholder="Ex.: R$ 100.000,00" required />
+              </label>
+              <label>
+                Total já pago em parcelas (R$)
+                <CurrencyFormField name="paid_value" placeholder="Ex.: R$ 25.000,00" required />
+              </label>
+              <label>
+                Saldo devedor total (R$)
+                <CurrencyFormField name="outstanding_balance" placeholder="Ex.: R$ 75.000,00" />
+              </label>
               <label>
                 Prazo contratado (meses)
                 <input name="term_months" type="number" min={1} max={9999} required placeholder="Ex.: 120" />
@@ -150,7 +159,7 @@ export default function VenderMinhaCotaPage() {
                   <option value="0">Não</option>
                 </select>
               </label>
-              <hr style={{ borderColor: "var(--line)", width: "100%" }} />
+              <hr />
               <label>Nome<input name="contact_name" required minLength={2} placeholder="Nome completo" /></label>
               <label>E-mail<input name="contact_email" type="email" required placeholder="voce@email.com" /></label>
               <label>Telefone / WhatsApp<input name="contact_phone" required placeholder="DDD + número" /></label>
