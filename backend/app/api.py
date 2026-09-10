@@ -89,7 +89,7 @@ from app.schemas import (
     QuotaSupplierCreate, QuotaSupplierUpdate, QuotaSupplierView, QuotaInventorySyncView,
     VendaDiretaManualCotaOption, VendaDiretaManualCadastroOption, VendaDiretaManualPartnerOption,
     VendaDiretaManualStoreRequest, VendaDiretaManualStoreResponse,
-    CadastroListItem, CadastroDetailView, CadastroUpdateRequest,
+    CadastroListItem, CadastroDetailView, CadastroUpdateRequest, MarketplaceExtratoItem,
     VenderCotaCalculateRequest, VenderCotaStoreRequest, QuotaOfferRangeUpdate, QuotaSellOfferUpdate, VenderCotaCloseRequest,
     SdcDeskEvaluateRequest, SdcDeskStoreRequest, SdcDeskStatusUpdate, SdcDeskSaleCreate,
     FlashDeskEvaluateRequest, FlashDeskStoreRequest, FlashDeskStatusUpdate, FlashDeskSaleCreate,
@@ -1916,6 +1916,17 @@ def marketplace_cadastro_update(lead_id: str, payload: CadastroUpdateRequest, us
     audit(db, user, "marketplace.cadastro.updated", "lead", lead_id, payload.model_dump(exclude_unset=True, mode="json"))
     db.commit()
     return result
+
+
+@router.get("/marketplace/extrato", response_model=list[MarketplaceExtratoItem])
+def marketplace_extrato(
+    limit: int = 200,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.marketplace_commission_release_service import list_marketplace_extrato
+
+    return list_marketplace_extrato(db, user, limit=limit)
 
 
 @router.post("/quotas/{quota_id}/nina-scan", response_model=NinaQuotaScanView)

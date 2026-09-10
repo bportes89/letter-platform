@@ -118,9 +118,19 @@ Campo explícito em `proposal.terms_json.lifecycle` (não só heurística de cot
 | `AGUARDANDO_PAGAMENTO` | Novos | padrão ao criar proposta Marketplace |
 | `PAGO` | Em negociação | `paid_at`; cotas `RESERVED/AVAILABLE` → `SOLD` (1ª vez) |
 | `CONCLUIDO` | Concluído / Compras | exige `supplier_transfer_confirmed` **ou** `force_admin_conclude` |
-| `CANCELADO` / `CANCELADO_FALTA_PAGAMENTO` | só Clientes (ALL) | sem estorno de stub de comissão |
+| `CANCELADO` / `CANCELADO_FALTA_PAGAMENTO` | só Clientes (ALL) | se comissão ainda não liberada → `SKIPPED` |
 
-Comissão neste MVP: stub `commission_release_status=RELEASED_STUB` (sem wallet/extrato). Liberação real fica para frente seguinte.
+### Liberação de comissão (Concluído)
+
+Na **primeira** transição para `CONCLUIDO`:
+
+1. Calcula linhas **plataforma** (`credit × QuotaSupplier.platform_fee_percent`) e **fornecedor** (`entrada − plataforma`) por cota → snapshot em `lifecycle.commission_release`
+2. Se houver originador na árvore SALES (`commission_originator_id` / `partner_user_id` / `lead.owner_id`), aloca Universal MMN (`CommissionEntry`, referência `MARKETPLACE_RELEASE:{proposal_id}`, status `AVAILABLE`)
+3. `commission_release_status=RELEASED` (idempotente)
+
+Extrato admin: `GET /api/v1/marketplace/extrato` (linhas fornecedor/plataforma + afiliados).
+
+Fora do escopo desta frente: boleto Inter, portal do fornecedor, crédito BANK/SEFAZ, saldo persistente em `QuotaSupplier`.
 
 ## Chat público nativo (site)
 

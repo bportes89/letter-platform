@@ -56,8 +56,10 @@ SITUATION_LABELS = {
 
 COMM_NOT_DUE = "NOT_DUE"
 COMM_PENDING = "PENDING"
-COMM_RELEASED_STUB = "RELEASED_STUB"
+COMM_RELEASED = "RELEASED"
+COMM_RELEASED_STUB = "RELEASED_STUB"  # legado pré-liberação real
 COMM_SKIPPED = "SKIPPED"
+COMM_RELEASED_ANY = frozenset({COMM_RELEASED, COMM_RELEASED_STUB})
 
 
 def _parse_json(raw: str | None) -> dict:
@@ -193,8 +195,6 @@ def _on_concluir(db: Session, user: User, proposal: Proposal, life: dict, *, for
     now = datetime.now(UTC).isoformat()
     fields = {
         "situation": SIT_CONCLUIDO,
-        "commission_release_status": COMM_RELEASED_STUB,
-        "commission_released_at": now,
         "concluded_by": user.id,
     }
     if force_admin and not confirmed:
@@ -202,6 +202,9 @@ def _on_concluir(db: Session, user: User, proposal: Proposal, life: dict, *, for
         fields["supplier_transfer_confirmed_at"] = now
         fields["force_admin_conclude"] = True
     _write_lifecycle(proposal, **fields)
+    from app.marketplace_commission_release_service import release_marketplace_commissions
+
+    release_marketplace_commissions(db, user, proposal)
 
 
 def apply_situation_transition(
@@ -241,7 +244,7 @@ def apply_situation_transition(
 
     if situation in {SIT_CANCELADO, SIT_CANCELADO_FALTA}:
         status = life.get("commission_release_status") or COMM_NOT_DUE
-        if status not in {COMM_RELEASED_STUB}:
+        if status not in COMM_RELEASED_ANY:
             status = COMM_SKIPPED
         _write_lifecycle(proposal, situation=situation, commission_release_status=status)
         lead.status = "CANCELLED"
@@ -440,6 +443,7 @@ def get_cadastro_detail(db: Session, user: User, lead_id: str) -> dict:
         "paid_at": life.get("paid_at"),
         "lifecycle_editable": bool(proposal),
         "can_conclude": bool(proposal) and bool(life.get("supplier_transfer_confirmed")),
+        "commission_release": life.get("commission_release") if isinstance(life.get("commission_release"), dict) else None,
     }
 
 

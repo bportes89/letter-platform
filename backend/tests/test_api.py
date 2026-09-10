@@ -678,7 +678,7 @@ def test_marketplace_cadastros_pipeline(client, auth_headers):
 
 
 def test_marketplace_cadastro_situation_lifecycle(client, auth_headers):
-    """Situação explícita: Pagou → Concluído bloqueado sem fornecedor; force libera stub."""
+    """Situação explícita: Pagou → Concluído libera comissão real + extrato."""
     # Garante uma venda Marketplace via venda direta manual
     cotas = client.get(
         "/api/v1/marketplace/venda-direta-manual/cotas?category=REAL_ESTATE",
@@ -748,11 +748,83 @@ def test_marketplace_cadastro_situation_lifecycle(client, auth_headers):
     assert done.json()["situation"] == "CONCLUIDO"
     assert done.json()["pipeline"] == "CONCLUIDO"
     assert done.json()["supplier_transfer_confirmed"] is True
-    assert done.json()["commission_release_status"] == "RELEASED_STUB"
+    assert done.json()["commission_release_status"] == "RELEASED"
+    release = done.json().get("commission_release") or {}
+    assert release.get("reference", "").startswith("MARKETPLACE_RELEASE:")
+    assert isinstance(release.get("lines"), list) and len(release["lines"]) >= 2
+    kinds = {line["type"] for line in release["lines"]}
+    assert "supplier_release" in kinds
+    assert "platform_fee" in kinds
+
+    # Idempotente: concluir de novo não cria segundo snapshot divergente
+    again = client.get(f"/api/v1/marketplace/cadastros/{lead_id}", headers=auth_headers)
+    assert again.json()["commission_release_status"] == "RELEASED"
+    assert again.json()["commission_release"]["reference"] == release["reference"]
+
+    extrato = client.get("/api/v1/marketplace/extrato", headers=auth_headers)
+    assert extrato.status_code == 200
+    assert any(
+        r.get("proposal_id") == done.json()["proposal_id"] and r.get("kind") in {"supplier_release", "platform_fee"}
+        for r in extrato.json()
+    )
 
     compras = client.get("/api/v1/marketplace/cadastros?pipeline=COMPRAS", headers=auth_headers)
     assert compras.status_code == 200
     assert any(r["lead_id"] == lead_id for r in compras.json())
+
+
+def test_marketplace_conclude_allocates_affiliate_commission(client, auth_headers):
+    """Concluído com parceiro na árvore SALES gera CommissionEntry MARKETPLACE_RELEASE."""
+    partners = client.get("/api/v1/marketplace/venda-direta-manual/partners", headers=auth_headers)
+    assert partners.status_code == 200
+    assert partners.json(), "seed precisa de ao menos um parceiro SALES"
+    partner_id = partners.json()[0]["id"]
+
+    cotas = client.get(
+        "/api/v1/marketplace/venda-direta-manual/cotas?category=REAL_ESTATE",
+        headers=auth_headers,
+    )
+    assert cotas.status_code == 200
+    chosen = cotas.json()[0]
+    store = client.post(
+        "/api/v1/marketplace/venda-direta-manual/store",
+        headers=auth_headers,
+        json={
+            "name": "Ciclo Comissao Afiliado",
+            "email": "ciclo.afiliado@letter.test",
+            "phone": "32966665555",
+            "person_type": "PF",
+            "document": "39053344705",
+            "quota_id": chosen["quota_id"],
+            "partner_user_id": partner_id,
+            "zipcode": "36010000",
+            "street": "Rua Afiliado",
+            "number": "20",
+            "neighborhood": "Centro",
+            "city": "Juiz de Fora",
+            "uf": "MG",
+        },
+    )
+    assert store.status_code == 200, store.text
+    lead_id = store.json()["lead_id"]
+
+    done = client.patch(
+        f"/api/v1/marketplace/cadastros/{lead_id}",
+        headers=auth_headers,
+        json={"situation": "CONCLUIDO", "force_admin_conclude": True},
+    )
+    assert done.status_code == 200, done.text
+    assert done.json()["commission_release_status"] == "RELEASED"
+    release = done.json()["commission_release"]
+    assert release["affiliate_originator_id"] == partner_id
+    assert release["affiliate_entry_ids"], release
+    assert Decimal(release["affiliate_total"]) > 0
+
+    extrato = client.get("/api/v1/marketplace/extrato?limit=50", headers=auth_headers)
+    assert extrato.status_code == 200
+    aff = [r for r in extrato.json() if r.get("kind") == "affiliate" and r.get("reference") == release["reference"]]
+    assert aff, extrato.json()[:5]
+    assert all(r.get("status") == "AVAILABLE" for r in aff)
 
 
 def test_marketplace_suppliers_crud_and_markup_override(client, auth_headers):

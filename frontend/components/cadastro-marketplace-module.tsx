@@ -37,6 +37,14 @@ type CadastroDetail = CadastroRow & {
   purchase_readonly: Record<string, unknown>;
   snapshot: Record<string, unknown>;
   can_conclude?: boolean;
+  commission_release?: {
+    reference?: string;
+    supplier_total?: string;
+    platform_total?: string;
+    affiliate_total?: string;
+    affiliate_skipped?: string | null;
+    lines?: Array<{ type?: string; amount?: string; supplier_name?: string | null; supplier_source?: string | null }>;
+  } | null;
 };
 
 const SALE_SITUATIONS = [
@@ -266,6 +274,26 @@ export function CadastroMarketplaceModule() {
                 </>
               ) : null}
             </div>
+            {selected.commission_release ? (
+              <div className="notice">
+                Liberação: fornecedor{" "}
+                {selected.commission_release.supplier_total
+                  ? brl.format(Number(selected.commission_release.supplier_total))
+                  : "—"}{" "}
+                · plataforma{" "}
+                {selected.commission_release.platform_total
+                  ? brl.format(Number(selected.commission_release.platform_total))
+                  : "—"}{" "}
+                · rede{" "}
+                {selected.commission_release.affiliate_total
+                  ? brl.format(Number(selected.commission_release.affiliate_total))
+                  : "—"}
+                {selected.commission_release.affiliate_skipped
+                  ? ` (afiliado: ${selected.commission_release.affiliate_skipped})`
+                  : ""}
+                {selected.commission_release.reference ? ` · ${selected.commission_release.reference}` : ""}
+              </div>
+            ) : null}
             <div className="marketplace-form-row">
               <label className="marketplace-field">
                 Nome

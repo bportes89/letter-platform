@@ -134,9 +134,11 @@ def seed():
                 _ensure_master_trees(db, org.id, password)
                 from app.vender_cota_service import ensure_default_ranges, ensure_quota_sell_commission_rule
                 from app.quota_supplier_service import ensure_default_suppliers
+                from app.marketplace_commission_release_service import ensure_marketplace_commission_rule
 
                 ensure_default_ranges(db, org.id)
                 ensure_quota_sell_commission_rule(db, org.id)
+                ensure_marketplace_commission_rule(db, org.id)
                 ensure_default_suppliers(db, org.id)
                 db.commit()
             _sync_headquarters_org(db)
@@ -218,6 +220,10 @@ def seed():
             CommissionRule(
                 organization_id=org.id, product="QUITCON", commission_type="SALES", version=1,
                 base_type="QUITACAO_VP", pool_rate_percent=Decimal("3"), levels_json=json.dumps(LEVEL_SHARES), active=True,
+            ),
+            CommissionRule(
+                organization_id=org.id, product="MARKETPLACE", commission_type="SALES", version=1,
+                base_type="CREDIT_VALUE", pool_rate_percent=Decimal("3"), levels_json=json.dumps(LEVEL_SHARES), active=True,
             ),
         ])
         db.commit()

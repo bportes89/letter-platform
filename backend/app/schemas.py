@@ -2367,6 +2367,23 @@ class CadastroDetailView(CadastroListItem):
     address: dict = Field(default_factory=dict)
     purchase_readonly: dict = Field(default_factory=dict)
     can_conclude: bool = False
+    commission_release: dict | None = None
+
+
+class MarketplaceExtratoItem(BaseModel):
+    kind: str
+    released_at: str | None = None
+    proposal_id: str | None = None
+    lead_id: str | None = None
+    reference: str | None = None
+    beneficiary_label: str | None = None
+    beneficiary_id: str | None = None
+    quota_id: str | None = None
+    credit: str | None = None
+    percent: str | None = None
+    amount: str | None = None
+    level: int | None = None
+    status: str | None = None
 
 
 class CadastroUpdateRequest(BaseModel):
