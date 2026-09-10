@@ -94,6 +94,7 @@ export type PublicClientRegisterResponse = {
   user: { id: string; name: string; email: string; role: string };
   referrer: PublicReferralPreview | null;
   lead_id: string;
+  chat_lead_id?: string | null;
 };
 
 export async function fetchPublicReferral(referralCode: string): Promise<PublicReferralPreview> {
@@ -108,6 +109,7 @@ export async function registerPublicClient(payload: {
   document?: string;
   referral_code?: string;
   terms_accepted: boolean;
+  chat_lead_id?: string;
 }): Promise<PublicClientRegisterResponse> {
   return publicFetch<PublicClientRegisterResponse>("/public/site/auth/register", {
     method: "POST",

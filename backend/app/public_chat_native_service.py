@@ -816,7 +816,7 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
                     ),
                     "options": [
                         {"name": "Criar conta", "link": f"/cadastro?{qs}"},
-                        {"name": "Já tenho conta", "link": "/login"},
+                        {"name": "Já tenho conta", "link": f"/login?lead_id={quote(lead.id)}&next=/modules/minhas-compras"},
                         {"name": "Continuar para o boleto", "next": int(STEP_BOLETO_HANDOFF)},
                     ],
                 }

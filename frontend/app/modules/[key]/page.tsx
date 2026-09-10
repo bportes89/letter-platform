@@ -26,6 +26,7 @@ import { VenderCotaAdminModule } from "@/components/vender-cota-admin-module";
 import { VendaDiretaRoboModule } from "@/components/venda-direta-robo-module";
 import { VendaDiretaManualModule } from "@/components/venda-direta-manual-module";
 import { CadastroMarketplaceModule } from "@/components/cadastro-marketplace-module";
+import { ClientMarketplaceModule } from "@/components/client-marketplace-module";
 import { FornecedoresModule } from "@/components/fornecedores-module";
 import { SdcDeskModule } from "@/components/sdc-desk-module";
 import { FlashDeskModule } from "@/components/flash-desk-module";
@@ -95,6 +96,7 @@ export default function ModulePage() {
   if (routeKey === "venda-direta-robo") return <VendaDiretaRoboModule />;
   if (routeKey === "venda-direta-manual") return <VendaDiretaManualModule />;
   if (routeKey === "cadastros") return <CadastroMarketplaceModule />;
+  if (routeKey === "minhas-compras") return <ClientMarketplaceModule />;
   if (routeKey === "fornecedores") return <FornecedoresModule />;
   if (routeKey === "inventory") return <InventoryModule />;
   if (routeKey === "vender-cota") return <VenderCotaAdminModule />;

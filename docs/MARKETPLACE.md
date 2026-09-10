@@ -185,6 +185,19 @@ No passo de categoria, **Capital de Giro** abre a faixa `10020–10028` (paralel
 
 Lead fica com `product_interest=SDC` / `source=SITE_CHAT`. Visibilidade operacional: **mesa SDC** (não Cadastros Marketplace).
 
+## Escritório do cliente — Minhas compras
+
+Após criar conta (ou login) a partir do chat, o lead `SITE_CHAT` é vinculado (`client_user_id` + `proposal.client_user_id`):
+
+- Cadastro público: `POST /public/site/auth/register` com `chat_lead_id` (também tenta match por e-mail do snapshot)
+- Conta existente: `POST /marketplace/me/bind-chat-lead`
+- Lista/detalhe: `GET /marketplace/me/compras` · `GET /marketplace/me/compras/{lead_id}`
+- Boleto: `POST /marketplace/me/compras/{lead_id}/boleto` (PDF público com token HMAC)
+- Finalizar: `POST /marketplace/me/compras/{lead_id}/finalize` → `CONCLUIDO` (exige `PAGO` + confirmação do fornecedor; sem `force_admin`)
+- Docs: `GET/POST /marketplace/me/compras/{lead_id}/documents` (`entity_type=marketplace_lead`)
+
+UI: `/modules/minhas-compras` (nav CLIENT). PATCH admin `/marketplace/cadastros/{id}` fica **403** para `CLIENT`.
+
 ## Sync de inventário (fornecedores API)
 
 Porta do cron Paulo (`QuotasApiCronsController`) para estoque vivo:

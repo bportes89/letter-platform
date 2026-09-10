@@ -145,6 +145,7 @@ def register_public_client(
     password: str,
     document: str | None = None,
     referral_code: str | None = None,
+    chat_lead_id: str | None = None,
     user_agent: str | None = None,
     ip_address: str | None = None,
 ) -> dict:
@@ -216,6 +217,15 @@ def register_public_client(
     if user_eligible_for_auto_subaccount(user):
         ensure_kyc_case_for_user(db, user)
 
+    bound_chat_lead_id = None
+    if user.role == Role.CLIENT:
+        from app.client_marketplace_service import bind_site_chat_lead
+
+        bound = bind_site_chat_lead(db, user, chat_lead_id)
+        if bound.get("bound"):
+            bound_chat_lead_id = bound.get("lead_id")
+            lead_id = bound_chat_lead_id or lead_id
+
     access, refresh, _ = create_session_tokens(db, user, user_agent, ip_address)
     referrer = db.get(User, referrer_user_id) if referrer_user_id else None
     return {
@@ -229,6 +239,7 @@ def register_public_client(
             "referrer_name": mask_person_name(referrer.name) if referrer else None,
         } if referrer_node else None,
         "lead_id": lead_id,
+        "chat_lead_id": bound_chat_lead_id,
     }
 
 

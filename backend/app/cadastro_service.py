@@ -10,7 +10,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Contract, Lead, Proposal, Quota, User
+from app.models import Contract, Lead, Proposal, Quota, Role, User
 from app.network_visibility import get_lead_for_user, list_visible_leads, owner_map
 from app.services import money
 
@@ -474,6 +474,12 @@ def update_cadastro(
     supplier_transfer_confirmed: bool | None = None,
 ) -> dict:
     lead = get_lead_for_user(db, user, lead_id)
+    if user.role == Role.CLIENT:
+        # Cliente só finaliza (CONCLUIDO) pela rota dedicada /marketplace/me; PATCH admin fica bloqueado.
+        raise HTTPException(
+            status_code=403,
+            detail="Use o escritório Minhas compras (finalizar / boleto / documentos) para esta conta.",
+        )
     if name is not None:
         lead.name = name.strip()
     if phone is not None:

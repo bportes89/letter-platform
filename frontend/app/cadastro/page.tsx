@@ -87,6 +87,10 @@ function CadastroForm() {
     setError("");
     setLoading(true);
     try {
+      const chatLeadId =
+        leadIdFromUrl ||
+        (typeof window !== "undefined" ? sessionStorage.getItem("letter_chat_lead_id") : null) ||
+        undefined;
       const result = await registerPublicClient({
         name,
         email,
@@ -95,9 +99,19 @@ function CadastroForm() {
         document: document.trim() || undefined,
         referral_code: referralCode.trim() || undefined,
         terms_accepted: termsAccepted,
+        chat_lead_id: chatLeadId || undefined,
       });
       localStorage.setItem("letter_access_token", result.access_token);
       localStorage.setItem("letter_refresh_token", result.refresh_token);
+      try {
+        sessionStorage.removeItem("letter_chat_lead_id");
+      } catch {
+        /* ignore */
+      }
+      if (result.chat_lead_id || chatLeadId) {
+        window.location.href = "/modules/minhas-compras";
+        return;
+      }
       window.location.href = postSignupRedirectForRole(result.user.role);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Não foi possível concluir o cadastro");

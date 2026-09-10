@@ -3,6 +3,8 @@ export type ProductNavChild = {
   name: string;
   /** Visível apenas para perfis internos (admin / staff / franqueadora). */
   internalOnly?: boolean;
+  /** Visível apenas para CLIENT. */
+  clientOnly?: boolean;
 };
 
 export type ProductNavItem = {
@@ -13,6 +15,8 @@ export type ProductNavItem = {
   children?: ProductNavChild[];
   /** Produto de estrutura interna — oculto para parceiros comerciais. */
   internalOnly?: boolean;
+  /** Visível apenas para CLIENT. */
+  clientOnly?: boolean;
   /** Produto do ambiente BANK (investimentos), não da PLATAFORMA. */
   bank?: boolean;
   /** Em stand-by: oculto do menu e travado na rota. */
@@ -36,6 +40,7 @@ export const PRODUCT_NAV: ProductNavItem[] = [
       { key: "venda-direta-robo", name: "Venda Direta Robô", internalOnly: true },
       { key: "venda-direta-manual", name: "Venda Direta Manual", internalOnly: true },
       { key: "cadastros", name: "Cadastros", internalOnly: true },
+      { key: "minhas-compras", name: "Minhas compras", clientOnly: true },
       { key: "fornecedores", name: "Fornecedores", internalOnly: true },
       { key: "inventory", name: "Inventário (admin)", internalOnly: true },
       { key: "vender-cota", name: "Vender minha cota (admin)", internalOnly: true },
@@ -98,12 +103,14 @@ export function filterProductNavItem(
   if (item.children?.length) {
     const children = item.children.filter((child) => {
       if (child.internalOnly && !internal) return false;
+      if (child.clientOnly && role !== "CLIENT") return false;
       return allowedKeys === "*" || allowedKeys.includes(child.key);
     });
     if (!children.length) return null;
     return { ...item, children };
   }
 
+  if (item.clientOnly && role !== "CLIENT") return null;
   if (allowedKeys !== "*" && !allowedKeys.includes(item.key)) return null;
   return item;
 }

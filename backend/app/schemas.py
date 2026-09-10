@@ -2859,6 +2859,7 @@ class PublicClientRegisterRequest(BaseModel):
     document: str | None = Field(default=None, min_length=11, max_length=20)
     referral_code: str | None = Field(default=None, min_length=6, max_length=40)
     terms_accepted: bool = False
+    chat_lead_id: str | None = Field(default=None, max_length=36)
 
 
 class PublicReferralPreview(BaseModel):
@@ -2875,6 +2876,17 @@ class PublicClientRegisterResponse(BaseModel):
     user: UserView
     referrer: PublicReferralPreview | None = None
     lead_id: str
+    chat_lead_id: str | None = None
+
+
+class MarketplaceBindChatLeadRequest(BaseModel):
+    chat_lead_id: str | None = Field(default=None, max_length=36)
+
+
+class MarketplaceBindChatLeadResponse(BaseModel):
+    bound: bool
+    lead_id: str | None = None
+    message: str
 
 
 class PublicFlashPoolRequest(BaseModel):

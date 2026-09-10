@@ -3733,6 +3733,108 @@ def test_public_site_chat_native_marketplace_flow(client, auth_headers):
     assert lead["status"] == "PROPOSAL"
 
 
+def test_marketplace_client_office_bind_boleto_finalize(client, auth_headers):
+    """Cliente vincula compra SITE_CHAT, emite boleto e finaliza após fornecedor."""
+    # Reusa fluxo chat até proposta
+    email_addr = "cliente.compras@letter.com.br"
+    email = client.post(
+        "/api/v1/public/site/chat/home/10003",
+        json={"name": "Cliente Compras Chat", "email": email_addr},
+    )
+    assert email.status_code == 200
+    lead_id = email.json()["OBJ"]["lead_id"]
+
+    client.post(
+        "/api/v1/public/site/chat/home/10004",
+        json={"lead_id": lead_id, "phone": "32911223344", "email": email_addr},
+    )
+    client.post(
+        "/api/v1/public/site/chat/home/10007",
+        json={"lead_id": lead_id, "option_id": "REAL_ESTATE", "option_save": "REAL_ESTATE"},
+    )
+    client.post(
+        "/api/v1/public/site/chat/home/10008",
+        json={"lead_id": lead_id, "option_id": "dirty_no", "option_save": "0"},
+    )
+    client.post(
+        "/api/v1/public/site/chat/home/10008",
+        json={"lead_id": lead_id, "target_amount": "400000"},
+    )
+    client.post(
+        "/api/v1/public/site/chat/home/10009",
+        json={"lead_id": lead_id, "target_entrada": "80000"},
+    )
+    client.post(
+        "/api/v1/public/site/chat/home/10010",
+        json={"lead_id": lead_id, "monthly_income": "50000"},
+    )
+    match = client.post(
+        "/api/v1/public/site/chat/home/10011",
+        json={"lead_id": lead_id, "asset_value": "900000"},
+    )
+    assert match.status_code == 200, match.text
+    options = match.json()["OBJ"]["chat_next"][0].get("options") or []
+    assert options
+    quota_key = options[0]["id"]
+    for qid in str(quota_key).split("|"):
+        assert client.post(f"/api/v1/quotas/{qid}/nina-scan", headers=auth_headers).status_code == 200
+
+    confirm = client.post(
+        "/api/v1/public/site/chat/home/10013",
+        json={"lead_id": lead_id, "option_id": quota_key, "option_save": quota_key},
+    )
+    assert confirm.status_code == 200, confirm.text
+
+    registered = client.post(
+        "/api/v1/public/site/auth/register",
+        json={
+            "name": "Cliente Compras Chat",
+            "email": email_addr,
+            "phone": "32911223344",
+            "password": "ClienteSite1!",
+            "terms_accepted": True,
+            "chat_lead_id": lead_id,
+        },
+    )
+    assert registered.status_code == 201, registered.text
+    token = registered.json()["access_token"]
+    assert registered.json().get("chat_lead_id") == lead_id
+    client_headers = {"Authorization": f"Bearer {token}"}
+
+    compras = client.get("/api/v1/marketplace/me/compras", headers=client_headers)
+    assert compras.status_code == 200
+    assert any(r["lead_id"] == lead_id for r in compras.json())
+
+    boleto = client.post(f"/api/v1/marketplace/me/compras/{lead_id}/boleto", headers=client_headers)
+    assert boleto.status_code == 200, boleto.text
+    assert boleto.json()["boleto"].get("download_token")
+
+    # Cliente não usa PATCH admin
+    blocked_patch = client.patch(
+        f"/api/v1/marketplace/cadastros/{lead_id}",
+        headers=client_headers,
+        json={"situation": "PAGO"},
+    )
+    assert blocked_patch.status_code == 403
+
+    # Pagou via admin + confirmação fornecedor
+    paid = client.patch(
+        f"/api/v1/marketplace/cadastros/{lead_id}",
+        headers=auth_headers,
+        json={"situation": "PAGO", "supplier_transfer_confirmed": True},
+    )
+    assert paid.status_code == 200, paid.text
+
+    early = client.post(f"/api/v1/marketplace/me/compras/{lead_id}/finalize", headers=client_headers)
+    # can_conclude true após supplier confirm — finalize deve passar
+    assert early.status_code == 200, early.text
+    assert early.json()["situation"] == "CONCLUIDO"
+
+    docs = client.get(f"/api/v1/marketplace/me/compras/{lead_id}/documents", headers=client_headers)
+    assert docs.status_code == 200
+    assert docs.json() == []
+
+
 def test_public_site_chat_native_sdc_flow(client, auth_headers):
     """Chat nativo SDC: garantia → evaluate → solicitation na mesa."""
     email = client.post(

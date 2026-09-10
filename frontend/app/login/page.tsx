@@ -19,7 +19,22 @@ import {
   type WalletPeek,
 } from "@/lib/wallet-onboarding";
 
-async function redirectAfterLogin(user: User, nextPath: string | null) {
+async function redirectAfterLogin(user: User, nextPath: string | null, chatLeadId: string | null) {
+  if (user.role === "CLIENT" && chatLeadId) {
+    try {
+      await api("/marketplace/me/bind-chat-lead", {
+        method: "POST",
+        body: JSON.stringify({ chat_lead_id: chatLeadId }),
+      });
+      try {
+        sessionStorage.removeItem("letter_chat_lead_id");
+      } catch {
+        /* ignore */
+      }
+    } catch {
+      /* bind best-effort */
+    }
+  }
   const wallet = await api<WalletPeek>("/wallet/me");
   if (shouldForceWalletOnboarding(user.role, wallet)) {
     window.location.href = walletOnboardingPath();
@@ -34,12 +49,17 @@ async function redirectAfterLogin(user: User, nextPath: string | null) {
     window.location.href = nextPath;
     return;
   }
+  if (user.role === "CLIENT" && chatLeadId) {
+    window.location.href = "/modules/minhas-compras";
+    return;
+  }
   window.location.href = portalHomeForRole(user.role);
 }
 
 function LoginForm() {
   const searchParams = useSearchParams();
   const nextPath = searchParams.get("next");
+  const leadIdFromUrl = searchParams.get("lead_id")?.trim() || null;
   const [email, setEmail] = useState("admin@letter.com.br");
   const [password, setPassword] = useState("Letter@123");
   const [otp, setOtp] = useState("");
@@ -48,16 +68,29 @@ function LoginForm() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
+    if (leadIdFromUrl) {
+      try {
+        sessionStorage.setItem("letter_chat_lead_id", leadIdFromUrl);
+      } catch {
+        /* ignore */
+      }
+    }
+  }, [leadIdFromUrl]);
+
+  useEffect(() => {
     if (!getToken()) return;
     api<User>("/auth/me")
       .then((user) => {
-        redirectAfterLogin(user, nextPath);
+        const stored =
+          leadIdFromUrl ||
+          (typeof window !== "undefined" ? sessionStorage.getItem("letter_chat_lead_id") : null);
+        redirectAfterLogin(user, nextPath, stored);
       })
       .catch(() => {
         localStorage.removeItem("letter_access_token");
         localStorage.removeItem("letter_refresh_token");
       });
-  }, [nextPath]);
+  }, [nextPath, leadIdFromUrl]);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -66,7 +99,10 @@ function LoginForm() {
     try {
       await login(email, password, showMfa ? otp : undefined);
       const user = await api<User>("/auth/me");
-      await redirectAfterLogin(user, nextPath);
+      const stored =
+        leadIdFromUrl ||
+        (typeof window !== "undefined" ? sessionStorage.getItem("letter_chat_lead_id") : null);
+      await redirectAfterLogin(user, nextPath, stored);
     } catch (e) {
       const message = e instanceof Error ? e.message : "Falha no acesso";
       if (message.includes("autenticador (MFA)")) {

@@ -93,6 +93,7 @@ from app.schemas import (
     VendaDiretaManualStoreRequest, VendaDiretaManualStoreResponse,
     CadastroListItem, CadastroDetailView, CadastroUpdateRequest, MarketplaceExtratoItem,
     MarketplaceBoletoIssueResponse, MarketplaceInterMockWebhookRequest,
+    MarketplaceBindChatLeadRequest, MarketplaceBindChatLeadResponse,
     VenderCotaCalculateRequest, VenderCotaStoreRequest, QuotaOfferRangeUpdate, QuotaSellOfferUpdate, VenderCotaCloseRequest,
     SdcDeskEvaluateRequest, SdcDeskStoreRequest, SdcDeskStatusUpdate, SdcDeskSaleCreate,
     FlashDeskEvaluateRequest, FlashDeskStoreRequest, FlashDeskStatusUpdate, FlashDeskSaleCreate,
@@ -2032,6 +2033,92 @@ def marketplace_cadastro_boleto_download(lead_id: str, token: str, db: Session =
     )
 
 
+@router.get("/marketplace/me/compras", response_model=list[CadastroListItem])
+def marketplace_me_compras(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.client_marketplace_service import list_my_compras
+
+    rows = list_my_compras(db, user)
+    db.commit()
+    return rows
+
+
+@router.get("/marketplace/me/compras/{lead_id}", response_model=CadastroDetailView)
+def marketplace_me_compra_detail(lead_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.client_marketplace_service import get_my_compra
+
+    return get_my_compra(db, user, lead_id)
+
+
+@router.post("/marketplace/me/bind-chat-lead", response_model=MarketplaceBindChatLeadResponse)
+def marketplace_me_bind_chat_lead(
+    payload: MarketplaceBindChatLeadRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.client_marketplace_service import bind_site_chat_lead
+
+    result = bind_site_chat_lead(db, user, payload.chat_lead_id)
+    audit(db, user, "marketplace.client.bind_chat_lead", "lead", result.get("lead_id") or "", result)
+    db.commit()
+    return result
+
+
+@router.post("/marketplace/me/compras/{lead_id}/boleto", response_model=MarketplaceBoletoIssueResponse)
+def marketplace_me_issue_boleto(
+    lead_id: str,
+    force_new: bool = False,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.client_marketplace_service import issue_my_boleto
+
+    result = issue_my_boleto(db, user, lead_id, force_new=force_new)
+    audit(
+        db,
+        user,
+        "marketplace.client.boleto.issued",
+        "proposal",
+        result["proposal_id"],
+        {"created": result["created"]},
+    )
+    db.commit()
+    return result
+
+
+@router.post("/marketplace/me/compras/{lead_id}/finalize", response_model=CadastroDetailView)
+def marketplace_me_finalize(lead_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.client_marketplace_service import finalize_my_compra
+
+    result = finalize_my_compra(db, user, lead_id)
+    audit(db, user, "marketplace.client.finalize", "lead", lead_id, {"situation": result.get("situation")})
+    db.commit()
+    return result
+
+
+@router.get("/marketplace/me/compras/{lead_id}/documents", response_model=list[DocumentView])
+def marketplace_me_documents(lead_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.client_marketplace_service import list_my_documents
+
+    return list_my_documents(db, user, lead_id)
+
+
+@router.post("/marketplace/me/compras/{lead_id}/documents", response_model=DocumentView, status_code=201)
+async def marketplace_me_upload_document(
+    lead_id: str,
+    kind: str = Form("OTHER"),
+    file: UploadFile = File(...),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.client_marketplace_service import upload_my_document
+
+    document = await upload_my_document(db, user, lead_id, kind=kind, file=file)
+    audit(db, user, "marketplace.client.document.uploaded", "document", document.id, {"lead_id": lead_id, "kind": kind})
+    db.commit()
+    db.refresh(document)
+    return document
+
+
 @router.post("/webhooks/inter")
 async def inter_webhook(request: Request, db: Session = Depends(get_db)):
     from app.inter_common import inter_webhook_token
@@ -2361,6 +2448,7 @@ def public_site_client_register(payload: PublicClientRegisterRequest, request: R
         password=payload.password,
         document=payload.document,
         referral_code=payload.referral_code,
+        chat_lead_id=payload.chat_lead_id,
         user_agent=request.headers.get("user-agent"),
         ip_address=ip,
     )
