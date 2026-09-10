@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import re
+from datetime import date
 from decimal import Decimal
 
 from fastapi import HTTPException, UploadFile
@@ -13,18 +15,27 @@ from app.core.config import settings
 from app.document_service import persist_upload
 from app.models import (
     Administrator,
+    CommissionEntry,
+    CommissionRule,
     CommunicationTemplate,
     Document,
     Organization,
+    Quota,
     QuotaOfferRange,
     QuotaSellOffer,
     Role,
     User,
     uid,
 )
+from app.network_service import allocate_commissions
+from app.public_site_service import lookup_referral_code
 from app.services import money
 from app.storage_service import get_storage
 from app.tax_communication_service import mock_deliver, queue_delivery
+
+QUOTA_SELL_PRODUCT = "QUOTA_SELL"
+QUOTA_SELL_POOL_PERCENT = Decimal("3")
+LEVEL_SHARES = ["50", "35", "7", "5", "3"]
 
 TIPOS_IMOVEL = frozenset({"imovel"})
 TIPOS_VEICULO = frozenset({"autos", "pesados", "maquinas", "produtos", "servicos"})
@@ -219,6 +230,8 @@ def validate_contact(*, name: str, email: str, phone: str) -> list[str]:
 
 def bootstrap_page(db: Session) -> dict:
     org_id = default_organization_id(db)
+    ensure_default_ranges(db, org_id)
+    ensure_quota_sell_commission_rule(db, org_id)
     admins = list(
         db.scalars(
             select(Administrator).where(
@@ -281,10 +294,14 @@ def store_offer(
     if administrator_id and not db.get(Administrator, administrator_id):
         raise HTTPException(status_code=404, detail="Administradora não encontrada")
 
+    partner_code = (partner_referral_code or "").strip() or None
+    partner_node = lookup_referral_code(db, org_id, partner_code) if partner_code else None
+
     offer = QuotaSellOffer(
         organization_id=org_id,
         administrator_id=administrator_id or None,
-        partner_referral_code=(partner_referral_code or "").strip() or None,
+        partner_referral_code=partner_code.upper() if partner_code else None,
+        partner_user_id=partner_node.user_id if partner_node else None,
         status="AWAITING_STATEMENT",
         contact_name=contact_name.strip(),
         contact_email=contact_email.strip().lower(),
@@ -523,5 +540,171 @@ def offer_view(item: QuotaSellOffer, admin: Administrator | None = None, stateme
         "notes": item.notes,
         "statement_document_id": item.statement_document_id,
         "statement_filename": statement.filename if statement else None,
+        "partner_user_id": item.partner_user_id,
+        "inventory_quota_id": item.inventory_quota_id,
+        "commission_reference": item.commission_reference,
         "created_at": item.created_at.isoformat() if item.created_at else None,
+    }
+
+
+def ensure_quota_sell_commission_rule(db: Session, organization_id: str) -> CommissionRule:
+    rule = db.scalar(
+        select(CommissionRule).where(
+            CommissionRule.organization_id == organization_id,
+            CommissionRule.product == QUOTA_SELL_PRODUCT,
+            CommissionRule.commission_type == "SALES",
+            CommissionRule.active.is_(True),
+        )
+    )
+    if rule:
+        return rule
+    current = db.scalar(
+        select(CommissionRule.version).where(
+            CommissionRule.organization_id == organization_id,
+            CommissionRule.product == QUOTA_SELL_PRODUCT,
+            CommissionRule.commission_type == "SALES",
+        )
+    ) or 0
+    rule = CommissionRule(
+        organization_id=organization_id,
+        product=QUOTA_SELL_PRODUCT,
+        commission_type="SALES",
+        version=current + 1,
+        base_type="CREDIT_VALUE",
+        pool_rate_percent=QUOTA_SELL_POOL_PERCENT,
+        levels_json=json.dumps(LEVEL_SHARES),
+        active=True,
+    )
+    db.add(rule)
+    db.flush()
+    return rule
+
+
+def resolve_offer_partner(db: Session, offer: QuotaSellOffer) -> str | None:
+    if offer.partner_user_id:
+        return offer.partner_user_id
+    if not offer.partner_referral_code:
+        return None
+    node = lookup_referral_code(db, offer.organization_id, offer.partner_referral_code)
+    if not node:
+        return None
+    offer.partner_user_id = node.user_id
+    db.flush()
+    return node.user_id
+
+
+def allocate_offer_commission(db: Session, actor: User, offer: QuotaSellOffer) -> list[CommissionEntry]:
+    """Comissão MMN sobre o crédito, só se houver parceiro. Idempotente por referência."""
+    originator_id = resolve_offer_partner(db, offer)
+    if not originator_id:
+        return []
+    reference = f"QUOTA_SELL:{offer.id}"
+    existing = list(
+        db.scalars(
+            select(CommissionEntry).where(
+                CommissionEntry.organization_id == offer.organization_id,
+                CommissionEntry.reference == reference,
+            )
+        )
+    )
+    if existing:
+        offer.commission_reference = reference
+        return existing
+    ensure_quota_sell_commission_rule(db, offer.organization_id)
+    base = money(Decimal(str(offer.credit_value)))
+    if base <= 0:
+        return []
+    entries = allocate_commissions(
+        db,
+        actor,
+        originator_id,
+        None,
+        reference,
+        QUOTA_SELL_PRODUCT,
+        "SALES",
+        base,
+    )
+    offer.commission_reference = reference
+    db.flush()
+    return entries
+
+
+def map_tipo_to_category(tipo_consorcio: str) -> str:
+    return "REAL_ESTATE" if tipo_faixa(tipo_consorcio) == "imovel" else "VEHICLE"
+
+
+def close_offer_to_inventory(
+    db: Session,
+    actor: User,
+    offer: QuotaSellOffer,
+    *,
+    group_code: str | None = None,
+    quota_code: str | None = None,
+    category: str | None = None,
+    installment_value: Decimal | float | str = 0,
+    installment_due_date: date | None = None,
+    create_inventory: bool = True,
+    allocate_commission: bool = True,
+    notes: str | None = None,
+) -> dict:
+    if offer.organization_id != actor.organization_id:
+        raise HTTPException(status_code=404, detail="Oferta não encontrada")
+    if offer.status in {"REJECTED"}:
+        raise HTTPException(status_code=422, detail="Oferta recusada não pode ser fechada")
+    if offer.status == "CLOSED" and offer.inventory_quota_id:
+        raise HTTPException(status_code=409, detail="Oferta já fechada com inventário")
+
+    if notes:
+        offer.notes = notes
+
+    quota = None
+    if create_inventory:
+        if not (group_code and quota_code):
+            raise HTTPException(status_code=422, detail="Informe group_code e quota_code para criar no inventário")
+        if not offer.administrator_id:
+            raise HTTPException(status_code=422, detail="Oferta sem administradora — não dá para criar inventário")
+        if offer.inventory_quota_id:
+            raise HTTPException(status_code=409, detail="Oferta já gerou cota no inventário")
+        cat = (category or map_tipo_to_category(offer.tipo_consorcio)).upper()
+        if cat not in {"VEHICLE", "REAL_ESTATE"}:
+            raise HTTPException(status_code=422, detail="Categoria deve ser VEHICLE ou REAL_ESTATE")
+        dup = db.scalar(
+            select(Quota.id).where(
+                Quota.administrator_id == offer.administrator_id,
+                Quota.group_code == group_code.strip(),
+                Quota.quota_code == quota_code.strip(),
+            )
+        )
+        if dup:
+            raise HTTPException(status_code=409, detail="Já existe cota com este grupo/código nesta administradora")
+        quota = Quota(
+            organization_id=offer.organization_id,
+            administrator_id=offer.administrator_id,
+            seller_id=actor.id,
+            group_code=group_code.strip(),
+            quota_code=quota_code.strip(),
+            category=cat,
+            credit_value=money(Decimal(str(offer.credit_value))),
+            outstanding_balance=money(Decimal(str(offer.outstanding_balance))),
+            premium_value=money(Decimal(str(offer.offer_value))),
+            installment_value=money(Decimal(str(installment_value or 0))),
+            installment_due_date=installment_due_date,
+            status="AVAILABLE",
+        )
+        db.add(quota)
+        db.flush()
+        offer.inventory_quota_id = quota.id
+
+    commission_entries: list[CommissionEntry] = []
+    if allocate_commission:
+        commission_entries = allocate_offer_commission(db, actor, offer)
+
+    offer.status = "CLOSED"
+    db.flush()
+    return {
+        "offer": offer,
+        "quota": quota,
+        "commission_entries": len(commission_entries),
+        "commission_reference": offer.commission_reference,
+        "commission_total": str(money(sum((Decimal(str(e.amount)) for e in commission_entries), Decimal("0")))),
     }

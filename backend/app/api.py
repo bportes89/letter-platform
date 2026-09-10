@@ -85,7 +85,7 @@ from app.schemas import (
     NetworkNodeCreate, NetworkNodeView, NetworkDownlineMemberView, PayoutApprove, PayoutCreate, PayoutView, ProposalCreate, ProposalUpdate,
     ReconciliationBatchView, ReconciliationItemView, ReconciliationResolveRequest,
     MarketplaceEsteira1Request, MarketplaceEsteira1Response, MarketplaceEsteira2Request, MarketplaceEsteira2Response,
-    VenderCotaCalculateRequest, VenderCotaStoreRequest, QuotaOfferRangeUpdate, QuotaSellOfferUpdate,
+    VenderCotaCalculateRequest, VenderCotaStoreRequest, QuotaOfferRangeUpdate, QuotaSellOfferUpdate, VenderCotaCloseRequest,
     ProposalView, QuotaCreate, QuotaUpdate, QuotaView, NinaQuotaScanView, RecoveredAssetCreate, RecoveredAssetView, RefreshRequest,
     CommercialClientView,
     ReservationCreate, ReservationView, SdcCalculationRequest, SessionView, SignatureComplete,
@@ -2201,6 +2201,67 @@ def vender_cota_offer_statement_download(
         media_type=media,
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.post("/funding/vender-cota/offers/{offer_id}/close")
+def vender_cota_offer_close(
+    offer_id: str,
+    payload: VenderCotaCloseRequest,
+    user: User = Depends(require_scope("inventory:write")),
+    db: Session = Depends(get_db),
+):
+    from app.models import Administrator, Document, QuotaSellOffer
+    from app.vender_cota_service import close_offer_to_inventory, offer_view
+
+    item = db.scalar(
+        select(QuotaSellOffer).where(
+            QuotaSellOffer.id == offer_id,
+            QuotaSellOffer.organization_id == user.organization_id,
+        )
+    )
+    if not item:
+        raise HTTPException(status_code=404, detail="Oferta não encontrada")
+    result = close_offer_to_inventory(
+        db,
+        user,
+        item,
+        group_code=payload.group_code,
+        quota_code=payload.quota_code,
+        category=payload.category,
+        installment_value=payload.installment_value,
+        installment_due_date=payload.installment_due_date,
+        create_inventory=payload.create_inventory,
+        allocate_commission=payload.allocate_commission,
+        notes=payload.notes,
+    )
+    audit(
+        db,
+        user,
+        "vender_cota.offer_closed",
+        "quota_sell_offer",
+        item.id,
+        {
+            "inventory_quota_id": item.inventory_quota_id,
+            "commission_reference": item.commission_reference,
+            "commission_entries": result["commission_entries"],
+        },
+    )
+    db.commit()
+    db.refresh(item)
+    admin = db.get(Administrator, item.administrator_id) if item.administrator_id else None
+    stmt = db.get(Document, item.statement_document_id) if item.statement_document_id else None
+    return {
+        "offer": offer_view(item, admin, stmt),
+        "inventory_quota_id": item.inventory_quota_id,
+        "commission_entries": result["commission_entries"],
+        "commission_reference": result["commission_reference"],
+        "commission_total": result["commission_total"],
+        "message": (
+            "Compra fechada"
+            + ("; cota criada no inventário" if item.inventory_quota_id else "")
+            + (f"; {result['commission_entries']} comissão(ões) provisionada(s)" if result["commission_entries"] else "")
+        ),
+    }
 
 
 @router.post("/public/site/chat/home")

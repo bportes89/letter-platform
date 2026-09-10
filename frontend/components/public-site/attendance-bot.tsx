@@ -10,8 +10,18 @@ import {
   fetchChatHome,
   fetchChatStep,
   mapLegacyLink,
+  venderCotaChatContactEmail,
+  venderCotaChatContactName,
+  venderCotaChatContactPhone,
+  venderCotaChatCredit,
+  venderCotaChatIntro,
+  venderCotaChatPaid,
+  venderCotaChatTerm,
+  venderCotaChatTipo,
   whatsappHref,
 } from "@/lib/public-chat-api";
+import { calculateVenderCota, fetchVenderCotaBootstrap, storeVenderCota } from "@/lib/public-site-api";
+import { getStoredReferralCode, isVenderCotaLink, rememberReferralCode } from "@/lib/referral";
 
 type FlowMeta = {
   visibleCount: number;
@@ -137,6 +147,12 @@ export function AttendanceBotSection() {
   }, [loadInitial]);
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    rememberReferralCode(params.get("ref"));
+  }, []);
+
+  useEffect(() => {
     if (flows.length === 0) return;
     const flowIndex = flows.length - 1;
     const items = flows[flowIndex];
@@ -163,13 +179,106 @@ export function AttendanceBotSection() {
     setEchoes((prev) => [...prev.filter((x) => !(x.flowIndex === flowIndex && x.itemIndex === itemIndex)), { flowIndex, itemIndex, value }]);
   };
 
-  const advance = async (step: number | string, back = 0, echo?: { flowIndex: number; itemIndex: number; value: string }) => {
+  const runVmcSubmit = async (merged: Record<string, unknown>) => {
+    const boot = await fetchVenderCotaBootstrap();
+    const adminId = boot.administrators[0]?.id;
+    if (!adminId) throw new Error("Nenhuma administradora disponível no momento.");
+    const payload = {
+      tipo_consorcio: String(merged.vmc_tipo || ""),
+      administrator_id: adminId,
+      credit_value: String(merged.vmc_credit || "").replace(/\D/g, "") || "0",
+      paid_value: String(merged.vmc_paid || "").replace(/\D/g, "") || "0",
+      outstanding_balance: "0",
+      term_months: Number(merged.vmc_term || 0),
+      contemplated: true,
+      contact_name: String(merged.vmc_name || ""),
+      contact_email: String(merged.vmc_email || ""),
+      contact_phone: String(merged.vmc_phone || ""),
+      person_type: "PF",
+      partner_referral_code: getStoredReferralCode(),
+    };
+    const calc = await calculateVenderCota(payload);
+    if (!calc.result.viable) {
+      pushFlow([
+        {
+          text: `Não foi possível seguir: ${calc.result.motivos.join(" ") || "oferta inviável."}`,
+          options: [{ name: "Abrir formulário completo", link: "/vender-minha-cota" }, { name: "Recomeçar", next: 0 }],
+        },
+      ]);
+      return;
+    }
+    const stored = await storeVenderCota(payload);
+    const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
+    pushFlow([
+      {
+        text: `Prévia Letter: ${brl.format(Number(stored.offer_value))} (${stored.offer_percent}% do crédito). Oferta registrada.`,
+        options: [
+          { name: "Anexar extrato no formulário", link: `/vender-minha-cota?offer=${stored.offer_id}` },
+          { name: "Voltar ao início", next: 0 },
+        ],
+      },
+    ]);
+  };
+
+  const advanceVmc = async (step: number, mergedForm: Record<string, unknown>) => {
+    if (step === -9101) {
+      pushFlow(venderCotaChatTipo());
+      return;
+    }
+    if (step === -9102) {
+      pushFlow(venderCotaChatCredit());
+      return;
+    }
+    if (step === -9103) {
+      pushFlow(venderCotaChatPaid());
+      return;
+    }
+    if (step === -9104) {
+      pushFlow(venderCotaChatTerm());
+      return;
+    }
+    if (step === -9105) {
+      pushFlow(venderCotaChatContactName());
+      return;
+    }
+    if (step === -9106) {
+      pushFlow(venderCotaChatContactEmail());
+      return;
+    }
+    if (step === -9107) {
+      pushFlow(venderCotaChatContactPhone());
+      return;
+    }
+    if (step === -9108) {
+      await runVmcSubmit(mergedForm);
+      return;
+    }
+    throw new Error("Etapa do chat de venda inválida");
+  };
+
+  const advance = async (
+    step: number | string,
+    back = 0,
+    echo?: { flowIndex: number; itemIndex: number; value: string },
+    formOverride?: Record<string, unknown>,
+  ) => {
     if (busy) return;
     setBusy(true);
     setError("");
     if (echo) recordEcho(echo.flowIndex, echo.itemIndex, echo.value);
+    const mergedForm = formOverride ?? form;
     try {
-      const payload = { ...form, back };
+      const numeric = typeof step === "number" ? step : Number(step);
+      if (Number.isFinite(numeric) && numeric <= -9101) {
+        await advanceVmc(numeric, mergedForm);
+        return;
+      }
+      if (step === 0) {
+        const data = await fetchChatHome({});
+        pushFlow(data.chat_next, data.info);
+        return;
+      }
+      const payload = { ...mergedForm, back };
       const data = await fetchChatStep(step, payload);
       pushFlow(data.chat_next, data.info);
     } catch (e) {
@@ -189,17 +298,44 @@ export function AttendanceBotSection() {
 
   const onOption = async (flowIndex: number, itemIndex: number, item: ChatItem, option: ChatOption) => {
     if (!isCurrent(flowIndex) || busy) return;
+    if (option.link && isVenderCotaLink(option.link)) {
+      if (option.save === "open_page") {
+        window.location.href = mapLegacyLink(option.link);
+        return;
+      }
+      recordEcho(flowIndex, itemIndex, optionLabel(option));
+      pushFlow(venderCotaChatIntro());
+      return;
+    }
     if (option.link) {
       const href = mapLegacyLink(option.link);
       if (href.startsWith("http")) window.open(href, "_blank", "noopener,noreferrer");
       else window.location.href = href;
       return;
     }
-    const next = option.next ?? item.next ?? 0;
     const nextForm = { ...form };
     if (option.id !== undefined) nextForm.option_id = option.id;
-    if (option.save !== undefined) nextForm.option_save = option.save;
+    if (option.save !== undefined) {
+      nextForm.option_save = option.save;
+      if (typeof option.save === "string" && ["imovel", "autos", "pesados", "maquinas", "produtos", "servicos"].includes(option.save)) {
+        nextForm.vmc_tipo = option.save;
+      }
+    }
     setForm(nextForm);
+    const next = option.next ?? item.next ?? 0;
+    if (typeof next === "number" && next <= -9101) {
+      setBusy(true);
+      setError("");
+      recordEcho(flowIndex, itemIndex, optionLabel(option));
+      try {
+        await advanceVmc(next, nextForm);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Falha no fluxo de venda");
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     await advance(next, 0, { flowIndex, itemIndex, value: optionLabel(option) });
   };
 
@@ -226,7 +362,7 @@ export function AttendanceBotSection() {
         : item.input.label
           ? `${item.input.label}: ${value}`
           : value;
-    await advance(item.next ?? 0, 0, { flowIndex, itemIndex, value: display });
+    await advance(item.next ?? 0, 0, { flowIndex, itemIndex, value: display }, nextForm);
   };
 
   const onContract = async (flowIndex: number, itemIndex: number, item: ChatItem, accepted: boolean) => {

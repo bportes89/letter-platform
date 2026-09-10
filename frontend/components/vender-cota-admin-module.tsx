@@ -1,7 +1,7 @@
 "use client";
 
 import { CheckCircle2, Download, RefreshCw, SlidersHorizontal, Upload, WalletCards } from "lucide-react";
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, apiForm, downloadApi } from "@/lib/api";
 
 type QuotaOfferRange = {
@@ -41,6 +41,9 @@ type QuotaSellOffer = {
   notes: string | null;
   statement_document_id: string | null;
   statement_filename: string | null;
+  partner_user_id: string | null;
+  inventory_quota_id: string | null;
+  commission_reference: string | null;
   created_at: string | null;
 };
 
@@ -66,6 +69,10 @@ export function VenderCotaAdminModule() {
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, Partial<QuotaOfferRange>>>({});
+  const [closeOffer, setCloseOffer] = useState<QuotaSellOffer | null>(null);
+  const [closeGroup, setCloseGroup] = useState("");
+  const [closeQuota, setCloseQuota] = useState("");
+  const [closeInstallment, setCloseInstallment] = useState("");
   const fileRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
   const load = useCallback(async () => {
@@ -131,6 +138,34 @@ export function VenderCotaAdminModule() {
       );
     } catch (e) {
       setError(e instanceof Error ? e.message : "Falha ao baixar extrato");
+    }
+  }
+
+  async function submitClose() {
+    if (!closeOffer) return;
+    setError("");
+    setSavingId(closeOffer.id);
+    try {
+      const result = await api<{ message: string }>(`/funding/vender-cota/offers/${closeOffer.id}/close`, {
+        method: "POST",
+        body: JSON.stringify({
+          group_code: closeGroup.trim(),
+          quota_code: closeQuota.trim(),
+          installment_value: closeInstallment || "0",
+          create_inventory: true,
+          allocate_commission: true,
+        }),
+      });
+      setNotice(result.message);
+      setCloseOffer(null);
+      setCloseGroup("");
+      setCloseQuota("");
+      setCloseInstallment("");
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Falha ao fechar compra");
+    } finally {
+      setSavingId(null);
     }
   }
 
@@ -210,6 +245,24 @@ export function VenderCotaAdminModule() {
 
         {notice && <div className="notice" style={{ margin: "0 18px 12px" }}><CheckCircle2 />{notice}</div>}
         {error && <div className="error" style={{ margin: "0 18px 12px" }}>{error}</div>}
+        {closeOffer && (
+          <div className="notice" style={{ margin: "0 18px 12px", display: "grid", gap: 10 }}>
+            <b>Fechar compra — {closeOffer.contact_name}</b>
+            <small>
+              Cria cota no inventário (crédito {brl.format(Number(closeOffer.credit_value))}, custo Letter {brl.format(Number(closeOffer.offer_value))})
+              e provisiona comissão MMN 3% sobre o crédito se houver ?ref= parceiro.
+            </small>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr auto auto", gap: 8 }}>
+              <input placeholder="Grupo" value={closeGroup} onChange={(e) => setCloseGroup(e.target.value)} />
+              <input placeholder="Cota" value={closeQuota} onChange={(e) => setCloseQuota(e.target.value)} />
+              <input placeholder="Parcela (R$)" value={closeInstallment} onChange={(e) => setCloseInstallment(e.target.value)} />
+              <button type="button" className="table-action lock" disabled={savingId === closeOffer.id || !closeGroup.trim() || !closeQuota.trim()} onClick={() => void submitClose()}>
+                Confirmar fechamento
+              </button>
+              <button type="button" className="table-action" onClick={() => setCloseOffer(null)}>Cancelar</button>
+            </div>
+          </div>
+        )}
         {loading && <div className="loading" style={{ padding: 24 }}>Carregando…</div>}
 
         {!loading && tab === "offers" && (
@@ -281,7 +334,7 @@ export function VenderCotaAdminModule() {
                     <td className="actions-cell">
                       <select
                         value={o.status}
-                        disabled={savingId === o.id}
+                        disabled={savingId === o.id || o.status === "CLOSED"}
                         onChange={(e) => void updateOfferStatus(o, e.target.value)}
                         style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid var(--line)", fontSize: 11 }}
                       >
@@ -289,6 +342,24 @@ export function VenderCotaAdminModule() {
                           <option key={s.value} value={s.value}>{s.label}</option>
                         ))}
                       </select>
+                      {o.status !== "CLOSED" && o.status !== "REJECTED" && (
+                        <button
+                          type="button"
+                          className="table-action lock"
+                          style={{ marginTop: 6 }}
+                          disabled={savingId === o.id}
+                          onClick={() => {
+                            setCloseOffer(o);
+                            setCloseGroup(`VMC${new Date().getFullYear()}`);
+                            setCloseQuota(o.id.slice(0, 6).toUpperCase());
+                            setCloseInstallment("");
+                          }}
+                        >
+                          Fechar compra
+                        </button>
+                      )}
+                      {o.inventory_quota_id && <small>Inventário: {o.inventory_quota_id.slice(0, 8)}…</small>}
+                      {o.commission_reference && <small>Comissão: {o.commission_reference}</small>}
                     </td>
                   </tr>
                 ))}

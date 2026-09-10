@@ -183,6 +183,8 @@ def release_reservation(db: Session, user: User, reservation: QuotaReservation, 
 
 
 def money(value: Decimal) -> Decimal:
+    if not isinstance(value, Decimal):
+        value = Decimal(str(value))
     return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 

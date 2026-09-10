@@ -132,9 +132,10 @@ def seed():
             if org:
                 _ensure_profile_demo_users(db, org.id, password)
                 _ensure_master_trees(db, org.id, password)
-                from app.vender_cota_service import ensure_default_ranges
+                from app.vender_cota_service import ensure_default_ranges, ensure_quota_sell_commission_rule
 
                 ensure_default_ranges(db, org.id)
+                ensure_quota_sell_commission_rule(db, org.id)
                 db.commit()
             _sync_headquarters_org(db)
             _sync_demo_phones(db)
@@ -202,6 +203,10 @@ def seed():
             CommissionRule(
                 organization_id=org.id, product="SDC", commission_type="SALES", version=1,
                 base_type="INTERMEDIATION_FEE", pool_rate_percent=Decimal("3"), levels_json=json.dumps(LEVEL_SHARES), active=True,
+            ),
+            CommissionRule(
+                organization_id=org.id, product="QUOTA_SELL", commission_type="SALES", version=1,
+                base_type="CREDIT_VALUE", pool_rate_percent=Decimal("3"), levels_json=json.dumps(LEVEL_SHARES), active=True,
             ),
         ])
         db.commit()

@@ -2136,6 +2136,17 @@ class QuotaSellOfferUpdate(BaseModel):
     notes: str | None = Field(default=None, max_length=4000)
 
 
+class VenderCotaCloseRequest(BaseModel):
+    group_code: str | None = Field(default=None, max_length=40)
+    quota_code: str | None = Field(default=None, max_length=40)
+    category: str | None = None
+    installment_value: Decimal = Field(ge=0, default=0)
+    installment_due_date: date | None = None
+    create_inventory: bool = True
+    allocate_commission: bool = True
+    notes: str | None = Field(default=None, max_length=4000)
+
+
 class BISummaryView(BaseModel):
     funnel: dict; portfolio: dict; risk: dict; funding: dict; recovery: dict
 

@@ -277,6 +277,9 @@ class QuotaSellOffer(TimestampMixin, Base):
     offer_value: Mapped[float] = mapped_column(Numeric(15, 2), default=0)
     notes: Mapped[str | None] = mapped_column(Text)
     statement_document_id: Mapped[str | None] = mapped_column(ForeignKey("documents.id"))
+    partner_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), index=True)
+    inventory_quota_id: Mapped[str | None] = mapped_column(ForeignKey("quotas.id"), index=True)
+    commission_reference: Mapped[str | None] = mapped_column(String(120))
 
 
 class QuotaReservation(TimestampMixin, Base):

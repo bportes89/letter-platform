@@ -16,11 +16,13 @@ import {
   type VenderCotaResult,
 } from "@/lib/public-site-api";
 
+import { resolveReferralCode } from "@/lib/referral";
+
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
 export default function VenderMinhaCotaPage() {
   const searchParams = useSearchParams();
-  const refCode = searchParams.get("ref")?.trim() ?? "";
+  const refCode = resolveReferralCode(searchParams.get("ref"));
   const [boot, setBoot] = useState<VenderCotaBootstrap | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");

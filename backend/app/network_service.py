@@ -18,6 +18,8 @@ LEVEL_SHARES = [Decimal("50"), Decimal("35"), Decimal("7"), Decimal("5"), Decima
 
 
 def money(value: Decimal) -> Decimal:
+    if not isinstance(value, Decimal):
+        value = Decimal(str(value))
     return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 

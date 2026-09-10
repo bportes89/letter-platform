@@ -116,6 +116,8 @@ export async function fetchChatStep(step: number | string, body: Record<string, 
   };
 }
 
+import { getStoredReferralCode, isVenderCotaLink, rememberReferralCode, venderCotaHref } from "@/lib/referral";
+
 export function whatsappHref(info?: ChatSiteInfo): string | null {
   const raw = info?.whatsapp?.replace(/\D/g, "") ?? "";
   if (!raw) return null;
@@ -127,6 +129,97 @@ export function whatsappHref(info?: ChatSiteInfo): string | null {
 }
 
 export function mapLegacyLink(link: string): string {
-  if (link === "/vender_minha_cota") return "/vender-minha-cota";
+  if (isVenderCotaLink(link)) return venderCotaHref("/vender-minha-cota");
   return link;
+}
+
+export function venderCotaChatIntro(): ChatItem[] {
+  const ref = getStoredReferralCode();
+  return [
+    {
+      text: ref
+        ? `Perfeito — vamos calcular quanto a Letter pagaria pela sua cota contemplada (indicação ${ref}).`
+        : "Perfeito — vamos calcular quanto a Letter pagaria pela sua cota contemplada.",
+      options: [
+        { name: "Preencher aqui no chat", next: -9101 },
+        { name: "Abrir formulário completo", link: "/vender-minha-cota", save: "open_page" },
+      ],
+    },
+  ];
+}
+
+export function venderCotaChatTipo(): ChatItem[] {
+  return [
+    {
+      text: "Qual o tipo do consórcio?",
+      options: [
+        { name: "Imóvel", save: "imovel", next: -9102 },
+        { name: "Autos", save: "autos", next: -9102 },
+        { name: "Pesados", save: "pesados", next: -9102 },
+        { name: "Máquinas", save: "maquinas", next: -9102 },
+        { name: "Produtos", save: "produtos", next: -9102 },
+        { name: "Serviços", save: "servicos", next: -9102 },
+      ],
+    },
+  ];
+}
+
+export function venderCotaChatCredit(): ChatItem[] {
+  return [
+    {
+      title: "Valor atual do crédito (R$)",
+      input: { name: "vmc_credit", type: "text", tags: 'placeholder="Ex.: 100000"' },
+      next: -9103,
+    },
+  ];
+}
+
+export function venderCotaChatPaid(): ChatItem[] {
+  return [
+    {
+      title: "Total já pago em parcelas (R$)",
+      input: { name: "vmc_paid", type: "text", tags: 'placeholder="Ex.: 10000"' },
+      next: -9104,
+    },
+  ];
+}
+
+export function venderCotaChatTerm(): ChatItem[] {
+  return [
+    {
+      title: "Prazo contratado (meses)",
+      input: { name: "vmc_term", type: "number", tags: 'placeholder="Ex.: 120"' },
+      next: -9105,
+    },
+  ];
+}
+
+export function venderCotaChatContactName(): ChatItem[] {
+  return [
+    {
+      title: "Seu nome completo",
+      input: { name: "vmc_name", type: "text", tags: 'placeholder="Nome completo"' },
+      next: -9106,
+    },
+  ];
+}
+
+export function venderCotaChatContactEmail(): ChatItem[] {
+  return [
+    {
+      title: "Seu e-mail",
+      input: { name: "vmc_email", type: "email", tags: 'placeholder="voce@email.com"' },
+      next: -9107,
+    },
+  ];
+}
+
+export function venderCotaChatContactPhone(): ChatItem[] {
+  return [
+    {
+      title: "Telefone / WhatsApp",
+      input: { name: "vmc_phone", type: "tel", tags: 'placeholder="DDD + número"' },
+      next: -9108,
+    },
+  ];
 }

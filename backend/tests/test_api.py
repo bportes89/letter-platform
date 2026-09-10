@@ -151,6 +151,45 @@ def test_vender_minha_cota_calculate_and_store(client, auth_headers):
     assert dl.status_code == 200
     assert dl.content.startswith(b"%PDF")
 
+    nodes = client.get("/api/v1/network/nodes", headers=auth_headers)
+    assert nodes.status_code == 200
+    partner_node = next((n for n in nodes.json() if n.get("referral_code")), None)
+    assert partner_node is not None
+
+    stored_ref = client.post("/api/v1/public/site/vender-minha-cota/store", json={
+        "tipo_consorcio": "imovel",
+        "administrator_id": admins[0]["id"],
+        "credit_value": "100000",
+        "paid_value": "10000",
+        "term_months": 120,
+        "contemplated": True,
+        "contact_name": "João Parceiro",
+        "contact_email": "joao.ref@example.com",
+        "contact_phone": "11987654321",
+        "person_type": "PF",
+        "partner_referral_code": partner_node["referral_code"],
+    })
+    assert stored_ref.status_code == 201
+    offer_ref_id = stored_ref.json()["offer_id"]
+    closed = client.post(
+        f"/api/v1/funding/vender-cota/offers/{offer_ref_id}/close",
+        headers=auth_headers,
+        json={
+            "group_code": "VMC2026",
+            "quota_code": "REF001",
+            "installment_value": "2500",
+            "create_inventory": True,
+            "allocate_commission": True,
+        },
+    )
+    assert closed.status_code == 200, closed.text
+    body = closed.json()
+    assert body["offer"]["status"] == "CLOSED"
+    assert body["inventory_quota_id"]
+    assert body["commission_entries"] >= 1
+    quotas = client.get("/api/v1/quotas", headers=auth_headers)
+    assert any(q["id"] == body["inventory_quota_id"] for q in quotas.json())
+
 
 def test_marketplace_esteira1_and_esteira2(client, auth_headers):
     quota = next(q for q in client.get("/api/v1/quotas", headers=auth_headers).json() if q["status"] == "AVAILABLE")
