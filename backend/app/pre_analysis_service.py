@@ -24,8 +24,100 @@ from app.pre_analysis_constants import (
     TAPAF_TOOLTIP,
 )
 from app.storage_service import get_storage
-from app.tapaf_constants import TAPAF_NOMINAL
+from app.tapaf_constants import TAPAF_NOMINAL, resolve_tapaf_track
 from app.tapaf_settlement_service import settle_tapaf_payment
+
+
+def _inventory_plate_from_pauta(pauta: PreAnalysisPauta) -> str | None:
+    submitted = json.loads(pauta.documents_json or "{}").get("submitted", [])
+    for item in submitted:
+        code = str(item.get("code", "")).upper()
+        if code in {"MATRICULA_OU_CRLV", "CRLV", "PLACA"}:
+            ref = str(item.get("reference") or item.get("filename") or "").strip()
+            if ref:
+                return ref[:12]
+    return None
+
+
+def provision_tapaf_asaas_payment(db: Session, user: User, pauta: PreAnalysisPauta) -> dict:
+    """Gera cobrança Pix Asaas (se configurado) ou checkout sandbox após aceite."""
+    from app.core.config import settings
+
+    amount = TAPAF_NOMINAL
+    ref = pauta.external_reference or f"tapaf_pre_analysis_{pauta.id}"
+    mode = "SANDBOX"
+    payment_id = pauta.asaas_payment_id
+    checkout_url = pauta.checkout_url
+    pix_copy = pauta.pix_copy_paste
+    pix_qr = pauta.pix_qr_code
+
+    if settings.asaas_api_key and not payment_id:
+        try:
+            from datetime import date, timedelta
+
+            from app.asaas_client import AsaasClient
+
+            doc = "".join(ch for ch in ((user.document if hasattr(user, "document") else None) or "24971563792") if ch.isdigit())
+            if len(doc) not in {11, 14}:
+                doc = "24971563792"
+            with AsaasClient() as client:
+                customer = client.create_customer(
+                    {
+                        "name": (user.name or "Cliente LETTER")[:80],
+                        "email": user.email or "tapaf@letter.com.br",
+                        "cpfCnpj": doc,
+                    }
+                )
+                customer_id = str(customer.get("id") or "").strip()
+                if customer_id:
+                    due = (date.today() + timedelta(days=2)).isoformat()
+                    payment = client.create_payment(
+                        {
+                            "customer": customer_id,
+                            "billingType": "PIX",
+                            "value": float(amount),
+                            "dueDate": due,
+                            "description": f"TAPAF pré-análise {pauta.pauta_code}",
+                            "externalReference": ref,
+                        }
+                    )
+                    payment_id = str(payment.get("id") or "").strip() or None
+                    checkout_url = payment.get("invoiceUrl") or payment.get("bankSlipUrl")
+                    pix_copy = payment.get("pixCopiaECola") or payment.get("payload")
+                    pix_qr = payment.get("encodedImage")
+                    if payment_id:
+                        mode = "ASAAS"
+        except Exception:
+            mode = "SANDBOX"
+            payment_id = None
+            checkout_url = None
+            pix_copy = None
+            pix_qr = None
+
+    if mode == "SANDBOX":
+        payment_id = payment_id or f"sandbox_tapaf_{pauta.id[:12]}"
+        checkout_url = checkout_url or f"/modules/proposals?tapaf={pauta.id}"
+        pix_copy = pix_copy or (
+            f"00020126580014br.gov.bcb.pix0136letter-spe-tapaf-{pauta.id[:8]}"
+            f"520400005303986540{amount}5802BR5925LETTER TAPAF6009SAO PAULO62070503***6304ABCD"
+        )
+        pix_qr = pix_qr or f"sandbox-qr-tapaf-{pauta.id[:8]}"
+
+    pauta.external_reference = ref
+    pauta.asaas_payment_id = payment_id
+    pauta.checkout_url = checkout_url
+    pauta.pix_copy_paste = pix_copy
+    pauta.pix_qr_code = pix_qr
+    pauta.checkout_status = "PENDING"
+    pauta.checkout_mode = mode
+    db.flush()
+    return {
+        "mode": mode,
+        "asaas_payment_id": payment_id,
+        "checkout_url": checkout_url,
+        "pix_copy_paste": pix_copy,
+        "pix_qr_code": pix_qr,
+    }
 
 
 HUNDRED = Decimal("100")
@@ -231,39 +323,58 @@ def validate_documents_phase1(db: Session, user: User, proposal: Proposal, docum
 def generate_tapaf_checkout(pauta: PreAnalysisPauta) -> dict:
     if pauta.status not in {"DOCUMENTS_OK", "TAPAF_CHECKOUT_ACCEPTED", "TAPAF_PAID"}:
         raise HTTPException(status_code=409, detail="Documentação deve estar validada na Fase 1 antes da TAPAF")
+    pix = pauta.pix_copy_paste or f"00020101021126580014br.gov.bcb.pix0136letter-spe-tapaf-{pauta.id[:8]}"
     return {
         "endpoint": "/api/v1/finops/pre-analysis/generate-tapaf",
         "status": "SUCCESS",
         "pauta_id": pauta.pauta_code,
         "interface_checkout_tapaf": {
             "valor_nominal_taxa": "1500.00",
-            "gateway_baas_pix_qrcode": f"00020101021126580014br.gov.bcb.pix0136letter-spe-tapaf-{pauta.id[:8]}",
+            "gateway_baas_pix_qrcode": pix,
+            "pix_copy_paste": pix,
+            "pix_qr_code": pauta.pix_qr_code,
+            "checkout_url": pauta.checkout_url,
+            "checkout_mode": pauta.checkout_mode or "SANDBOX",
+            "checkout_status": pauta.checkout_status,
+            "asaas_payment_id": pauta.asaas_payment_id,
+            "asset_type": pauta.asset_type or "REAL_ESTATE",
             "texto_explicativo_tooltip_interrogacao": TAPAF_TOOLTIP,
             "checkbox_obrigatorio_01": TAPAF_CHECKBOX_01,
             "checkbox_obrigatorio_02": TAPAF_CHECKBOX_02,
             "manifesto_html": TAPAF_MANIFESTO_HTML,
-            "botao_habilitado": False,
-            "botao_label": "GERAR BOLETO / PIX DE ANÁLISE",
+            "botao_habilitado": pauta.status == "TAPAF_CHECKOUT_ACCEPTED",
+            "botao_label": (
+                "CONFIRMAR PAGAMENTO SANDBOX"
+                if (pauta.checkout_mode or "SANDBOX") == "SANDBOX"
+                else "AGUARDAR CONFIRMAÇÃO PIX"
+            ),
         },
     }
 
 
 def accept_tapaf_checkout(
-    db: Session, pauta: PreAnalysisPauta, *,
+    db: Session, user: User, pauta: PreAnalysisPauta, *,
     scroll_completed: bool, checkbox_1: bool, checkbox_2: bool,
+    asset_type: str | None = None,
 ) -> PreAnalysisPauta:
     if pauta.status != "DOCUMENTS_OK":
         raise HTTPException(status_code=409, detail="Checkout TAPAF indisponível neste status")
     if not all([scroll_completed, checkbox_1, checkbox_2]):
         raise HTTPException(status_code=422, detail="Rolagem do manifesto e duas caixas de aceite são obrigatórias")
+    if asset_type:
+        at = asset_type.strip().upper()
+        pauta.asset_type = "VEHICLE" if at == "VEHICLE" else ("RURAL" if at == "RURAL" else "REAL_ESTATE")
     pauta.tapaf_scroll_completed = True
     pauta.tapaf_checkbox_1 = True
     pauta.tapaf_checkbox_2 = True
     pauta.status = "TAPAF_CHECKOUT_ACCEPTED"
+    provision_tapaf_asaas_payment(db, user, pauta)
     return pauta
 
 
 def confirm_tapaf_payment(db: Session, user: User, pauta: PreAnalysisPauta, event_id: str, amount: Decimal) -> PreAnalysisPauta:
+    if pauta.status == "TAPAF_PAID":
+        return pauta
     if pauta.status != "TAPAF_CHECKOUT_ACCEPTED":
         raise HTTPException(status_code=409, detail="Aceite do checkout TAPAF é obrigatório antes do pagamento")
     if money(amount) != MotorPreAnaliseFiduciariaV6.taxa_tapaf_nominal:
@@ -271,13 +382,14 @@ def confirm_tapaf_payment(db: Session, user: User, pauta: PreAnalysisPauta, even
     pauta.tapaf_payment_reference = event_id
     pauta.tapaf_paid_at = datetime.now(UTC)
     pauta.status = "TAPAF_PAID"
+    pauta.checkout_status = "CONFIRMED"
     proposal = db.get(Proposal, pauta.proposal_id)
     submitted = json.loads(pauta.documents_json or "{}").get("submitted", [])
     registry_number = next(
         (
             str(item.get("reference") or item.get("filename") or "")
             for item in submitted
-            if str(item.get("code", "")).upper() in {"MATRICULA_ENOTARIADO", "MATRICULA", "LAUDO_AVALIACAO"}
+            if str(item.get("code", "")).upper() in {"MATRICULA_ENOTARIADO", "MATRICULA", "LAUDO_AVALIACAO", "MATRICULA_OU_CRLV"}
             and (item.get("reference") or item.get("filename"))
         ),
         None,
@@ -290,23 +402,60 @@ def confirm_tapaf_payment(db: Session, user: User, pauta: PreAnalysisPauta, even
                 company_document = digits(terms.get("company_cnpj")) or company_document
         except json.JSONDecodeError:
             pass
+    track = resolve_tapaf_track(pauta.asset_type)
+    inventory_context = {
+        "proposal_id": pauta.proposal_id,
+        "pauta_code": pauta.pauta_code,
+        "appraisal_value": str(proposal.requested_amount if proposal else "0"),
+        "company_document": company_document,
+        "registry_number": registry_number,
+        "asset_type": pauta.asset_type,
+    }
+    plate = _inventory_plate_from_pauta(pauta)
+    if plate:
+        inventory_context["plate"] = plate
+        inventory_context["placa"] = plate
     settle_tapaf_payment(
         db,
         user,
-        track="REAL_ESTATE",
+        track=track,
         entity_type="pre_analysis_pauta",
         entity_id=pauta.id,
         payment_event_id=event_id,
         total_amount=money(amount),
-        inventory_context={
-            "proposal_id": pauta.proposal_id,
-            "pauta_code": pauta.pauta_code,
-            "appraisal_value": str(proposal.requested_amount if proposal else "0"),
-            "company_document": company_document,
-            "registry_number": registry_number,
-        },
+        inventory_context=inventory_context,
     )
     return pauta
+
+
+def confirm_tapaf_payment_from_asaas(
+    db: Session,
+    *,
+    external_reference: str | None = None,
+    asaas_payment_id: str | None = None,
+    payment_id: str | None = None,
+    amount: Decimal | None = None,
+) -> PreAnalysisPauta | None:
+    """Confirma TAPAF a partir do webhook Asaas (sem sessão de usuário)."""
+    item = None
+    if external_reference:
+        item = db.scalar(
+            select(PreAnalysisPauta).where(PreAnalysisPauta.external_reference == external_reference)
+        )
+    if not item and asaas_payment_id:
+        item = db.scalar(
+            select(PreAnalysisPauta).where(PreAnalysisPauta.asaas_payment_id == asaas_payment_id)
+        )
+    if not item:
+        return None
+    if item.status == "TAPAF_PAID":
+        return item
+    actor = db.scalar(select(User).where(User.organization_id == item.organization_id).limit(1))
+    if not actor:
+        return None
+    event_id = payment_id or asaas_payment_id or item.asaas_payment_id or f"asaas-{item.id}"
+    pay_amount = amount if amount is not None else TAPAF_NOMINAL
+    return confirm_tapaf_payment(db, actor, item, str(event_id), pay_amount)
 
 
 def _flash_documents_from_pauta(pauta: PreAnalysisPauta, asset_type: str) -> dict[str, str]:
@@ -351,9 +500,10 @@ def run_flash_capital_engine_phase3(
         raise HTTPException(status_code=422, detail="Informe valor_avaliacao_bem (AVM) para Flash Capital")
 
     ltv = money(principal / asset_value * HUNDRED)
-    asset_type = str(payload.get("asset_type", "REAL_ESTATE")).upper()
+    asset_type = str(payload.get("asset_type", pauta.asset_type or "REAL_ESTATE")).upper()
     if asset_type not in {"REAL_ESTATE", "VEHICLE"}:
         raise HTTPException(status_code=422, detail="asset_type deve ser REAL_ESTATE ou VEHICLE")
+    pauta.asset_type = asset_type
 
     engine = MotorPreAnaliseFiduciariaV6()
     extratos = payload.get("extratos_6_meses_data") or {}
@@ -495,6 +645,14 @@ def pauta_view(item: PreAnalysisPauta) -> dict:
         "tapaf_checkbox_2": item.tapaf_checkbox_2,
         "tapaf_payment_reference": item.tapaf_payment_reference,
         "tapaf_paid_at": item.tapaf_paid_at,
+        "asset_type": item.asset_type or "REAL_ESTATE",
+        "asaas_payment_id": item.asaas_payment_id,
+        "external_reference": item.external_reference,
+        "checkout_url": item.checkout_url,
+        "pix_copy_paste": item.pix_copy_paste,
+        "pix_qr_code": item.pix_qr_code,
+        "checkout_status": item.checkout_status,
+        "checkout_mode": item.checkout_mode,
         "client_result": json.loads(item.client_result_json) if item.client_result_json else None,
         "valid_stamp_hash": item.valid_stamp_hash,
         "created_at": item.created_at,

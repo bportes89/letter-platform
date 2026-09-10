@@ -1,7 +1,7 @@
 "use client";
 
-import { Building2, Camera, CheckCircle2, Coins, Lock, Timer, Unlock } from "lucide-react";
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { Building2, Camera, CheckCircle2, Coins, Lock, ScrollText, Timer, Unlock } from "lucide-react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { api, Proposal, QuitConOperacao } from "@/lib/api";
 import { QuitConCustosEntradaPanel, QuitConCustosEntrada } from "@/components/quitcon-custos-entrada";
 import { CurrencyFormField } from "@/components/currency-input";
@@ -9,11 +9,21 @@ import { CurrencyFormField } from "@/components/currency-input";
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
 const STATUSES = [
-  "AGUARDANDO_TAPAF", "TAPAF_LIQUIDADA", "EM_AUDITORIA_RISCO", "REPROVADO_COMPLIANCE",
+  "AGUARDANDO_TAPAF", "TAPAF_CHECKOUT_ACCEPTED", "TAPAF_LIQUIDADA", "EM_AUDITORIA_RISCO", "REPROVADO_COMPLIANCE",
   "AGUARDANDO_ASSINATURA", "PRONTO_PARA_CARTORIO", "EM_ANALISE_NO_RGI", "GRAVAME_CONCLUIDO",
   "ATIVO_OK_EM_PRODUCAO",
   "CANCELADO_INADIMPLENCIA_CESSIONARIO", "CANCELADO_DESISTENCIA_CEDENTE",
 ];
+
+type QuitConTapafCheckout = {
+  valor_tapaf_brl: string;
+  manifesto_html: string;
+  checkbox_obrigatorio_01: string;
+  checkbox_obrigatorio_02: string;
+  gateway_baas_pix_qrcode: string;
+  botao_habilitado?: boolean;
+  texto_tooltip?: string;
+};
 
 export function QuitConModule() {
   const [proposals, setProposals] = useState<Proposal[]>([]);
@@ -24,6 +34,19 @@ export function QuitConModule() {
   const [tokenization, setTokenization] = useState<Record<string, unknown> | null>(null);
   const cameraRef = useRef<HTMLInputElement>(null);
   const [photoMeta, setPhotoMeta] = useState<Array<{ filename: string; exif_timestamp_unix: number; gps_latitude: number; gps_longitude: number }>>([]);
+  const [tapafCheckout, setTapafCheckout] = useState<QuitConTapafCheckout | null>(null);
+  const [scrollDone, setScrollDone] = useState(false);
+  const [cb1, setCb1] = useState(false);
+  const [cb2, setCb2] = useState(false);
+  const manifestRef = useRef<HTMLDivElement>(null);
+  const manifestEndRef = useRef<HTMLDivElement>(null);
+
+  const evaluateManifestScroll = useCallback(() => {
+    const el = manifestRef.current;
+    if (!el) return;
+    const remaining = el.scrollHeight - el.scrollTop - el.clientHeight;
+    if (remaining <= 24 || el.scrollHeight <= el.clientHeight + 1) setScrollDone(true);
+  }, []);
 
   const load = () =>
     Promise.all([
@@ -36,6 +59,41 @@ export function QuitConModule() {
     });
 
   useEffect(() => { void load(); }, []);
+
+  useEffect(() => {
+    if (!selected || !["AGUARDANDO_TAPAF", "TAPAF_CHECKOUT_ACCEPTED"].includes(selected.status)) {
+      setTapafCheckout(null);
+      return;
+    }
+    setScrollDone(Boolean(selected.tapaf_scroll_completed));
+    setCb1(Boolean(selected.tapaf_checkbox_1));
+    setCb2(Boolean(selected.tapaf_checkbox_2));
+    api<QuitConTapafCheckout>(`/finops/quitcon/tapaf-checkout?operacao_id=${selected.id}`, { method: "POST", body: "{}" })
+      .then((c) => setTapafCheckout(c))
+      .catch(() => setTapafCheckout(null));
+  }, [selected?.id, selected?.status]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!tapafCheckout?.manifesto_html) return;
+    const el = manifestRef.current;
+    const end = manifestEndRef.current;
+    if (!el) return;
+    const raf = requestAnimationFrame(evaluateManifestScroll);
+    let observer: IntersectionObserver | undefined;
+    if (end) {
+      observer = new IntersectionObserver(
+        (entries) => {
+          if (entries.some((entry) => entry.isIntersecting)) setScrollDone(true);
+        },
+        { root: el, threshold: 0.25 },
+      );
+      observer.observe(end);
+    }
+    return () => {
+      cancelAnimationFrame(raf);
+      observer?.disconnect();
+    };
+  }, [tapafCheckout, evaluateManifestScroll]);
 
   async function createOperacao(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -61,6 +119,26 @@ export function QuitConModule() {
       setSelected(item);
     } catch (x) {
       setMessage(x instanceof Error ? x.message : "Falha ao criar operação");
+    }
+  }
+
+  async function acceptTapaf() {
+    if (!selected) return;
+    try {
+      const item = await api<QuitConOperacao>("/finops/quitcon/tapaf-checkout-accept", {
+        method: "POST",
+        body: JSON.stringify({
+          operacao_id: selected.id,
+          scroll_completed: scrollDone,
+          checkbox_1: cb1,
+          checkbox_2: cb2,
+        }),
+      });
+      setSelected(item);
+      setMessage("Aceite TAPAF registrado — pagamento liberado.");
+      await load();
+    } catch (x) {
+      setMessage(x instanceof Error ? x.message : "Falha no aceite TAPAF");
     }
   }
 
@@ -315,8 +393,39 @@ export function QuitConModule() {
               <article><small>Tokens estimados</small><strong>{Math.floor(Number(selected.credit_matrix.meta_captacao_quitacao) / 100)}</strong></article>
             </div>
             {selected.custos_entrada && <QuitConCustosEntradaPanel data={selected.custos_entrada} />}
+            {tapafCheckout && ["AGUARDANDO_TAPAF", "TAPAF_CHECKOUT_ACCEPTED"].includes(selected.status) && (
+              <section className="panel">
+                <h3 className="tapaf-section-title">Manifesto TAPAF QuitCon</h3>
+                <div ref={manifestRef} className="manifest-scroll" onScroll={() => evaluateManifestScroll()}>
+                  <ScrollText size={18} />
+                  <div className="manifest-body" dangerouslySetInnerHTML={{ __html: tapafCheckout.manifesto_html }} />
+                  <div ref={manifestEndRef} className="manifest-end-sentinel" aria-hidden="true" />
+                </div>
+                {!scrollDone && <small className="form-help">Role o manifesto até o final para habilitar as declarações.</small>}
+                <div className="tapaf-acceptance">
+                  <h4>Declarações obrigatórias</h4>
+                  <label className="tapaf-check">
+                    <input type="checkbox" checked={cb1} disabled={!scrollDone} onChange={(e) => setCb1(e.target.checked)} />
+                    <span>{tapafCheckout.checkbox_obrigatorio_01}</span>
+                  </label>
+                  <label className="tapaf-check">
+                    <input type="checkbox" checked={cb2} disabled={!scrollDone} onChange={(e) => setCb2(e.target.checked)} />
+                    <span>{tapafCheckout.checkbox_obrigatorio_02}</span>
+                  </label>
+                </div>
+              </section>
+            )}
             <div className="tapaf-actions">
-              <button type="button" disabled={selected.status !== "AGUARDANDO_TAPAF"} onClick={() => void payTapaf()}>Pagar TAPAF R$ 1.500</button>
+              <button
+                type="button"
+                disabled={selected.status !== "AGUARDANDO_TAPAF" || !(scrollDone && cb1 && cb2)}
+                onClick={() => void acceptTapaf()}
+              >
+                Registrar aceite TAPAF
+              </button>
+              <button type="button" disabled={selected.status !== "TAPAF_CHECKOUT_ACCEPTED"} onClick={() => void payTapaf()}>
+                Pagar TAPAF R$ 1.500
+              </button>
               <button type="button" disabled={!selected.operational_service_enabled || selected.status !== "TAPAF_LIQUIDADA" || !!selected.operational_service_paid_at} onClick={() => void payOperationalService()}>Pagar taxa serviço 2% (abertura)</button>
               <button type="button" disabled={selected.status !== "TAPAF_LIQUIDADA" || !!selected.success_fee_escrow_paid_at || (selected.operational_service_enabled && !selected.operational_service_paid_at)} onClick={() => void paySuccessFee()}>Depositar taxa sucesso Escrow 10%</button>
               <button type="button" disabled={!selected.administrator_approved_at || !!selected.cedente_payment_escrow_reference} onClick={() => void payCedenteEscrow()}>Pagar quitação cedente (Escrow)</button>

@@ -9,6 +9,13 @@ const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" 
 type TapafCheckout = {
   valor_nominal_taxa: string;
   gateway_baas_pix_qrcode: string;
+  pix_copy_paste?: string | null;
+  pix_qr_code?: string | null;
+  checkout_url?: string | null;
+  checkout_mode?: string | null;
+  checkout_status?: string | null;
+  asaas_payment_id?: string | null;
+  asset_type?: string;
   texto_explicativo_tooltip_interrogacao: string;
   checkbox_obrigatorio_01: string;
   checkbox_obrigatorio_02: string;
@@ -18,6 +25,7 @@ type TapafCheckout = {
 };
 
 type TapafSettlement = {
+  track?: string;
   total_brl: string;
   lote_a_api_reserve_brl: string;
   lote_b_franchise_spread_brl: string;
@@ -34,6 +42,10 @@ type Pauta = {
   tapaf_checkbox_1: boolean;
   tapaf_checkbox_2: boolean;
   tapaf_payment_reference: string | null;
+  asset_type?: string;
+  checkout_mode?: string | null;
+  checkout_url?: string | null;
+  pix_copy_paste?: string | null;
   client_result: Record<string, unknown> | null;
   valid_stamp_hash: string | null;
 };
@@ -75,6 +87,7 @@ export function PreAnalysisModule({ variant = "sdc" }: { variant?: "sdc" | "flas
 
   const [apiReady, setApiReady] = useState<boolean | null>(null);
   const [settlement, setSettlement] = useState<TapafSettlement | null>(null);
+  const [assetType, setAssetType] = useState<"REAL_ESTATE" | "VEHICLE">("REAL_ESTATE");
 
   const evaluateManifestScroll = useCallback(() => {
     const el = manifestRef.current;
@@ -211,10 +224,21 @@ export function PreAnalysisModule({ variant = "sdc" }: { variant?: "sdc" | "flas
     try {
       const result = await api<Pauta>("/finops/pre-analysis/tapaf-checkout-accept", {
         method: "POST",
-        body: JSON.stringify({ proposal_id: proposalId, scroll_completed: scrollDone, checkbox_1: cb1, checkbox_2: cb2 }),
+        body: JSON.stringify({
+          proposal_id: proposalId,
+          scroll_completed: scrollDone,
+          checkbox_1: cb1,
+          checkbox_2: cb2,
+          asset_type: variant === "flash" ? assetType : "REAL_ESTATE",
+        }),
       });
       setPauta(result);
-      setMessage("Aceite registrado — botão de pagamento habilitado.");
+      await loadTapafCheckout(true);
+      setMessage(
+        result.checkout_mode === "ASAAS"
+          ? "Aceite registrado — Pix Asaas gerado. Aguarde o webhook ou use o link de cobrança."
+          : "Aceite registrado — checkout sandbox. Confirme o pagamento abaixo.",
+      );
     } catch (x) {
       setMessage(x instanceof Error ? x.message : "Falha no aceite TAPAF");
     }
@@ -222,6 +246,11 @@ export function PreAnalysisModule({ variant = "sdc" }: { variant?: "sdc" | "flas
 
   async function payTapaf() {
     try {
+      if (pauta?.checkout_mode === "ASAAS" && pauta.checkout_url) {
+        window.open(pauta.checkout_url, "_blank", "noopener,noreferrer");
+        setMessage("Cobrança Asaas aberta — a confirmação chega via webhook PAYMENT_CONFIRMED.");
+        return;
+      }
       const result = await api<Pauta>("/finops/pre-analysis/tapaf-payment-webhook", {
         method: "POST",
         body: JSON.stringify({ proposal_id: proposalId, event_id: `tapaf-${Date.now()}`, amount: "1500.00" }),
@@ -245,7 +274,8 @@ export function PreAnalysisModule({ variant = "sdc" }: { variant?: "sdc" | "flas
     const body = variant === "flash"
       ? {
           proposal_id: proposalId,
-          asset_type: "REAL_ESTATE",
+          asset_type: assetType,
+          vehicle: assetType === "VEHICLE" ? { plate: "ABC1D23", renavam: "12345678901" } : undefined,
           extratos_6_meses_data: sampleExtratos,
           parcela_simulada: proposal ? String(Number(proposal.requested_amount) / 36) : "8000",
           valor_avaliacao_bem: proposal ? String(Number(proposal.requested_amount) / 0.35) : "1000000",
@@ -348,7 +378,23 @@ export function PreAnalysisModule({ variant = "sdc" }: { variant?: "sdc" | "flas
                   </button>
                   {showTooltip && <div className="tooltip-pop">{checkout.texto_explicativo_tooltip_interrogacao}</div>}
                 </article>
+                {checkout.checkout_mode && (
+                  <article>
+                    <small>Billing</small>
+                    <strong>{checkout.checkout_mode}</strong>
+                  </article>
+                )}
               </div>
+
+              {variant === "flash" && pauta?.status === "DOCUMENTS_OK" && (
+                <label className="form-help">
+                  Tipo de lastro{" "}
+                  <select value={assetType} onChange={(e) => setAssetType(e.target.value as "REAL_ESTATE" | "VEHICLE")}>
+                    <option value="REAL_ESTATE">Imóvel</option>
+                    <option value="VEHICLE">Veículo (SERPRO/FIPE)</option>
+                  </select>
+                </label>
+              )}
 
               <div>
                 <h3 className="tapaf-section-title">Manifesto regulatório</h3>
@@ -383,7 +429,12 @@ export function PreAnalysisModule({ variant = "sdc" }: { variant?: "sdc" | "flas
                   {checkout.botao_label}
                 </button>
               </div>
-              {canPay && <small className="form-help">Pix sandbox: {checkout.gateway_baas_pix_qrcode.slice(0, 48)}…</small>}
+              {canPay && (
+                <small className="form-help">
+                  Pix: {(checkout.pix_copy_paste || checkout.gateway_baas_pix_qrcode).slice(0, 48)}…
+                  {checkout.checkout_url ? ` · ${checkout.checkout_url}` : ""}
+                </small>
+              )}
             </div>
           )}
         </section>
@@ -393,6 +444,7 @@ export function PreAnalysisModule({ variant = "sdc" }: { variant?: "sdc" | "flas
         <section className="panel">
           <h2>Split TAPAF e inventário (NINA v4.0)</h2>
           <div className="finops-summary">
+            <article><small>Track</small><strong>{settlement.track ?? "—"}</strong></article>
             <article><small>Total recebido</small><strong>{brl.format(Number(settlement.total_brl))}</strong></article>
             <article><small>Lote A — APIs</small><strong>{brl.format(Number(settlement.lote_a_api_reserve_brl))}</strong></article>
             <article><small>Lote B — spread</small><strong>{brl.format(Number(settlement.lote_b_franchise_spread_brl))}</strong></article>

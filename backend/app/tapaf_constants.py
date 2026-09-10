@@ -39,7 +39,6 @@ INFRA_PROVIDER_CATALOG = [
 def compute_tapaf_split(total: Decimal) -> dict[str, str]:
     total = total.quantize(Decimal("0.01"))
     ratio_a = TAPAF_LOTE_A_API_RESERVE / TAPAF_NOMINAL
-    ratio_b = TAPAF_LOTE_B_FRANCHISE_SPREAD / TAPAF_NOMINAL
     lote_a = (total * ratio_a).quantize(Decimal("0.01"))
     lote_b = (total - lote_a).quantize(Decimal("0.01"))
     return {
@@ -48,3 +47,13 @@ def compute_tapaf_split(total: Decimal) -> dict[str, str]:
         "lote_b_franchise_spread_brl": str(lote_b),
         "split_basis": "300/1200 sobre base R$ 1.500 (proporcional para outros valores)",
     }
+
+
+def resolve_tapaf_track(asset_or_property_type: str | None) -> str:
+    """Mapeia tipo de bem → track de inventário TAPAF (REAL_ESTATE | VEHICLE | RURAL)."""
+    raw = (asset_or_property_type or "REAL_ESTATE").strip().upper()
+    if raw in {"VEHICLE", "VEICULO", "AUTO", "AUTOMOVEL", "CARRO", "SDC_VEHICLE"}:
+        return "VEHICLE"
+    if raw in {"RURAL", "RURAL_PROPERTY", "IMOVEL_RURAL"}:
+        return "RURAL"
+    return "REAL_ESTATE"

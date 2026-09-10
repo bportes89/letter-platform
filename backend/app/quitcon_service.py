@@ -9,13 +9,20 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import Proposal, QuitConOperacao, QuitConStatusLog, User
+from app.pre_analysis_constants import (
+    TAPAF_CHECKBOX_01,
+    TAPAF_CHECKBOX_02,
+    TAPAF_MANIFESTO_HTML,
+)
 from app.quitcon_engine import EngineQuitConLetter, money
 from app.storage_service import get_storage
+from app.tapaf_constants import resolve_tapaf_track
 from app.tapaf_settlement_service import settle_tapaf_payment
 
 
 VALID_TRANSITIONS = {
-    "AGUARDANDO_TAPAF": {"TAPAF_LIQUIDADA"},
+    "AGUARDANDO_TAPAF": {"TAPAF_CHECKOUT_ACCEPTED"},
+    "TAPAF_CHECKOUT_ACCEPTED": {"TAPAF_LIQUIDADA"},
     "TAPAF_LIQUIDADA": {"EM_AUDITORIA_RISCO"},
     "EM_AUDITORIA_RISCO": {"REPROVADO_COMPLIANCE", "AGUARDANDO_ASSINATURA"},
     "AGUARDANDO_ASSINATURA": {"PRONTO_PARA_CARTORIO", "CANCELADO_DESISTENCIA_CEDENTE"},
@@ -89,6 +96,9 @@ def operacao_view(item: QuitConOperacao) -> dict:
         "registry_office": item.registry_office,
         "tapaf_payment_reference": item.tapaf_payment_reference,
         "tapaf_paid_at": item.tapaf_paid_at,
+        "tapaf_scroll_completed": item.tapaf_scroll_completed,
+        "tapaf_checkbox_1": item.tapaf_checkbox_1,
+        "tapaf_checkbox_2": item.tapaf_checkbox_2,
         "compliance_dossier_uri": item.compliance_dossier_uri,
         "inspection_photos_count": item.inspection_photos_count,
         "administrator_approved_at": item.administrator_approved_at,
@@ -207,8 +217,8 @@ def create_operacao(
 
 
 def generate_tapaf_checkout(operacao: QuitConOperacao) -> dict:
-    if operacao.status != "AGUARDANDO_TAPAF":
-        raise HTTPException(status_code=409, detail="TAPAF disponível apenas em AGUARDANDO_TAPAF")
+    if operacao.status not in {"AGUARDANDO_TAPAF", "TAPAF_CHECKOUT_ACCEPTED", "TAPAF_LIQUIDADA"}:
+        raise HTTPException(status_code=409, detail="TAPAF disponível apenas em AGUARDANDO_TAPAF / pós-aceite")
     amount = EngineQuitConLetter.taxa_tapaf_nominal
     engine = EngineQuitConLetter()
     vp = money(operacao.quitacao_vp_amount or operacao.outstanding_balance)
@@ -221,22 +231,52 @@ def generate_tapaf_checkout(operacao: QuitConOperacao) -> dict:
         "valor_tapaf_brl": str(amount),
         "custos_entrada": custos_entrada,
         "gateway_baas_pix_qrcode": f"00020101021126580014br.gov.bcb.pix0136letter-quitcon-tapaf-{operacao.id[:8]}",
-        "status_operacao_db": "AGUARDANDO_TAPAF",
+        "status_operacao_db": operacao.status,
         "texto_tooltip": (
             "TAPAF QuitCon R$ 1.500,00 — taxa não reembolsável que cobre certidões, ONR e laudo AVM."
         ),
+        "checkbox_obrigatorio_01": TAPAF_CHECKBOX_01,
+        "checkbox_obrigatorio_02": TAPAF_CHECKBOX_02,
+        "manifesto_html": TAPAF_MANIFESTO_HTML,
+        "tapaf_scroll_completed": operacao.tapaf_scroll_completed,
+        "tapaf_checkbox_1": operacao.tapaf_checkbox_1,
+        "tapaf_checkbox_2": operacao.tapaf_checkbox_2,
+        "botao_habilitado": operacao.status == "TAPAF_CHECKOUT_ACCEPTED",
     }
 
 
-def confirm_tapaf_payment(db: Session, user: User, operacao: QuitConOperacao, event_id: str, amount) -> QuitConOperacao:
+def accept_tapaf_checkout(
+    db: Session,
+    user: User,
+    operacao: QuitConOperacao,
+    *,
+    scroll_completed: bool,
+    checkbox_1: bool,
+    checkbox_2: bool,
+) -> QuitConOperacao:
     if operacao.status != "AGUARDANDO_TAPAF":
-        raise HTTPException(status_code=409, detail="TAPAF já liquidada ou indisponível")
+        raise HTTPException(status_code=409, detail="Aceite TAPAF disponível apenas em AGUARDANDO_TAPAF")
+    if not all([scroll_completed, checkbox_1, checkbox_2]):
+        raise HTTPException(status_code=422, detail="Rolagem do manifesto e duas caixas de aceite são obrigatórias")
+    operacao.tapaf_scroll_completed = True
+    operacao.tapaf_checkbox_1 = True
+    operacao.tapaf_checkbox_2 = True
+    _transition(db, operacao, user, "TAPAF_CHECKOUT_ACCEPTED", "Manifesto TAPAF aceito — pagamento liberado")
+    db.flush()
+    return operacao
+
+
+def confirm_tapaf_payment(db: Session, user: User, operacao: QuitConOperacao, event_id: str, amount) -> QuitConOperacao:
+    if operacao.status == "TAPAF_LIQUIDADA":
+        return operacao
+    if operacao.status != "TAPAF_CHECKOUT_ACCEPTED":
+        raise HTTPException(status_code=409, detail="Aceite do manifesto TAPAF é obrigatório antes do pagamento")
     if money(amount) != EngineQuitConLetter.taxa_tapaf_nominal:
         raise HTTPException(status_code=422, detail="Valor TAPAF deve ser exatamente R$ 1.500,00")
     operacao.tapaf_payment_reference = event_id
     operacao.tapaf_paid_at = datetime.now(UTC)
     _transition(db, operacao, user, "TAPAF_LIQUIDADA", "Pix liquidado BaaS D+0")
-    track = "RURAL" if operacao.property_type.upper() == "RURAL" else "REAL_ESTATE"
+    track = resolve_tapaf_track(operacao.property_type)
     settle_tapaf_payment(
         db,
         user,

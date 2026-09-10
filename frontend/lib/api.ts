@@ -163,6 +163,7 @@ export type QuitConOperacao = {
   property_type: string; appraisal_value: string; outstanding_balance: string;
   registry_number: string; registry_office: string;
   tapaf_payment_reference: string | null; tapaf_paid_at: string | null;
+  tapaf_scroll_completed?: boolean; tapaf_checkbox_1?: boolean; tapaf_checkbox_2?: boolean;
   compliance_dossier_uri: string | null; inspection_photos_count: number;
   administrator_approved_at: string | null; sla_estimated_completion_at: string | null;
   sla_dias_estimados: number; success_fee_escrow_amount: string;

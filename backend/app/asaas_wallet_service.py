@@ -16,7 +16,7 @@ from app.asaas_client import AsaasClient
 from app.asaas_common import asaas_configured
 from app.core.config import settings
 from app.financial_service import ensure_chart, process_escrow_event
-from app.models import EscrowAccount, EscrowEvent, User
+from app.models import EscrowAccount, EscrowEvent, PreAnalysisPauta, User
 from app.services import money
 from app.subaccount_auto_service import find_user_plain_subaccount
 
@@ -793,9 +793,23 @@ def handle_asaas_webhook(db: Session, payload: dict) -> dict:
 
     if event in {"PAYMENT_RECEIVED", "PAYMENT_CONFIRMED"}:
         from app.flash_invest_service import confirm_reservation_payment
+        from app.pre_analysis_service import confirm_tapaf_payment_from_asaas
 
         external_ref = str(payment.get("externalReference") or "")
         payment_id = str(payment.get("id") or "")
+        pay_amount = Decimal(str(payment.get("value") or payment.get("netValue") or 0)) or None
+        if external_ref.startswith("tapaf_pre_analysis_") or (
+            payment_id and db.scalar(select(PreAnalysisPauta).where(PreAnalysisPauta.asaas_payment_id == payment_id))
+        ):
+            tapaf_pauta = confirm_tapaf_payment_from_asaas(
+                db,
+                external_reference=external_ref or None,
+                asaas_payment_id=payment_id or None,
+                payment_id=payment_id or None,
+                amount=pay_amount,
+            )
+            if tapaf_pauta:
+                processed = True
         if external_ref.startswith("flash_invest_res_") or payment_id:
             position = confirm_reservation_payment(
                 db,

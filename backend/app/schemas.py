@@ -2306,6 +2306,7 @@ class PreAnalysisTapafCheckoutAcceptRequest(BaseModel):
     scroll_completed: bool
     checkbox_1: bool
     checkbox_2: bool
+    asset_type: str | None = None
 
 
 class PreAnalysisTapafPaymentWebhook(BaseModel):
@@ -2325,6 +2326,8 @@ class PreAnalysisEngineRequest(BaseModel):
     restricoes_cadastrais_bool: bool = False
     possui_gravame_bool: bool = False
     valor_gravame_anterior: Decimal = Field(default=Decimal("0"))
+    asset_type: str = "REAL_ESTATE"
+    vehicle: dict | None = None
 
 
 class PreAnalysisPautaView(BaseModel):
@@ -2338,6 +2341,14 @@ class PreAnalysisPautaView(BaseModel):
     tapaf_checkbox_2: bool
     tapaf_payment_reference: str | None
     tapaf_paid_at: datetime | None
+    asset_type: str = "REAL_ESTATE"
+    asaas_payment_id: str | None = None
+    external_reference: str | None = None
+    checkout_url: str | None = None
+    pix_copy_paste: str | None = None
+    pix_qr_code: str | None = None
+    checkout_status: str | None = None
+    checkout_mode: str | None = None
     client_result: dict | None
     valid_stamp_hash: str | None
     created_at: datetime
@@ -2575,6 +2586,13 @@ class QuitConTapafWebhook(BaseModel):
     amount: Decimal = Field(gt=0)
 
 
+class QuitConTapafCheckoutAcceptRequest(BaseModel):
+    operacao_id: str
+    scroll_completed: bool
+    checkbox_1: bool
+    checkbox_2: bool
+
+
 class QuitConInspectionRequest(BaseModel):
     operacao_id: str
     photos: list[LeaseEquityInspectionPhoto] = Field(min_length=3)
@@ -2630,6 +2648,9 @@ class QuitConOperacaoView(BaseModel):
     registry_office: str
     tapaf_payment_reference: str | None
     tapaf_paid_at: datetime | None
+    tapaf_scroll_completed: bool = False
+    tapaf_checkbox_1: bool = False
+    tapaf_checkbox_2: bool = False
     compliance_dossier_uri: str | None
     inspection_photos_count: int
     administrator_approved_at: datetime | None

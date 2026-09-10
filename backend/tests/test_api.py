@@ -2237,6 +2237,8 @@ def test_pre_analysis_v6_documents_tapaf_and_engine(client, auth_headers):
         "proposal_id": proposal["id"], "scroll_completed": True, "checkbox_1": True, "checkbox_2": True,
     })
     assert accepted.status_code == 200 and accepted.json()["status"] == "TAPAF_CHECKOUT_ACCEPTED"
+    assert accepted.json()["checkout_mode"] == "SANDBOX"
+    assert accepted.json()["pix_copy_paste"]
 
     paid = client.post("/api/v1/finops/pre-analysis/tapaf-payment-webhook", headers=auth_headers, json={
         "proposal_id": proposal["id"], "event_id": "tapaf-webhook-001", "amount": "1500.00",
@@ -2250,10 +2252,12 @@ def test_pre_analysis_v6_documents_tapaf_and_engine(client, auth_headers):
     )
     assert settlement.status_code == 200
     body = settlement.json()
+    assert body["track"] == "REAL_ESTATE"
     assert body["total_brl"] == "1500.00"
     assert body["lote_a_api_reserve_brl"] == "300.00"
     assert body["lote_b_franchise_spread_brl"] == "1200.00"
     assert len(body["inventory"]["providers"]) >= 5
+    assert "SERPRO_DENATRAN" not in {p["code"] for p in body["inventory"]["providers"]}
 
     policy = client.get("/api/v1/finops/tapaf/split-policy", headers=auth_headers)
     assert policy.status_code == 200
@@ -2318,6 +2322,59 @@ def test_flash_capital_tapaf_and_valid_stamp(client, auth_headers):
 
     stamps = client.get("/api/v1/valid-stamps", headers=auth_headers).json()
     assert any(s["purpose"] == "FLASH_CAPITAL_PARTIES" for s in stamps)
+
+
+def test_tapaf_vehicle_track_inventory_and_asaas_webhook(client, auth_headers, monkeypatch):
+    lead = client.get("/api/v1/leads", headers=auth_headers).json()[0]
+    proposal = client.post("/api/v1/proposals", headers=auth_headers, json={
+        "lead_id": lead["id"], "product": "FLASH_CREDIT", "requested_amount": "80000", "terms": {},
+    }).json()
+    validated = client.post("/api/v1/finops/pre-analysis/validate-documents", headers=auth_headers, json={
+        "proposal_id": proposal["id"], "documents": _valid_pre_analysis_documents(),
+    })
+    assert validated.status_code == 200
+
+    accepted = client.post("/api/v1/finops/pre-analysis/tapaf-checkout-accept", headers=auth_headers, json={
+        "proposal_id": proposal["id"],
+        "scroll_completed": True,
+        "checkbox_1": True,
+        "checkbox_2": True,
+        "asset_type": "VEHICLE",
+    })
+    assert accepted.status_code == 200
+    assert accepted.json()["asset_type"] == "VEHICLE"
+    assert accepted.json()["external_reference"] or accepted.json().get("asaas_payment_id")
+    pauta = accepted.json()
+    assert pauta["checkout_mode"] == "SANDBOX"
+
+    monkeypatch.setattr("app.core.config.settings.asaas_webhook_access_token", "test-webhook-token")
+    webhook = client.post(
+        "/api/v1/webhooks/asaas",
+        headers={"asaas-access-token": "test-webhook-token"},
+        json={
+            "event": "PAYMENT_CONFIRMED",
+            "payment": {
+                "id": pauta["asaas_payment_id"],
+                "externalReference": pauta.get("external_reference") or f"tapaf_pre_analysis_{pauta['id']}",
+                "status": "CONFIRMED",
+                "value": 1500.0,
+            },
+        },
+    )
+    assert webhook.status_code == 200
+
+    listed = client.get(f"/api/v1/finops/pre-analysis/{proposal['id']}", headers=auth_headers).json()
+    assert listed["status"] == "TAPAF_PAID"
+
+    settlement = client.get(
+        "/api/v1/finops/tapaf/settlements/lookup",
+        headers=auth_headers,
+        params={"entity_type": "pre_analysis_pauta", "entity_id": pauta["id"]},
+    ).json()
+    assert settlement["track"] == "VEHICLE"
+    codes = {p["code"] for p in settlement["inventory"]["providers"]}
+    assert "SERPRO_DENATRAN" in codes
+    assert "FIPE_CLOUD" in codes
 
 
 def test_pre_analysis_v6_income_margin_bifurcation(client, auth_headers):
@@ -2599,6 +2656,24 @@ def test_quitcon_full_pipeline_penalties_and_tokenization(client, auth_headers):
     assert operacao["success_fee_escrow_amount"] == "22321.43"
     assert operacao["credit_matrix"]["ltv_assimetrico_aplicavel"] is False
     assert operacao["credit_matrix"]["meta_captacao_quitacao"] == "223214.29"
+
+    blocked_pay = client.post("/api/v1/finops/quitcon/tapaf-payment-webhook", headers=auth_headers, json={
+        "operacao_id": operacao["id"], "event_id": "tapaf-qc-blocked", "amount": "1500.00",
+    })
+    assert blocked_pay.status_code == 409
+
+    checkout = client.post(f"/api/v1/finops/quitcon/tapaf-checkout?operacao_id={operacao['id']}", headers=auth_headers)
+    assert checkout.status_code == 200 and "manifesto_html" in checkout.json()
+
+    blocked_accept = client.post("/api/v1/finops/quitcon/tapaf-checkout-accept", headers=auth_headers, json={
+        "operacao_id": operacao["id"], "scroll_completed": False, "checkbox_1": True, "checkbox_2": True,
+    })
+    assert blocked_accept.status_code == 422
+
+    accepted = client.post("/api/v1/finops/quitcon/tapaf-checkout-accept", headers=auth_headers, json={
+        "operacao_id": operacao["id"], "scroll_completed": True, "checkbox_1": True, "checkbox_2": True,
+    })
+    assert accepted.status_code == 200 and accepted.json()["status"] == "TAPAF_CHECKOUT_ACCEPTED"
 
     paid = client.post("/api/v1/finops/quitcon/tapaf-payment-webhook", headers=auth_headers, json={
         "operacao_id": operacao["id"], "event_id": "tapaf-qc-001", "amount": "1500.00",

@@ -66,7 +66,7 @@ from app.schemas import (
     LeaseEquityComplianceReview, LeaseEquityFundingCapture, LeaseEquityActivateRequest,
     LeaseEquityAnticipationRequest, LeaseEquityMonthsRequest, LeaseEquityLtvSimulateRequest,
     LeaseEquityTokenizationRequest,
-    QuitConOperacaoCreate, QuitConOperacaoView, QuitConTapafWebhook, QuitConInspectionRequest,
+    QuitConOperacaoCreate, QuitConOperacaoView, QuitConTapafCheckoutAcceptRequest, QuitConTapafWebhook, QuitConInspectionRequest,
     QuitConComplianceReview, QuitConFundingCapture, QuitConActivateRequest,
     QuitConPublicSimulateRequest, QuitConSuccessFeeWebhook, QuitConCedentePaymentWebhook,
     QuitConOperationalServiceWebhook,
@@ -138,7 +138,7 @@ from app.sdc_quitcon_service import start_quitcon_from_sdc
 from app.valid_stamp_requirements import valid_stamp_requirements
 from app.invoice_processor_service import process_invoice_settlement, receipt_processor_response, receipt_view
 from app.pre_analysis_service import (
-    accept_tapaf_checkout, confirm_tapaf_payment, generate_tapaf_checkout, pauta_view,
+    accept_tapaf_checkout, confirm_tapaf_payment, confirm_tapaf_payment_from_asaas, generate_tapaf_checkout, pauta_view,
     run_engine_phase3, validate_documents_phase1,
 )
 from app.collateral_native_inspection_service import (
@@ -155,7 +155,8 @@ from app.lease_equity_service import (
 )
 from app.quitcon_engine import EngineQuitConLetter
 from app.quitcon_service import (
-    activate_ok as activate_quitcon_ok, cancel_desistencia_cedente, cancel_inadimplencia_cessionario,
+    activate_ok as activate_quitcon_ok, accept_tapaf_checkout as accept_quitcon_tapaf,
+    cancel_desistencia_cedente, cancel_inadimplencia_cessionario,
     complete_gravame as complete_quitcon_gravame,
     confirm_tapaf_payment as confirm_quitcon_tapaf,
     create_operacao, generate_tapaf_checkout as generate_quitcon_tapaf,
@@ -2911,7 +2912,13 @@ def pre_analysis_tapaf_checkout_accept(payload: PreAnalysisTapafCheckoutAcceptRe
     pauta = db.scalar(select(PreAnalysisPauta).where(PreAnalysisPauta.proposal_id == proposal.id, PreAnalysisPauta.organization_id == user.organization_id))
     if not pauta:
         raise HTTPException(status_code=404, detail="Pauta de pré-análise não encontrada")
-    accept_tapaf_checkout(db, pauta, scroll_completed=payload.scroll_completed, checkbox_1=payload.checkbox_1, checkbox_2=payload.checkbox_2)
+    accept_tapaf_checkout(
+        db, user, pauta,
+        scroll_completed=payload.scroll_completed,
+        checkbox_1=payload.checkbox_1,
+        checkbox_2=payload.checkbox_2,
+        asset_type=payload.asset_type,
+    )
     audit(db, user, "finops.pre_analysis.tapaf_checkout", "pre_analysis_pauta", pauta.id)
     db.commit()
     return PreAnalysisPautaView(**pauta_view(pauta))
@@ -3143,6 +3150,21 @@ def quitcon_get_operacao(operacao_id: str, user: User = Depends(get_current_user
 def quitcon_tapaf_checkout(operacao_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     operacao = _load_quitcon_operacao(db, user, operacao_id)
     return generate_quitcon_tapaf(operacao)
+
+
+@router.post("/finops/quitcon/tapaf-checkout-accept", response_model=QuitConOperacaoView)
+def quitcon_tapaf_checkout_accept(payload: QuitConTapafCheckoutAcceptRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    operacao = _load_quitcon_operacao(db, user, payload.operacao_id)
+    accept_quitcon_tapaf(
+        db, user, operacao,
+        scroll_completed=payload.scroll_completed,
+        checkbox_1=payload.checkbox_1,
+        checkbox_2=payload.checkbox_2,
+    )
+    audit(db, user, "finops.quitcon.tapaf_checkout", "quitcon_operacao", operacao.id)
+    db.commit()
+    db.refresh(operacao)
+    return QuitConOperacaoView(**quitcon_operacao_view(operacao))
 
 
 @router.post("/finops/quitcon/tapaf-payment-webhook", response_model=QuitConOperacaoView)

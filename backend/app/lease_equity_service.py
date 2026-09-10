@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.lease_equity_engine import EngineLeaseEquityLetter, money
 from app.models import LeaseEquityPauta, LeaseEquityStatusLog, Proposal, User
 from app.storage_service import get_storage
+from app.tapaf_constants import resolve_tapaf_track
 from app.tapaf_settlement_service import settle_tapaf_payment
 
 
@@ -155,7 +156,7 @@ def confirm_tapaf_payment(db: Session, user: User, pauta: LeaseEquityPauta, even
     pauta.tapaf_payment_reference = event_id
     pauta.tapaf_paid_at = datetime.now(UTC)
     _transition(db, pauta, user, "TAPAF_LIQUIDADA", "Pix liquidado BaaS D+0")
-    track = "RURAL" if pauta.property_type.upper() == "RURAL" else "REAL_ESTATE"
+    track = resolve_tapaf_track(pauta.property_type)
     settle_tapaf_payment(
         db,
         user,

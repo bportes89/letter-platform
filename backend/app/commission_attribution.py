@@ -80,6 +80,17 @@ def resolve_sale_channel_and_parties(
             raise HTTPException(status_code=403, detail="Cliente só pode consumir no próprio escritório")
         return SALE_CHANNEL_SELF, actor, None
 
+    # Ops / FinOps internos: abrem proposta sem canal comercial obrigatório
+    if actor.role in {Role.PLATFORM_ADMIN, Role.INTERNAL_STAFF}:
+        client = None
+        if client_user_id:
+            client = db.get(User, client_user_id)
+            if not client or client.organization_id != actor.organization_id:
+                raise HTTPException(status_code=404, detail="Cliente não encontrado")
+        elif lead.client_user_id:
+            client = db.get(User, lead.client_user_id)
+        return SALE_CHANNEL_PARTNER, client, None
+
     if not is_commercial_seller(actor.role):
         raise HTTPException(status_code=403, detail="Perfil sem permissão para registrar venda comercial")
 
