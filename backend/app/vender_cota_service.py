@@ -358,5 +358,6 @@ def offer_view(item: QuotaSellOffer, admin: Administrator | None = None) -> dict
         "offer_percent": str(money(Decimal(str(item.offer_percent)))),
         "offer_value": str(money(Decimal(str(item.offer_value)))),
         "partner_referral_code": item.partner_referral_code,
+        "notes": item.notes,
         "created_at": item.created_at.isoformat() if item.created_at else None,
     }

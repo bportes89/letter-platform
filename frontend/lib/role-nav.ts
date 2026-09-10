@@ -38,10 +38,10 @@ const ROLE_PRODUCT_KEYS: Record<LetterRole, AccessList> = {
   PLATFORM_ADMIN: "*",
   INTERNAL_STAFF: "*",
   MASTER_FRANCHISEE: [
-    "marketplace", "inventory", "proposals", "sdc",
+    "marketplace", "inventory", "vender-cota", "proposals", "sdc",
     "flash-capital", "lease-equity", "flash-invest", "quitcon", "lss", "leilao",
   ],
-  MANAGER: ["marketplace", "inventory", "proposals", "flash-capital", "lease-equity", "quitcon", "lss"],
+  MANAGER: ["marketplace", "inventory", "vender-cota", "proposals", "flash-capital", "lease-equity", "quitcon", "lss"],
   PARTNER: ["marketplace", "proposals", "flash-capital", "lease-equity", "quitcon", "lss", "leilao"],
   CLIENT: ["proposals", "flash-capital", "lease-equity", "quitcon", "lss"],
   QUOTA_SELLER: ["marketplace", "proposals", "quitcon"],
@@ -98,7 +98,8 @@ export function canAccessPlatformModule(role: string | undefined, moduleKey: str
 /** Rotas de produto incluem aliases legados usados em /modules/[key]. */
 const PRODUCT_ROUTE_ALIASES: Record<string, string> = {
   marketplace: "marketplace",
-  inventory: "marketplace",
+  inventory: "inventory",
+  "vender-cota": "vender-cota",
   proposals: "proposals",
   sdc: "sdc",
   "flash-capital": "flash-capital",

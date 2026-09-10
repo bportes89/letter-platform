@@ -34,6 +34,7 @@ export const PRODUCT_NAV: ProductNavItem[] = [
     children: [
       { key: "marketplace", name: "Marketplace (esteiras)" },
       { key: "inventory", name: "Inventário (admin)", internalOnly: true },
+      { key: "vender-cota", name: "Vender minha cota (admin)", internalOnly: true },
     ],
   },
   {

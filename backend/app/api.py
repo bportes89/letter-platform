@@ -85,7 +85,7 @@ from app.schemas import (
     NetworkNodeCreate, NetworkNodeView, NetworkDownlineMemberView, PayoutApprove, PayoutCreate, PayoutView, ProposalCreate, ProposalUpdate,
     ReconciliationBatchView, ReconciliationItemView, ReconciliationResolveRequest,
     MarketplaceEsteira1Request, MarketplaceEsteira1Response, MarketplaceEsteira2Request, MarketplaceEsteira2Response,
-    VenderCotaCalculateRequest, VenderCotaStoreRequest, QuotaOfferRangeUpdate,
+    VenderCotaCalculateRequest, VenderCotaStoreRequest, QuotaOfferRangeUpdate, QuotaSellOfferUpdate,
     ProposalView, QuotaCreate, QuotaUpdate, QuotaView, NinaQuotaScanView, RecoveredAssetCreate, RecoveredAssetView, RefreshRequest,
     CommercialClientView,
     ReservationCreate, ReservationView, SdcCalculationRequest, SessionView, SignatureComplete,
@@ -2045,9 +2045,17 @@ def vender_cota_range_update(
     if not item:
         raise HTTPException(status_code=404, detail="Faixa não encontrada")
     data = payload.model_dump(exclude_unset=True)
+    if "prazo_init" in data and "prazo_final" in data and data["prazo_init"] > data["prazo_final"]:
+        raise HTTPException(status_code=422, detail="prazo_init não pode ser maior que prazo_final")
+    if "pago_init" in data and "pago_final" in data and data["pago_init"] > data["pago_final"]:
+        raise HTTPException(status_code=422, detail="pago_init não pode ser maior que pago_final")
     for key, value in data.items():
         setattr(item, key, value)
-    audit(db, user, "vender_cota.range_updated", "quota_offer_range", item.id, data)
+    audit_meta = {
+        k: (str(v) if hasattr(v, "as_tuple") else v)
+        for k, v in data.items()
+    }
+    audit(db, user, "vender_cota.range_updated", "quota_offer_range", item.id, audit_meta)
     db.commit()
     db.refresh(item)
     return range_view(item)
@@ -2060,6 +2068,42 @@ def vender_cota_offers(user: User = Depends(require_scope("inventory:write")), d
 
     items = list_offers(db, user.organization_id)
     return [offer_view(o, db.get(Administrator, o.administrator_id) if o.administrator_id else None) for o in items]
+
+
+OFFER_STATUSES = {"AWAITING_STATEMENT", "UNDER_REVIEW", "ACCEPTED", "REJECTED", "CLOSED"}
+
+
+@router.patch("/funding/vender-cota/offers/{offer_id}")
+def vender_cota_offer_update(
+    offer_id: str,
+    payload: QuotaSellOfferUpdate,
+    user: User = Depends(require_scope("inventory:write")),
+    db: Session = Depends(get_db),
+):
+    from app.models import Administrator, QuotaSellOffer
+    from app.vender_cota_service import offer_view
+
+    item = db.scalar(
+        select(QuotaSellOffer).where(
+            QuotaSellOffer.id == offer_id,
+            QuotaSellOffer.organization_id == user.organization_id,
+        )
+    )
+    if not item:
+        raise HTTPException(status_code=404, detail="Oferta não encontrada")
+    data = payload.model_dump(exclude_unset=True)
+    if "status" in data:
+        status = str(data["status"]).upper().strip()
+        if status not in OFFER_STATUSES:
+            raise HTTPException(status_code=422, detail=f"Status inválido. Use: {', '.join(sorted(OFFER_STATUSES))}")
+        data["status"] = status
+    for key, value in data.items():
+        setattr(item, key, value)
+    audit(db, user, "vender_cota.offer_updated", "quota_sell_offer", item.id, data)
+    db.commit()
+    db.refresh(item)
+    admin = db.get(Administrator, item.administrator_id) if item.administrator_id else None
+    return offer_view(item, admin)
 
 
 @router.post("/public/site/chat/home")

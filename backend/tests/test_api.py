@@ -116,10 +116,26 @@ def test_vender_minha_cota_calculate_and_store(client, auth_headers):
     offers = client.get("/api/v1/funding/vender-cota/offers", headers=auth_headers)
     assert offers.status_code == 200
     assert any(o["contact_email"] == "maria.cota@example.com" for o in offers.json())
+    offer_id = next(o["id"] for o in offers.json() if o["contact_email"] == "maria.cota@example.com")
+    patched = client.patch(
+        f"/api/v1/funding/vender-cota/offers/{offer_id}",
+        headers=auth_headers,
+        json={"status": "UNDER_REVIEW", "notes": "Extrato solicitado"},
+    )
+    assert patched.status_code == 200
+    assert patched.json()["status"] == "UNDER_REVIEW"
+    assert patched.json()["notes"] == "Extrato solicitado"
 
     ranges = client.get("/api/v1/funding/vender-cota/ranges", headers=auth_headers)
     assert ranges.status_code == 200
     assert len(ranges.json()) >= 30
+    first = ranges.json()[0]
+    range_patch = client.patch(
+        f"/api/v1/funding/vender-cota/ranges/{first['id']}",
+        headers=auth_headers,
+        json={"porc": first["porc"]},
+    )
+    assert range_patch.status_code == 200
 
 
 def test_marketplace_esteira1_and_esteira2(client, auth_headers):

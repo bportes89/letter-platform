@@ -2124,9 +2124,16 @@ class QuotaOfferRangeUpdate(BaseModel):
     active: bool | None = None
     name: str | None = None
     porc: Decimal | None = Field(default=None, ge=0, le=100)
+    pago_init: Decimal | None = Field(default=None, ge=0, le=100)
     pago_final: Decimal | None = Field(default=None, ge=0, le=100)
     prazo_init: int | None = Field(default=None, ge=1)
     prazo_final: int | None = Field(default=None, ge=1)
+    sort_order: int | None = Field(default=None, ge=0)
+
+
+class QuotaSellOfferUpdate(BaseModel):
+    status: str | None = Field(default=None, max_length=40)
+    notes: str | None = Field(default=None, max_length=4000)
 
 
 class BISummaryView(BaseModel):

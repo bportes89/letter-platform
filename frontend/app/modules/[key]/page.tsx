@@ -23,6 +23,7 @@ import { FinOpsModule } from "@/components/finops-module";
 import { PreAnalysisModule } from "@/components/pre-analysis-module";
 import { LeaseEquityModule } from "@/components/lease-equity-module";
 import { QuitConModule } from "@/components/quitcon-module";
+import { VenderCotaAdminModule } from "@/components/vender-cota-admin-module";
 import { BankControlModule } from "@/components/bank-control-module";
 import { canAccessModuleRoute, personaLabel } from "@/lib/role-nav";
 import { STANDBY_PRODUCT_KEYS } from "@/lib/product-nav";
@@ -86,6 +87,7 @@ export default function ModulePage() {
 
   if (routeKey === "marketplace") return <MarketplaceModule />;
   if (routeKey === "inventory") return <InventoryModule />;
+  if (routeKey === "vender-cota") return <VenderCotaAdminModule />;
   if (routeKey === "proposals") return <ProposalsModule />;
   if (routeKey === "sdc") return <PreAnalysisModule />;
   if (routeKey === "flash-capital" || routeKey === "finops") return <><FinOpsModule /><PreAnalysisModule variant="flash" /></>;
