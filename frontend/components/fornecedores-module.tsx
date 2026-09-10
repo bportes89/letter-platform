@@ -24,6 +24,7 @@ type QuotaSupplier = {
   api_url: string | null;
   last_sync_at: string | null;
   last_sync_status: string | null;
+  has_portal_token?: boolean;
 };
 
 type SyncResult = {
@@ -100,6 +101,29 @@ export function FornecedoresModule() {
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Falha no sync");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function issuePortalToken(item: QuotaSupplier) {
+    setError("");
+    setBusy(true);
+    try {
+      const result = await api<{ portal_token: string; portal_url: string }>(
+        `/marketplace/suppliers/${item.id}/portal-token`,
+        { method: "POST" },
+      );
+      const url = `${window.location.origin}${result.portal_url}`;
+      setNotice(`Token portal ${item.source_key}: ${result.portal_token} · ${url}`);
+      try {
+        await navigator.clipboard.writeText(url);
+      } catch {
+        /* ignore */
+      }
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Falha ao gerar token do portal");
     } finally {
       setBusy(false);
     }
@@ -347,6 +371,9 @@ export function FornecedoresModule() {
                       disabled={busy || (x.sync_mode || "NONE") === "NONE"}
                     >
                       Sincronizar
+                    </button>
+                    <button type="button" className="table-action" onClick={() => issuePortalToken(x)} disabled={busy}>
+                      {x.has_portal_token ? "Novo token portal" : "Token portal"}
                     </button>
                     <button type="button" className="table-action" onClick={() => toggleActive(x)}>
                       {x.active ? "Inativar" : "Ativar"}

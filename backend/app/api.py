@@ -11,6 +11,7 @@ from app.core.security import create_token, verify_password
 from app.core.config import settings
 from app.db import get_db
 from app.dependencies import get_current_user, require_scope
+from app.supplier_portal_auth import get_current_supplier
 from app.models import (
     Administrator, AuctionBid, AuctionLot, AuctionQualification, AuctionSettlement,
     AuthSession, Branch, CalculationMemory, CommunicationConsent, CommunicationDelivery,
@@ -22,7 +23,7 @@ from app.models import (
     EscrowAccount, FundingOpportunity, Invoice, RecoveredAsset,
     InvestmentPosition, InvestmentReservation, KycCase, Lead, LedgerEntry,
     LedgerTransaction, NetworkNode, PaymentReceipt, PayoutApproval, PayoutRequest, PreAnalysisPauta, Proposal, LeaseEquityPauta, QuitConOperacao, CollateralNativeInspection,
-    Quota, QuotaReservation, SignatureEnvelope, User, UserInvitation, Role,
+    Quota, QuotaReservation, QuotaSupplier, SignatureEnvelope, User, UserInvitation, Role,
     ReconciliationBatch, ReconciliationItem, TaxClosing, TaxDocument, TaxException,
     UnderwritingAssessment, UnderwritingDecision, UnderwritingPolicy, OperationalJob, SecurityEvent, TenantQuota,
     NinaCriticalApproval, NinaDistressCase, NinaDistressEvent, NinaLegalDocument,
@@ -87,6 +88,7 @@ from app.schemas import (
     MarketplaceEsteira1Request, MarketplaceEsteira1Response, MarketplaceEsteira2Request, MarketplaceEsteira2Response,
     VendaDiretaRoboSearchRequest, VendaDiretaRoboSearchResponse, VendaDiretaRoboConfirmRequest, VendaDiretaRoboConfirmResponse,
     QuotaSupplierCreate, QuotaSupplierUpdate, QuotaSupplierView, QuotaInventorySyncView,
+    SupplierPortalTokenResponse, SupplierPortalMeView, SupplierPortalTransferItem,
     VendaDiretaManualCotaOption, VendaDiretaManualCadastroOption, VendaDiretaManualPartnerOption,
     VendaDiretaManualStoreRequest, VendaDiretaManualStoreResponse,
     CadastroListItem, CadastroDetailView, CadastroUpdateRequest, MarketplaceExtratoItem,
@@ -1689,6 +1691,29 @@ def ensure_quota_supplier_defaults(user: User = Depends(require_scope("inventory
     return [supplier_view(x) for x in list_suppliers(db, user)]
 
 
+@router.post("/marketplace/suppliers/{supplier_id}/portal-token", response_model=SupplierPortalTokenResponse)
+def marketplace_supplier_issue_portal_token(
+    supplier_id: str,
+    user: User = Depends(require_scope("inventory:write")),
+    db: Session = Depends(get_db),
+):
+    from app.quota_supplier_service import get_supplier
+    from app.supplier_portal_auth import issue_portal_token
+
+    item = get_supplier(db, user, supplier_id)
+    raw = issue_portal_token(item)
+    db.flush()
+    audit(db, user, "marketplace.supplier.portal_token", "quota_supplier", item.id, {"source_key": item.source_key})
+    db.commit()
+    return {
+        "supplier_id": item.id,
+        "source_key": item.source_key,
+        "portal_token": raw,
+        "portal_url": f"/portal-fornecedor?token={raw}",
+        "has_portal_token": True,
+    }
+
+
 @router.post("/marketplace/suppliers/{supplier_id}/sync", response_model=QuotaInventorySyncView)
 def sync_quota_supplier_inventory(
     supplier_id: str,
@@ -1711,6 +1736,48 @@ def sync_marketplace_inventory(user: User = Depends(require_scope("inventory:wri
     audit(db, user, "marketplace.inventory.sync", "organization", user.organization_id, {"suppliers": result.get("suppliers")})
     db.commit()
     return QuotaInventorySyncView(**result)
+
+
+@router.get("/supplier-portal/me", response_model=SupplierPortalMeView)
+def supplier_portal_me(supplier: QuotaSupplier = Depends(get_current_supplier)):
+    from app.supplier_portal_service import portal_me
+
+    return portal_me(supplier)
+
+
+@router.get("/supplier-portal/transfers", response_model=list[SupplierPortalTransferItem])
+def supplier_portal_transfers(
+    status: str = "pending",
+    supplier: QuotaSupplier = Depends(get_current_supplier),
+    db: Session = Depends(get_db),
+):
+    from app.supplier_portal_service import list_transfers
+
+    return list_transfers(db, supplier, status_filter=status)
+
+
+@router.get("/supplier-portal/transfers/{lead_id}", response_model=SupplierPortalTransferItem)
+def supplier_portal_transfer_detail(
+    lead_id: str,
+    supplier: QuotaSupplier = Depends(get_current_supplier),
+    db: Session = Depends(get_db),
+):
+    from app.supplier_portal_service import get_transfer
+
+    return get_transfer(db, supplier, lead_id)
+
+
+@router.post("/supplier-portal/transfers/{lead_id}/confirm", response_model=SupplierPortalTransferItem)
+def supplier_portal_confirm_transfer(
+    lead_id: str,
+    supplier: QuotaSupplier = Depends(get_current_supplier),
+    db: Session = Depends(get_db),
+):
+    from app.supplier_portal_service import confirm_supplier_transfer
+
+    result = confirm_supplier_transfer(db, supplier, lead_id)
+    db.commit()
+    return result
 
 
 @router.post("/system/cron/marketplace-quota-sync", response_model=QuotaInventorySyncView)

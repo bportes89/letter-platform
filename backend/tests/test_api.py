@@ -886,6 +886,106 @@ def test_marketplace_inter_boleto_mock_and_webhook_pago(client, auth_headers, mo
     assert wrong_amount.status_code == 200
 
 
+def test_supplier_portal_confirm_unlocks_conclude(client, auth_headers):
+    """Token do fornecedor confirma transferência; admin conclui sem force."""
+    seeded = client.post("/api/v1/marketplace/suppliers/ensure-defaults", headers=auth_headers)
+    assert seeded.status_code == 200
+    suppliers = {x["source_key"]: x for x in seeded.json()}
+
+    cotas = client.get(
+        "/api/v1/marketplace/venda-direta-manual/cotas?category=REAL_ESTATE",
+        headers=auth_headers,
+    )
+    assert cotas.status_code == 200
+    chosen = cotas.json()[0]
+    source = chosen.get("supplier_source") or "FRAGA"
+    # normaliza chave para achar fornecedor
+    key = source.strip().upper().replace("-", "_").replace(" ", "_")
+    supplier = suppliers.get(key) or next(iter(suppliers.values()))
+    token_resp = client.post(
+        f"/api/v1/marketplace/suppliers/{supplier['id']}/portal-token",
+        headers=auth_headers,
+    )
+    assert token_resp.status_code == 200, token_resp.text
+    portal_token = token_resp.json()["portal_token"]
+    portal_headers = {"Authorization": f"Bearer {portal_token}"}
+
+    me = client.get("/api/v1/supplier-portal/me", headers=portal_headers)
+    assert me.status_code == 200
+    assert me.json()["source_key"] == supplier["source_key"]
+
+    store = client.post(
+        "/api/v1/marketplace/venda-direta-manual/store",
+        headers=auth_headers,
+        json={
+            "name": "Ciclo Portal Fornecedor",
+            "email": "ciclo.portal.forn@letter.test",
+            "phone": "32944443333",
+            "person_type": "PF",
+            "document": "52998224725",
+            "quota_id": chosen["quota_id"],
+            "zipcode": "36010000",
+            "street": "Rua Portal",
+            "number": "70",
+            "neighborhood": "Centro",
+            "city": "Juiz de Fora",
+            "uf": "MG",
+        },
+    )
+    assert store.status_code == 200, store.text
+    lead_id = store.json()["lead_id"]
+
+    # sem PAGO → confirm bloqueado
+    blocked_confirm = client.post(
+        f"/api/v1/supplier-portal/transfers/{lead_id}/confirm",
+        headers=portal_headers,
+    )
+    assert blocked_confirm.status_code == 409
+
+    paid = client.patch(
+        f"/api/v1/marketplace/cadastros/{lead_id}",
+        headers=auth_headers,
+        json={"situation": "PAGO"},
+    )
+    assert paid.status_code == 200
+
+    pending = client.get("/api/v1/supplier-portal/transfers?status=pending", headers=portal_headers)
+    assert pending.status_code == 200
+    assert any(r["lead_id"] == lead_id for r in pending.json()), pending.json()
+
+    # token errado
+    assert client.get("/api/v1/supplier-portal/me", headers={"Authorization": "Bearer SUP-invalid"}).status_code == 401
+
+    confirmed = client.post(
+        f"/api/v1/supplier-portal/transfers/{lead_id}/confirm",
+        headers=portal_headers,
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    assert confirmed.json()["supplier_transfer_confirmed"] is True
+    assert confirmed.json()["situation"] == "PAGO"
+
+    # idempotente
+    again = client.post(
+        f"/api/v1/supplier-portal/transfers/{lead_id}/confirm",
+        headers=portal_headers,
+    )
+    assert again.status_code == 200
+    assert again.json()["supplier_transfer_confirmed"] is True
+
+    detail = client.get(f"/api/v1/marketplace/cadastros/{lead_id}", headers=auth_headers)
+    assert detail.json()["supplier_transfer_confirmed"] is True
+    assert detail.json()["commission_release_status"] != "RELEASED"
+
+    done = client.patch(
+        f"/api/v1/marketplace/cadastros/{lead_id}",
+        headers=auth_headers,
+        json={"situation": "CONCLUIDO", "force_admin_conclude": False},
+    )
+    assert done.status_code == 200, done.text
+    assert done.json()["situation"] == "CONCLUIDO"
+    assert done.json()["commission_release_status"] == "RELEASED"
+
+
 def test_marketplace_conclude_allocates_affiliate_commission(client, auth_headers):
     """Concluído com parceiro na árvore SALES gera CommissionEntry MARKETPLACE_RELEASE."""
     partners = client.get("/api/v1/marketplace/venda-direta-manual/partners", headers=auth_headers)

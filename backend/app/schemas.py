@@ -2240,8 +2240,43 @@ class QuotaSupplierView(BaseModel):
     last_sync_at: datetime | None = None
     last_sync_status: str | None = None
     last_sync_detail_json: str = "{}"
+    has_portal_token: bool = False
+    portal_token_created_at: datetime | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
+
+
+class SupplierPortalTokenResponse(BaseModel):
+    supplier_id: str
+    source_key: str
+    portal_token: str
+    portal_url: str
+    has_portal_token: bool = True
+
+
+class SupplierPortalMeView(BaseModel):
+    id: str
+    name: str
+    trade_name: str | None = None
+    source_key: str
+    email: str | None = None
+    document: str
+
+
+class SupplierPortalTransferItem(BaseModel):
+    lead_id: str
+    proposal_id: str
+    created_at: str | None = None
+    name: str
+    situation: str
+    credit_value: str | None = None
+    entrada_value: str | None = None
+    quota_codes: list[str] = Field(default_factory=list)
+    supplier_sources: list[str] = Field(default_factory=list)
+    supplier_transfer_confirmed: bool = False
+    supplier_transfer_confirmed_at: str | None = None
+    paid_at: str | None = None
+    confirmed_by_source_key: str | None = None
 
 
 class QuotaInventorySyncView(BaseModel):

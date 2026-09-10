@@ -268,6 +268,8 @@ class QuotaSupplier(TimestampMixin, Base):
     last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_sync_status: Mapped[str | None] = mapped_column(String(40))
     last_sync_detail_json: Mapped[str] = mapped_column(Text, default="{}")
+    portal_token_hash: Mapped[str | None] = mapped_column(String(64), index=True)
+    portal_token_created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class QuotaOfferRange(TimestampMixin, Base):
