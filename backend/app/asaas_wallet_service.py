@@ -791,6 +791,20 @@ def handle_asaas_webhook(db: Session, payload: dict) -> dict:
         processed = True
         lss_subscription_id = lss_item.id
 
+    if event in {"PAYMENT_RECEIVED", "PAYMENT_CONFIRMED"}:
+        from app.flash_invest_service import confirm_reservation_payment
+
+        external_ref = str(payment.get("externalReference") or "")
+        payment_id = str(payment.get("id") or "")
+        if external_ref.startswith("flash_invest_res_") or payment_id:
+            position = confirm_reservation_payment(
+                db,
+                external_reference=external_ref or None,
+                asaas_payment_id=payment_id or None,
+            )
+            if position:
+                processed = True
+
     if account and event in {"PAYMENT_RECEIVED", "PAYMENT_CONFIRMED"}:
         amount = Decimal(str(payment.get("value") or payment.get("netValue") or 0))
         if amount > 0:

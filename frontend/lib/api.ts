@@ -38,6 +38,13 @@ export type InvestmentReservation = {
   instrument_type?: string;
   status: string;
   confirmed_at: string | null;
+  asaas_payment_id?: string | null;
+  external_reference?: string | null;
+  checkout_url?: string | null;
+  pix_copy_paste?: string | null;
+  pix_qr_code?: string | null;
+  checkout_status?: string | null;
+  checkout_mode?: string | null;
 };
 export type InvestmentPosition = {
   id: string;

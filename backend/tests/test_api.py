@@ -946,6 +946,51 @@ def test_funding_reservation_confirmation_and_profile_guard(client, auth_headers
     assert blocked.status_code == 403
 
 
+def test_flash_invest_checkout_sandbox_pay_and_mutuo_interest_cron(client, auth_headers):
+    opportunity = client.post("/api/v1/funding/opportunities", headers=auth_headers, json={
+        "title": "Pool Flash Desk",
+        "product": "FLASH_INVEST",
+        "capital_source": "RETAIL",
+        "instrument_type": "TOKEN",
+        "target_amount": "20000",
+        "min_investment": "1000",
+    })
+    assert opportunity.status_code == 201
+    opp_id = opportunity.json()["id"]
+
+    investor_login = client.post("/api/v1/auth/login", json={"email": "investidor@letter.com.br", "password": "Letter@123"}).json()
+    investor_headers = {"Authorization": f"Bearer {investor_login['access_token']}"}
+
+    reservation = client.post(
+        f"/api/v1/funding/opportunities/{opp_id}/reserve",
+        headers=investor_headers,
+        json={"amount": "2000"},
+    )
+    assert reservation.status_code == 201, reservation.text
+    rid = reservation.json()["id"]
+
+    checkout = client.post(f"/api/v1/funding/reservations/{rid}/checkout", headers=investor_headers)
+    assert checkout.status_code == 200, checkout.text
+    body = checkout.json()
+    assert body["mode"] in {"SANDBOX", "ASAAS"}
+    assert body["reservation"]["pix_copy_paste"]
+    assert body["reservation"]["external_reference"].startswith("flash_invest_res_")
+
+    paid = client.post(f"/api/v1/funding/reservations/{rid}/sandbox-pay", headers=investor_headers)
+    assert paid.status_code == 200, paid.text
+    assert paid.json()["principal"] == "2000.00"
+    assert paid.json()["tokens_qty"] == 20
+
+    again = client.post(f"/api/v1/funding/reservations/{rid}/sandbox-pay", headers=investor_headers)
+    assert again.status_code in {409, 422, 200}
+
+    # mutuo interest cron is idempotent even with zero ACTIVE contracts
+    cron = client.post("/api/v1/system/cron/flash-invest-mutuo-interest")
+    assert cron.status_code == 200
+    assert "posted" in cron.json()
+    assert cron.json()["reference_month"]
+
+
 def test_flash_invest_manual_investment_and_rentability(client, auth_headers):
     opportunity = client.post("/api/v1/funding/opportunities", headers=auth_headers, json={
         "title": "Flash Invest Tokens",

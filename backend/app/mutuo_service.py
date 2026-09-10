@@ -431,3 +431,32 @@ def get_mutuo_contract(db: Session, user: User, contract_id: str) -> MutuoContra
     if user.role not in {Role.PLATFORM_ADMIN, Role.INTERNAL_STAFF} and contract.investor_id != user.id:
         raise HTTPException(status_code=403, detail="Acesso negado a este contrato")
     return contract
+
+
+def run_mutuo_interest_cron(db: Session, *, reference_month: str | None = None) -> dict:
+    """Lança juros do mês para todos os mútuos ACTIVE (idempotente por mês)."""
+    month = reference_month or _month_key()
+    contracts = list(
+        db.scalars(select(MutuoContract).where(MutuoContract.status == "ACTIVE"))
+    )
+    posted = 0
+    skipped = 0
+    errors: list[dict] = []
+    for contract in contracts:
+        try:
+            post_monthly_interest(db, contract, reference_month=month)
+            posted += 1
+        except HTTPException as exc:
+            skipped += 1
+            if exc.status_code not in {409}:
+                errors.append({"contract_id": contract.id, "detail": str(exc.detail)})
+        except Exception as exc:  # noqa: BLE001
+            errors.append({"contract_id": contract.id, "detail": str(exc)})
+    return {
+        "reference_month": month,
+        "active_contracts": len(contracts),
+        "posted": posted,
+        "skipped": skipped,
+        "errors": errors,
+        "message": f"Juros Flash Invest {month}: {posted} lançados, {skipped} ignorados",
+    }

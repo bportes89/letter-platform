@@ -997,6 +997,56 @@ def investment_confirm(reservation_id: str, user: User = Depends(require_scope("
     position=confirm_investment(db,reservation);audit(db,user,"investment.confirmed","investment_position",position.id);db.commit();db.refresh(position);return position
 
 
+@router.post("/funding/reservations/{reservation_id}/checkout")
+def funding_reservation_checkout(
+    reservation_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.flash_invest_service import create_reservation_checkout
+
+    reservation = db.scalar(
+        select(InvestmentReservation).where(
+            InvestmentReservation.id == reservation_id,
+            InvestmentReservation.organization_id == user.organization_id,
+        )
+    )
+    if not reservation:
+        raise HTTPException(status_code=404, detail="Reserva não encontrada")
+    result = create_reservation_checkout(db, user, reservation)
+    audit(db, user, "investment.checkout_created", "investment_reservation", reservation.id, {
+        "mode": result["mode"],
+        "amount": str(reservation.amount),
+    })
+    db.commit()
+    return result
+
+
+@router.post("/funding/reservations/{reservation_id}/sandbox-pay", response_model=InvestmentPositionView)
+def funding_reservation_sandbox_pay(
+    reservation_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.flash_invest_service import sandbox_pay_reservation
+
+    reservation = db.scalar(
+        select(InvestmentReservation).where(
+            InvestmentReservation.id == reservation_id,
+            InvestmentReservation.organization_id == user.organization_id,
+        )
+    )
+    if not reservation:
+        raise HTTPException(status_code=404, detail="Reserva não encontrada")
+    position = sandbox_pay_reservation(db, user, reservation)
+    audit(db, user, "investment.sandbox_paid", "investment_position", position.id, {
+        "reservation_id": reservation.id,
+    })
+    db.commit()
+    db.refresh(position)
+    return position
+
+
 @router.post("/funding/manual-investments", response_model=InvestmentPositionView, status_code=201)
 def funding_manual_investment(payload: ManualInvestmentCreate, user: User = Depends(require_scope("admin:users")), db: Session = Depends(get_db)):
     from app.flash_invest_service import manual_investment
@@ -1543,6 +1593,24 @@ def cron_recurring_commission_settlement(
     result = run_monthly_recurring_settlement_job(db, actor, accrual_period=accrual_period)
     db.commit()
     return RecurringCommissionSettlementView(**result)
+
+
+@router.post("/system/cron/flash-invest-mutuo-interest")
+def cron_flash_invest_mutuo_interest(
+    request: Request,
+    reference_month: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
+    db: Session = Depends(get_db),
+):
+    secret = settings.cron_secret
+    if secret:
+        provided = request.headers.get("x-cron-secret") or request.headers.get("authorization", "").removeprefix("Bearer ").strip()
+        if provided != secret:
+            raise HTTPException(status_code=401, detail="Cron secret inválido")
+    from app.mutuo_service import run_mutuo_interest_cron
+
+    result = run_mutuo_interest_cron(db, reference_month=reference_month)
+    db.commit()
+    return result
 
 
 @router.get("/wallet/pricing", response_model=list[WalletPricingRowView])

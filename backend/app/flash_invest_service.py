@@ -350,3 +350,169 @@ def list_rentability_credits(db: Session, user: User) -> list[RentabilityCredit]
     if user.role not in {Role.PLATFORM_ADMIN, Role.INTERNAL_STAFF}:
         query = query.where(RentabilityCredit.investor_id == user.id)
     return list(db.scalars(query.order_by(RentabilityCredit.created_at.desc())))
+
+
+def reservation_view(item: InvestmentReservation) -> dict:
+    return {
+        "id": item.id,
+        "opportunity_id": item.opportunity_id,
+        "investor_id": item.investor_id,
+        "amount": str(money(Decimal(str(item.amount)))),
+        "instrument_type": item.instrument_type,
+        "status": item.status,
+        "confirmed_at": item.confirmed_at.isoformat() if item.confirmed_at else None,
+        "asaas_payment_id": item.asaas_payment_id,
+        "external_reference": item.external_reference,
+        "checkout_url": item.checkout_url,
+        "pix_copy_paste": item.pix_copy_paste,
+        "pix_qr_code": item.pix_qr_code,
+        "checkout_status": item.checkout_status,
+        "checkout_mode": item.checkout_mode,
+        "created_at": item.created_at.isoformat() if item.created_at else None,
+    }
+
+
+def create_reservation_checkout(db: Session, user: User, reservation: InvestmentReservation) -> dict:
+    """Gera cobrança Pix Asaas (se configurado) ou checkout sandbox."""
+    from app.core.config import settings
+
+    if reservation.status != "RESERVED":
+        raise HTTPException(status_code=409, detail="Checkout disponível apenas para reservas RESERVED")
+    if user.role not in {Role.RETAIL_INVESTOR, Role.INSTITUTIONAL_FUND, Role.PLATFORM_ADMIN, Role.INTERNAL_STAFF}:
+        raise HTTPException(status_code=403, detail="Sem permissão para checkout Flash Invest")
+    if user.role in {Role.RETAIL_INVESTOR, Role.INSTITUTIONAL_FUND} and reservation.investor_id != user.id:
+        raise HTTPException(status_code=403, detail="Reserva de outro investidor")
+
+    ref = reservation.external_reference or f"flash_invest_res_{reservation.id}"
+    amount = money(Decimal(str(reservation.amount)))
+    mode = "SANDBOX"
+    payment_id = reservation.asaas_payment_id
+    checkout_url = reservation.checkout_url
+    pix_copy = reservation.pix_copy_paste
+    pix_qr = reservation.pix_qr_code
+
+    if settings.asaas_api_key and not payment_id:
+        try:
+            from datetime import date, timedelta
+
+            from app.asaas_client import AsaasClient
+
+            investor = db.get(User, reservation.investor_id)
+            doc = "".join(ch for ch in ((investor.document if investor else None) or "24971563792") if ch.isdigit())
+            if len(doc) not in {11, 14}:
+                doc = "24971563792"
+            with AsaasClient() as client:
+                customer = client.create_customer(
+                    {
+                        "name": (investor.name if investor else "Investidor LETTER")[:80],
+                        "email": (investor.email if investor else "investidor@letter.com.br"),
+                        "cpfCnpj": doc,
+                    }
+                )
+                customer_id = str(customer.get("id") or "").strip()
+                if customer_id:
+                    due = (date.today() + timedelta(days=2)).isoformat()
+                    payment = client.create_payment(
+                        {
+                            "customer": customer_id,
+                            "billingType": "PIX",
+                            "value": float(amount),
+                            "dueDate": due,
+                            "description": f"Flash Invest aporte {reservation.id[:8]}",
+                            "externalReference": ref,
+                        }
+                    )
+                    payment_id = str(payment.get("id") or "").strip() or None
+                    checkout_url = payment.get("invoiceUrl") or payment.get("bankSlipUrl")
+                    pix_copy = payment.get("pixCopiaECola") or payment.get("payload")
+                    pix_qr = payment.get("encodedImage")
+                    if payment_id:
+                        mode = "ASAAS"
+        except Exception:
+            mode = "SANDBOX"
+            payment_id = None
+            checkout_url = None
+            pix_copy = None
+            pix_qr = None
+
+    if mode == "SANDBOX":
+        payment_id = payment_id or f"sandbox_{reservation.id[:12]}"
+        checkout_url = checkout_url or f"/modules/flash-invest?checkout={reservation.id}"
+        pix_copy = pix_copy or (
+            f"00020126580014br.gov.bcb.pix0136letter-flash-invest-{reservation.id[:8]}"
+            f"520400005303986540{amount}5802BR5925LETTER FLASH INVEST6009SAO PAULO62070503***6304ABCD"
+        )
+        pix_qr = pix_qr or f"sandbox-qr-{reservation.id[:8]}"
+
+    reservation.external_reference = ref
+    reservation.asaas_payment_id = payment_id
+    reservation.checkout_url = checkout_url
+    reservation.pix_copy_paste = pix_copy
+    reservation.pix_qr_code = pix_qr
+    reservation.checkout_status = "PENDING"
+    reservation.checkout_mode = mode
+    db.flush()
+    return {
+        "reservation": reservation_view(reservation),
+        "mode": mode,
+        "message": (
+            "Cobrança Pix Asaas gerada"
+            if mode == "ASAAS"
+            else "Checkout sandbox gerado — use Confirmar pagamento sandbox para liquidar o aporte"
+        ),
+    }
+
+
+def confirm_reservation_payment(
+    db: Session,
+    *,
+    reservation_id: str | None = None,
+    external_reference: str | None = None,
+    asaas_payment_id: str | None = None,
+) -> InvestmentPosition | None:
+    """Confirma aporte a partir de webhook Asaas ou sandbox-pay."""
+    item = None
+    if reservation_id:
+        item = db.get(InvestmentReservation, reservation_id)
+    elif external_reference:
+        item = db.scalar(
+            select(InvestmentReservation).where(InvestmentReservation.external_reference == external_reference)
+        )
+    elif asaas_payment_id:
+        item = db.scalar(
+            select(InvestmentReservation).where(InvestmentReservation.asaas_payment_id == asaas_payment_id)
+        )
+    if not item:
+        return None
+    if item.status == "CONFIRMED":
+        return db.scalar(
+            select(InvestmentPosition).where(
+                InvestmentPosition.opportunity_id == item.opportunity_id,
+                InvestmentPosition.investor_id == item.investor_id,
+            )
+        )
+    if item.status != "RESERVED":
+        return None
+    item.checkout_status = "PAID"
+    position = confirm_investment(db, item)
+    return position
+
+
+def sandbox_pay_reservation(db: Session, user: User, reservation: InvestmentReservation) -> InvestmentPosition:
+    if reservation.checkout_mode == "ASAAS" and user.role not in {Role.PLATFORM_ADMIN, Role.INTERNAL_STAFF}:
+        raise HTTPException(status_code=409, detail="Reserva Asaas deve ser liquidada via webhook de pagamento")
+    if user.role in {Role.RETAIL_INVESTOR, Role.INSTITUTIONAL_FUND} and reservation.investor_id != user.id:
+        raise HTTPException(status_code=403, detail="Reserva de outro investidor")
+    if user.role not in {
+        Role.RETAIL_INVESTOR,
+        Role.INSTITUTIONAL_FUND,
+        Role.PLATFORM_ADMIN,
+        Role.INTERNAL_STAFF,
+    }:
+        raise HTTPException(status_code=403, detail="Sem permissão")
+    if not reservation.checkout_mode:
+        create_reservation_checkout(db, user, reservation)
+    position = confirm_reservation_payment(db, reservation_id=reservation.id)
+    if not position:
+        raise HTTPException(status_code=409, detail="Não foi possível confirmar o aporte")
+    return position

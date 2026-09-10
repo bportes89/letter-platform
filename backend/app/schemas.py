@@ -562,6 +562,13 @@ class InvestmentReservationView(ORMModel):
     instrument_type: str = "TOKEN"
     status: str
     confirmed_at: datetime | None
+    asaas_payment_id: str | None = None
+    external_reference: str | None = None
+    checkout_url: str | None = None
+    pix_copy_paste: str | None = None
+    pix_qr_code: str | None = None
+    checkout_status: str | None = None
+    checkout_mode: str | None = None
 
 
 class InvestmentPositionView(ORMModel):

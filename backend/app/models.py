@@ -1109,6 +1109,13 @@ class InvestmentReservation(TimestampMixin, Base):
     instrument_type: Mapped[str] = mapped_column(String(20), default="TOKEN")
     status: Mapped[str] = mapped_column(String(30), default="RESERVED", index=True)
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    asaas_payment_id: Mapped[str | None] = mapped_column(String(80), index=True)
+    external_reference: Mapped[str | None] = mapped_column(String(120), index=True)
+    checkout_url: Mapped[str | None] = mapped_column(Text)
+    pix_copy_paste: Mapped[str | None] = mapped_column(Text)
+    pix_qr_code: Mapped[str | None] = mapped_column(Text)
+    checkout_status: Mapped[str | None] = mapped_column(String(40))
+    checkout_mode: Mapped[str | None] = mapped_column(String(20))  # ASAAS | SANDBOX
 
 
 class InvestmentPosition(TimestampMixin, Base):
