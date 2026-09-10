@@ -86,6 +86,7 @@ from app.schemas import (
     ReconciliationBatchView, ReconciliationItemView, ReconciliationResolveRequest,
     MarketplaceEsteira1Request, MarketplaceEsteira1Response, MarketplaceEsteira2Request, MarketplaceEsteira2Response,
     VendaDiretaRoboSearchRequest, VendaDiretaRoboSearchResponse, VendaDiretaRoboConfirmRequest, VendaDiretaRoboConfirmResponse,
+    QuotaSupplierCreate, QuotaSupplierUpdate, QuotaSupplierView,
     VenderCotaCalculateRequest, VenderCotaStoreRequest, QuotaOfferRangeUpdate, QuotaSellOfferUpdate, VenderCotaCloseRequest,
     SdcDeskEvaluateRequest, SdcDeskStoreRequest, SdcDeskStatusUpdate, SdcDeskSaleCreate,
     FlashDeskEvaluateRequest, FlashDeskStoreRequest, FlashDeskStatusUpdate, FlashDeskSaleCreate,
@@ -1643,6 +1644,45 @@ def escrow_account_billing(
 @router.get("/quotas", response_model=list[QuotaView])
 def list_quotas(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     return list(db.scalars(select(Quota).where(Quota.organization_id == user.organization_id).order_by(Quota.created_at.desc())))
+
+
+@router.get("/marketplace/suppliers", response_model=list[QuotaSupplierView])
+def list_quota_suppliers(active_only: bool = False, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.quota_supplier_service import list_suppliers, supplier_view
+
+    return [supplier_view(x) for x in list_suppliers(db, user, active_only=active_only)]
+
+
+@router.post("/marketplace/suppliers", response_model=QuotaSupplierView, status_code=201)
+def create_quota_supplier(payload: QuotaSupplierCreate, user: User = Depends(require_scope("inventory:write")), db: Session = Depends(get_db)):
+    from app.quota_supplier_service import create_supplier, supplier_view
+
+    item = create_supplier(db, user, payload.model_dump())
+    audit(db, user, "marketplace.supplier.created", "quota_supplier", item.id, {"source_key": item.source_key})
+    db.commit()
+    db.refresh(item)
+    return supplier_view(item)
+
+
+@router.patch("/marketplace/suppliers/{supplier_id}", response_model=QuotaSupplierView)
+def update_quota_supplier(supplier_id: str, payload: QuotaSupplierUpdate, user: User = Depends(require_scope("inventory:write")), db: Session = Depends(get_db)):
+    from app.quota_supplier_service import supplier_view, update_supplier
+
+    item = update_supplier(db, user, supplier_id, payload.model_dump(exclude_unset=True))
+    audit(db, user, "marketplace.supplier.updated", "quota_supplier", item.id, payload.model_dump(exclude_unset=True, mode="json"))
+    db.commit()
+    db.refresh(item)
+    return supplier_view(item)
+
+
+@router.post("/marketplace/suppliers/ensure-defaults", response_model=list[QuotaSupplierView])
+def ensure_quota_supplier_defaults(user: User = Depends(require_scope("inventory:write")), db: Session = Depends(get_db)):
+    from app.quota_supplier_service import ensure_default_suppliers, list_suppliers, supplier_view
+
+    ensure_default_suppliers(db, user.organization_id)
+    audit(db, user, "marketplace.supplier.ensure_defaults", "quota_supplier", user.organization_id)
+    db.commit()
+    return [supplier_view(x) for x in list_suppliers(db, user)]
 
 
 @router.post("/quotas", response_model=QuotaView, status_code=201)

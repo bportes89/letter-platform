@@ -507,7 +507,7 @@ def test_marketplace_esteira2_robot_band_rollover_and_markup(client, auth_header
     assert fraga_match["rollover_applied"] is True
     assert Decimal(fraga_match["total_entrada"]) == Decimal("94800.00")
     qbrief = fraga_match["quotas"][0]
-    assert qbrief["markup_percent"] == "3"
+    assert qbrief["markup_percent"] in {"3", "3.00"}
     assert qbrief["remaining_installments"] == 47
 
     # Fora da banda 5%: alvo 1M não casa com inventário ~400k
@@ -591,6 +591,81 @@ def test_venda_direta_robo_search_and_confirm(client, auth_headers):
         json={**payload, "target_amount": "9999999", "asset_value": "9999999", "document": "52998224725"},
     )
     assert miss.status_code == 404
+
+
+def test_marketplace_suppliers_crud_and_markup_override(client, auth_headers):
+    """Fornecedores: CRUD + markup cadastrado prevalece; cliente embute % plataforma."""
+    from decimal import Decimal
+
+    seeded = client.post("/api/v1/marketplace/suppliers/ensure-defaults", headers=auth_headers)
+    assert seeded.status_code == 200
+    assert len(seeded.json()) >= 6
+    assert {x["source_key"] for x in seeded.json()} >= {"FRAGA", "LUME", "BITTELO"}
+
+    created = client.post(
+        "/api/v1/marketplace/suppliers",
+        headers=auth_headers,
+        json={
+            "name": "Parceiro Teste Markup",
+            "source_key": "TEST_MARKUP",
+            "document": "12345678000199",
+            "markup_percent": "7.5",
+            "quem_paga_comissao": 1,
+            "platform_fee_percent": "2",
+        },
+    )
+    assert created.status_code == 201, created.text
+    supplier = created.json()
+    assert supplier["markup_percent"] == "7.50"
+    assert supplier["quem_paga_comissao"] == 1
+
+    # Cota com source TEST_MARKUP: entrada = premium + 7.5% crédito + 2% plataforma
+    admins = client.get("/api/v1/administrators", headers=auth_headers).json()
+    quota = client.post(
+        "/api/v1/quotas",
+        headers=auth_headers,
+        json={
+            "administrator_id": admins[0]["id"],
+            "group_code": "9001",
+            "quota_code": "TM1",
+            "category": "REAL_ESTATE",
+            "credit_value": "100000",
+            "premium_value": "10000",
+            "installment_value": "1000",
+            "installment_due_date": "2027-01-15",
+            "remaining_installments": 60,
+            "supplier_source": "TEST_MARKUP",
+        },
+    )
+    assert quota.status_code == 201, quota.text
+
+    match = client.post(
+        "/api/v1/marketplace/esteira-2/match",
+        headers=auth_headers,
+        json={
+            "monthly_income": "50000",
+            "monthly_commitment": "0",
+            "asset_value": "300000",
+            "asset_year": 2020,
+            "target_amount": "100000",
+            "target_entrada": "19500",
+            "category": "REAL_ESTATE",
+        },
+    )
+    assert match.status_code == 200, match.text
+    body = match.json()
+    hit = next((m for m in body["matches"] if quota.json()["id"] in m["quota_ids"]), None)
+    assert hit is not None
+    # 10000 + 7500 markup + 2000 platform = 19500
+    assert Decimal(hit["total_entrada"]) == Decimal("19500.00")
+
+    patched = client.patch(
+        f"/api/v1/marketplace/suppliers/{supplier['id']}",
+        headers=auth_headers,
+        json={"active": False, "markup_percent": "1"},
+    )
+    assert patched.status_code == 200
+    assert patched.json()["active"] is False
 
 
 def test_marketplace_income_three_times_installment_blocks(client, auth_headers):

@@ -29,32 +29,17 @@ ESTEIRA2_CREDIT_LANE_LIMIT = 2
 ESTEIRA2_ENTRADA_LANE_LIMIT = 2
 INSTALLMENT_ROLLOVER_DAYS = 7
 
-# Markup na entrada = % do crédito (Paulo). Chaves normalizadas.
-SUPPLIER_ENTRADA_MARKUP_PERCENT: dict[str, Decimal] = {
-    "FRAGA": Decimal("3"),
-    "BITTELO": Decimal("3"),
-    "LANCE": Decimal("3"),
-    "UNI_CONTEMPLADOS": Decimal("10"),
-    "UNI CONTEMPLADOS": Decimal("10"),
-    "CONTEMPLADO_SP": Decimal("10"),
-    "CONTEMPLADO SP": Decimal("10"),
-    "LUME": Decimal("10"),
-}
-
 
 def normalize_supplier_key(value: str | None) -> str:
-    return (value or "").strip().upper().replace("-", "_")
+    from app.quota_supplier_service import normalize_supplier_key as _norm
+
+    return _norm(value or "") if value else ""
 
 
 def supplier_markup_percent(supplier_source: str | None) -> Decimal:
-    key = normalize_supplier_key(supplier_source)
-    if key in SUPPLIER_ENTRADA_MARKUP_PERCENT:
-        return SUPPLIER_ENTRADA_MARKUP_PERCENT[key]
-    # tenta match parcial (ex.: "API FRAGA")
-    for known, pct in SUPPLIER_ENTRADA_MARKUP_PERCENT.items():
-        if known.replace("_", " ") in key.replace("_", " ") or known in key:
-            return pct
-    return Decimal("0")
+    from app.quota_supplier_service import resolve_supplier_fees
+
+    return resolve_supplier_fees(supplier_source)["markup_percent"]
 
 
 def _within_band(value: Decimal, target: Decimal, band_percent: Decimal = ESTEIRA2_BAND_PERCENT) -> bool:
@@ -99,18 +84,45 @@ def apply_installment_rollover(
     }
 
 
-def apply_supplier_markup(*, entrada: Decimal, credit: Decimal, supplier_source: str | None) -> dict:
-    pct = supplier_markup_percent(supplier_source)
-    add_on = money(credit * pct / Decimal("100")) if pct > 0 else Decimal("0.00")
+def normalize_supplier_key(value: str | None) -> str:
+    from app.quota_supplier_service import normalize_supplier_key as _norm
+
+    return _norm(value)
+
+
+def supplier_markup_percent(supplier_source: str | None) -> Decimal:
+    from app.quota_supplier_service import resolve_supplier_fees
+
+    return resolve_supplier_fees(supplier_source)["markup_percent"]
+
+
+def apply_supplier_markup(
+    *,
+    entrada: Decimal,
+    credit: Decimal,
+    supplier_source: str | None,
+    suppliers: dict | None = None,
+) -> dict:
+    from app.quota_supplier_service import resolve_supplier_fees
+
+    fees = resolve_supplier_fees(supplier_source, suppliers=suppliers)
+    markup_pct = fees["markup_percent"]
+    platform_pct = fees["platform_fee_percent"]
+    markup_amount = money(credit * markup_pct / Decimal("100")) if markup_pct > 0 else Decimal("0.00")
+    platform_amount = money(credit * platform_pct / Decimal("100")) if platform_pct > 0 else Decimal("0.00")
+    add_on = money(markup_amount + platform_amount)
     return {
-        "markup_percent": str(pct),
+        "markup_percent": str(markup_pct),
         "markup_amount": str(add_on),
+        "platform_fee_percent": str(platform_pct),
+        "platform_fee_amount": str(platform_amount),
+        "quem_paga_comissao": fees["quem_paga_comissao"],
         "entrada": money(entrada + add_on),
     }
 
 
-def pricing_for_quota(quota: Quota, *, as_of: date | None = None) -> dict:
-    """Entrada efetiva após rollover 7 dias + markup do fornecedor."""
+def pricing_for_quota(quota: Quota, *, as_of: date | None = None, suppliers: dict | None = None) -> dict:
+    """Entrada efetiva após rollover 7 dias + markup do fornecedor (+ comissão embutida)."""
     credit = money(Decimal(str(quota.credit_value)))
     base_entrada = money(Decimal(str(quota.premium_value or 0)))
     installment = money(Decimal(str(quota.installment_value or 0)))
@@ -125,6 +137,7 @@ def pricing_for_quota(quota: Quota, *, as_of: date | None = None) -> dict:
         entrada=rollover["entrada"],
         credit=credit,
         supplier_source=quota.supplier_source,
+        suppliers=suppliers,
     )
     return {
         "credit": credit,
@@ -137,12 +150,14 @@ def pricing_for_quota(quota: Quota, *, as_of: date | None = None) -> dict:
         "days_to_due": rollover["days_to_due"],
         "markup_percent": markup["markup_percent"],
         "markup_amount": markup["markup_amount"],
+        "platform_fee_percent": markup.get("platform_fee_percent"),
+        "quem_paga_comissao": markup.get("quem_paga_comissao", 0),
         "supplier_source": quota.supplier_source,
     }
 
 
-def pricing_for_combo(quotas: list[Quota], *, as_of: date | None = None) -> dict:
-    rows = [pricing_for_quota(q, as_of=as_of) for q in quotas]
+def pricing_for_combo(quotas: list[Quota], *, as_of: date | None = None, suppliers: dict | None = None) -> dict:
+    rows = [pricing_for_quota(q, as_of=as_of, suppliers=suppliers) for q in quotas]
     credit = money(sum((r["credit"] for r in rows), Decimal("0")))
     entrada_final = money(sum((r["entrada_final"] for r in rows), Decimal("0")))
     installment = money(sum((r["installment"] for r in rows), Decimal("0")))
@@ -161,8 +176,8 @@ def pricing_for_combo(quotas: list[Quota], *, as_of: date | None = None) -> dict
     }
 
 
-def _quota_summary(quota: Quota, admin: Administrator | None, *, as_of: date | None = None) -> dict:
-    pricing = pricing_for_quota(quota, as_of=as_of)
+def _quota_summary(quota: Quota, admin: Administrator | None, *, as_of: date | None = None, suppliers: dict | None = None) -> dict:
+    pricing = pricing_for_quota(quota, as_of=as_of, suppliers=suppliers)
     return {
         "quota_id": quota.id,
         "group_code": quota.group_code,
@@ -310,11 +325,12 @@ def _eligible_combo_candidate(
     asset_is_zero_km: bool,
     target_amount: Decimal,
     as_of: date | None = None,
+    suppliers: dict | None = None,
 ) -> dict | None:
     if len({q.administrator_id for q in quotas}) > 1:
         return None
     admin = db.get(Administrator, quotas[0].administrator_id)
-    pricing = pricing_for_combo(list(quotas), as_of=as_of)
+    pricing = pricing_for_combo(list(quotas), as_of=as_of, suppliers=suppliers)
     blockers = admin_profile_blockers(
         admin,
         category=category,
@@ -334,7 +350,10 @@ def _eligible_combo_candidate(
     score = max(0, 1000 - int(credit_dev * 20) - len(quotas) * 5)
     return {
         "quota_ids": [q.id for q in quotas],
-        "quotas": [_quota_summary(q, db.get(Administrator, q.administrator_id), as_of=as_of) for q in quotas],
+        "quotas": [
+            _quota_summary(q, db.get(Administrator, q.administrator_id), as_of=as_of, suppliers=suppliers)
+            for q in quotas
+        ],
         "total_credit": str(pricing["credit"]),
         "total_entrada": str(pricing["entrada_final"]),
         "deviation_percent": str(credit_dev),
@@ -372,6 +391,9 @@ def _rank_alternatives(
     as_of: date | None = None,
 ) -> list[dict]:
     """Candidatos na banda de crédito (e entrada, se informada)."""
+    from app.quota_supplier_service import suppliers_index
+
+    suppliers = suppliers_index(db, user.organization_id)
     quotas = list(
         db.scalars(
             select(Quota).where(
@@ -397,6 +419,7 @@ def _rank_alternatives(
                 asset_is_zero_km=asset_is_zero_km,
                 target_amount=target_amount,
                 as_of=as_of,
+                suppliers=suppliers,
             )
             if not item:
                 continue

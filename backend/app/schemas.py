@@ -2175,6 +2175,66 @@ class VendaDiretaRoboConfirmResponse(BaseModel):
     message: str
 
 
+class QuotaSupplierCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=180)
+    source_key: str = Field(min_length=2, max_length=80)
+    document: str = Field(min_length=11, max_length=20)
+    person_type: str = Field(default="PJ", max_length=2)
+    trade_name: str | None = Field(default=None, max_length=180)
+    email: str | None = Field(default=None, max_length=180)
+    phone: str | None = Field(default=None, max_length=40)
+    markup_percent: Decimal = Field(default=0, ge=0, le=100)
+    quem_paga_comissao: int = Field(default=0, ge=0, le=1)
+    platform_fee_percent: Decimal = Field(default=0, ge=0, le=100)
+    bank_name: str | None = Field(default=None, max_length=120)
+    bank_agency: str | None = Field(default=None, max_length=40)
+    bank_account: str | None = Field(default=None, max_length=40)
+    pix_key: str | None = Field(default=None, max_length=180)
+    notes: str | None = None
+    active: bool = True
+
+
+class QuotaSupplierUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=2, max_length=180)
+    source_key: str | None = Field(default=None, min_length=2, max_length=80)
+    document: str | None = Field(default=None, min_length=11, max_length=20)
+    person_type: str | None = Field(default=None, max_length=2)
+    trade_name: str | None = None
+    email: str | None = None
+    phone: str | None = None
+    markup_percent: Decimal | None = Field(default=None, ge=0, le=100)
+    quem_paga_comissao: int | None = Field(default=None, ge=0, le=1)
+    platform_fee_percent: Decimal | None = Field(default=None, ge=0, le=100)
+    bank_name: str | None = None
+    bank_agency: str | None = None
+    bank_account: str | None = None
+    pix_key: str | None = None
+    notes: str | None = None
+    active: bool | None = None
+
+
+class QuotaSupplierView(BaseModel):
+    id: str
+    active: bool
+    person_type: str
+    name: str
+    trade_name: str | None = None
+    document: str
+    email: str | None = None
+    phone: str | None = None
+    source_key: str
+    markup_percent: str
+    quem_paga_comissao: int
+    platform_fee_percent: str
+    bank_name: str | None = None
+    bank_agency: str | None = None
+    bank_account: str | None = None
+    pix_key: str | None = None
+    notes: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
 class VenderCotaCalculateRequest(BaseModel):
     tipo_consorcio: str
     credit_value: Decimal = Field(gt=0)

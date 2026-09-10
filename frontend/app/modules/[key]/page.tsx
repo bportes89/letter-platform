@@ -24,6 +24,7 @@ import { LeaseEquityModule } from "@/components/lease-equity-module";
 import { QuitConDeskModule } from "@/components/quitcon-desk-module";
 import { VenderCotaAdminModule } from "@/components/vender-cota-admin-module";
 import { VendaDiretaRoboModule } from "@/components/venda-direta-robo-module";
+import { FornecedoresModule } from "@/components/fornecedores-module";
 import { SdcDeskModule } from "@/components/sdc-desk-module";
 import { FlashDeskModule } from "@/components/flash-desk-module";
 import { FlashInvestDeskModule } from "@/components/flash-invest-desk-module";
@@ -90,6 +91,7 @@ export default function ModulePage() {
 
   if (routeKey === "marketplace") return <MarketplaceModule />;
   if (routeKey === "venda-direta-robo") return <VendaDiretaRoboModule />;
+  if (routeKey === "fornecedores") return <FornecedoresModule />;
   if (routeKey === "inventory") return <InventoryModule />;
   if (routeKey === "vender-cota") return <VenderCotaAdminModule />;
   if (routeKey === "proposals") return <ProposalsModule />;

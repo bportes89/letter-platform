@@ -197,6 +197,9 @@ def seed():
             Quota(organization_id=org.id, administrator_id=adm.id, seller_id=admin.id, group_code="1002", quota_code="011", category="REAL_ESTATE", credit_value=Decimal("420000"), outstanding_balance=Decimal("260000"), premium_value=Decimal("84000"), installment_value=Decimal("2900"), installment_due_date=date(2026, 11, 5), remaining_installments=54, supplier_source="BITTELO"),
         ])
         db.add(Proposal(organization_id=org.id, lead_id=lead.id, product="MARKETPLACE", requested_amount=Decimal("800000"), status="DRAFT"))
+        from app.quota_supplier_service import ensure_default_suppliers
+
+        ensure_default_suppliers(db, org.id)
         db.add_all([
             CommissionRule(
                 organization_id=org.id, product="FLASH_CREDIT", commission_type="SALES", version=1,

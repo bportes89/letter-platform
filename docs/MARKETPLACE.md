@@ -57,13 +57,23 @@ Cada cota deve ter:
 - `installment_value` — filtro de renda
 - `installment_due_date` — rollover 7 dias
 - `remaining_installments` — prazo ajustado no rollover
-- `supplier_source` — markup do fornecedor API
+- `supplier_source` — chave do fornecedor (`source_key` em **Fornecedores**)
 - `premium_value` — entrada/ágio base
+
+## Fornecedores (admin)
+
+CRUD em `GET/POST/PATCH /api/v1/marketplace/suppliers` (+ `POST .../ensure-defaults`).
+
+- `source_key` único por org (FRAGA, BITTELO, LANCE, UNI_CONTEMPLADOS, CONTEMPLADO_SP, LUME…)
+- `markup_percent` — % do crédito somado na entrada (prevalece sobre o mapa hardcoded)
+- `quem_paga_comissao` — `0` fornecedor / `1` cliente embute `platform_fee_percent` na entrada
+
+Menu: **Cartas contempladas → Fornecedores**.
 
 ## Fluxo completo
 
 ```
-Cadastro (Inventário + fornecedor) → Sync Bacen (opcional) → Varredura Nina → Marketplace (Esteira 1 ou 2) → Trava 60 min → Proposta → Contrato (SOLD)
+Cadastro (Fornecedores + Inventário) → Sync Bacen (opcional) → Varredura Nina → Marketplace / Venda Direta Robô → Trava 60 min → Proposta → Contrato (SOLD)
 ```
 
 ## UI

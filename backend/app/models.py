@@ -236,6 +236,31 @@ class Quota(TimestampMixin, Base):
     administrator: Mapped[Administrator] = relationship()
 
 
+class QuotaSupplier(TimestampMixin, Base):
+    """Fornecedor de cotas contempladas (API / inventário) — markup e quem paga comissão."""
+
+    __tablename__ = "quota_suppliers"
+    __table_args__ = (UniqueConstraint("organization_id", "source_key"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    person_type: Mapped[str] = mapped_column(String(2), default="PJ")  # PF | PJ
+    name: Mapped[str] = mapped_column(String(180))
+    trade_name: Mapped[str | None] = mapped_column(String(180))
+    document: Mapped[str] = mapped_column(String(20), index=True)
+    email: Mapped[str | None] = mapped_column(String(180))
+    phone: Mapped[str | None] = mapped_column(String(40))
+    source_key: Mapped[str] = mapped_column(String(80), index=True)  # FRAGA, BITTELO, LUME...
+    markup_percent: Mapped[float] = mapped_column(Numeric(8, 2), default=0)  # % do crédito na entrada
+    quem_paga_comissao: Mapped[int] = mapped_column(Integer, default=0)  # 0=fornecedor 1=cliente
+    platform_fee_percent: Mapped[float] = mapped_column(Numeric(8, 2), default=0)  # embutido se cliente paga
+    bank_name: Mapped[str | None] = mapped_column(String(120))
+    bank_agency: Mapped[str | None] = mapped_column(String(40))
+    bank_account: Mapped[str | None] = mapped_column(String(40))
+    pix_key: Mapped[str | None] = mapped_column(String(180))
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
 class QuotaOfferRange(TimestampMixin, Base):
     """Faixas editáveis do robô 'Vender minha cota' (tipo × prazo × % pago → % oferta)."""
 

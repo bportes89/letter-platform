@@ -38,10 +38,10 @@ const ROLE_PRODUCT_KEYS: Record<LetterRole, AccessList> = {
   PLATFORM_ADMIN: "*",
   INTERNAL_STAFF: "*",
   MASTER_FRANCHISEE: [
-    "marketplace", "venda-direta-robo", "inventory", "vender-cota", "proposals", "sdc",
+    "marketplace", "venda-direta-robo", "fornecedores", "inventory", "vender-cota", "proposals", "sdc",
     "flash-capital", "lease-equity", "flash-invest", "quitcon", "lss", "leilao",
   ],
-  MANAGER: ["marketplace", "venda-direta-robo", "inventory", "vender-cota", "proposals", "sdc", "flash-capital", "lease-equity", "quitcon", "lss"],
+  MANAGER: ["marketplace", "venda-direta-robo", "fornecedores", "inventory", "vender-cota", "proposals", "sdc", "flash-capital", "lease-equity", "quitcon", "lss"],
   PARTNER: ["marketplace", "proposals", "sdc", "flash-capital", "lease-equity", "quitcon", "lss", "leilao"],
   CLIENT: ["proposals", "flash-capital", "lease-equity", "quitcon", "lss"],
   QUOTA_SELLER: ["marketplace", "proposals", "quitcon"],
@@ -99,6 +99,7 @@ export function canAccessPlatformModule(role: string | undefined, moduleKey: str
 const PRODUCT_ROUTE_ALIASES: Record<string, string> = {
   marketplace: "marketplace",
   "venda-direta-robo": "venda-direta-robo",
+  fornecedores: "fornecedores",
   inventory: "inventory",
   "vender-cota": "vender-cota",
   proposals: "proposals",
