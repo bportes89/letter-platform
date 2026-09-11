@@ -34,3 +34,22 @@ services:
         sync: false
       - key: LETTER_INFOSIMPLES_API_TOKEN
         sync: false
+      - key: LETTER_CRON_SECRET
+        sync: false
+
+  # Sync de estoque JSON dos fornecedores (porta Paulo QuotasApiCrons — 30 min).
+  # Cole a mesma LETTER_DATABASE_URL do serviço web acima.
+  - type: cron
+    name: letter-marketplace-quota-sync
+    runtime: python
+    schedule: "*/30 * * * *"
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: python scripts/cron_marketplace_quota_sync.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.10"
+      - key: LETTER_ENV
+        value: staging
+      - key: LETTER_DATABASE_URL
+        sync: false

@@ -5052,6 +5052,16 @@ def test_administrator_homologation_and_bacen_scr(client, auth_headers):
     assert captured["scr_reference"] == body["scr_reference"]
 
 
+def test_marketplace_quota_sync_cron(client, auth_headers):
+    cron = client.post("/api/v1/system/cron/marketplace-quota-sync")
+    assert cron.status_code == 200, cron.text
+    body = cron.json()
+    assert body["synced_at"]
+    assert body["suppliers"] == 0
+    assert body["created"] == 0
+    assert body["failed"] == 0
+
+
 def test_bacen_administrator_rules_sync_and_cron(client, auth_headers):
     before = client.get("/api/v1/administrators", headers=auth_headers).json()
     assert before[0]["bacen_rules_synced_at"] is None

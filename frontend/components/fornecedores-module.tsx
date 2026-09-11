@@ -242,7 +242,8 @@ export function FornecedoresModule() {
           <Truck />
           Use o mesmo <b>source_key</b> da cota no Inventário (ex.: FRAGA). Com <b>sync_mode=JSON</b> e{" "}
           <b>api_url</b>, o botão Sincronizar importa/atualiza cotas e inativa as que sumiram (sem tocar em
-          RESERVED/SOLD). Markup continua no match — não é embutido no sync.
+          RESERVED/SOLD). Markup continua no match — não é embutido no sync. Em produção, o cron Render{" "}
+          <code>letter-marketplace-quota-sync</code> repete o sync a cada 30 min.
         </div>
 
         <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", marginBottom: "1rem" }}>
