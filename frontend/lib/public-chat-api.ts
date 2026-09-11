@@ -37,6 +37,16 @@ export type SdcResult = {
   motivos?: string[];
 };
 
+export type FlashResult = {
+  principal_fmt: string;
+  ltv_fmt: string;
+  parcela_fmt: string;
+  prazo_fmt: string;
+  liquido_fmt: string;
+  viavel: boolean;
+  motivos?: string[];
+};
+
 export type ChatItem = {
   text?: string;
   button?: string;
@@ -56,6 +66,7 @@ export type ChatItem = {
   resumo?: boolean;
   quotas?: ChatOption[];
   sdc_result?: SdcResult;
+  flash_result?: FlashResult;
   faq?: boolean;
   items?: ChatOption[];
   contract?: boolean;

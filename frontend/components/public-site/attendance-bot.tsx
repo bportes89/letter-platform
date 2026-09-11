@@ -598,6 +598,72 @@ export function AttendanceBotSection() {
                     </div>
                   ) : null}
 
+                  {item.flash_result ? (
+                    <div className="attendance-sdc-result" data-chat-item>
+                      <h4>Flash Capital — análise</h4>
+                      <div className="attendance-sdc-grid">
+                        <div>
+                          <span>Principal (LTV 40%)</span>
+                          <strong>{item.flash_result.principal_fmt}</strong>
+                        </div>
+                        <div>
+                          <span>LTV</span>
+                          <strong>{item.flash_result.ltv_fmt}</strong>
+                        </div>
+                        <div>
+                          <span>Parcela estimada</span>
+                          <strong>{item.flash_result.parcela_fmt}</strong>
+                        </div>
+                        <div>
+                          <span>Prazo</span>
+                          <strong>{item.flash_result.prazo_fmt}</strong>
+                        </div>
+                        <div>
+                          <span>Líquido estimado</span>
+                          <strong>{item.flash_result.liquido_fmt}</strong>
+                        </div>
+                      </div>
+                      {item.flash_result.viavel ? (
+                        <>
+                          <p className="attendance-sdc-ok">
+                            Operação Flash viável. Clique em continuar para registrar na mesa.
+                          </p>
+                          {isCurrent(flowIndex) ? (
+                            <button
+                              type="button"
+                              className="attendance-primary"
+                              disabled={busy}
+                              onClick={() => void onButton(flowIndex, itemIndex, item)}
+                            >
+                              Continuar
+                            </button>
+                          ) : null}
+                        </>
+                      ) : (
+                        <>
+                          <p className="attendance-sdc-block">Não foi possível seguir com a operação Flash.</p>
+                          {Array.isArray(item.flash_result.motivos) ? (
+                            <ul>
+                              {item.flash_result.motivos.map((motivo) => (
+                                <li key={motivo}>{motivo}</li>
+                              ))}
+                            </ul>
+                          ) : null}
+                          {isCurrent(flowIndex) ? (
+                            <div className="attendance-actions">
+                              <button type="button" className="attendance-primary" onClick={() => void advance(10005, 1)}>
+                                Mudar a categoria
+                              </button>
+                              <button type="button" className="attendance-secondary" onClick={resetChat}>
+                                Começar do início
+                              </button>
+                            </div>
+                          ) : null}
+                        </>
+                      )}
+                    </div>
+                  ) : null}
+
                   {item.faq && Array.isArray(item.items) && showInteractive(flowIndex, itemIndex) ? (
                     <div className="attendance-options" data-chat-item>
                       {item.items.map((faqItem, faqIndex) => (

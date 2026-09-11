@@ -18,7 +18,8 @@ from app.marketplace_service import esteira2_nina_curated_match
 from app.models import Lead, Organization, Proposal, Quota, Role, User
 from app.public_site_service import headquarters_org
 from app.quota_inventory_service import run_nina_quota_scan
-from app.sdc_desk_service import evaluate_sdc_desk, store_solicitation
+from app.sdc_desk_service import evaluate_sdc_desk, store_solicitation as store_sdc_solicitation
+from app.flash_desk_service import evaluate_flash_desk, store_solicitation as store_flash_solicitation
 from app.services import money, reserve_quota
 
 SOURCE = "SITE_CHAT"
@@ -71,6 +72,16 @@ STEP_SDC_DOCS = "10025"
 STEP_SDC_EVAL = "10026"
 STEP_SDC_CONFIRM = "10027"
 STEP_SDC_DONE = "10028"
+# Flash Capital — faixa paralela (espelha SDC + prazo 36/60).
+STEP_FLASH_ASSET_TYPE = "10050"
+STEP_FLASH_YEAR = "10051"
+STEP_FLASH_VALUE = "10052"
+STEP_FLASH_PAID_OFF = "10053"
+STEP_FLASH_LIEN = "10054"
+STEP_FLASH_DOCS = "10055"
+STEP_FLASH_TERM = "10056"
+STEP_FLASH_EVAL = "10057"
+STEP_FLASH_CONFIRM = "10058"
 
 KNOWN_CEPS = {
     "36010000": {
@@ -519,6 +530,7 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
                         {"name": "Imóvel", "next": int(STEP_DIRTY), "save": "REAL_ESTATE", "id": "REAL_ESTATE"},
                         {"name": "Veículo", "next": int(STEP_YEAR), "save": "VEHICLE", "id": "VEHICLE"},
                         {"name": "Capital de Giro (SDC)", "next": int(STEP_SDC_ASSET_TYPE), "save": "SDC", "id": "SDC"},
+                        {"name": "Flash Capital", "next": int(STEP_FLASH_ASSET_TYPE), "save": "FLASH", "id": "FLASH"},
                         {"name": "Vender minha cota", "link": "/vender-minha-cota", "save": "open_page"},
                     ],
                 }
@@ -1882,6 +1894,7 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
                         {"name": "Imóvel", "next": int(STEP_DIRTY), "save": "REAL_ESTATE", "id": "REAL_ESTATE"},
                         {"name": "Veículo", "next": int(STEP_YEAR), "save": "VEHICLE", "id": "VEHICLE"},
                         {"name": "Capital de Giro (SDC)", "next": int(STEP_SDC_ASSET_TYPE), "save": "SDC", "id": "SDC"},
+                        {"name": "Flash Capital", "next": int(STEP_FLASH_ASSET_TYPE), "save": "FLASH", "id": "FLASH"},
                         {"name": "Vender minha cota", "link": "/vender-minha-cota", "save": "open_page"},
                     ],
                 }
@@ -1936,7 +1949,7 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
             "person_type": "PF",
         }
         try:
-            solicitation = store_solicitation(db, actor, store_payload)
+            solicitation = store_sdc_solicitation(db, actor, store_payload)
         except HTTPException as exc:
             detail = exc.detail
             message = detail.get("message") if isinstance(detail, dict) else str(detail)
@@ -1980,6 +1993,404 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
                     "text": (
                         "Perfeito! Registrei sua solicitação de Capital de Giro na mesa SDC "
                         f"(crédito estimado {_brl(solicitation.credit_estimated)}). "
+                        "Envie a documentação quando a equipe entrar em contato."
+                    ),
+                    "options": [
+                        {"name": "Falar no WhatsApp", "link": f"https://wa.me/55{_digits(settings.company_phone)}"},
+                        {"name": "Criar conta / acompanhar", "link": "/login"},
+                        {"name": "Nova simulação", "next": 0},
+                    ],
+                }
+            ],
+            lead_id=lead.id,
+        )
+
+    # --- Flash Capital ---
+    if step == STEP_FLASH_ASSET_TYPE:
+        if not lead:
+            raise HTTPException(422, "Sessão do chat expirada. Recomece pelo início.")
+        lead.product_interest = "FLASH_CREDIT"
+        snap = _lead_snapshot(lead)
+        snap["flow"] = "FLASH"
+        snap["product"] = "FLASH_CREDIT"
+        asset_type = str(data.get("option_save") or data.get("option_id") or "").strip().lower()
+        if asset_type in {"imovel", "veiculo_leve", "veiculo_pesado", "maquina"}:
+            snap["asset_type"] = asset_type
+            if asset_type == "imovel":
+                snap.pop("asset_year", None)
+            _save_lead_snapshot(lead, snap)
+            db.flush()
+            if asset_type == "imovel":
+                return _wrap(
+                    [
+                        {
+                            "text": "Qual o valor do bem dado em garantia (Flash Capital — LTV até 40%)?",
+                            "input": {"name": "asset_value", "label": "Valor do bem", "type": "text"},
+                            "next": int(STEP_FLASH_VALUE),
+                        }
+                    ],
+                    lead_id=lead.id,
+                )
+            return _wrap(
+                [
+                    {
+                        "text": "Qual o ano de fabricação do bem?",
+                        "input": {"name": "asset_year", "label": "Ano", "type": "number"},
+                        "next": int(STEP_FLASH_YEAR),
+                    }
+                ],
+                lead_id=lead.id,
+            )
+        _save_lead_snapshot(lead, snap)
+        db.flush()
+        return _wrap(
+            [
+                {
+                    "text": "Flash Capital — qual o tipo do bem em garantia?",
+                    "options": [
+                        {"name": "Imóvel", "next": int(STEP_FLASH_ASSET_TYPE), "save": "imovel", "id": "imovel"},
+                        {"name": "Veículo leve", "next": int(STEP_FLASH_ASSET_TYPE), "save": "veiculo_leve", "id": "veiculo_leve"},
+                        {"name": "Veículo pesado", "next": int(STEP_FLASH_ASSET_TYPE), "save": "veiculo_pesado", "id": "veiculo_pesado"},
+                        {"name": "Máquina", "next": int(STEP_FLASH_ASSET_TYPE), "save": "maquina", "id": "maquina"},
+                    ],
+                }
+            ],
+            lead_id=lead.id,
+        )
+
+    if step == STEP_FLASH_YEAR:
+        if not lead:
+            raise HTTPException(422, "Sessão do chat expirada. Recomece pelo início.")
+        try:
+            year = int(str(data.get("asset_year") or data.get("option_id") or "0"))
+        except ValueError:
+            year = 0
+        if year < 1980 or year > date.today().year + 1:
+            return _retry(
+                "Informe um ano de fabricação válido!",
+                STEP_FLASH_YEAR,
+                input_name="asset_year",
+                label="Ano",
+                lead_id=lead.id,
+            )
+        snap = _lead_snapshot(lead)
+        snap["asset_year"] = year
+        _save_lead_snapshot(lead, snap)
+        return _wrap(
+            [
+                {
+                    "text": "Qual o valor do bem dado em garantia?",
+                    "input": {"name": "asset_value", "label": "Valor do bem", "type": "text"},
+                    "next": int(STEP_FLASH_VALUE),
+                }
+            ],
+            lead_id=lead.id,
+        )
+
+    if step == STEP_FLASH_VALUE:
+        if not lead:
+            raise HTTPException(422, "Sessão do chat expirada. Recomece pelo início.")
+        try:
+            asset = _money_input(data.get("asset_value"))
+        except HTTPException:
+            return _retry("Informe o valor do bem!", STEP_FLASH_VALUE, input_name="asset_value", label="Valor do bem", lead_id=lead.id)
+        if asset <= 0:
+            return _retry("Informe o valor do bem!", STEP_FLASH_VALUE, input_name="asset_value", label="Valor do bem", lead_id=lead.id)
+        snap = _lead_snapshot(lead)
+        snap["asset_value"] = str(asset)
+        _save_lead_snapshot(lead, snap)
+        return _wrap(
+            [
+                {
+                    "text": "O bem está quitado?",
+                    "options": [
+                        {"name": "Sim", "next": int(STEP_FLASH_LIEN), "save": "1", "id": "paid_yes"},
+                        {"name": "Não", "next": int(STEP_FLASH_LIEN), "save": "0", "id": "paid_no"},
+                    ],
+                }
+            ],
+            lead_id=lead.id,
+        )
+
+    if step == STEP_FLASH_PAID_OFF:
+        if not lead:
+            raise HTTPException(422, "Sessão do chat expirada. Recomece pelo início.")
+        snap = _lead_snapshot(lead)
+        snap["asset_paid_off"] = data.get("option_save") == "1" or data.get("option_id") == "paid_yes"
+        _save_lead_snapshot(lead, snap)
+        return _wrap(
+            [
+                {
+                    "text": "O bem possui alguma pendência (alienação, restrição)?",
+                    "options": [
+                        {"name": "Sim", "next": int(STEP_FLASH_DOCS), "save": "1", "id": "lien_yes"},
+                        {"name": "Não", "next": int(STEP_FLASH_DOCS), "save": "0", "id": "lien_no"},
+                    ],
+                }
+            ],
+            lead_id=lead.id,
+        )
+
+    if step == STEP_FLASH_LIEN:
+        if not lead:
+            raise HTTPException(422, "Sessão do chat expirada. Recomece pelo início.")
+        snap = _lead_snapshot(lead)
+        oid = str(data.get("option_id") or "")
+        if oid in {"paid_yes", "paid_no"}:
+            snap["asset_paid_off"] = oid == "paid_yes"
+            _save_lead_snapshot(lead, snap)
+            return _wrap(
+                [
+                    {
+                        "text": "O bem possui alguma pendência (alienação, restrição)?",
+                        "options": [
+                            {"name": "Sim", "next": int(STEP_FLASH_DOCS), "save": "1", "id": "lien_yes"},
+                            {"name": "Não", "next": int(STEP_FLASH_DOCS), "save": "0", "id": "lien_no"},
+                        ],
+                    }
+                ],
+                lead_id=lead.id,
+            )
+        if oid in {"lien_yes", "lien_no"}:
+            snap["asset_has_lien"] = oid == "lien_yes"
+            _save_lead_snapshot(lead, snap)
+            return _wrap(
+                [
+                    {
+                        "text": "A documentação do bem está completa?",
+                        "options": [
+                            {"name": "Sim", "next": int(STEP_FLASH_TERM), "save": "1", "id": "docs_yes"},
+                            {"name": "Não", "next": int(STEP_FLASH_TERM), "save": "0", "id": "docs_no"},
+                        ],
+                    }
+                ],
+                lead_id=lead.id,
+            )
+        snap["asset_paid_off"] = data.get("option_save") == "1"
+        _save_lead_snapshot(lead, snap)
+        return _wrap(
+            [
+                {
+                    "text": "O bem possui alguma pendência (alienação, restrição)?",
+                    "options": [
+                        {"name": "Sim", "next": int(STEP_FLASH_DOCS), "save": "1", "id": "lien_yes"},
+                        {"name": "Não", "next": int(STEP_FLASH_DOCS), "save": "0", "id": "lien_no"},
+                    ],
+                }
+            ],
+            lead_id=lead.id,
+        )
+
+    if step == STEP_FLASH_DOCS:
+        if not lead:
+            raise HTTPException(422, "Sessão do chat expirada. Recomece pelo início.")
+        snap = _lead_snapshot(lead)
+        oid = str(data.get("option_id") or "")
+        if oid in {"lien_yes", "lien_no"}:
+            snap["asset_has_lien"] = oid == "lien_yes"
+            _save_lead_snapshot(lead, snap)
+            return _wrap(
+                [
+                    {
+                        "text": "A documentação do bem está completa?",
+                        "options": [
+                            {"name": "Sim", "next": int(STEP_FLASH_TERM), "save": "1", "id": "docs_yes"},
+                            {"name": "Não", "next": int(STEP_FLASH_TERM), "save": "0", "id": "docs_no"},
+                        ],
+                    }
+                ],
+                lead_id=lead.id,
+            )
+        snap["docs_complete"] = oid == "docs_yes" or data.get("option_save") == "1"
+        _save_lead_snapshot(lead, snap)
+        return _wrap(
+            [
+                {
+                    "text": "Qual o prazo desejado?",
+                    "options": [
+                        {"name": "36 meses", "next": int(STEP_FLASH_EVAL), "save": "36", "id": "term_36"},
+                        {"name": "60 meses", "next": int(STEP_FLASH_EVAL), "save": "60", "id": "term_60"},
+                    ],
+                }
+            ],
+            lead_id=lead.id,
+        )
+
+    if step == STEP_FLASH_TERM:
+        if not lead:
+            raise HTTPException(422, "Sessão do chat expirada. Recomece pelo início.")
+        snap = _lead_snapshot(lead)
+        oid = str(data.get("option_id") or "")
+        if oid in {"docs_yes", "docs_no"}:
+            snap["docs_complete"] = oid == "docs_yes"
+            _save_lead_snapshot(lead, snap)
+            return _wrap(
+                [
+                    {
+                        "text": "Qual o prazo desejado?",
+                        "options": [
+                            {"name": "36 meses", "next": int(STEP_FLASH_EVAL), "save": "36", "id": "term_36"},
+                            {"name": "60 meses", "next": int(STEP_FLASH_EVAL), "save": "60", "id": "term_60"},
+                        ],
+                    }
+                ],
+                lead_id=lead.id,
+            )
+        term_raw = str(data.get("option_save") or oid or "36").replace("term_", "")
+        try:
+            term = int(term_raw)
+        except ValueError:
+            term = 36
+        if term not in {36, 60}:
+            term = 36
+        snap["term_months"] = term
+        _save_lead_snapshot(lead, snap)
+        data = {**data, "option_id": f"term_{term}", "option_save": str(term)}
+        step = STEP_FLASH_EVAL
+
+    if step == STEP_FLASH_EVAL:
+        if not lead:
+            raise HTTPException(422, "Sessão do chat expirada. Recomece pelo início.")
+        snap = _lead_snapshot(lead)
+        oid = str(data.get("option_id") or "")
+        if oid in {"term_36", "term_60"} or str(data.get("option_save") or "") in {"36", "60"}:
+            term_raw = str(data.get("option_save") or oid).replace("term_", "")
+            try:
+                snap["term_months"] = int(term_raw)
+            except ValueError:
+                snap["term_months"] = 36
+            _save_lead_snapshot(lead, snap)
+        payload = {
+            "asset_type": snap.get("asset_type") or "imovel",
+            "asset_value": snap.get("asset_value") or "0",
+            "asset_year": snap.get("asset_year"),
+            "asset_paid_off": bool(snap.get("asset_paid_off")),
+            "asset_has_lien": bool(snap.get("asset_has_lien")),
+            "docs_complete": bool(snap.get("docs_complete")),
+            "term_months": int(snap.get("term_months") or 36),
+            "capital_source": "RETAIL",
+        }
+        result = evaluate_flash_desk(payload)
+        snap["flash_evaluation"] = result
+        _save_lead_snapshot(lead, snap)
+        db.flush()
+        flash_card = {
+            "viavel": bool(result.get("viable")),
+            "principal_fmt": _brl(result.get("principal") or 0),
+            "ltv_fmt": f"{result.get('ltv_percent') or '0'}%" if result.get("viable") else "—",
+            "parcela_fmt": _brl(result.get("monthly_payment") or 0),
+            "prazo_fmt": f"{int(result.get('term_months') or 0)} meses" if result.get("viable") else "—",
+            "liquido_fmt": _brl(result.get("net_payout") or 0),
+            "motivos": list(result.get("motivos") or []),
+        }
+        item: dict[str, Any] = {
+            "text": result.get("message") or ("Operação viável" if result.get("viable") else "Operação não viável"),
+            "flash_result": flash_card,
+        }
+        if result.get("viable"):
+            item["next"] = int(STEP_FLASH_CONFIRM)
+            item["button"] = "Continuar"
+        else:
+            item["options"] = [
+                {"name": "Mudar categoria", "next": int(STEP_CATEGORY)},
+                {"name": "Recomeçar", "next": 0},
+            ]
+        return _wrap([item], lead_id=lead.id)
+
+    if step == STEP_FLASH_CONFIRM:
+        if not lead:
+            raise HTTPException(422, "Sessão do chat expirada. Recomece pelo início.")
+        snap = _lead_snapshot(lead)
+        if snap.get("flash_solicitation_id"):
+            return _wrap(
+                [
+                    {
+                        "text": (
+                            "Sua solicitação Flash Capital já está na mesa. "
+                            "Nossa equipe pede a documentação e segue a análise."
+                        ),
+                        "options": [
+                            {"name": "Falar no WhatsApp", "link": f"https://wa.me/55{_digits(settings.company_phone)}"},
+                            {"name": "Nova simulação", "next": 0},
+                        ],
+                    }
+                ],
+                lead_id=lead.id,
+            )
+        evaluation = snap.get("flash_evaluation") or {}
+        if not evaluation.get("viable"):
+            return _wrap(
+                [
+                    {
+                        "text": "A operação Flash não está viável com os dados atuais. Ajuste a garantia ou a categoria.",
+                        "options": [
+                            {"name": "Mudar categoria", "next": int(STEP_CATEGORY)},
+                            {"name": "Recomeçar", "next": 0},
+                        ],
+                    }
+                ],
+                lead_id=lead.id,
+            )
+        store_payload = {
+            "asset_type": snap.get("asset_type") or "imovel",
+            "asset_value": snap.get("asset_value") or "0",
+            "asset_year": snap.get("asset_year"),
+            "asset_paid_off": bool(snap.get("asset_paid_off")),
+            "asset_has_lien": bool(snap.get("asset_has_lien")),
+            "docs_complete": bool(snap.get("docs_complete")),
+            "term_months": int(snap.get("term_months") or evaluation.get("term_months") or 36),
+            "capital_source": "RETAIL",
+            "contact_name": lead.name or snap.get("name") or "Visitante",
+            "contact_email": snap.get("email") or "site@letter.app.br",
+            "contact_phone": lead.phone or snap.get("phone") or "",
+            "person_type": "PF",
+        }
+        try:
+            solicitation = store_flash_solicitation(db, actor, store_payload)
+        except HTTPException as exc:
+            detail = exc.detail
+            message = detail.get("message") if isinstance(detail, dict) else str(detail)
+            motivos = detail.get("motivos") if isinstance(detail, dict) else []
+            return _wrap(
+                [
+                    {
+                        "text": message or "Não foi possível registrar a solicitação Flash Capital.",
+                        "flash_result": {
+                            "viavel": False,
+                            "principal_fmt": "R$ 0,00",
+                            "ltv_fmt": "—",
+                            "parcela_fmt": "R$ 0,00",
+                            "prazo_fmt": "—",
+                            "liquido_fmt": "R$ 0,00",
+                            "motivos": motivos or [message],
+                        },
+                        "options": [
+                            {"name": "Mudar categoria", "next": int(STEP_CATEGORY)},
+                            {"name": "Recomeçar", "next": 0},
+                        ],
+                    }
+                ],
+                lead_id=lead.id,
+            )
+        snap["flash_solicitation_id"] = solicitation.id
+        lead.product_interest = "FLASH_CREDIT"
+        lead.status = "QUALIFIED"
+        try:
+            detail = json.loads(solicitation.evaluation_json or "{}")
+            if isinstance(detail, dict):
+                detail["channel"] = SOURCE
+                detail["lead_id"] = lead.id
+                solicitation.evaluation_json = json.dumps(detail, ensure_ascii=False)
+        except json.JSONDecodeError:
+            pass
+        _save_lead_snapshot(lead, snap)
+        db.flush()
+        return _wrap(
+            [
+                {
+                    "text": (
+                        "Perfeito! Registrei sua solicitação Flash Capital na mesa "
+                        f"(principal {_brl(solicitation.principal)}, LTV {solicitation.ltv_percent}%). "
                         "Envie a documentação quando a equipe entrar em contato."
                     ),
                     "options": [

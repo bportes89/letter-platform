@@ -202,6 +202,16 @@ No passo de categoria, **Capital de Giro** abre a faixa `10020–10028` (paralel
 
 Lead fica com `product_interest=SDC` / `source=SITE_CHAT`. Visibilidade operacional: **mesa SDC** (não Cadastros Marketplace).
 
+### Chat — Flash Capital
+
+Categoria **Flash Capital** abre a faixa `10050–10058`:
+
+1. Tipo do bem → ano (se veículo/máquina) → valor → quitado → pendência → docs → prazo 36/60  
+2. `evaluate_flash_desk` → card `flash_result` (principal LTV 40% / parcela / líquido)  
+3. Confirmar → `store_solicitation` Flash (mesa, status `AWAITING_DOCS`, canal `SITE_CHAT` em `evaluation_json`)
+
+Lead: `product_interest=FLASH_CREDIT`. Sem venda/TAPAF pelo chat nesta frente.
+
 ## Escritório do cliente — Minhas compras
 
 Após criar conta (ou login) a partir do chat, o lead `SITE_CHAT` é vinculado (`client_user_id` + `proposal.client_user_id`):
