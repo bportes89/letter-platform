@@ -212,6 +212,16 @@ Categoria **Flash Capital** abre a faixa `10050–10058`:
 
 Lead: `product_interest=FLASH_CREDIT`. Sem venda/TAPAF pelo chat nesta frente.
 
+### Chat — QuitCon
+
+Categoria **QuitCon** abre a faixa `10060–10069`:
+
+1. Saldo → meses → administradora (whitelist) → grupo/cota → contemplada → bem faturado → parcelas em dia → docs  
+2. `evaluate_quitcon_desk` → card `quitcon_result` (VP + custos)  
+3. Confirmar → `store_solicitation` QuitCon (mesa, status `AWAITING_DOCS`, canal `SITE_CHAT` em `evaluation_json`)
+
+Lead: `product_interest=QUITCON`. Sem TAPAF/venda pelo chat nesta frente.
+
 ## Escritório do cliente — Minhas compras
 
 Após criar conta (ou login) a partir do chat, o lead `SITE_CHAT` é vinculado (`client_user_id` + `proposal.client_user_id`):

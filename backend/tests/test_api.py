@@ -4212,6 +4212,97 @@ def test_public_site_chat_native_flash_flow(client, auth_headers):
     assert lead["source"] == "SITE_CHAT"
 
 
+def test_public_site_chat_native_quitcon_flow(client, auth_headers):
+    """Chat nativo QuitCon: cota → evaluate → solicitation na mesa."""
+    email = client.post(
+        "/api/v1/public/site/chat/home/10003",
+        json={"name": "Carla Quitcon Chat", "email": "carla.quitcon.chat@letter.test"},
+    )
+    assert email.status_code == 200
+    lead_id = email.json()["OBJ"]["lead_id"]
+
+    phone = client.post(
+        "/api/v1/public/site/chat/home/10004",
+        json={"lead_id": lead_id, "phone": "31977665544", "email": "carla.quitcon.chat@letter.test"},
+    )
+    assert phone.status_code == 200
+    assert any(o.get("save") == "QUITCON" for o in phone.json()["OBJ"]["chat_next"][0]["options"])
+
+    saldo_prompt = client.post(
+        "/api/v1/public/site/chat/home/10060",
+        json={"lead_id": lead_id, "option_id": "QUITCON", "option_save": "QUITCON"},
+    )
+    assert saldo_prompt.status_code == 200
+
+    saldo = client.post(
+        "/api/v1/public/site/chat/home/10060",
+        json={"lead_id": lead_id, "outstanding_balance": "100000"},
+    )
+    assert saldo.status_code == 200
+
+    meses = client.post(
+        "/api/v1/public/site/chat/home/10061",
+        json={"lead_id": lead_id, "meses_restantes": "48"},
+    )
+    assert meses.status_code == 200
+    assert any(o.get("save") == "Embracon" for o in (meses.json()["OBJ"]["chat_next"][0].get("options") or []))
+
+    registry_prompt = client.post(
+        "/api/v1/public/site/chat/home/10063",
+        json={"lead_id": lead_id, "option_id": "embracon", "option_save": "Embracon"},
+    )
+    assert registry_prompt.status_code == 200
+
+    registry = client.post(
+        "/api/v1/public/site/chat/home/10063",
+        json={"lead_id": lead_id, "registry_number": "G-1/C-1", "option_save": "Embracon"},
+    )
+    assert registry.status_code == 200
+
+    contemplada = client.post(
+        "/api/v1/public/site/chat/home/10065",
+        json={"lead_id": lead_id, "option_id": "contemplada_yes", "option_save": "1"},
+    )
+    assert contemplada.status_code == 200
+
+    bem = client.post(
+        "/api/v1/public/site/chat/home/10066",
+        json={"lead_id": lead_id, "option_id": "bem_yes", "option_save": "1"},
+    )
+    assert bem.status_code == 200
+
+    parcelas = client.post(
+        "/api/v1/public/site/chat/home/10067",
+        json={"lead_id": lead_id, "option_id": "parcelas_yes", "option_save": "1"},
+    )
+    assert parcelas.status_code == 200
+
+    eval_step = client.post(
+        "/api/v1/public/site/chat/home/10068",
+        json={"lead_id": lead_id, "option_id": "docs_yes", "option_save": "1"},
+    )
+    assert eval_step.status_code == 200, eval_step.text
+    card = eval_step.json()["OBJ"]["chat_next"][0]
+    assert card["quitcon_result"]["viavel"] is True
+    assert card["next"] == 10069
+
+    confirm = client.post("/api/v1/public/site/chat/home/10069", json={"lead_id": lead_id})
+    assert confirm.status_code == 200, confirm.text
+    assert "quitcon" in confirm.json()["OBJ"]["chat_next"][0]["text"].lower()
+
+    listed = client.get("/api/v1/quitcon/desk/solicitations", headers=auth_headers)
+    assert listed.status_code == 200
+    hit = next(r for r in listed.json() if r["contact_email"] == "carla.quitcon.chat@letter.test")
+    assert hit["status"] == "AWAITING_DOCS"
+    assert hit["registry_office"] == "Embracon"
+    assert Decimal(hit["quitacao_vp_amount"]) > 0
+
+    leads = client.get("/api/v1/leads", headers=auth_headers).json()
+    lead = next(l for l in leads if l["id"] == lead_id)
+    assert lead["product_interest"] == "QUITCON"
+    assert lead["source"] == "SITE_CHAT"
+
+
 def test_escrow_asaas_status_not_configured(client, auth_headers, monkeypatch):
     monkeypatch.setattr("app.asaas_common.settings.asaas_api_key", None)
     monkeypatch.setattr("app.asaas_common.settings.asaas_wallet_id", None)

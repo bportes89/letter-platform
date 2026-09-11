@@ -664,6 +664,72 @@ export function AttendanceBotSection() {
                     </div>
                   ) : null}
 
+                  {item.quitcon_result ? (
+                    <div className="attendance-sdc-result" data-chat-item>
+                      <h4>QuitCon — análise</h4>
+                      <div className="attendance-sdc-grid">
+                        <div>
+                          <span>Valor presente (VP)</span>
+                          <strong>{item.quitcon_result.vp_fmt}</strong>
+                        </div>
+                        <div>
+                          <span>Saldo bruto</span>
+                          <strong>{item.quitcon_result.saldo_fmt}</strong>
+                        </div>
+                        <div>
+                          <span>Prazo restante</span>
+                          <strong>{item.quitcon_result.meses_fmt}</strong>
+                        </div>
+                        <div>
+                          <span>Administradora</span>
+                          <strong>{item.quitcon_result.admin_fmt}</strong>
+                        </div>
+                        <div>
+                          <span>Custos de abertura</span>
+                          <strong>{item.quitcon_result.entrada_fmt}</strong>
+                        </div>
+                      </div>
+                      {item.quitcon_result.viavel ? (
+                        <>
+                          <p className="attendance-sdc-ok">
+                            Operação QuitCon viável. Clique em continuar para registrar na mesa.
+                          </p>
+                          {isCurrent(flowIndex) ? (
+                            <button
+                              type="button"
+                              className="attendance-primary"
+                              disabled={busy}
+                              onClick={() => void onButton(flowIndex, itemIndex, item)}
+                            >
+                              Continuar
+                            </button>
+                          ) : null}
+                        </>
+                      ) : (
+                        <>
+                          <p className="attendance-sdc-block">Não foi possível seguir com a operação QuitCon.</p>
+                          {Array.isArray(item.quitcon_result.motivos) ? (
+                            <ul>
+                              {item.quitcon_result.motivos.map((motivo) => (
+                                <li key={motivo}>{motivo}</li>
+                              ))}
+                            </ul>
+                          ) : null}
+                          {isCurrent(flowIndex) ? (
+                            <div className="attendance-actions">
+                              <button type="button" className="attendance-primary" onClick={() => void advance(10005, 1)}>
+                                Mudar a categoria
+                              </button>
+                              <button type="button" className="attendance-secondary" onClick={resetChat}>
+                                Começar do início
+                              </button>
+                            </div>
+                          ) : null}
+                        </>
+                      )}
+                    </div>
+                  ) : null}
+
                   {item.faq && Array.isArray(item.items) && showInteractive(flowIndex, itemIndex) ? (
                     <div className="attendance-options" data-chat-item>
                       {item.items.map((faqItem, faqIndex) => (

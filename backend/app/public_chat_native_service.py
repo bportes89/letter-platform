@@ -20,6 +20,7 @@ from app.public_site_service import headquarters_org
 from app.quota_inventory_service import run_nina_quota_scan
 from app.sdc_desk_service import evaluate_sdc_desk, store_solicitation as store_sdc_solicitation
 from app.flash_desk_service import evaluate_flash_desk, store_solicitation as store_flash_solicitation
+from app.quitcon_desk_service import evaluate_quitcon_desk, store_solicitation as store_quitcon_solicitation
 from app.services import money, reserve_quota
 
 SOURCE = "SITE_CHAT"
@@ -82,6 +83,29 @@ STEP_FLASH_DOCS = "10055"
 STEP_FLASH_TERM = "10056"
 STEP_FLASH_EVAL = "10057"
 STEP_FLASH_CONFIRM = "10058"
+# QuitCon — quitação inteligente (doc253) → mesa QuitCon.
+STEP_QUITCON_BALANCE = "10060"
+STEP_QUITCON_MONTHS = "10061"
+STEP_QUITCON_ADMIN = "10062"
+STEP_QUITCON_REGISTRY = "10063"
+STEP_QUITCON_CONTEMPLADA = "10064"
+STEP_QUITCON_BEM = "10065"
+STEP_QUITCON_PARCELAS = "10066"
+STEP_QUITCON_DOCS = "10067"
+STEP_QUITCON_EVAL = "10068"
+STEP_QUITCON_CONFIRM = "10069"
+
+QUITCON_ADMIN_OPTIONS = (
+    ("Embracon", "Embracon"),
+    ("Ademicon", "Ademicon"),
+    ("Âncora", "Ancora"),
+    ("HS", "HS"),
+    ("Tradição", "Tradicao"),
+    ("Recon", "Recon"),
+    ("Groscon", "Groscon"),
+    ("Roma", "Roma"),
+    ("Reserva", "Reserva"),
+)
 
 KNOWN_CEPS = {
     "36010000": {
@@ -531,6 +555,7 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
                         {"name": "Veículo", "next": int(STEP_YEAR), "save": "VEHICLE", "id": "VEHICLE"},
                         {"name": "Capital de Giro (SDC)", "next": int(STEP_SDC_ASSET_TYPE), "save": "SDC", "id": "SDC"},
                         {"name": "Flash Capital", "next": int(STEP_FLASH_ASSET_TYPE), "save": "FLASH", "id": "FLASH"},
+                        {"name": "QuitCon", "next": int(STEP_QUITCON_BALANCE), "save": "QUITCON", "id": "QUITCON"},
                         {"name": "Vender minha cota", "link": "/vender-minha-cota", "save": "open_page"},
                     ],
                 }
@@ -1895,6 +1920,7 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
                         {"name": "Veículo", "next": int(STEP_YEAR), "save": "VEHICLE", "id": "VEHICLE"},
                         {"name": "Capital de Giro (SDC)", "next": int(STEP_SDC_ASSET_TYPE), "save": "SDC", "id": "SDC"},
                         {"name": "Flash Capital", "next": int(STEP_FLASH_ASSET_TYPE), "save": "FLASH", "id": "FLASH"},
+                        {"name": "QuitCon", "next": int(STEP_QUITCON_BALANCE), "save": "QUITCON", "id": "QUITCON"},
                         {"name": "Vender minha cota", "link": "/vender-minha-cota", "save": "open_page"},
                     ],
                 }
@@ -2391,6 +2417,431 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
                     "text": (
                         "Perfeito! Registrei sua solicitação Flash Capital na mesa "
                         f"(principal {_brl(solicitation.principal)}, LTV {solicitation.ltv_percent}%). "
+                        "Envie a documentação quando a equipe entrar em contato."
+                    ),
+                    "options": [
+                        {"name": "Falar no WhatsApp", "link": f"https://wa.me/55{_digits(settings.company_phone)}"},
+                        {"name": "Criar conta / acompanhar", "link": "/login"},
+                        {"name": "Nova simulação", "next": 0},
+                    ],
+                }
+            ],
+            lead_id=lead.id,
+        )
+
+    # --- QuitCon ---
+    if step == STEP_QUITCON_BALANCE:
+        if not lead:
+            raise HTTPException(422, "Sessão do chat expirada. Recomece pelo início.")
+        lead.product_interest = "QUITCON"
+        snap = _lead_snapshot(lead)
+        snap["flow"] = "QUITCON"
+        snap["product"] = "QUITCON"
+        # Entrada pela categoria ou re-prompt — sem saldo ainda.
+        raw = data.get("outstanding_balance")
+        if raw in (None, ""):
+            _save_lead_snapshot(lead, snap)
+            db.flush()
+            return _wrap(
+                [
+                    {
+                        "text": "QuitCon — informe o saldo devedor bruto da cota (valor total que ainda falta pagar).",
+                        "input": {"name": "outstanding_balance", "label": "Saldo devedor", "type": "text"},
+                        "next": int(STEP_QUITCON_BALANCE),
+                    }
+                ],
+                lead_id=lead.id,
+            )
+        try:
+            saldo = _money_input(raw)
+        except HTTPException:
+            return _retry(
+                "Informe o saldo devedor!",
+                STEP_QUITCON_BALANCE,
+                input_name="outstanding_balance",
+                label="Saldo devedor",
+                lead_id=lead.id,
+            )
+        if saldo <= 0:
+            return _retry(
+                "Informe o saldo devedor!",
+                STEP_QUITCON_BALANCE,
+                input_name="outstanding_balance",
+                label="Saldo devedor",
+                lead_id=lead.id,
+            )
+        snap["outstanding_balance"] = str(saldo)
+        _save_lead_snapshot(lead, snap)
+        db.flush()
+        return _wrap(
+            [
+                {
+                    "text": "Quantos meses faltam para encerrar o contrato?",
+                    "input": {"name": "meses_restantes", "label": "Meses restantes", "type": "number"},
+                    "next": int(STEP_QUITCON_MONTHS),
+                }
+            ],
+            lead_id=lead.id,
+        )
+
+    if step == STEP_QUITCON_MONTHS:
+        if not lead:
+            raise HTTPException(422, "Sessão do chat expirada. Recomece pelo início.")
+        try:
+            meses = int(str(data.get("meses_restantes") or data.get("option_id") or "0"))
+        except ValueError:
+            meses = 0
+        if meses <= 0 or meses > 240:
+            return _retry(
+                "Informe os meses restantes (1 a 240)!",
+                STEP_QUITCON_MONTHS,
+                input_name="meses_restantes",
+                label="Meses restantes",
+                lead_id=lead.id,
+            )
+        snap = _lead_snapshot(lead)
+        snap["meses_restantes"] = meses
+        _save_lead_snapshot(lead, snap)
+        return _wrap(
+            [
+                {
+                    "text": "Qual a administradora da cota? (whitelist QuitCon)",
+                    "options": [
+                        {
+                            "name": label,
+                            "next": int(STEP_QUITCON_REGISTRY),
+                            "save": value,
+                            "id": value.lower(),
+                        }
+                        for label, value in QUITCON_ADMIN_OPTIONS
+                    ],
+                }
+            ],
+            lead_id=lead.id,
+        )
+
+    if step == STEP_QUITCON_ADMIN:
+        if not lead:
+            raise HTTPException(422, "Sessão do chat expirada. Recomece pelo início.")
+        # Compat: se caiu no step admin sem escolha, reexibe lista.
+        return _wrap(
+            [
+                {
+                    "text": "Qual a administradora da cota? (whitelist QuitCon)",
+                    "options": [
+                        {
+                            "name": label,
+                            "next": int(STEP_QUITCON_REGISTRY),
+                            "save": value,
+                            "id": value.lower(),
+                        }
+                        for label, value in QUITCON_ADMIN_OPTIONS
+                    ],
+                }
+            ],
+            lead_id=lead.id,
+        )
+
+    if step == STEP_QUITCON_REGISTRY:
+        if not lead:
+            raise HTTPException(422, "Sessão do chat expirada. Recomece pelo início.")
+        snap = _lead_snapshot(lead)
+        admin = str(data.get("option_save") or data.get("registry_office") or "").strip()
+        if admin and not data.get("registry_number"):
+            snap["registry_office"] = admin
+            _save_lead_snapshot(lead, snap)
+            return _wrap(
+                [
+                    {
+                        "text": "Informe grupo e cota (ex.: G-12/C-034).",
+                        "input": {"name": "registry_number", "label": "Grupo / cota", "type": "text"},
+                        "next": int(STEP_QUITCON_REGISTRY),
+                    }
+                ],
+                lead_id=lead.id,
+            )
+        registry = str(data.get("registry_number") or data.get("option_id") or "").strip()
+        if len(registry) < 2:
+            return _retry(
+                "Informe grupo e cota!",
+                STEP_QUITCON_REGISTRY,
+                input_name="registry_number",
+                label="Grupo / cota",
+                lead_id=lead.id,
+            )
+        if admin:
+            snap["registry_office"] = admin
+        snap["registry_number"] = registry
+        _save_lead_snapshot(lead, snap)
+        return _wrap(
+            [
+                {
+                    "text": "A cota já está contemplada?",
+                    "options": [
+                        {"name": "Sim", "next": int(STEP_QUITCON_BEM), "save": "1", "id": "contemplada_yes"},
+                        {"name": "Não", "next": int(STEP_QUITCON_BEM), "save": "0", "id": "contemplada_no"},
+                    ],
+                }
+            ],
+            lead_id=lead.id,
+        )
+
+    if step == STEP_QUITCON_CONTEMPLADA:
+        if not lead:
+            raise HTTPException(422, "Sessão do chat expirada. Recomece pelo início.")
+        snap = _lead_snapshot(lead)
+        snap["contemplada"] = data.get("option_save") == "1" or data.get("option_id") == "contemplada_yes"
+        _save_lead_snapshot(lead, snap)
+        return _wrap(
+            [
+                {
+                    "text": "O bem já foi faturado?",
+                    "options": [
+                        {"name": "Sim", "next": int(STEP_QUITCON_PARCELAS), "save": "1", "id": "bem_yes"},
+                        {"name": "Não", "next": int(STEP_QUITCON_PARCELAS), "save": "0", "id": "bem_no"},
+                    ],
+                }
+            ],
+            lead_id=lead.id,
+        )
+
+    if step == STEP_QUITCON_BEM:
+        if not lead:
+            raise HTTPException(422, "Sessão do chat expirada. Recomece pelo início.")
+        snap = _lead_snapshot(lead)
+        oid = str(data.get("option_id") or "")
+        if oid in {"contemplada_yes", "contemplada_no"}:
+            snap["contemplada"] = oid == "contemplada_yes"
+            _save_lead_snapshot(lead, snap)
+            return _wrap(
+                [
+                    {
+                        "text": "O bem já foi faturado?",
+                        "options": [
+                            {"name": "Sim", "next": int(STEP_QUITCON_PARCELAS), "save": "1", "id": "bem_yes"},
+                            {"name": "Não", "next": int(STEP_QUITCON_PARCELAS), "save": "0", "id": "bem_no"},
+                        ],
+                    }
+                ],
+                lead_id=lead.id,
+            )
+        snap["bem_faturado"] = oid == "bem_yes" or data.get("option_save") == "1"
+        _save_lead_snapshot(lead, snap)
+        return _wrap(
+            [
+                {
+                    "text": "As parcelas estão em dia?",
+                    "options": [
+                        {"name": "Sim", "next": int(STEP_QUITCON_DOCS), "save": "1", "id": "parcelas_yes"},
+                        {"name": "Não", "next": int(STEP_QUITCON_DOCS), "save": "0", "id": "parcelas_no"},
+                    ],
+                }
+            ],
+            lead_id=lead.id,
+        )
+
+    if step == STEP_QUITCON_PARCELAS:
+        if not lead:
+            raise HTTPException(422, "Sessão do chat expirada. Recomece pelo início.")
+        snap = _lead_snapshot(lead)
+        oid = str(data.get("option_id") or "")
+        if oid in {"bem_yes", "bem_no"}:
+            snap["bem_faturado"] = oid == "bem_yes"
+            _save_lead_snapshot(lead, snap)
+            return _wrap(
+                [
+                    {
+                        "text": "As parcelas estão em dia?",
+                        "options": [
+                            {"name": "Sim", "next": int(STEP_QUITCON_DOCS), "save": "1", "id": "parcelas_yes"},
+                            {"name": "Não", "next": int(STEP_QUITCON_DOCS), "save": "0", "id": "parcelas_no"},
+                        ],
+                    }
+                ],
+                lead_id=lead.id,
+            )
+        snap["parcelas_em_dia"] = oid == "parcelas_yes" or data.get("option_save") == "1"
+        _save_lead_snapshot(lead, snap)
+        return _wrap(
+            [
+                {
+                    "text": "A documentação da cota está completa (extrato, contrato, docs pessoais)?",
+                    "options": [
+                        {"name": "Sim", "next": int(STEP_QUITCON_EVAL), "save": "1", "id": "docs_yes"},
+                        {"name": "Não", "next": int(STEP_QUITCON_EVAL), "save": "0", "id": "docs_no"},
+                    ],
+                }
+            ],
+            lead_id=lead.id,
+        )
+
+    if step == STEP_QUITCON_DOCS:
+        if not lead:
+            raise HTTPException(422, "Sessão do chat expirada. Recomece pelo início.")
+        snap = _lead_snapshot(lead)
+        oid = str(data.get("option_id") or "")
+        if oid in {"parcelas_yes", "parcelas_no"}:
+            snap["parcelas_em_dia"] = oid == "parcelas_yes"
+            _save_lead_snapshot(lead, snap)
+            return _wrap(
+                [
+                    {
+                        "text": "A documentação da cota está completa (extrato, contrato, docs pessoais)?",
+                        "options": [
+                            {"name": "Sim", "next": int(STEP_QUITCON_EVAL), "save": "1", "id": "docs_yes"},
+                            {"name": "Não", "next": int(STEP_QUITCON_EVAL), "save": "0", "id": "docs_no"},
+                        ],
+                    }
+                ],
+                lead_id=lead.id,
+            )
+        snap["docs_complete"] = oid == "docs_yes" or data.get("option_save") == "1"
+        _save_lead_snapshot(lead, snap)
+        data = {**data, "option_id": "docs_yes" if snap["docs_complete"] else "docs_no"}
+        step = STEP_QUITCON_EVAL
+
+    if step == STEP_QUITCON_EVAL:
+        if not lead:
+            raise HTTPException(422, "Sessão do chat expirada. Recomece pelo início.")
+        snap = _lead_snapshot(lead)
+        oid = str(data.get("option_id") or "")
+        if oid in {"docs_yes", "docs_no"}:
+            snap["docs_complete"] = oid == "docs_yes"
+            _save_lead_snapshot(lead, snap)
+        payload = {
+            "outstanding_balance": snap.get("outstanding_balance") or "0",
+            "meses_restantes": int(snap.get("meses_restantes") or 48),
+            "registry_office": snap.get("registry_office") or "",
+            "registry_number": snap.get("registry_number") or "",
+            "contemplada": bool(snap.get("contemplada")),
+            "bem_faturado": bool(snap.get("bem_faturado")),
+            "parcelas_em_dia": bool(snap.get("parcelas_em_dia")),
+            "docs_complete": bool(snap.get("docs_complete")),
+            "operational_service": False,
+        }
+        result = evaluate_quitcon_desk(payload)
+        snap["quitcon_evaluation"] = result
+        _save_lead_snapshot(lead, snap)
+        db.flush()
+        custos = result.get("custos_entrada") if isinstance(result.get("custos_entrada"), dict) else {}
+        quitcon_card = {
+            "viavel": bool(result.get("viable")),
+            "vp_fmt": _brl(result.get("valor_presente_quitacao") or 0),
+            "saldo_fmt": _brl(snap.get("outstanding_balance") or 0),
+            "meses_fmt": f"{int(snap.get('meses_restantes') or 0)} meses",
+            "admin_fmt": str(snap.get("registry_office") or "—"),
+            "entrada_fmt": _brl(custos.get("total_obrigatorio_abertura") or 0) if custos else "—",
+            "motivos": list(result.get("motivos") or []),
+        }
+        item: dict[str, Any] = {
+            "text": result.get("message") or ("Operação viável" if result.get("viable") else "Operação não viável"),
+            "quitcon_result": quitcon_card,
+        }
+        if result.get("viable"):
+            item["next"] = int(STEP_QUITCON_CONFIRM)
+            item["button"] = "Continuar"
+        else:
+            item["options"] = [
+                {"name": "Mudar categoria", "next": int(STEP_CATEGORY)},
+                {"name": "Recomeçar", "next": 0},
+            ]
+        return _wrap([item], lead_id=lead.id)
+
+    if step == STEP_QUITCON_CONFIRM:
+        if not lead:
+            raise HTTPException(422, "Sessão do chat expirada. Recomece pelo início.")
+        snap = _lead_snapshot(lead)
+        if snap.get("quitcon_solicitation_id"):
+            return _wrap(
+                [
+                    {
+                        "text": (
+                            "Sua solicitação QuitCon já está na mesa. "
+                            "Nossa equipe pede a documentação e segue a análise."
+                        ),
+                        "options": [
+                            {"name": "Falar no WhatsApp", "link": f"https://wa.me/55{_digits(settings.company_phone)}"},
+                            {"name": "Nova simulação", "next": 0},
+                        ],
+                    }
+                ],
+                lead_id=lead.id,
+            )
+        evaluation = snap.get("quitcon_evaluation") or {}
+        if not evaluation.get("viable"):
+            return _wrap(
+                [
+                    {
+                        "text": "A operação QuitCon não está viável com os dados atuais. Ajuste a cota ou a categoria.",
+                        "options": [
+                            {"name": "Mudar categoria", "next": int(STEP_CATEGORY)},
+                            {"name": "Recomeçar", "next": 0},
+                        ],
+                    }
+                ],
+                lead_id=lead.id,
+            )
+        store_payload = {
+            "outstanding_balance": snap.get("outstanding_balance") or "0",
+            "meses_restantes": int(snap.get("meses_restantes") or 48),
+            "registry_office": snap.get("registry_office") or "",
+            "registry_number": snap.get("registry_number") or "",
+            "contemplada": bool(snap.get("contemplada")),
+            "bem_faturado": bool(snap.get("bem_faturado")),
+            "parcelas_em_dia": bool(snap.get("parcelas_em_dia")),
+            "docs_complete": bool(snap.get("docs_complete")),
+            "operational_service": False,
+            "contact_name": lead.name or snap.get("name") or "Visitante",
+            "contact_email": snap.get("email") or "site@letter.app.br",
+            "contact_phone": lead.phone or snap.get("phone") or "",
+            "person_type": "PF",
+        }
+        try:
+            solicitation = store_quitcon_solicitation(db, actor, store_payload)
+        except HTTPException as exc:
+            detail = exc.detail
+            message = detail.get("message") if isinstance(detail, dict) else str(detail)
+            motivos = detail.get("motivos") if isinstance(detail, dict) else []
+            return _wrap(
+                [
+                    {
+                        "text": message or "Não foi possível registrar a solicitação QuitCon.",
+                        "quitcon_result": {
+                            "viavel": False,
+                            "vp_fmt": "R$ 0,00",
+                            "saldo_fmt": "R$ 0,00",
+                            "meses_fmt": "—",
+                            "admin_fmt": "—",
+                            "entrada_fmt": "—",
+                            "motivos": motivos or [message],
+                        },
+                        "options": [
+                            {"name": "Mudar categoria", "next": int(STEP_CATEGORY)},
+                            {"name": "Recomeçar", "next": 0},
+                        ],
+                    }
+                ],
+                lead_id=lead.id,
+            )
+        snap["quitcon_solicitation_id"] = solicitation.id
+        lead.product_interest = "QUITCON"
+        lead.status = "QUALIFIED"
+        try:
+            detail = json.loads(solicitation.evaluation_json or "{}")
+            if isinstance(detail, dict):
+                detail["channel"] = SOURCE
+                detail["lead_id"] = lead.id
+                solicitation.evaluation_json = json.dumps(detail, ensure_ascii=False)
+        except json.JSONDecodeError:
+            pass
+        _save_lead_snapshot(lead, snap)
+        db.flush()
+        return _wrap(
+            [
+                {
+                    "text": (
+                        "Perfeito! Registrei sua solicitação QuitCon na mesa "
+                        f"(VP {_brl(solicitation.quitacao_vp_amount)} — {solicitation.registry_office}). "
                         "Envie a documentação quando a equipe entrar em contato."
                     ),
                     "options": [

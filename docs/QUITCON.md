@@ -46,7 +46,7 @@ A API e o simulador expõem o bloco `custos_entrada` com TAPAF, taxa 2% (quando 
 
 ## Jornada (4 fases)
 
-1. **Simulação e envio** — Super App, site ou SDC integrado
+1. **Simulação e envio** — Super App, site (chat nativo `10060–10069` → mesa), simulador `/simulador/quitcon` ou SDC integrado
 2. **Análise e entradas** — TAPAF + taxa serviço 2% (se contratada) + taxa sucesso 10% em Escrow
 3. **Administradora** — SLA médio **45 dias**
 4. **Desbloqueio** — cedente paga **VP + 3%** em Escrow (48h úteis pós-aprovação) + liberação final **VP − 5%** ao cessionário
@@ -55,6 +55,7 @@ A API e o simulador expõem o bloco `custos_entrada` com TAPAF, taxa 2% (quando 
 
 | Método | Rota |
 |--------|------|
+| POST | `/public/site/chat/home/{10060–10069}` — chat nativo → mesa QuitCon |
 | POST | `/public/quitcon/simulate` — simulador site (sem login) |
 | POST | `/finops/quitcon/simulate` — simulador autenticado doc253 |
 | POST | `/finops/quitcon/operacoes` — abrir esteira |

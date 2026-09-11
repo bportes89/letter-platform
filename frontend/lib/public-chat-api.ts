@@ -47,6 +47,16 @@ export type FlashResult = {
   motivos?: string[];
 };
 
+export type QuitconResult = {
+  vp_fmt: string;
+  saldo_fmt: string;
+  meses_fmt: string;
+  admin_fmt: string;
+  entrada_fmt: string;
+  viavel: boolean;
+  motivos?: string[];
+};
+
 export type ChatItem = {
   text?: string;
   button?: string;
@@ -67,6 +77,7 @@ export type ChatItem = {
   quotas?: ChatOption[];
   sdc_result?: SdcResult;
   flash_result?: FlashResult;
+  quitcon_result?: QuitconResult;
   faq?: boolean;
   items?: ChatOption[];
   contract?: boolean;
