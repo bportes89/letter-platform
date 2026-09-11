@@ -2197,6 +2197,8 @@ class QuotaSupplierCreate(BaseModel):
     scrape_config_json: str | None = None
     scrape_table_id: str | None = Field(default=None, max_length=120)
     scrape_category: str | None = Field(default=None, max_length=20)
+    scrape_layout: str | None = Field(default=None, max_length=40)
+    scrape_tls_ca: str | None = Field(default=None, max_length=80)
 
 
 class QuotaSupplierUpdate(BaseModel):
@@ -2221,6 +2223,8 @@ class QuotaSupplierUpdate(BaseModel):
     scrape_config_json: str | None = None
     scrape_table_id: str | None = Field(default=None, max_length=120)
     scrape_category: str | None = Field(default=None, max_length=20)
+    scrape_layout: str | None = Field(default=None, max_length=40)
+    scrape_tls_ca: str | None = Field(default=None, max_length=80)
 
 
 class QuotaSupplierView(BaseModel):

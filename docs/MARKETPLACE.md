@@ -254,4 +254,4 @@ Comportamento:
 - Someu do JSON → `INACTIVE` (não mexe em `RESERVED` / `SOLD`)
 - Lista vazia ou GET com falha → **não** zera o estoque daquele fornecedor
 - Markup **não** é somado no sync (Esteira 2 aplica no match)
-- `SCRAPE` (HTML TablePress — Uni/Lume): `api_url` da página + `scrape_config` com `table_id` (ex. `tablepress-tab-imoveis`) e `category` (`REAL_ESTATE` / `VEHICLE`). Layouts `contempladosp` / `cartascontempladas` ficam para fase 2.
+- `SCRAPE` (HTML): `api_url` da página + `scrape_config` com `layout` (`tablepress` | `contempladosp` | `cartascontempladas`), `table_id` (ex. `tablepress-tab-imoveis`, `tbCotasGerais`, `listaCotas`), `category` (`REAL_ESTATE` / `VEHICLE`) e opcional `ca` (`lets-encrypt-root-yr.pem` para Contemplado SP — cadeia TLS incompleta). Regra de disponibilidade: coluna status vazia (TablePress) ou checkbox habilitado (Contemplado SP / Cartas). Chave externa inclui entrada nos layouts novos.

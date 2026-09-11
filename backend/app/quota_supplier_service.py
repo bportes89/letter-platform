@@ -170,9 +170,14 @@ def _scrape_config_payload(data: dict, *, sync_mode: str) -> str:
     if sync_mode == "SCRAPE":
         table_id = str(data.get("scrape_table_id") or "").strip()
         category = str(data.get("scrape_category") or "REAL_ESTATE").strip().upper()
+        layout = str(data.get("scrape_layout") or "tablepress").strip().lower()
+        ca = str(data.get("scrape_tls_ca") or "").strip() or None
         import json
 
-        return json.dumps({"layout": "tablepress", "table_id": table_id, "category": category}, ensure_ascii=False)
+        payload: dict[str, str] = {"layout": layout, "table_id": table_id, "category": category}
+        if ca:
+            payload["ca"] = ca
+        return json.dumps(payload, ensure_ascii=False)
     return "{}"
 
 
@@ -227,9 +232,25 @@ def update_supplier(db: Session, user: User, supplier_id: str, data: dict) -> Qu
         item.sync_mode = sync_mode
     if "api_url" in data:
         item.api_url = (str(data["api_url"]).strip() if data["api_url"] else None) or None
-    if any(key in data for key in ("scrape_config_json", "scrape_table_id", "scrape_category", "sync_mode")):
+    if any(
+        key in data
+        for key in (
+            "scrape_config_json",
+            "scrape_table_id",
+            "scrape_category",
+            "scrape_layout",
+            "scrape_tls_ca",
+            "sync_mode",
+        )
+    ):
         item.scrape_config_json = _scrape_config_payload(
-            {**data, "scrape_table_id": data.get("scrape_table_id"), "scrape_category": data.get("scrape_category")},
+            {
+                **data,
+                "scrape_table_id": data.get("scrape_table_id"),
+                "scrape_category": data.get("scrape_category"),
+                "scrape_layout": data.get("scrape_layout"),
+                "scrape_tls_ca": data.get("scrape_tls_ca"),
+            },
             sync_mode=item.sync_mode or "NONE",
         )
     final_mode = item.sync_mode or "NONE"

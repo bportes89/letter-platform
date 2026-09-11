@@ -41,6 +41,14 @@ type SupplierWithdrawal = {
   supplier_source_key: string | null;
 };
 
+function parseScrapeConfig(raw?: string | null) {
+  try {
+    return JSON.parse(raw || "{}") as { layout?: string; table_id?: string; category?: string; ca?: string };
+  } catch {
+    return {};
+  }
+}
+
 type SyncResult = {
   status?: string;
   created?: number;
@@ -191,6 +199,8 @@ export function FornecedoresModule() {
       api_url: String(fd.get("api_url") || "") || null,
       scrape_table_id: String(fd.get("scrape_table_id") || "") || null,
       scrape_category: String(fd.get("scrape_category") || "REAL_ESTATE") || null,
+      scrape_layout: String(fd.get("scrape_layout") || "tablepress") || null,
+      scrape_tls_ca: String(fd.get("scrape_tls_ca") || "") || null,
     };
     try {
       if (editing) {
@@ -332,49 +342,41 @@ export function FornecedoresModule() {
               <select name="sync_mode" defaultValue={editing?.sync_mode || "NONE"}>
                 <option value="NONE">Manual</option>
                 <option value="JSON">API JSON</option>
-                <option value="SCRAPE">Scrape HTML (TablePress)</option>
+                <option value="SCRAPE">Scrape HTML</option>
               </select>
             </label>
             <label className="marketplace-field marketplace-field-wide">
               API URL / página HTML
               <input name="api_url" placeholder="https://..." defaultValue={editing?.api_url || ""} />
             </label>
+            <label className="marketplace-field marketplace-field-compact">
+              Layout (SCRAPE)
+              <select name="scrape_layout" defaultValue={parseScrapeConfig(editing?.scrape_config_json).layout || "tablepress"}>
+                <option value="tablepress">TablePress (Uni/Lume)</option>
+                <option value="contempladosp">Contemplado SP</option>
+                <option value="cartascontempladas">Cartas Contempladas</option>
+              </select>
+            </label>
             <label className="marketplace-field marketplace-field-wide">
               Table ID (SCRAPE)
               <input
                 name="scrape_table_id"
-                placeholder="tablepress-tab-imoveis"
-                defaultValue={
-                  editing?.scrape_config_json
-                    ? (() => {
-                        try {
-                          return JSON.parse(editing.scrape_config_json).table_id || "";
-                        } catch {
-                          return "";
-                        }
-                      })()
-                    : ""
-                }
+                placeholder="tablepress-tab-imoveis · tbCotasGerais · listaCotas"
+                defaultValue={parseScrapeConfig(editing?.scrape_config_json).table_id || ""}
               />
             </label>
             <label className="marketplace-field marketplace-field-compact">
               Categoria (SCRAPE)
-              <select
-                name="scrape_category"
-                defaultValue={
-                  editing?.scrape_config_json
-                    ? (() => {
-                        try {
-                          return JSON.parse(editing.scrape_config_json).category || "REAL_ESTATE";
-                        } catch {
-                          return "REAL_ESTATE";
-                        }
-                      })()
-                    : "REAL_ESTATE"
-                }
-              >
+              <select name="scrape_category" defaultValue={parseScrapeConfig(editing?.scrape_config_json).category || "REAL_ESTATE"}>
                 <option value="REAL_ESTATE">Imóvel</option>
                 <option value="VEHICLE">Veículo</option>
+              </select>
+            </label>
+            <label className="marketplace-field marketplace-field-compact">
+              CA TLS (opcional)
+              <select name="scrape_tls_ca" defaultValue={parseScrapeConfig(editing?.scrape_config_json).ca || ""}>
+                <option value="">Padrão do sistema</option>
+                <option value="lets-encrypt-root-yr.pem">Contemplado SP (Lets Encrypt YR)</option>
               </select>
             </label>
             <label className="marketplace-field">

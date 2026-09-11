@@ -5134,6 +5134,152 @@ def test_marketplace_supplier_scrape_sync_tablepress(client, auth_headers, monke
     assert sync2.json()["created"] == 1
 
 
+def test_marketplace_supplier_scrape_sync_contempladosp(client, auth_headers, monkeypatch):
+    """SCRAPE contempladosp: checkbox habilitado + chave com entrada."""
+    html_page = """
+    <table id="tbCotasGerais"><tbody>
+      <tr>
+        <td><input type="checkbox" disabled /></td>
+        <td>R$ 200.000,00</td><td>R$ 30.000,00</td><td>48 X 2.200,00</td>
+        <td>Embracon</td><td>Disponivel</td>
+      </tr>
+      <tr>
+        <td><input type="checkbox" /></td>
+        <td>R$ 200.000,00</td><td>R$ 14.900,00</td><td>27 X 1.800,00</td>
+        <td>Embracon</td><td>Disponivel</td>
+      </tr>
+      <tr>
+        <td><input type="checkbox" /></td>
+        <td>R$ 200.000,00</td><td>R$ 15.200,00</td><td>27 X 1.800,00</td>
+        <td>Embracon</td><td>Disponivel</td>
+      </tr>
+    </tbody></table>
+    """
+
+    class FakeResponse:
+        status_code = 200
+        text = html_page
+
+        def raise_for_status(self):
+            return None
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def get(self, url):
+            assert "contempladosp.test" in url
+            return FakeResponse()
+
+    monkeypatch.setattr("app.quota_scrape_service.httpx.Client", FakeClient)
+
+    created = client.post(
+        "/api/v1/marketplace/suppliers",
+        headers=auth_headers,
+        json={
+            "name": "Contemplado SP Demo",
+            "source_key": "SCRAPE_CSP",
+            "document": "88776655000155",
+            "markup_percent": "10",
+            "sync_mode": "SCRAPE",
+            "api_url": "https://contempladosp.test/imoveis",
+            "scrape_layout": "contempladosp",
+            "scrape_table_id": "tbCotasGerais",
+            "scrape_category": "REAL_ESTATE",
+            "scrape_tls_ca": "lets-encrypt-root-yr.pem",
+        },
+    )
+    assert created.status_code == 201, created.text
+    supplier_id = created.json()["id"]
+
+    sync1 = client.post(f"/api/v1/marketplace/suppliers/{supplier_id}/sync", headers=auth_headers)
+    assert sync1.status_code == 200, sync1.text
+    assert sync1.json()["created"] == 2
+
+    quotas = client.get("/api/v1/quotas", headers=auth_headers).json()
+    synced = [q for q in quotas if q.get("supplier_source") == "SCRAPE_CSP"]
+    assert len(synced) == 2
+    entradas = {q.get("premium_value") for q in synced}
+    assert len(entradas) == 2
+    assert any("14900" in str(v) for v in entradas)
+    assert any("15200" in str(v) for v in entradas)
+
+
+def test_marketplace_supplier_scrape_sync_cartascontempladas(client, auth_headers, monkeypatch):
+    """SCRAPE cartascontempladas: tbody id + colunas qtd/valor + sem checkbox."""
+    html_page = """
+    <table><tbody id="listaCotas">
+      <tr>
+        <td></td><td></td><td></td>
+        <td>HS Consorcios</td><td>R$ 180.000,00</td><td>R$ 22.000,00</td>
+        <td>142</td><td>355,00</td><td>20/11/2026</td>
+      </tr>
+      <tr>
+        <td><input type="checkbox" /></td><td></td><td></td>
+        <td>Embracon</td><td>R$ 250.000,00</td><td>R$ 35.000,00</td>
+        <td>48</td><td>2.100,00</td><td></td>
+      </tr>
+    </tbody></table>
+    """
+
+    class FakeResponse:
+        status_code = 200
+        text = html_page
+
+        def raise_for_status(self):
+            return None
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def get(self, url):
+            assert "cartas.test" in url
+            return FakeResponse()
+
+    monkeypatch.setattr("app.quota_scrape_service.httpx.Client", FakeClient)
+
+    created = client.post(
+        "/api/v1/marketplace/suppliers",
+        headers=auth_headers,
+        json={
+            "name": "Cartas Demo",
+            "source_key": "SCRAPE_CC",
+            "document": "88776655000166",
+            "markup_percent": "10",
+            "sync_mode": "SCRAPE",
+            "api_url": "https://cartas.test/imoveis",
+            "scrape_layout": "cartascontempladas",
+            "scrape_table_id": "listaCotas",
+            "scrape_category": "REAL_ESTATE",
+        },
+    )
+    assert created.status_code == 201, created.text
+    supplier_id = created.json()["id"]
+
+    sync1 = client.post(f"/api/v1/marketplace/suppliers/{supplier_id}/sync", headers=auth_headers)
+    assert sync1.status_code == 200, sync1.text
+    assert sync1.json()["created"] == 1
+
+    quotas = client.get("/api/v1/quotas", headers=auth_headers).json()
+    synced = [q for q in quotas if q.get("supplier_source") == "SCRAPE_CC"]
+    assert len(synced) == 1
+    assert synced[0]["credit_value"] in {"250000.00", "250000.0"}
+    assert synced[0]["installment_due_date"] is None
+
+
 def test_marketplace_quota_sync_cron(client, auth_headers):
     cron = client.post("/api/v1/system/cron/marketplace-quota-sync")
     assert cron.status_code == 200, cron.text
