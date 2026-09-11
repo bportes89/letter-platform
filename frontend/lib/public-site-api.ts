@@ -101,6 +101,41 @@ export async function fetchPublicReferral(referralCode: string): Promise<PublicR
   return publicFetch<PublicReferralPreview>(`/public/site/referral/${encodeURIComponent(referralCode)}`);
 }
 
+export type PublicSupplierAuthResponse = {
+  supplier_id: string;
+  source_key: string;
+  portal_token: string;
+  portal_url: string;
+  name: string;
+  email: string;
+};
+
+export async function registerPublicSupplier(payload: {
+  person_type: "PF" | "PJ";
+  name: string;
+  trade_name?: string;
+  document: string;
+  email: string;
+  phone: string;
+  password: string;
+  terms_accepted: boolean;
+}): Promise<PublicSupplierAuthResponse> {
+  return publicFetch<PublicSupplierAuthResponse>("/public/site/auth/register-supplier", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function loginPublicSupplier(payload: {
+  email: string;
+  password: string;
+}): Promise<PublicSupplierAuthResponse> {
+  return publicFetch<PublicSupplierAuthResponse>("/public/site/auth/login-supplier", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function registerPublicClient(payload: {
   name: string;
   email: string;

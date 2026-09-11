@@ -1,8 +1,10 @@
 "use client";
 
+import Link from "next/link";
 import { CheckCircle2, RefreshCw, Truck } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { API_URL } from "@/lib/api";
+import { loginPublicSupplier } from "@/lib/public-site-api";
 
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
@@ -70,6 +72,9 @@ export default function PortalFornecedorPage() {
   }, []);
   const [token, setToken] = useState(initialToken);
   const [tokenInput, setTokenInput] = useState(initialToken);
+  const [loginMode, setLoginMode] = useState<"password" | "token">("password");
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
   const [me, setMe] = useState<Me | null>(null);
   const [rows, setRows] = useState<Transfer[]>([]);
   const [ledger, setLedger] = useState<LedgerRow[]>([]);
@@ -148,22 +153,77 @@ export default function PortalFornecedorPage() {
 
       {!me ? (
         <section style={{ borderTop: "1px solid #ccc", paddingTop: "1rem" }}>
-          <p>Cole o token gerado no admin (Fornecedores) para ver vendas, saldo e saques.</p>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              setToken(tokenInput.trim());
-            }}
-            style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}
-          >
-            <input
-              value={tokenInput}
-              onChange={(e) => setTokenInput(e.target.value)}
-              placeholder="SUP-…"
-              style={{ flex: 1, minWidth: 240, padding: "0.6rem" }}
-            />
-            <button type="submit">Entrar</button>
-          </form>
+          <div style={{ display: "flex", gap: "0.75rem", marginBottom: "1rem" }}>
+            <button type="button" onClick={() => setLoginMode("password")} disabled={loginMode === "password"}>
+              E-mail e senha
+            </button>
+            <button type="button" onClick={() => setLoginMode("token")} disabled={loginMode === "token"}>
+              Token do admin
+            </button>
+          </div>
+
+          {loginMode === "password" ? (
+            <>
+              <p>Entre com o e-mail e a senha cadastrados no auto-cadastro de fornecedor.</p>
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  setBusy(true);
+                  setError("");
+                  loginPublicSupplier({ email: loginEmail.trim(), password: loginPassword })
+                    .then((result) => {
+                      localStorage.setItem("supplier_portal_token", result.portal_token);
+                      setToken(result.portal_token);
+                      setTokenInput(result.portal_token);
+                    })
+                    .catch((err) => setError(err instanceof Error ? err.message : "Falha ao entrar"))
+                    .finally(() => setBusy(false));
+                }}
+                style={{ display: "grid", gap: "0.75rem", maxWidth: 420 }}
+              >
+                <input
+                  value={loginEmail}
+                  onChange={(e) => setLoginEmail(e.target.value)}
+                  type="email"
+                  placeholder="E-mail"
+                  required
+                  style={{ padding: "0.6rem" }}
+                />
+                <input
+                  value={loginPassword}
+                  onChange={(e) => setLoginPassword(e.target.value)}
+                  type="password"
+                  placeholder="Senha"
+                  required
+                  minLength={8}
+                  style={{ padding: "0.6rem" }}
+                />
+                <button type="submit" disabled={busy}>Entrar</button>
+              </form>
+              <p style={{ marginTop: "1rem" }}>
+                <Link href="/cadastro-fornecedor">Criar conta de fornecedor →</Link>
+              </p>
+            </>
+          ) : (
+            <>
+              <p>Cole o token gerado no admin (Fornecedores) para ver vendas, saldo e saques.</p>
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  setToken(tokenInput.trim());
+                }}
+                style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}
+              >
+                <input
+                  value={tokenInput}
+                  onChange={(e) => setTokenInput(e.target.value)}
+                  placeholder="SUP-…"
+                  style={{ flex: 1, minWidth: 240, padding: "0.6rem" }}
+                />
+                <button type="submit">Entrar</button>
+              </form>
+            </>
+          )}
         </section>
       ) : (
         <section>

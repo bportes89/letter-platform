@@ -2966,6 +2966,31 @@ class PublicClientRegisterResponse(BaseModel):
     chat_lead_id: str | None = None
 
 
+class PublicSupplierRegisterRequest(BaseModel):
+    person_type: str = Field(min_length=2, max_length=2)
+    name: str = Field(min_length=2, max_length=180)
+    trade_name: str | None = Field(default=None, max_length=180)
+    document: str = Field(min_length=11, max_length=20)
+    email: EmailStr
+    phone: str = Field(min_length=8, max_length=30)
+    password: str = Field(min_length=8, max_length=128)
+    terms_accepted: bool = False
+
+
+class PublicSupplierLoginRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=8, max_length=128)
+
+
+class PublicSupplierAuthResponse(BaseModel):
+    supplier_id: str
+    source_key: str
+    portal_token: str
+    portal_url: str
+    name: str
+    email: EmailStr
+
+
 class MarketplaceBindChatLeadRequest(BaseModel):
     chat_lead_id: str | None = Field(default=None, max_length=36)
 

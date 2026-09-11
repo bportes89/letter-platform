@@ -73,6 +73,7 @@ from app.schemas import (
     QuitConOperationalServiceWebhook,
     PublicFlashPoolRequest, PublicLeadCaptureRequest, PublicQuotaCatalogItem, PublicSdcSimulateRequest,
     PublicClientRegisterRequest, PublicClientRegisterResponse, PublicReferralPreview,
+    PublicSupplierRegisterRequest, PublicSupplierLoginRequest, PublicSupplierAuthResponse,
     QuitConAdminRejectionRequest,
     QuitConSimulateRequest,
     SdcQuitConIntegrationView, SdcQuitConProjectionRequest,
@@ -2680,6 +2681,42 @@ def public_site_client_register(payload: PublicClientRegisterRequest, request: R
     db.commit()
     user = result.pop("user")
     return PublicClientRegisterResponse.model_validate({**result, "user": user})
+
+
+@router.post("/public/site/auth/register-supplier", response_model=PublicSupplierAuthResponse, status_code=201)
+def public_site_supplier_register(payload: PublicSupplierRegisterRequest, request: Request, db: Session = Depends(get_db)):
+    ip = request.client.host if request.client else "unknown"
+    allowed, retry = rate_limiter.allow(f"public-supplier-register:{ip}", settings.public_rate_limit_per_minute)
+    if not allowed:
+        raise HTTPException(429, "Limite de cadastro atingido", headers={"Retry-After": str(retry)})
+    from app.supplier_registration_service import register_public_supplier
+
+    result = register_public_supplier(
+        db,
+        person_type=payload.person_type,
+        name=payload.name,
+        trade_name=payload.trade_name,
+        document=payload.document,
+        email=str(payload.email),
+        phone=payload.phone,
+        password=payload.password,
+        terms_accepted=payload.terms_accepted,
+    )
+    db.commit()
+    return PublicSupplierAuthResponse.model_validate(result)
+
+
+@router.post("/public/site/auth/login-supplier", response_model=PublicSupplierAuthResponse)
+def public_site_supplier_login(payload: PublicSupplierLoginRequest, request: Request, db: Session = Depends(get_db)):
+    ip = request.client.host if request.client else "unknown"
+    allowed, retry = rate_limiter.allow(f"public-supplier-login:{ip}", settings.public_rate_limit_per_minute)
+    if not allowed:
+        raise HTTPException(429, "Limite de tentativas atingido", headers={"Retry-After": str(retry)})
+    from app.supplier_registration_service import login_supplier_portal
+
+    result = login_supplier_portal(db, email=str(payload.email), password=payload.password)
+    db.commit()
+    return PublicSupplierAuthResponse.model_validate(result)
 
 
 @router.get("/public/site/quotas", response_model=list[PublicQuotaCatalogItem])

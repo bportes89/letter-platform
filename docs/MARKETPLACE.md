@@ -158,6 +158,17 @@ Fecha o gate de `CONCLUIDO` sem depender só do admin:
 
 Match: `normalize_supplier_key(quota.supplier_source)` = `QuotaSupplier.source_key`. UI: `/portal-fornecedor`.
 
+## Auto-cadastro de fornecedor
+
+Fornecedor pode se cadastrar sem passar pelo admin (conta **ativa imediata**):
+
+- `POST /api/v1/public/site/auth/register-supplier` — cria `QuotaSupplier` com `password_hash`, emite token `SUP-…` e retorna `portal_url`
+- `POST /api/v1/public/site/auth/login-supplier` — e-mail + senha → novo token de portal
+- UI: `/cadastro-fornecedor` · login no portal (`/portal-fornecedor`) por e-mail/senha ou token legado do admin
+- `source_key` gerado automaticamente a partir do nome (único na organização); markup padrão 3%
+
+Admin continua podendo criar fornecedor e emitir token manual (`POST .../portal-token`) para quem não usa auto-cadastro.
+
 ## Boleto Inter (entrada)
 
 Emissão da cobrança de entrada (boleto + PIX no Inter) e webhook **Pagou**:

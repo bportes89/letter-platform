@@ -273,6 +273,7 @@ class QuotaSupplier(TimestampMixin, Base):
     last_sync_detail_json: Mapped[str] = mapped_column(Text, default="{}")
     portal_token_hash: Mapped[str | None] = mapped_column(String(64), index=True)
     portal_token_created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    password_hash: Mapped[str | None] = mapped_column(String(255))
     balance_available: Mapped[float] = mapped_column(Numeric(15, 2), default=0)
 
 

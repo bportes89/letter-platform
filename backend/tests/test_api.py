@@ -901,6 +901,64 @@ def test_marketplace_inter_boleto_mock_and_webhook_pago(client, auth_headers, mo
     assert wrong_amount.status_code == 200
 
 
+def test_public_supplier_self_register_and_portal_login(client):
+    """Auto-cadastro público de fornecedor + login e-mail/senha no portal."""
+    created = client.post(
+        "/api/v1/public/site/auth/register-supplier",
+        json={
+            "person_type": "PJ",
+            "name": "Cotas Auto Cadastro LTDA",
+            "trade_name": "Auto Cotas",
+            "document": "11222333000181",
+            "email": "fornecedor.auto@example.com",
+            "phone": "32999887766",
+            "password": "Senha1234",
+            "terms_accepted": True,
+        },
+    )
+    assert created.status_code == 201, created.text
+    body = created.json()
+    assert body["portal_token"].startswith("SUP-")
+    assert body["source_key"]
+    portal_headers = {"Authorization": f"Bearer {body['portal_token']}"}
+    me = client.get("/api/v1/supplier-portal/me", headers=portal_headers)
+    assert me.status_code == 200
+    assert me.json()["email"] == "fornecedor.auto@example.com"
+
+    logged = client.post(
+        "/api/v1/public/site/auth/login-supplier",
+        json={"email": "fornecedor.auto@example.com", "password": "Senha1234"},
+    )
+    assert logged.status_code == 200, logged.text
+    assert logged.json()["portal_token"].startswith("SUP-")
+    me2 = client.get(
+        "/api/v1/supplier-portal/me",
+        headers={"Authorization": f"Bearer {logged.json()['portal_token']}"},
+    )
+    assert me2.status_code == 200
+    assert me2.json()["id"] == body["supplier_id"]
+
+    duplicate = client.post(
+        "/api/v1/public/site/auth/register-supplier",
+        json={
+            "person_type": "PJ",
+            "name": "Outra Empresa",
+            "document": "11222333000181",
+            "email": "fornecedor.auto@example.com",
+            "phone": "32999887766",
+            "password": "Senha1234",
+            "terms_accepted": True,
+        },
+    )
+    assert duplicate.status_code == 409
+
+    bad_login = client.post(
+        "/api/v1/public/site/auth/login-supplier",
+        json={"email": "fornecedor.auto@example.com", "password": "SenhaErrada1"},
+    )
+    assert bad_login.status_code == 401
+
+
 def test_supplier_portal_confirm_unlocks_conclude(client, auth_headers):
     """Token do fornecedor confirma transferência; admin conclui sem force."""
     seeded = client.post("/api/v1/marketplace/suppliers/ensure-defaults", headers=auth_headers)
