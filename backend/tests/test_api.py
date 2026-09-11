@@ -3839,6 +3839,11 @@ def test_public_site_chat_native_marketplace_flow(client, auth_headers):
     assert accept.status_code == 200, accept.text
     assert accept.json()["OBJ"]["chat_next"][0].get("next") == 10016
 
+    contract_pdf = client.get(f"/api/v1/marketplace/cadastros/{lead_id}/contrato.pdf", headers=auth_headers)
+    assert contract_pdf.status_code == 200, contract_pdf.text
+    assert contract_pdf.headers.get("content-type", "").startswith("application/pdf")
+    assert contract_pdf.content[:4] == b"%PDF"
+
     account = client.post("/api/v1/public/site/chat/home/10016", json={"lead_id": lead_id})
     assert account.status_code == 200, account.text
     account_item = account.json()["OBJ"]["chat_next"][0]
@@ -3956,6 +3961,25 @@ def test_marketplace_client_office_bind_boleto_finalize(client, auth_headers):
     assert boleto.status_code == 200, boleto.text
     assert boleto.json()["boleto"].get("download_token")
 
+    # Sem aceite de contrato no atalho deste teste → 404/409
+    no_contract = client.get(f"/api/v1/marketplace/me/compras/{lead_id}/contrato.pdf", headers=client_headers)
+    assert no_contract.status_code in {404, 409}
+
+    uploaded = client.post(
+        f"/api/v1/marketplace/me/compras/{lead_id}/documents",
+        headers=client_headers,
+        data={"kind": "IDENTITY"},
+        files={"file": ("rg.pdf", b"%PDF-1.4\n% identity\n", "application/pdf")},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    doc_id = uploaded.json()["id"]
+    dl = client.get(f"/api/v1/marketplace/me/compras/{lead_id}/documents/{doc_id}", headers=client_headers)
+    assert dl.status_code == 200
+    assert dl.content.startswith(b"%PDF")
+    admin_list = client.get(f"/api/v1/marketplace/cadastros/{lead_id}/documents", headers=auth_headers)
+    assert admin_list.status_code == 200
+    assert any(d["id"] == doc_id for d in admin_list.json())
+
     # Cliente não usa PATCH admin
     blocked_patch = client.patch(
         f"/api/v1/marketplace/cadastros/{lead_id}",
@@ -3979,7 +4003,7 @@ def test_marketplace_client_office_bind_boleto_finalize(client, auth_headers):
 
     docs = client.get(f"/api/v1/marketplace/me/compras/{lead_id}/documents", headers=client_headers)
     assert docs.status_code == 200
-    assert docs.json() == []
+    assert any(d["id"] == doc_id for d in docs.json())
 
 
 def test_marketplace_chat_faq_admin_crud_reflects_in_chat(client, auth_headers):

@@ -2470,6 +2470,8 @@ class CadastroDetailView(CadastroListItem):
     can_conclude: bool = False
     commission_release: dict | None = None
     boleto: dict | None = None
+    has_site_contract: bool = False
+    contract_ack: dict | None = None
 
 
 class MarketplaceBoletoIssueResponse(BaseModel):

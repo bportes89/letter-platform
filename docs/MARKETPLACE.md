@@ -210,8 +210,11 @@ Após criar conta (ou login) a partir do chat, o lead `SITE_CHAT` é vinculado (
 - Conta existente: `POST /marketplace/me/bind-chat-lead`
 - Lista/detalhe: `GET /marketplace/me/compras` · `GET /marketplace/me/compras/{lead_id}`
 - Boleto: `POST /marketplace/me/compras/{lead_id}/boleto` (PDF público com token HMAC)
+- Contrato do chat: `GET /marketplace/me/compras/{lead_id}/contrato.pdf` (auth; exige aceite `SITE_CHAT_ACK`)
 - Finalizar: `POST /marketplace/me/compras/{lead_id}/finalize` → `CONCLUIDO` (exige `PAGO` + confirmação do fornecedor; sem `force_admin`)
-- Docs: `GET/POST /marketplace/me/compras/{lead_id}/documents` (`entity_type=marketplace_lead`)
+- Docs: `GET/POST /marketplace/me/compras/{lead_id}/documents` · `GET .../documents/{id}` (`entity_type=marketplace_lead`)
+
+Admin Cadastros: `GET /marketplace/cadastros/{lead_id}/contrato.pdf` · `GET .../documents` · `GET .../documents/{id}` · detalhe inclui `has_site_contract` + `contract_ack`.
 
 UI: `/modules/minhas-compras` (nav CLIENT). PATCH admin `/marketplace/cadastros/{id}` fica **403** para `CLIENT`.
 

@@ -431,6 +431,9 @@ def get_cadastro_detail(db: Session, user: User, lead_id: str) -> dict:
         from app.inter_boleto_service import boleto_view_from_terms
 
         boleto = boleto_view_from_terms(terms, lead_id=lead.id)
+    from app.marketplace_contract_docs_service import site_contract_meta
+
+    contract_meta = site_contract_meta(terms, snap)
     return {
         **row,
         "snapshot": snap,
@@ -450,6 +453,8 @@ def get_cadastro_detail(db: Session, user: User, lead_id: str) -> dict:
         "can_conclude": bool(proposal) and bool(life.get("supplier_transfer_confirmed")),
         "commission_release": life.get("commission_release") if isinstance(life.get("commission_release"), dict) else None,
         "boleto": boleto,
+        "has_site_contract": contract_meta["has_site_contract"],
+        "contract_ack": contract_meta["contract_ack"],
     }
 
 

@@ -2172,6 +2172,42 @@ def marketplace_cadastro_boleto_download(lead_id: str, token: str, db: Session =
     )
 
 
+@router.get("/marketplace/cadastros/{lead_id}/contrato.pdf")
+def marketplace_cadastro_contract_pdf(lead_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.marketplace_contract_docs_service import marketplace_contract_pdf_bytes
+
+    content, filename = marketplace_contract_pdf_bytes(db, user, lead_id)
+    return Response(
+        content=content,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
+
+
+@router.get("/marketplace/cadastros/{lead_id}/documents", response_model=list[DocumentView])
+def marketplace_cadastro_documents(lead_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.marketplace_contract_docs_service import list_marketplace_lead_documents
+
+    return list_marketplace_lead_documents(db, user, lead_id)
+
+
+@router.get("/marketplace/cadastros/{lead_id}/documents/{document_id}")
+def marketplace_cadastro_document_download(
+    lead_id: str,
+    document_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.marketplace_contract_docs_service import read_marketplace_lead_document
+
+    content, filename, media = read_marketplace_lead_document(db, user, lead_id, document_id)
+    return Response(
+        content=content,
+        media_type=media,
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
+
+
 @router.get("/marketplace/me/compras", response_model=list[CadastroListItem])
 def marketplace_me_compras(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     from app.client_marketplace_service import list_my_compras
@@ -2239,6 +2275,39 @@ def marketplace_me_documents(lead_id: str, user: User = Depends(get_current_user
     from app.client_marketplace_service import list_my_documents
 
     return list_my_documents(db, user, lead_id)
+
+
+@router.get("/marketplace/me/compras/{lead_id}/contrato.pdf")
+def marketplace_me_contract_pdf(lead_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.marketplace_contract_docs_service import marketplace_contract_pdf_bytes
+
+    if user.role != Role.CLIENT:
+        raise HTTPException(status_code=403, detail="Somente clientes.")
+    content, filename = marketplace_contract_pdf_bytes(db, user, lead_id)
+    return Response(
+        content=content,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
+
+
+@router.get("/marketplace/me/compras/{lead_id}/documents/{document_id}")
+def marketplace_me_document_download(
+    lead_id: str,
+    document_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.marketplace_contract_docs_service import read_marketplace_lead_document
+
+    if user.role != Role.CLIENT:
+        raise HTTPException(status_code=403, detail="Somente clientes.")
+    content, filename, media = read_marketplace_lead_document(db, user, lead_id, document_id)
+    return Response(
+        content=content,
+        media_type=media,
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
 
 
 @router.post("/marketplace/me/compras/{lead_id}/documents", response_model=DocumentView, status_code=201)

@@ -2,7 +2,7 @@
 
 import { CheckCircle2, ShoppingBag } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useState } from "react";
-import { api, API_URL, apiForm } from "@/lib/api";
+import { api, API_URL, apiForm, downloadApi } from "@/lib/api";
 
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
@@ -23,6 +23,8 @@ type CompraRow = {
 type CompraDetail = CompraRow & {
   purchase_readonly: Record<string, unknown>;
   can_conclude?: boolean;
+  has_site_contract?: boolean;
+  contract_ack?: { accepted_at?: string; provider?: string } | null;
   boleto?: {
     provider?: string;
     amount?: string;
@@ -132,6 +134,32 @@ export function ClientMarketplaceModule() {
     }
   }
 
+  async function openContractPdf() {
+    if (!selected?.has_site_contract) return;
+    setBusy(true);
+    setError("");
+    try {
+      await downloadApi(`/marketplace/me/compras/${selected.lead_id}/contrato.pdf`, `contrato-${selected.lead_id.slice(0, 8)}.pdf`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Falha ao baixar contrato");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function openDocument(docId: string, filename: string) {
+    if (!selected) return;
+    setBusy(true);
+    setError("");
+    try {
+      await downloadApi(`/marketplace/me/compras/${selected.lead_id}/documents/${docId}`, filename);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Falha ao baixar documento");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function uploadDoc(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!selected) return;
@@ -217,6 +245,9 @@ export function ClientMarketplaceModule() {
                 <button type="button" disabled={busy} onClick={() => void issueBoleto()}>
                   Baixar boleto
                 </button>
+                <button type="button" disabled={busy || !selected.has_site_contract} onClick={() => void openContractPdf()}>
+                  Ver contrato (PDF)
+                </button>
                 <button
                   type="button"
                   className="primary"
@@ -236,7 +267,10 @@ export function ClientMarketplaceModule() {
               <ul className="list-plain">
                 {docs.map((d) => (
                   <li key={d.id}>
-                    {d.kind} — {d.filename} ({d.status})
+                    {d.kind} — {d.filename} ({d.status}){" "}
+                    <button type="button" disabled={busy} onClick={() => void openDocument(d.id, d.filename)}>
+                      Baixar
+                    </button>
                   </li>
                 ))}
               </ul>

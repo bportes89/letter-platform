@@ -3,7 +3,7 @@
 import { CheckCircle2, ClipboardList, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
-import { api, API_URL } from "@/lib/api";
+import { api, API_URL, downloadApi } from "@/lib/api";
 
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
@@ -53,6 +53,8 @@ type CadastroDetail = CadastroRow & {
     download_token?: string | null;
     due_date?: string | null;
   } | null;
+  has_site_contract?: boolean;
+  contract_ack?: { accepted_at?: string; provider?: string; channel?: string } | null;
 };
 
 const SALE_SITUATIONS = [
@@ -77,6 +79,7 @@ export function CadastroMarketplaceModule() {
   const [q, setQ] = useState("");
   const [rows, setRows] = useState<CadastroRow[]>([]);
   const [selected, setSelected] = useState<CadastroDetail | null>(null);
+  const [docs, setDocs] = useState<Array<{ id: string; kind: string; filename: string; status: string }>>([]);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
@@ -95,8 +98,35 @@ export function CadastroMarketplaceModule() {
     setError("");
     try {
       setSelected(await api<CadastroDetail>(`/marketplace/cadastros/${leadId}`));
+      setDocs(await api(`/marketplace/cadastros/${leadId}/documents`));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Falha ao abrir cadastro");
+    }
+  }
+
+  async function openContractPdf() {
+    if (!selected?.has_site_contract) return;
+    setBusy(true);
+    setError("");
+    try {
+      await downloadApi(`/marketplace/cadastros/${selected.lead_id}/contrato.pdf`, `contrato-${selected.lead_id.slice(0, 8)}.pdf`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Falha ao baixar contrato");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function openDocument(docId: string, filename: string) {
+    if (!selected) return;
+    setBusy(true);
+    setError("");
+    try {
+      await downloadApi(`/marketplace/cadastros/${selected.lead_id}/documents/${docId}`, filename);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Falha ao baixar documento");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -336,6 +366,38 @@ export function CadastroMarketplaceModule() {
                 </button>
               </div>
             ) : null}
+            <div className="notice">
+              Contrato do chat:{" "}
+              {selected.has_site_contract
+                ? `aceito ${selected.contract_ack?.accepted_at ? new Date(selected.contract_ack.accepted_at).toLocaleString("pt-BR") : ""} (${selected.contract_ack?.provider || "SITE_CHAT_ACK"})`
+                : "ainda não aceito"}
+              <button
+                type="button"
+                className="table-action"
+                style={{ marginLeft: "0.75rem" }}
+                onClick={() => void openContractPdf()}
+                disabled={busy || !selected.has_site_contract}
+              >
+                Ver contrato (PDF)
+              </button>
+            </div>
+            <div className="notice">
+              Documentos do cliente ({docs.length})
+              {!docs.length ? (
+                <small style={{ display: "block", marginTop: "0.35rem" }}>Nenhum upload ainda.</small>
+              ) : (
+                <ul style={{ margin: "0.5rem 0 0", paddingLeft: "1.1rem" }}>
+                  {docs.map((d) => (
+                    <li key={d.id}>
+                      {d.kind} — {d.filename} ({d.status}){" "}
+                      <button type="button" className="table-action" disabled={busy} onClick={() => void openDocument(d.id, d.filename)}>
+                        Baixar
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
             <div className="marketplace-form-row">
               <label className="marketplace-field">
                 Nome
