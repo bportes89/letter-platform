@@ -242,7 +242,7 @@ UI: `/modules/minhas-compras` (nav CLIENT). PATCH admin `/marketplace/cadastros/
 
 Porta do cron Paulo (`QuotasApiCronsController`) para estoque vivo:
 
-1. No fornecedor: `sync_mode=JSON` + `api_url` (lista JSON com `id`, `valor_credito`, `entrada`, `parcelas`, `valor_parcela`, `administradora`, `categoria`, `reserva`).
+1. No fornecedor: `sync_mode=JSON` + `api_url` (lista JSON com `id`, `valor_credito`, `entrada`, `parcelas`, `valor_parcela`, `date_vencimento` / `data_vencimento` / `installment_due_date` (`AAAA-MM-DD` ou `dd/mm/aaaa`), `administradora`, `categoria`, `reserva`).
 2. `POST /api/v1/marketplace/suppliers/{id}/sync` — um fornecedor.
 3. `POST /api/v1/marketplace/inventory/sync` — todos os JSON ativos da org.
 4. Cron: `POST /api/v1/system/cron/marketplace-quota-sync` (header `x-cron-secret` se configurado).

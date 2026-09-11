@@ -1187,6 +1187,7 @@ def test_marketplace_supplier_json_sync_upsert_and_deactivate(client, auth_heade
             "administradora": "Embracon",
             "categoria": "Imóvel",
             "reserva": "disponivel",
+            "date_vencimento": "15/09/2026",
         },
         {
             "id": 102,
@@ -1194,6 +1195,7 @@ def test_marketplace_supplier_json_sync_upsert_and_deactivate(client, auth_heade
             "entrada": "20000",
             "parcelas": 36,
             "valor_parcela": "1800",
+            "installment_due_date": "2026-10-01",
             "administradora": "HS Consórcios",
             "categoria": "Veículo",
             "reserva": "reservar",
@@ -1238,9 +1240,14 @@ def test_marketplace_supplier_json_sync_upsert_and_deactivate(client, auth_heade
     sync_codes = [q for q in quotas if str(q.get("group_code", "")).startswith("SYNC-SYNC_DEMO")]
     assert len(sync_codes) == 2
     assert all(q["status"] == "AVAILABLE" for q in sync_codes)
+    by_code = {q["quota_code"]: q for q in sync_codes}
+    assert by_code["101"]["installment_due_date"] == "2026-09-15"
+    assert by_code["102"]["installment_due_date"] == "2026-10-01"
 
     payload_round1[:] = [payload_round1[0]]  # only id 101 remains
     payload_round1[0]["entrada"] = "31000.00"
+    payload_round1[0]["data_vencimento"] = "2026-09-20"
+    del payload_round1[0]["date_vencimento"]
 
     sync2 = client.post(f"/api/v1/marketplace/suppliers/{supplier_id}/sync", headers=auth_headers)
     assert sync2.status_code == 200, sync2.text
@@ -1253,6 +1260,7 @@ def test_marketplace_supplier_json_sync_upsert_and_deactivate(client, auth_heade
     assert {q["quota_code"]: q["status"] for q in sync_codes2}["102"] == "INACTIVE"
     assert {q["quota_code"]: q["status"] for q in sync_codes2}["101"] == "AVAILABLE"
     assert str(next(q for q in sync_codes2 if q["quota_code"] == "101")["premium_value"]) in {"31000.00", "31000.0"}
+    assert next(q for q in sync_codes2 if q["quota_code"] == "101")["installment_due_date"] == "2026-09-20"
 
     class BoomClient(FakeClient):
         def get(self, url):

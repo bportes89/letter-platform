@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import re
 import unicodedata
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -59,6 +59,43 @@ def _map_category(raw: Any) -> str:
 
 def _reserva_available(raw: Any) -> bool:
     return _slug(str(raw or "")) in {"reservar", "disponivel"}
+
+
+_DUE_DATE_KEYS = ("date_vencimento", "data_vencimento", "installment_due_date")
+
+
+def _due_date_keys_in_row(row: dict) -> bool:
+    return any(key in row for key in _DUE_DATE_KEYS)
+
+
+def _parse_due_date_value(raw: Any) -> date | None:
+    if raw is None:
+        return None
+    if isinstance(raw, date):
+        return raw
+    text = str(raw).strip()
+    if not text:
+        return None
+    iso = text[:10]
+    try:
+        return date.fromisoformat(iso)
+    except ValueError:
+        pass
+    match = re.match(r"^(\d{1,2})/(\d{1,2})/(\d{4})$", text)
+    if match:
+        day, month, year = (int(match.group(i)) for i in range(1, 4))
+        try:
+            return date(year, month, day)
+        except ValueError:
+            return None
+    return None
+
+
+def _installment_due_from_row(row: dict) -> date | None:
+    for key in _DUE_DATE_KEYS:
+        if key in row:
+            return _parse_due_date_value(row.get(key))
+    return None
 
 
 def _default_administrator(db: Session) -> Administrator:
@@ -136,6 +173,8 @@ def _apply_row(
     available = _reserva_available(row.get("reserva") or row.get("status") or "disponivel")
     administrator = _resolve_administrator(db, adm_name, admin_cache)
     now = datetime.now(UTC)
+    due_date = _installment_due_from_row(row) if _due_date_keys_in_row(row) else None
+    has_due_date = _due_date_keys_in_row(row)
 
     quota = existing.get(external_ref)
     if quota and quota.status in PROTECTED_STATUSES:
@@ -152,6 +191,8 @@ def _apply_row(
         quota.administrator_name_txt = adm_name
         quota.synced_at = now
         quota.sync_origin = ORIGIN_JSON
+        if has_due_date:
+            quota.installment_due_date = due_date
         if quota.status not in PROTECTED_STATUSES:
             quota.status = "AVAILABLE" if available else "INACTIVE"
         return "updated"
@@ -167,6 +208,7 @@ def _apply_row(
         premium_value=entrada,
         installment_value=parcela,
         remaining_installments=parcelas or None,
+        installment_due_date=due_date if has_due_date else None,
         supplier_source=normalize_supplier_key(supplier.source_key),
         external_ref=external_ref,
         sync_origin=ORIGIN_JSON,
