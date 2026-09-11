@@ -131,7 +131,7 @@ export function FornecedoresModule() {
     try {
       const rows = await api<QuotaSupplier[]>("/marketplace/suppliers/ensure-defaults", { method: "POST" });
       setItems(rows);
-      setNotice("Fornecedores padrão (Fraga, Bittelo, Lance, Uni, Contemplado SP, Lume) garantidos.");
+      setNotice("Fornecedores padrão (Fraga, Bittelo, Lance, Uni, Contemplado SP, Lume + veículos) garantidos.");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Falha ao criar padrões");
     } finally {

@@ -1093,7 +1093,7 @@ def test_marketplace_suppliers_crud_and_markup_override(client, auth_headers):
 
     seeded = client.post("/api/v1/marketplace/suppliers/ensure-defaults", headers=auth_headers)
     assert seeded.status_code == 200
-    assert len(seeded.json()) >= 6
+    assert len(seeded.json()) >= 9
     by_key = {x["source_key"]: x for x in seeded.json()}
     assert {"FRAGA", "LUME", "BITTELO"} <= set(by_key)
     uni = by_key["UNI_CONTEMPLADOS"]
@@ -1107,6 +1107,9 @@ def test_marketplace_suppliers_crud_and_markup_override(client, auth_headers):
     assert csp["sync_mode"] == "SCRAPE"
     assert "contempladosp.com.br" in (csp.get("api_url") or "")
     assert json.loads(csp["scrape_config_json"])["ca"] == "lets-encrypt-root-yr.pem"
+    uni_veic = by_key["UNI_VEICULOS"]
+    assert uni_veic["sync_mode"] == "SCRAPE"
+    assert json.loads(uni_veic["scrape_config_json"])["category"] == "VEHICLE"
     assert by_key["FRAGA"]["sync_mode"] == "NONE"
 
     created = client.post(
@@ -5301,7 +5304,7 @@ def test_marketplace_quota_sync_cron(client, auth_headers, monkeypatch):
     assert cron.status_code == 200, cron.text
     body = cron.json()
     assert body["synced_at"]
-    assert body["suppliers"] >= 3
+    assert body["suppliers"] >= 6
     assert body["bootstrap"]["presets_applied"] >= 0
     assert body["created"] == 0
     assert body["failed"] == 0

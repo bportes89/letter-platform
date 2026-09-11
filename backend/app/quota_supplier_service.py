@@ -22,9 +22,12 @@ SUPPLIER_ENTRADA_MARKUP_PERCENT: dict[str, Decimal] = {
     "LANCE": Decimal("3"),
     "UNI_CONTEMPLADOS": Decimal("10"),
     "UNI CONTEMPLADOS": Decimal("10"),
+    "UNI_VEICULOS": Decimal("10"),
     "CONTEMPLADO_SP": Decimal("10"),
     "CONTEMPLADO SP": Decimal("10"),
+    "CONTEMPLADO_SP_VEICULOS": Decimal("10"),
     "LUME": Decimal("10"),
+    "LUME_VEICULOS": Decimal("10"),
 }
 
 DEFAULT_SUPPLIERS: tuple[dict, ...] = (
@@ -34,6 +37,9 @@ DEFAULT_SUPPLIERS: tuple[dict, ...] = (
     {"name": "Uni Contemplados", "source_key": "UNI_CONTEMPLADOS", "markup_percent": Decimal("10"), "document": "44444444000144"},
     {"name": "Contemplado SP", "source_key": "CONTEMPLADO_SP", "markup_percent": Decimal("10"), "document": "55555555000155"},
     {"name": "Lume Contemplados", "source_key": "LUME", "markup_percent": Decimal("10"), "document": "66666666000166"},
+    {"name": "Uni Veículos", "source_key": "UNI_VEICULOS", "markup_percent": Decimal("10"), "document": "77777777000177"},
+    {"name": "Contemplado SP Veículos", "source_key": "CONTEMPLADO_SP_VEICULOS", "markup_percent": Decimal("10"), "document": "88888888000188"},
+    {"name": "Lume Veículos", "source_key": "LUME_VEICULOS", "markup_percent": Decimal("10"), "document": "99999999000199"},
 )
 
 # Presets de scrape HTML (Paulo QuotasUrlCrons). Só aplica quando sync_mode=NONE e sem api_url.
@@ -64,6 +70,35 @@ SUPPLIER_SYNC_PRESETS: dict[str, dict[str, str]] = {
         "api_url": "https://cartascontempladas.com.br/consorcios-contemplados-de-imoveis/",
         "scrape_config_json": json.dumps(
             {"layout": "cartascontempladas", "table_id": "listaCotas", "category": "REAL_ESTATE"},
+            ensure_ascii=False,
+        ),
+    },
+    "UNI_VEICULOS": {
+        "sync_mode": "SCRAPE",
+        "api_url": "https://unicontemplados.com.br/veiculos/",
+        "scrape_config_json": json.dumps(
+            {"layout": "tablepress", "table_id": "tablepress-tab-veiculos", "category": "VEHICLE"},
+            ensure_ascii=False,
+        ),
+    },
+    "CONTEMPLADO_SP_VEICULOS": {
+        "sync_mode": "SCRAPE",
+        "api_url": "https://www.contempladosp.com.br/cartas-de-credito-contempladas-de-veiculos",
+        "scrape_config_json": json.dumps(
+            {
+                "layout": "contempladosp",
+                "table_id": "tbCotasGerais",
+                "category": "VEHICLE",
+                "ca": "lets-encrypt-root-yr.pem",
+            },
+            ensure_ascii=False,
+        ),
+    },
+    "LUME_VEICULOS": {
+        "sync_mode": "SCRAPE",
+        "api_url": "https://cartascontempladas.com.br/cartas-contempladas-de-veiculos/",
+        "scrape_config_json": json.dumps(
+            {"layout": "cartascontempladas", "table_id": "listaCotas", "category": "VEHICLE"},
             ensure_ascii=False,
         ),
     },
