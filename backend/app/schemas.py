@@ -2279,6 +2279,54 @@ class SupplierPortalMeView(BaseModel):
     pix_key: str | None = None
 
 
+class SupplierPortalAdministratorOption(BaseModel):
+    id: str
+    name: str
+    code: str | None = None
+
+
+class SupplierPortalQuotaItem(BaseModel):
+    id: str
+    group_code: str
+    quota_code: str
+    category: str
+    credit_value: str
+    premium_value: str
+    installment_value: str
+    installment_due_date: str | None = None
+    remaining_installments: int | None = None
+    status: str
+    administrator_id: str
+    administrator_name: str | None = None
+    change_reason: str | None = None
+    created_at: str | None = None
+
+
+class SupplierPortalQuotaCreate(BaseModel):
+    administrator_id: str
+    group_code: str = Field(min_length=1, max_length=60)
+    quota_code: str = Field(min_length=1, max_length=60)
+    category: str
+    credit_value: Decimal = Field(gt=0)
+    premium_value: Decimal = Field(ge=0, default=0)
+    installment_value: Decimal = Field(ge=0, default=0)
+    installment_due_date: date
+    remaining_installments: int | None = Field(default=None, ge=0)
+
+
+class SupplierPortalQuotaUpdate(BaseModel):
+    change_reason: str = Field(min_length=3, max_length=500)
+    administrator_id: str | None = None
+    group_code: str | None = Field(default=None, min_length=1, max_length=60)
+    quota_code: str | None = Field(default=None, min_length=1, max_length=60)
+    category: str | None = None
+    credit_value: Decimal | None = Field(default=None, gt=0)
+    premium_value: Decimal | None = Field(default=None, ge=0)
+    installment_value: Decimal | None = Field(default=None, ge=0)
+    installment_due_date: date | None = None
+    remaining_installments: int | None = Field(default=None, ge=0)
+
+
 class SupplierPortalTransferItem(BaseModel):
     lead_id: str
     proposal_id: str

@@ -90,6 +90,8 @@ from app.schemas import (
     VendaDiretaRoboSearchRequest, VendaDiretaRoboSearchResponse, VendaDiretaRoboConfirmRequest, VendaDiretaRoboConfirmResponse,
     QuotaSupplierCreate, QuotaSupplierUpdate, QuotaSupplierView, QuotaInventorySyncView,
     SupplierPortalTokenResponse, SupplierPortalMeView, SupplierPortalTransferItem,
+    SupplierPortalAdministratorOption, SupplierPortalQuotaItem,
+    SupplierPortalQuotaCreate, SupplierPortalQuotaUpdate,
     SupplierLedgerItem, SupplierWithdrawalRequest, SupplierWithdrawalView, SupplierWithdrawalProcessRequest,
     MarketplaceChatFaqCreate, MarketplaceChatFaqUpdate, MarketplaceChatFaqView,
     VendaDiretaManualCotaOption, VendaDiretaManualCadastroOption, VendaDiretaManualPartnerOption,
@@ -1829,6 +1831,106 @@ def supplier_portal_request_withdrawal(
     )
     db.commit()
     return result
+
+
+@router.get("/supplier-portal/administrators", response_model=list[SupplierPortalAdministratorOption])
+def supplier_portal_administrators(
+    supplier: QuotaSupplier = Depends(get_current_supplier),
+    db: Session = Depends(get_db),
+):
+    from app.supplier_portal_quota_service import list_portal_administrators
+
+    return list_portal_administrators(db)
+
+
+@router.get("/supplier-portal/quotas", response_model=list[SupplierPortalQuotaItem])
+def supplier_portal_quotas(
+    supplier: QuotaSupplier = Depends(get_current_supplier),
+    db: Session = Depends(get_db),
+):
+    from app.supplier_portal_quota_service import list_supplier_quotas
+
+    return list_supplier_quotas(db, supplier)
+
+
+@router.post("/supplier-portal/quotas", response_model=SupplierPortalQuotaItem, status_code=201)
+def supplier_portal_create_quota(
+    payload: SupplierPortalQuotaCreate,
+    supplier: QuotaSupplier = Depends(get_current_supplier),
+    db: Session = Depends(get_db),
+):
+    from app.supplier_portal_quota_service import create_supplier_quota
+
+    result = create_supplier_quota(
+        db,
+        supplier,
+        administrator_id=payload.administrator_id,
+        group_code=payload.group_code,
+        quota_code=payload.quota_code,
+        category=payload.category,
+        credit_value=float(payload.credit_value),
+        premium_value=float(payload.premium_value),
+        installment_value=float(payload.installment_value),
+        installment_due_date=payload.installment_due_date,
+        remaining_installments=payload.remaining_installments,
+    )
+    db.commit()
+    return result
+
+
+@router.patch("/supplier-portal/quotas/{quota_id}", response_model=SupplierPortalQuotaItem)
+def supplier_portal_update_quota(
+    quota_id: str,
+    payload: SupplierPortalQuotaUpdate,
+    supplier: QuotaSupplier = Depends(get_current_supplier),
+    db: Session = Depends(get_db),
+):
+    from app.supplier_portal_quota_service import update_supplier_quota
+
+    result = update_supplier_quota(
+        db,
+        supplier,
+        quota_id,
+        change_reason=payload.change_reason,
+        administrator_id=payload.administrator_id,
+        group_code=payload.group_code,
+        quota_code=payload.quota_code,
+        category=payload.category,
+        credit_value=float(payload.credit_value) if payload.credit_value is not None else None,
+        premium_value=float(payload.premium_value) if payload.premium_value is not None else None,
+        installment_value=float(payload.installment_value) if payload.installment_value is not None else None,
+        installment_due_date=payload.installment_due_date,
+        remaining_installments=payload.remaining_installments,
+    )
+    db.commit()
+    return result
+
+
+@router.delete("/supplier-portal/quotas/{quota_id}", status_code=204)
+def supplier_portal_delete_quota(
+    quota_id: str,
+    supplier: QuotaSupplier = Depends(get_current_supplier),
+    db: Session = Depends(get_db),
+):
+    from app.supplier_portal_quota_service import delete_supplier_quota
+
+    delete_supplier_quota(db, supplier, quota_id)
+    db.commit()
+
+
+@router.post("/marketplace/quotas/{quota_id}/approve", response_model=QuotaView)
+def marketplace_quota_approve(
+    quota_id: str,
+    user: User = Depends(require_scope("inventory:write")),
+    db: Session = Depends(get_db),
+):
+    from app.supplier_portal_quota_service import approve_supplier_quota
+
+    quota = approve_supplier_quota(db, user, quota_id)
+    audit(db, user, "quota.approved", "quota", quota.id)
+    db.commit()
+    db.refresh(quota)
+    return quota
 
 
 @router.get("/marketplace/supplier-withdrawals", response_model=list[SupplierWithdrawalView])

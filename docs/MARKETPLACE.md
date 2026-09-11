@@ -169,6 +169,16 @@ Fornecedor pode se cadastrar sem passar pelo admin (conta **ativa imediata**):
 
 Admin continua podendo criar fornecedor e emitir token manual (`POST .../portal-token`) para quem não usa auto-cadastro.
 
+## Cotas em análise (portal fornecedor)
+
+Fornecedor cadastra cotas pelo portal; entram em `PENDING_REVIEW` até o admin aprovar:
+
+- `GET /api/v1/supplier-portal/administrators` — administradoras homologadas (select)
+- `GET/POST/PATCH/DELETE /api/v1/supplier-portal/quotas` — CRUD das cotas do fornecedor (`supplier_source` = `source_key`)
+- Nova cota ou edição → `PENDING_REVIEW` (edição exige `change_reason`)
+- Admin: `POST /api/v1/marketplace/quotas/{id}/approve` → `AVAILABLE` (entra no estoque/chat)
+- UI portal: aba **Minhas cotas** · admin Inventário: botão **Aprovar**
+
 ## Boleto Inter (entrada)
 
 Emissão da cobrança de entrada (boleto + PIX no Inter) e webhook **Pagou**:

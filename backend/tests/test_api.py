@@ -959,6 +959,72 @@ def test_public_supplier_self_register_and_portal_login(client):
     assert bad_login.status_code == 401
 
 
+def test_supplier_portal_quota_submit_and_admin_approve(client, auth_headers):
+    """Fornecedor cadastra cota em análise; admin aprova para estoque."""
+    created = client.post(
+        "/api/v1/public/site/auth/register-supplier",
+        json={
+            "person_type": "PJ",
+            "name": "Cotas Portal LTDA",
+            "trade_name": "Portal Cotas",
+            "document": "11444777000161",
+            "email": "cotas.portal@example.com",
+            "phone": "32988776655",
+            "password": "Senha1234",
+            "terms_accepted": True,
+        },
+    )
+    assert created.status_code == 201, created.text
+    portal_headers = {"Authorization": f"Bearer {created.json()['portal_token']}"}
+
+    admins = client.get("/api/v1/supplier-portal/administrators", headers=portal_headers)
+    assert admins.status_code == 200, admins.text
+    assert admins.json(), "seed precisa de administradora homologada"
+    admin_id = admins.json()[0]["id"]
+
+    submitted = client.post(
+        "/api/v1/supplier-portal/quotas",
+        headers=portal_headers,
+        json={
+            "administrator_id": admin_id,
+            "group_code": "9001",
+            "quota_code": "077",
+            "category": "REAL_ESTATE",
+            "credit_value": "350000.00",
+            "premium_value": "70000.00",
+            "installment_value": "2200.00",
+            "installment_due_date": "2026-10-15",
+            "remaining_installments": 48,
+        },
+    )
+    assert submitted.status_code == 201, submitted.text
+    quota_id = submitted.json()["id"]
+    assert submitted.json()["status"] == "PENDING_REVIEW"
+
+    listed = client.get("/api/v1/supplier-portal/quotas", headers=portal_headers)
+    assert listed.status_code == 200
+    assert any(q["id"] == quota_id for q in listed.json())
+
+    public = client.get("/api/v1/public/site/quotas")
+    assert public.status_code == 200
+    assert not any(q["id"] == quota_id for q in public.json())
+
+    approved = client.post(f"/api/v1/marketplace/quotas/{quota_id}/approve", headers=auth_headers)
+    assert approved.status_code == 200, approved.text
+    assert approved.json()["status"] == "AVAILABLE"
+
+    public_after = client.get("/api/v1/public/site/quotas")
+    assert any(q["id"] == quota_id for q in public_after.json())
+
+    blocked = client.patch(
+        f"/api/v1/supplier-portal/quotas/{quota_id}",
+        headers=portal_headers,
+        json={"change_reason": "Ajuste valor", "premium_value": "71000.00"},
+    )
+    assert blocked.status_code == 200
+    assert blocked.json()["status"] == "PENDING_REVIEW"
+
+
 def test_supplier_portal_confirm_unlocks_conclude(client, auth_headers):
     """Token do fornecedor confirma transferência; admin conclui sem force."""
     seeded = client.post("/api/v1/marketplace/suppliers/ensure-defaults", headers=auth_headers)
