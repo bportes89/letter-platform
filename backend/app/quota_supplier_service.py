@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from decimal import Decimal
 
@@ -33,6 +34,39 @@ DEFAULT_SUPPLIERS: tuple[dict, ...] = (
     {"name": "Contemplado SP", "source_key": "CONTEMPLADO_SP", "markup_percent": Decimal("10"), "document": "55555555000155"},
     {"name": "Lume Contemplados", "source_key": "LUME", "markup_percent": Decimal("10"), "document": "66666666000166"},
 )
+
+# Presets de scrape HTML (Paulo QuotasUrlCrons). Só aplica quando sync_mode=NONE e sem api_url.
+SUPPLIER_SYNC_PRESETS: dict[str, dict[str, str]] = {
+    "UNI_CONTEMPLADOS": {
+        "sync_mode": "SCRAPE",
+        "api_url": "https://unicontemplados.com.br/imobiliario/",
+        "scrape_config_json": json.dumps(
+            {"layout": "tablepress", "table_id": "tablepress-tab-imoveis", "category": "REAL_ESTATE"},
+            ensure_ascii=False,
+        ),
+    },
+    "CONTEMPLADO_SP": {
+        "sync_mode": "SCRAPE",
+        "api_url": "https://www.contempladosp.com.br/cartas-de-credito-contempladas-de-imoveis",
+        "scrape_config_json": json.dumps(
+            {
+                "layout": "contempladosp",
+                "table_id": "tbCotasGerais",
+                "category": "REAL_ESTATE",
+                "ca": "lets-encrypt-root-yr.pem",
+            },
+            ensure_ascii=False,
+        ),
+    },
+    "LUME": {
+        "sync_mode": "SCRAPE",
+        "api_url": "https://cartascontempladas.com.br/consorcios-contemplados-de-imoveis/",
+        "scrape_config_json": json.dumps(
+            {"layout": "cartascontempladas", "table_id": "listaCotas", "category": "REAL_ESTATE"},
+            ensure_ascii=False,
+        ),
+    },
+}
 
 
 def normalize_supplier_key(value: str | None) -> str:
@@ -264,6 +298,31 @@ def update_supplier(db: Session, user: User, supplier_id: str, data: dict) -> Qu
     return item
 
 
+def apply_supplier_sync_presets(db: Session, organization_id: str) -> int:
+    """Preenche sync SCRAPE nos fornecedores padrão ainda sem URL (não sobrescreve config manual)."""
+    applied = 0
+    for source_key, preset in SUPPLIER_SYNC_PRESETS.items():
+        item = db.scalar(
+            select(QuotaSupplier).where(
+                QuotaSupplier.organization_id == organization_id,
+                QuotaSupplier.source_key == source_key,
+            )
+        )
+        if not item:
+            continue
+        if (item.sync_mode or "NONE") != "NONE":
+            continue
+        if (item.api_url or "").strip():
+            continue
+        item.sync_mode = preset["sync_mode"]
+        item.api_url = preset["api_url"]
+        item.scrape_config_json = preset["scrape_config_json"]
+        applied += 1
+    if applied:
+        db.flush()
+    return applied
+
+
 def ensure_default_suppliers(db: Session, organization_id: str) -> list[QuotaSupplier]:
     created: list[QuotaSupplier] = []
     for row in DEFAULT_SUPPLIERS:
@@ -291,6 +350,7 @@ def ensure_default_suppliers(db: Session, organization_id: str) -> list[QuotaSup
         created.append(item)
     if created:
         db.flush()
+    apply_supplier_sync_presets(db, organization_id)
     return created
 
 

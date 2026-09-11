@@ -1,3 +1,4 @@
+import json
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import uuid4
@@ -1093,7 +1094,20 @@ def test_marketplace_suppliers_crud_and_markup_override(client, auth_headers):
     seeded = client.post("/api/v1/marketplace/suppliers/ensure-defaults", headers=auth_headers)
     assert seeded.status_code == 200
     assert len(seeded.json()) >= 6
-    assert {x["source_key"] for x in seeded.json()} >= {"FRAGA", "LUME", "BITTELO"}
+    by_key = {x["source_key"]: x for x in seeded.json()}
+    assert {"FRAGA", "LUME", "BITTELO"} <= set(by_key)
+    uni = by_key["UNI_CONTEMPLADOS"]
+    assert uni["sync_mode"] == "SCRAPE"
+    assert "unicontemplados.com.br" in (uni.get("api_url") or "")
+    assert json.loads(uni["scrape_config_json"])["layout"] == "tablepress"
+    lume = by_key["LUME"]
+    assert lume["sync_mode"] == "SCRAPE"
+    assert "cartascontempladas.com.br" in (lume.get("api_url") or "")
+    csp = by_key["CONTEMPLADO_SP"]
+    assert csp["sync_mode"] == "SCRAPE"
+    assert "contempladosp.com.br" in (csp.get("api_url") or "")
+    assert json.loads(csp["scrape_config_json"])["ca"] == "lets-encrypt-root-yr.pem"
+    assert by_key["FRAGA"]["sync_mode"] == "NONE"
 
     created = client.post(
         "/api/v1/marketplace/suppliers",

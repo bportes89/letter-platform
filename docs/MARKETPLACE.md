@@ -67,6 +67,8 @@ CRUD em `GET/POST/PATCH /api/v1/marketplace/suppliers` (+ `POST .../ensure-defau
 - `source_key` único por org (FRAGA, BITTELO, LANCE, UNI_CONTEMPLADOS, CONTEMPLADO_SP, LUME…)
 - `markup_percent` — % do crédito somado na entrada (prevalece sobre o mapa hardcoded)
 - `quem_paga_comissao` — `0` fornecedor / `1` cliente embute `platform_fee_percent` na entrada
+- `POST .../ensure-defaults` cria os 6 fornecedores padrão e, se ainda sem `api_url`, aplica presets SCRAPE em **UNI_CONTEMPLADOS**, **CONTEMPLADO_SP** e **LUME** (não sobrescreve config manual). FRAGA/Bittelo/Lance exigem `api_url` JSON no admin.
+- Tabela admin mostra resumo do último sync (`+criadas ~atualizadas −inativadas`) via `last_sync_detail_json`.
 
 Menu: **Cartas contempladas → Fornecedores**.
 

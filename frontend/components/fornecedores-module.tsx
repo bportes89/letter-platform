@@ -25,6 +25,7 @@ type QuotaSupplier = {
   scrape_config_json?: string;
   last_sync_at: string | null;
   last_sync_status: string | null;
+  last_sync_detail_json?: string;
   has_portal_token?: boolean;
   balance_available?: string;
 };
@@ -46,6 +47,31 @@ function parseScrapeConfig(raw?: string | null) {
     return JSON.parse(raw || "{}") as { layout?: string; table_id?: string; category?: string; ca?: string };
   } catch {
     return {};
+  }
+}
+
+function formatSyncDetail(raw?: string | null) {
+  try {
+    const detail = JSON.parse(raw || "{}") as {
+      created?: number;
+      updated?: number;
+      deactivated?: number;
+      skipped?: number;
+      protected?: number;
+      error?: string;
+      fetched?: number;
+    };
+    if (detail.error) {
+      return detail.error;
+    }
+    const parts: string[] = [];
+    if (detail.created) parts.push(`+${detail.created}`);
+    if (detail.updated) parts.push(`~${detail.updated}`);
+    if (detail.deactivated) parts.push(`−${detail.deactivated}`);
+    if (detail.protected) parts.push(`⊘${detail.protected}`);
+    return parts.join(" ");
+  } catch {
+    return "";
   }
 }
 
@@ -420,7 +446,9 @@ export function FornecedoresModule() {
               </tr>
             </thead>
             <tbody>
-              {items.map((x) => (
+              {items.map((x) => {
+                const syncDetail = formatSyncDetail(x.last_sync_detail_json);
+                return (
                 <tr key={x.id}>
                   <td>
                     <span className={`pill pill-${x.active ? "cleared" : "blocked"}`}>{x.active ? "Ativo" : "Inativo"}</span>
@@ -440,6 +468,7 @@ export function FornecedoresModule() {
                   <td>R$ {x.balance_available ?? "0.00"}</td>
                   <td>
                     {x.last_sync_status || "—"}
+                    {syncDetail ? <small title={x.last_sync_detail_json}>{syncDetail}</small> : null}
                     <small>{x.last_sync_at ? new Date(x.last_sync_at).toLocaleString("pt-BR") : ""}</small>
                   </td>
                   <td className="actions-cell">
@@ -462,7 +491,8 @@ export function FornecedoresModule() {
                     </button>
                   </td>
                 </tr>
-              ))}
+              );
+              })}
             </tbody>
           </table>
         </div>
