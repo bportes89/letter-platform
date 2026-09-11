@@ -9,6 +9,7 @@ from fastapi import HTTPException, UploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.desk_solicitation_meta import evaluation_json_with_meta, evaluation_meta
 from app.document_service import persist_upload
 from app.models import (
     CommissionRule,
@@ -243,7 +244,11 @@ def store_solicitation(db: Session, user: User, payload: dict) -> QuitConSolicit
         parcelas_em_dia=bool(payload.get("parcelas_em_dia", True)),
         docs_complete=bool(payload.get("docs_complete", True)),
         quitacao_vp_amount=money(_dec(result["valor_presente_quitacao"])),
-        evaluation_json=json_dumps(result, ensure_ascii=False),
+        evaluation_json=evaluation_json_with_meta(
+            result,
+            channel="QUITCON_DESK",
+            lead_id=str(payload.get("lead_id") or "").strip() or None,
+        ),
     )
     db.add(item)
     db.flush()
@@ -446,4 +451,5 @@ def solicitation_view(item: QuitConSolicitation, docs: list[QuitConSolicitationD
         ],
         "created_at": item.created_at.isoformat() if item.created_at else None,
         "can_create_sale": item.status == STATUS_APPROVED and not item.quitcon_operacao_id,
+        **evaluation_meta(item.evaluation_json),
     }

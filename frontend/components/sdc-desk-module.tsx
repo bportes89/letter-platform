@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, apiForm, User } from "@/lib/api";
 import { isInternalProductRole } from "@/lib/product-nav";
 import { PreAnalysisModule } from "@/components/pre-analysis-module";
+import { DeskSourceMetaRow } from "@/lib/desk-source-meta";
 
 type SdcSolicitation = {
   id: string;
@@ -28,6 +29,9 @@ type SdcSolicitation = {
   term_months: number;
   interest_rate_monthly: string;
   proposal_id: string | null;
+  source_channel: string | null;
+  source_channel_label: string | null;
+  lead_id: string | null;
   documents: Array<{ id: string; doc_type: string; created_at: string | null }>;
   can_create_sale: boolean;
 };
@@ -388,6 +392,11 @@ export function SdcDeskModule() {
                         {item.contact_name}
                       </button>
                       <div className="muted" style={{ fontSize: 11 }}>{item.contact_email}</div>
+                      <DeskSourceMetaRow
+                        channel={item.source_channel}
+                        label={item.source_channel_label}
+                        leadId={item.lead_id}
+                      />
                     </td>
                     <td>
                       {item.asset_type_label}
@@ -444,6 +453,11 @@ export function SdcDeskModule() {
                   {brl.format(Number(selected.installment_estimated))} · {selected.term_months}m @ {selected.interest_rate_monthly}%
                 </div>
                 {selected.proposal_id && <div>Proposta: {selected.proposal_id}</div>}
+                <DeskSourceMetaRow
+                  channel={selected.source_channel}
+                  label={selected.source_channel_label}
+                  leadId={selected.lead_id}
+                />
                 <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
                   {selected.documents.map((d) => (
                     <li key={d.id}>{d.doc_type} — {d.created_at ? new Date(d.created_at).toLocaleString("pt-BR") : "—"}</li>

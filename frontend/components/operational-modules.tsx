@@ -11,14 +11,14 @@ import { CurrencyInput, CurrencyFormField } from "@/components/currency-input";
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
 export function LeadsModule() {
-  const [items,setItems]=useState<Lead[]>([]); const [error,setError]=useState("");
+  const [items,setItems]=useState<Lead[]>([]); const [error,setError]=useState(""); const [highlightId,setHighlightId]=useState<string|null>(null);
   const load=()=>api<Lead[]>("/leads").then(setItems).catch(e=>setError(e.message));
-  useEffect(()=>{void load()},[]);
+  useEffect(()=>{void load(); if(typeof window!=="undefined"){const id=new URLSearchParams(window.location.search).get("lead_id"); if(id)setHighlightId(id)}},[]);
   async function submit(e:FormEvent<HTMLFormElement>){e.preventDefault();const form=e.currentTarget;const fd=new FormData(form);await api("/leads",{method:"POST",body:JSON.stringify({name:fd.get("name"),phone:fd.get("phone"),product_interest:fd.get("product_interest"),source:"DASHBOARD"})});form.reset();load()}
   async function advance(lead:Lead){const next:Record<string,string>={NEW:"CONTACTED",CONTACTED:"QUALIFIED",QUALIFIED:"PROPOSAL",PROPOSAL:"CONVERTED"};await api(`/leads/${lead.id}`,{method:"PATCH",body:JSON.stringify({status:next[lead.status]??"QUALIFIED"})});load()}
   return <OperationalLayout title="CRM e originação" subtitle="Cadastre leads e avance a jornada comercial com histórico auditável." icon={<Users/>}>
     <form className="quick-form" onSubmit={submit}><input name="name" placeholder="Nome do cliente" required minLength={2}/><input name="phone" placeholder="WhatsApp" required minLength={8}/><select name="product_interest"><option value="MARKETPLACE">Marketplace</option><option value="SDC">SDC</option><option value="FLASH_CREDIT">Flash Capital</option></select><button><Plus/>Adicionar lead</button></form>
-    {error&&<div className="error">{error}</div>}<DataTable headers={["Cliente","Contato","Interesse","SCR/Bacen","Status","Ação"]}>{items.map(x=><tr key={x.id}><td><b>{x.name}</b><small>{x.source}</small></td><td>{x.phone}</td><td>{productLabel(x.product_interest)}</td><td><small>{x.scr_reference ?? "—"}</small><br/><span className="pill">{x.scr_status ?? "PENDENTE"}</span></td><td><Pill value={x.status}/></td><td><button className="table-action" onClick={()=>advance(x)}>Avançar</button></td></tr>)}</DataTable>
+    {error&&<div className="error">{error}</div>}<DataTable headers={["Cliente","Contato","Interesse","SCR/Bacen","Status","Ação"]}>{items.map(x=><tr key={x.id} style={highlightId===x.id?{background:"#f2faf6"}:undefined}><td><b>{x.name}</b><small>{x.source}</small></td><td>{x.phone}</td><td>{productLabel(x.product_interest)}</td><td><small>{x.scr_reference ?? "—"}</small><br/><span className="pill">{x.scr_status ?? "PENDENTE"}</span></td><td><Pill value={x.status}/></td><td><button className="table-action" onClick={()=>advance(x)}>Avançar</button></td></tr>)}</DataTable>
   </OperationalLayout>
 }
 

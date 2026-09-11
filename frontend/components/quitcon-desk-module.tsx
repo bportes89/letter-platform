@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, apiForm, User } from "@/lib/api";
 import { isInternalProductRole } from "@/lib/product-nav";
 import { QuitConModule } from "@/components/quitcon-module";
+import { DeskSourceMetaRow } from "@/lib/desk-source-meta";
 
 type RequiredDoc = { code: string; label: string; uploaded?: boolean };
 
@@ -22,6 +23,9 @@ type QuitConSolicitation = {
   operational_service: boolean;
   proposal_id: string | null;
   quitcon_operacao_id: string | null;
+  source_channel: string | null;
+  source_channel_label: string | null;
+  lead_id: string | null;
   required_docs: RequiredDoc[];
   documents: Array<{ id: string; doc_type: string; created_at: string | null }>;
   can_create_sale: boolean;
@@ -406,6 +410,11 @@ export function QuitConDeskModule() {
                           {item.contact_name}
                         </button>
                         <div className="muted" style={{ fontSize: 11 }}>{item.contact_email}</div>
+                        <DeskSourceMetaRow
+                          channel={item.source_channel}
+                          label={item.source_channel_label}
+                          leadId={item.lead_id}
+                        />
                       </td>
                       <td>
                         {item.registry_office}

@@ -200,7 +200,7 @@ No passo de categoria, **Capital de Giro** abre a faixa `10020–10028` (paralel
 2. `evaluate_sdc_desk` → card `sdc_result`  
 3. Confirmar → `store_solicitation` (mesa SDC, status `AWAITING_DOCS`, canal `SITE_CHAT`)
 
-Lead fica com `product_interest=SDC` / `source=SITE_CHAT`. Visibilidade operacional: **mesa SDC** (não Cadastros Marketplace).
+Lead fica com `product_interest=SDC` / `source=SITE_CHAT`. Visibilidade operacional: **mesa SDC** (não Cadastros Marketplace). Na lista da mesa: badge **Site (chat)** + link `lead_id` → CRM (`/modules/crm?lead_id=…`).
 
 ### Chat — Flash Capital
 
@@ -210,7 +210,7 @@ Categoria **Flash Capital** abre a faixa `10050–10058`:
 2. `evaluate_flash_desk` → card `flash_result` (principal LTV 40% / parcela / líquido)  
 3. Confirmar → `store_solicitation` Flash (mesa, status `AWAITING_DOCS`, canal `SITE_CHAT` em `evaluation_json`)
 
-Lead: `product_interest=FLASH_CREDIT`. Sem venda/TAPAF pelo chat nesta frente.
+Lead: `product_interest=FLASH_CREDIT`. Sem venda/TAPAF pelo chat nesta frente. Mesa Flash expõe `source_channel` / `lead_id` na API e na UI (mesmo padrão SDC).
 
 ### Chat — QuitCon
 
@@ -220,7 +220,7 @@ Categoria **QuitCon** abre a faixa `10060–10069`:
 2. `evaluate_quitcon_desk` → card `quitcon_result` (VP + custos)  
 3. Confirmar → `store_solicitation` QuitCon (mesa, status `AWAITING_DOCS`, canal `SITE_CHAT` em `evaluation_json`)
 
-Lead: `product_interest=QUITCON`. Sem TAPAF/venda pelo chat nesta frente.
+Lead: `product_interest=QUITCON`. Sem TAPAF/venda pelo chat nesta frente. Mesa QuitCon expõe `source_channel` / `lead_id` na API e na UI.
 
 ## Escritório do cliente — Minhas compras
 

@@ -233,6 +233,9 @@ def test_sdc_desk_evaluate_store_approve_and_sale(client, auth_headers):
     item = stored.json()
     assert item["status"] == "AWAITING_DOCS"
     assert item["credit_estimated"] == "175000.00"
+    assert item["source_channel"] == "SDC_DESK"
+    assert item["source_channel_label"] == "Mesa SDC"
+    assert item["lead_id"] is None
     sid = item["id"]
 
     listed = client.get("/api/v1/sdc/desk/solicitations", headers=auth_headers)
@@ -4133,6 +4136,9 @@ def test_public_site_chat_native_sdc_flow(client, auth_headers):
     hit = next(r for r in listed.json() if r["contact_email"] == "ana.sdc.chat@letter.test")
     assert hit["status"] == "AWAITING_DOCS"
     assert hit["credit_estimated"] == "175000.00"
+    assert hit["source_channel"] == "SITE_CHAT"
+    assert hit["source_channel_label"] == "Site (chat)"
+    assert hit["lead_id"] == lead_id
 
     leads = client.get("/api/v1/leads", headers=auth_headers).json()
     lead = next(l for l in leads if l["id"] == lead_id)
@@ -4213,6 +4219,9 @@ def test_public_site_chat_native_flash_flow(client, auth_headers):
     assert hit["status"] == "AWAITING_DOCS"
     assert hit["principal"] == "200000.00"
     assert hit["term_months"] == 36
+    assert hit["source_channel"] == "SITE_CHAT"
+    assert hit["source_channel_label"] == "Site (chat)"
+    assert hit["lead_id"] == lead_id
 
     leads = client.get("/api/v1/leads", headers=auth_headers).json()
     lead = next(l for l in leads if l["id"] == lead_id)
@@ -4304,6 +4313,9 @@ def test_public_site_chat_native_quitcon_flow(client, auth_headers):
     assert hit["status"] == "AWAITING_DOCS"
     assert hit["registry_office"] == "Embracon"
     assert Decimal(hit["quitacao_vp_amount"]) > 0
+    assert hit["source_channel"] == "SITE_CHAT"
+    assert hit["source_channel_label"] == "Site (chat)"
+    assert hit["lead_id"] == lead_id
 
     leads = client.get("/api/v1/leads", headers=auth_headers).json()
     lead = next(l for l in leads if l["id"] == lead_id)

@@ -11,6 +11,7 @@ from fastapi import HTTPException, UploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.desk_solicitation_meta import evaluation_json_with_meta, evaluation_meta
 from app.document_service import persist_upload
 from app.models import Lead, Proposal, Quota, Role, SdcSolicitation, SdcSolicitationDocument, User
 from app.network_service import PARTNER_NETWORK_ROLES
@@ -245,7 +246,11 @@ def store_solicitation(db: Session, user: User, payload: dict) -> SdcSolicitatio
         installment_estimated=money(_dec(result["parcela_estimada"])),
         term_months=int(result["prazo_meses"]),
         interest_rate_monthly=money(_dec(result["taxa_juros_mensal"])),
-        evaluation_json=json_dumps(result, ensure_ascii=False),
+        evaluation_json=evaluation_json_with_meta(
+            result,
+            channel="SDC_DESK",
+            lead_id=str(payload.get("lead_id") or "").strip() or None,
+        ),
     )
     db.add(item)
     db.flush()
@@ -402,4 +407,5 @@ def solicitation_view(item: SdcSolicitation, docs: list[SdcSolicitationDocument]
         ],
         "created_at": item.created_at.isoformat() if item.created_at else None,
         "can_create_sale": item.status == STATUS_APPROVED and not item.proposal_id,
+        **evaluation_meta(item.evaluation_json),
     }

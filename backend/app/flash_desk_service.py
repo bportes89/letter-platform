@@ -10,6 +10,7 @@ from fastapi import HTTPException, UploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.desk_solicitation_meta import evaluation_json_with_meta, evaluation_meta
 from app.document_service import persist_upload
 from app.flash_valid_lss_service import configure_flash_parties
 from app.models import FlashSolicitation, FlashSolicitationDocument, Lead, Proposal, Role, User
@@ -276,7 +277,11 @@ def store_solicitation(db: Session, user: User, payload: dict) -> FlashSolicitat
         net_payout=money(_dec(result["net_payout"])),
         installment_estimated=money(_dec(result["monthly_payment"])),
         interest_rate_monthly=money(_dec(result["interest_rate_monthly"])),
-        evaluation_json=json_dumps(result, ensure_ascii=False),
+        evaluation_json=evaluation_json_with_meta(
+            result,
+            channel="FLASH_DESK",
+            lead_id=str(payload.get("lead_id") or "").strip() or None,
+        ),
         parties_json="{}",
     )
     db.add(item)
@@ -466,4 +471,5 @@ def solicitation_view(item: FlashSolicitation, docs: list[FlashSolicitationDocum
         ],
         "created_at": item.created_at.isoformat() if item.created_at else None,
         "can_create_sale": item.status == STATUS_APPROVED and not item.proposal_id,
+        **evaluation_meta(item.evaluation_json),
     }
