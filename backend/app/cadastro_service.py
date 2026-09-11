@@ -434,6 +434,8 @@ def get_cadastro_detail(db: Session, user: User, lead_id: str) -> dict:
     from app.marketplace_contract_docs_service import site_contract_meta
 
     contract_meta = site_contract_meta(terms, snap)
+    from app.marketplace_zapsign_service import zapsign_view_from_terms
+
     return {
         **row,
         "snapshot": snap,
@@ -455,6 +457,7 @@ def get_cadastro_detail(db: Session, user: User, lead_id: str) -> dict:
         "boleto": boleto,
         "has_site_contract": contract_meta["has_site_contract"],
         "contract_ack": contract_meta["contract_ack"],
+        "zapsign": zapsign_view_from_terms(terms),
     }
 
 

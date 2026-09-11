@@ -134,7 +134,7 @@ Extrato admin: `GET /api/v1/marketplace/extrato` (linhas fornecedor/plataforma +
 
 Na mesma liberação, credita **saldo do fornecedor** (`QuotaSupplier.balance_available` + `supplier_ledger_entries`, idempotente por `MARKETPLACE_RELEASE:{proposal_id}`).
 
-Fora do escopo desta frente: crédito BANK/SEFAZ, scrape Uni/Lume, PIX automático Asaas.
+Fora do escopo desta frente: crédito BANK/SEFAZ, PIX automático Asaas.
 
 ## Portal do fornecedor (confirmar transferência + saldo/saque)
 
@@ -176,7 +176,7 @@ Jornada no site (`POST /api/v1/public/site/chat/home` e `.../home/{step}`):
    - `10014` resumo (crédito / entrada / cotas)
    - `10030–10037` PF/PJ → CPF/CNPJ (+ razão social PJ) → CEP → número → profissão/atividade → renda/faturamento → comprovação (Holerite/IR/Decore/Extrato)
    - `10038–10040` dúvida? → lista FAQ (admin `/modules/chat-faq`, seed Paulo) → resposta + mais dúvidas / contrato (decline do contrato volta a `10038`)
-   - `10015` contrato templated (HTML com dados do comprador/cota/renda; ack em `terms_json.contract_html` + `contract_ack`)
+   - `10015` contrato templated (HTML com dados do comprador/cota/renda; ack em `terms_json.contract_html` + `contract_ack`). Com `LETTER_ZAPSIGN_API_TOKEN` configurado, o PDF é enviado ao **ZapSign** na hora do aceite (`terms_json.zapsign.sign_url`); sem token permanece só `SITE_CHAT_ACK`.
    - `10016` senha in-chat → `register_public_client` + bind; se e-mail já existe → CTA login
    - `10017` emite boleto Inter com pagador real (documento/endereço do snapshot)
    - `10018` encerramento
@@ -233,6 +233,7 @@ Após criar conta (ou login) a partir do chat, o lead `SITE_CHAT` é vinculado (
 - Lista/detalhe: `GET /marketplace/me/compras` · `GET /marketplace/me/compras/{lead_id}`
 - Boleto: `POST /marketplace/me/compras/{lead_id}/boleto` (PDF público com token HMAC)
 - Contrato do chat: `GET /marketplace/me/compras/{lead_id}/contrato.pdf` (auth; exige aceite `SITE_CHAT_ACK`)
+- ZapSign: `POST /marketplace/me/compras/{lead_id}/zapsign/refresh` — atualiza status (`SENT` → `SIGNED`); detalhe inclui `zapsign.sign_url` quando pendente
 - Finalizar: `POST /marketplace/me/compras/{lead_id}/finalize` → `CONCLUIDO` (exige `PAGO` + confirmação do fornecedor; sem `force_admin`)
 - Docs: `GET/POST /marketplace/me/compras/{lead_id}/documents` · `GET .../documents/{id}` (`entity_type=marketplace_lead`)
 

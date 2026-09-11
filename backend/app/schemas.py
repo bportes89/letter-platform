@@ -2484,6 +2484,11 @@ class CadastroDetailView(CadastroListItem):
     boleto: dict | None = None
     has_site_contract: bool = False
     contract_ack: dict | None = None
+    zapsign: dict | None = None
+
+
+class MarketplaceZapSignRefreshResponse(BaseModel):
+    zapsign: dict | None = None
 
 
 class MarketplaceBoletoIssueResponse(BaseModel):

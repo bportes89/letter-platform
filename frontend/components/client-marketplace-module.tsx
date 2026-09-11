@@ -25,6 +25,12 @@ type CompraDetail = CompraRow & {
   can_conclude?: boolean;
   has_site_contract?: boolean;
   contract_ack?: { accepted_at?: string; provider?: string } | null;
+  zapsign?: {
+    status?: string;
+    sign_url?: string | null;
+    signed_at?: string | null;
+    signer_email?: string | null;
+  } | null;
   boleto?: {
     provider?: string;
     amount?: string;
@@ -86,7 +92,14 @@ export function ClientMarketplaceModule() {
     setError("");
     setNotice("");
     try {
-      const detail = await api<CompraDetail>(`/marketplace/me/compras/${leadId}`);
+      let detail = await api<CompraDetail>(`/marketplace/me/compras/${leadId}`);
+      if (detail.zapsign?.status === "SENT") {
+        const refreshed = await api<{ zapsign: CompraDetail["zapsign"] }>(
+          `/marketplace/me/compras/${leadId}/zapsign/refresh`,
+          { method: "POST" },
+        );
+        detail = { ...detail, zapsign: refreshed.zapsign };
+      }
       setSelected(detail);
       setDocs(await api<DocRow[]>(`/marketplace/me/compras/${leadId}/documents`));
     } catch (e) {
@@ -241,6 +254,15 @@ export function ClientMarketplaceModule() {
               <p>
                 Crédito {money(selected.credit_value)} · Entrada {money(selected.entrada_value)}
               </p>
+              {selected.zapsign?.status === "SENT" && selected.zapsign.sign_url ? (
+                <p className="muted">
+                  Assinatura digital pendente no ZapSign
+                  {selected.zapsign.signer_email ? ` (${selected.zapsign.signer_email})` : ""}.
+                </p>
+              ) : null}
+              {selected.zapsign?.status === "SIGNED" ? (
+                <p className="muted">Contrato assinado digitalmente (ZapSign).</p>
+              ) : null}
               <div className="actions-row">
                 <button type="button" disabled={busy} onClick={() => void issueBoleto()}>
                   Baixar boleto
@@ -248,6 +270,16 @@ export function ClientMarketplaceModule() {
                 <button type="button" disabled={busy || !selected.has_site_contract} onClick={() => void openContractPdf()}>
                   Ver contrato (PDF)
                 </button>
+                {selected.zapsign?.status === "SENT" && selected.zapsign.sign_url ? (
+                  <button
+                    type="button"
+                    className="primary"
+                    disabled={busy}
+                    onClick={() => window.open(selected.zapsign!.sign_url!, "_blank", "noopener,noreferrer")}
+                  >
+                    Assinar no ZapSign
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   className="primary"

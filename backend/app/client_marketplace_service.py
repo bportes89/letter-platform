@@ -129,6 +129,30 @@ def get_my_compra(db: Session, user: User, lead_id: str) -> dict:
     return get_cadastro_detail(db, user, lead_id)
 
 
+def refresh_my_zapsign(db: Session, user: User, lead_id: str) -> dict:
+    if user.role != Role.CLIENT:
+        raise HTTPException(status_code=403, detail="Somente clientes.")
+    get_lead_for_user(db, user, lead_id)
+    proposal = db.scalar(
+        select(Proposal)
+        .where(
+            Proposal.lead_id == lead_id,
+            Proposal.organization_id == user.organization_id,
+            Proposal.product == "MARKETPLACE",
+        )
+        .order_by(Proposal.created_at.desc())
+    )
+    if not proposal:
+        raise HTTPException(status_code=404, detail="Proposta Marketplace não encontrada.")
+
+    from app.marketplace_zapsign_service import refresh_marketplace_zapsign, zapsign_view_from_terms
+
+    current = zapsign_view_from_terms(json.loads(proposal.terms_json or "{}"))
+    if current and current.get("status") == "SENT":
+        return {"zapsign": refresh_marketplace_zapsign(db, proposal)}
+    return {"zapsign": current}
+
+
 def issue_my_boleto(db: Session, user: User, lead_id: str, *, force_new: bool = False) -> dict:
     if user.role != Role.CLIENT:
         raise HTTPException(status_code=403, detail="Somente clientes.")

@@ -3913,6 +3913,151 @@ def test_public_site_chat_native_marketplace_flow(client, auth_headers):
     assert body.get("boleto")
 
 
+def test_marketplace_chat_sends_zapsign_on_contract_accept(client, auth_headers, monkeypatch):
+    class FakeZapSignClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def create_doc_from_pdf(self, **kwargs):
+            return {
+                "token": "marketplace-doc-001",
+                "status": "pending",
+                "signers": [
+                    {
+                        "email": "maria.chat@letter.test",
+                        "sign_url": "https://app.zapsign.com.br/verificar/marketplace-signer",
+                    }
+                ],
+            }
+
+        def get_doc(self, token):
+            return {
+                "token": token,
+                "status": "signed",
+                "signers": [
+                    {
+                        "email": "maria.chat@letter.test",
+                        "signed_at": "2026-09-11T12:00:00Z",
+                        "sign_url": "https://app.zapsign.com.br/verificar/marketplace-signer",
+                    }
+                ],
+            }
+
+    monkeypatch.setattr("app.marketplace_zapsign_service.settings.zapsign_api_token", "zapsign-test-token")
+    monkeypatch.setattr("app.marketplace_zapsign_service.ZapSignClient", FakeZapSignClient)
+
+    email_addr = "maria.chat.zapsign@letter.com.br"
+    client.post("/api/v1/public/site/chat/home/10001", json={"name": "Maria Silva Chat"})
+    email = client.post(
+        "/api/v1/public/site/chat/home/10003",
+        json={"name": "Maria Silva Chat", "email": email_addr},
+    )
+    lead_id = email.json()["OBJ"]["lead_id"]
+    client.post(
+        "/api/v1/public/site/chat/home/10004",
+        json={"lead_id": lead_id, "phone": "32999887766", "email": email_addr},
+    )
+    client.post(
+        "/api/v1/public/site/chat/home/10007",
+        json={"lead_id": lead_id, "option_id": "REAL_ESTATE", "option_save": "REAL_ESTATE"},
+    )
+    client.post(
+        "/api/v1/public/site/chat/home/10008",
+        json={"lead_id": lead_id, "option_id": "dirty_no", "option_save": "0"},
+    )
+    client.post("/api/v1/public/site/chat/home/10008", json={"lead_id": lead_id, "target_amount": "400000"})
+    client.post("/api/v1/public/site/chat/home/10009", json={"lead_id": lead_id, "target_entrada": "80000"})
+    client.post("/api/v1/public/site/chat/home/10010", json={"lead_id": lead_id, "monthly_income": "50000"})
+    match = client.post(
+        "/api/v1/public/site/chat/home/10011",
+        json={"lead_id": lead_id, "asset_value": "900000"},
+    )
+    options = match.json()["OBJ"]["chat_next"][0].get("options") or []
+    quota_key = options[0]["id"]
+    for qid in str(quota_key).split("|"):
+        client.post(f"/api/v1/quotas/{qid}/nina-scan", headers=auth_headers)
+    client.post(
+        "/api/v1/public/site/chat/home/10013",
+        json={"lead_id": lead_id, "option_id": quota_key, "option_save": quota_key},
+    )
+    client.post("/api/v1/public/site/chat/home/10014", json={"lead_id": lead_id})
+    client.post(
+        "/api/v1/public/site/chat/home/10030",
+        json={"lead_id": lead_id, "option_id": "PF", "option_save": "PF"},
+    )
+    client.post(
+        "/api/v1/public/site/chat/home/10031",
+        json={"lead_id": lead_id, "document": "52998224725"},
+    )
+    client.post(
+        "/api/v1/public/site/chat/home/10033",
+        json={"lead_id": lead_id, "zipcode": "36010000"},
+    )
+    client.post(
+        "/api/v1/public/site/chat/home/10034",
+        json={"lead_id": lead_id, "number": "100"},
+    )
+    client.post(
+        "/api/v1/public/site/chat/home/10035",
+        json={"lead_id": lead_id, "profession": "Engenheira"},
+    )
+    client.post(
+        "/api/v1/public/site/chat/home/10036",
+        json={"lead_id": lead_id, "declared_income": "15000"},
+    )
+    client.post(
+        "/api/v1/public/site/chat/home/10037",
+        json={"lead_id": lead_id, "option_save": "holerite", "option_id": "holerite"},
+    )
+    client.post(
+        "/api/v1/public/site/chat/home/10037",
+        json={"lead_id": lead_id, "option_save": "done", "option_id": "done"},
+    )
+    client.post("/api/v1/public/site/chat/home/10038", json={"lead_id": lead_id, "option_save": "no"})
+
+    accept = client.post(
+        "/api/v1/public/site/chat/home/10015",
+        json={"lead_id": lead_id, "option_save": "accept", "option_id": "accept"},
+    )
+    assert accept.status_code == 200, accept.text
+    accept_opts = accept.json()["OBJ"]["chat_next"][0].get("options") or []
+    zapsign_links = [o.get("link") for o in accept_opts if "zapsign" in str(o.get("link", "")).lower()]
+    assert zapsign_links, "aceite do contrato deveria expor link ZapSign"
+
+    detail = client.get(f"/api/v1/marketplace/cadastros/{lead_id}", headers=auth_headers)
+    assert detail.status_code == 200
+    zs = detail.json().get("zapsign") or {}
+    assert zs.get("status") == "SENT"
+    assert "zapsign" in (zs.get("sign_url") or "")
+
+    registered = client.post(
+        "/api/v1/public/site/auth/register",
+        json={
+            "name": "Maria Silva Chat",
+            "email": email_addr,
+            "phone": "32999887766",
+            "password": "ClienteSite1!",
+            "terms_accepted": True,
+            "chat_lead_id": lead_id,
+        },
+    )
+    assert registered.status_code == 201, registered.text
+    client_headers = {"Authorization": f"Bearer {registered.json()['access_token']}"}
+
+    refreshed = client.post(
+        f"/api/v1/marketplace/me/compras/{lead_id}/zapsign/refresh",
+        headers=client_headers,
+    )
+    assert refreshed.status_code == 200, refreshed.text
+    assert refreshed.json()["zapsign"]["status"] == "SIGNED"
+
+
 def test_marketplace_client_office_bind_boleto_finalize(client, auth_headers):
     """Cliente vincula compra SITE_CHAT, emite boleto e finaliza após fornecedor."""
     # Reusa fluxo chat até proposta

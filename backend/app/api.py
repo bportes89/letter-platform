@@ -94,7 +94,7 @@ from app.schemas import (
     VendaDiretaManualCotaOption, VendaDiretaManualCadastroOption, VendaDiretaManualPartnerOption,
     VendaDiretaManualStoreRequest, VendaDiretaManualStoreResponse,
     CadastroListItem, CadastroDetailView, CadastroUpdateRequest, MarketplaceExtratoItem,
-    MarketplaceBoletoIssueResponse, MarketplaceInterMockWebhookRequest,
+    MarketplaceBoletoIssueResponse, MarketplaceInterMockWebhookRequest, MarketplaceZapSignRefreshResponse,
     MarketplaceBindChatLeadRequest, MarketplaceBindChatLeadResponse,
     VenderCotaCalculateRequest, VenderCotaStoreRequest, QuotaOfferRangeUpdate, QuotaSellOfferUpdate, VenderCotaCloseRequest,
     SdcDeskEvaluateRequest, SdcDeskStoreRequest, SdcDeskStatusUpdate, SdcDeskSaleCreate,
@@ -2266,6 +2266,17 @@ def marketplace_me_finalize(lead_id: str, user: User = Depends(get_current_user)
 
     result = finalize_my_compra(db, user, lead_id)
     audit(db, user, "marketplace.client.finalize", "lead", lead_id, {"situation": result.get("situation")})
+    db.commit()
+    return result
+
+
+@router.post("/marketplace/me/compras/{lead_id}/zapsign/refresh", response_model=MarketplaceZapSignRefreshResponse)
+def marketplace_me_zapsign_refresh(
+    lead_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)
+):
+    from app.client_marketplace_service import refresh_my_zapsign
+
+    result = refresh_my_zapsign(db, user, lead_id)
     db.commit()
     return result
 
