@@ -3982,6 +3982,61 @@ def test_marketplace_client_office_bind_boleto_finalize(client, auth_headers):
     assert docs.json() == []
 
 
+def test_marketplace_chat_faq_admin_crud_reflects_in_chat(client, auth_headers):
+    seeded = client.post("/api/v1/marketplace/chat-faq/ensure-defaults", headers=auth_headers)
+    assert seeded.status_code == 200, seeded.text
+    assert len(seeded.json()) >= 6
+    assert any(x.get("legacy_key") == "23" for x in seeded.json())
+
+    created = client.post(
+        "/api/v1/marketplace/chat-faq",
+        headers=auth_headers,
+        json={
+            "name": "Posso parcelar a entrada?",
+            "txt": "Não. A entrada é paga à vista via boleto Inter.",
+            "sort_order": 5,
+            "active": True,
+        },
+    )
+    assert created.status_code == 201, created.text
+    faq_id = created.json()["id"]
+    public_id = created.json()["public_id"]
+
+    email = client.post(
+        "/api/v1/public/site/chat/home/10003",
+        json={"name": "Faq Tester Letter", "email": "faq.admin.chat@letter.test"},
+    )
+    assert email.status_code == 200
+    lead_id = email.json()["OBJ"]["lead_id"]
+    client.post("/api/v1/public/site/chat/home/10004", json={"lead_id": lead_id, "phone": "11988887777"})
+
+    # Atalho: lista FAQ direto no passo 10039 (não precisa match completo)
+    faq_list = client.post("/api/v1/public/site/chat/home/10039", json={"lead_id": lead_id})
+    assert faq_list.status_code == 200, faq_list.text
+    items = faq_list.json()["OBJ"]["chat_next"][0].get("items") or []
+    assert any(i.get("id") == public_id for i in items)
+
+    answer = client.post(
+        "/api/v1/public/site/chat/home/10040",
+        json={"lead_id": lead_id, "faq_id": public_id, "option_id": public_id},
+    )
+    assert answer.status_code == 200, answer.text
+    assert "boleto Inter" in (answer.json()["OBJ"]["chat_next"][0].get("text") or "")
+
+    hidden = client.patch(
+        f"/api/v1/marketplace/chat-faq/{faq_id}",
+        headers=auth_headers,
+        json={"active": False},
+    )
+    assert hidden.status_code == 200
+    faq_list2 = client.post("/api/v1/public/site/chat/home/10039", json={"lead_id": lead_id})
+    items2 = faq_list2.json()["OBJ"]["chat_next"][0].get("items") or []
+    assert not any(i.get("id") == public_id for i in items2)
+
+    deleted = client.delete(f"/api/v1/marketplace/chat-faq/{faq_id}", headers=auth_headers)
+    assert deleted.status_code == 204
+
+
 def test_public_site_chat_native_sdc_flow(client, auth_headers):
     """Chat nativo SDC: garantia → evaluate → solicitation na mesa."""
     email = client.post(

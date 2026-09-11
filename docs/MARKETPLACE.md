@@ -173,13 +173,24 @@ Jornada no site (`POST /api/v1/public/site/chat/home` e `.../home/{step}`):
 4. Handoff pós-match (`10014–10018` + dados `10030–10034`):
    - `10014` resumo (crédito / entrada / cotas)
    - `10030–10037` PF/PJ → CPF/CNPJ (+ razão social PJ) → CEP → número → profissão/atividade → renda/faturamento → comprovação (Holerite/IR/Decore/Extrato)
-   - `10038–10040` dúvida? → lista FAQ (seed Paulo) → resposta + mais dúvidas / contrato (decline do contrato volta a `10038`)
+   - `10038–10040` dúvida? → lista FAQ (admin `/modules/chat-faq`, seed Paulo) → resposta + mais dúvidas / contrato (decline do contrato volta a `10038`)
    - `10015` contrato templated (HTML com dados do comprador/cota/renda; ack em `terms_json.contract_html` + `contract_ack`)
    - `10016` senha in-chat → `register_public_client` + bind; se e-mail já existe → CTA login
    - `10017` emite boleto Inter com pagador real (documento/endereço do snapshot)
    - `10018` encerramento
 
 Resposta compatível com o widget legado (`OBJ.chat_next` + `OBJ.info` + `OBJ.lead_id`). Fallback legado: `LETTER_CHAT_NATIVE_ENABLED=false`.
+
+### FAQ do chat (admin)
+
+CRUD org-scoped em `marketplace_chat_faqs` (seed Paulo ids `23`, `24`, `25`, `40–42`):
+
+- Admin UI: `/modules/chat-faq`
+- `GET/POST /api/v1/marketplace/chat-faq`
+- `PATCH/DELETE /api/v1/marketplace/chat-faq/{id}`
+- `POST /api/v1/marketplace/chat-faq/ensure-defaults`
+
+O chat lista só `active=true`; `public_id` = `legacy_key` (Paulo) ou UUID. Auto-seed na primeira listagem do chat se a org estiver vazia.
 
 ### Chat — Capital de Giro (SDC)
 

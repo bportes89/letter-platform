@@ -100,74 +100,23 @@ INCOME_PROOF_OPTIONS = {
     "extrato": "Extrato",
 }
 
-# FAQ seed (Paulo Items type=faq) — sem CRUD admin nesta frente.
-MARKETPLACE_CHAT_FAQ: list[dict[str, str]] = [
-    {
-        "id": "23",
-        "name": "Essa compra é realmente segura?",
-        "txt": (
-            "Todas as opções de créditos cadastrados em nosso sistema são devidamente checadas "
-            "por nosso setor de BackOffice e Compliance. Operamos em conformidade com a LGPD."
-        ),
-    },
-    {
-        "id": "25",
-        "name": "O que acontece com o meu dinheiro caso o processo não conclua?",
-        "txt": (
-            "Os valores pagos de entrada ficam retidos na plataforma. Se a transferência não "
-            "concluir por parte do fornecedor, a entrada é devolvida em até 2 dias úteis."
-        ),
-    },
-    {
-        "id": "24",
-        "name": "Como funciona o faturamento do bem que irei comprar?",
-        "txt": (
-            "Após a transferência do crédito para o seu nome, você inicia o faturamento "
-            "diretamente com a administradora. O crédito fica disponível para uso imediato."
-        ),
-    },
-    {
-        "id": "40",
-        "name": "O que é a Taxa de Transferência?",
-        "txt": (
-            "É a taxa cobrada pela administradora do crédito para concluir a transferência "
-            "para o seu nome."
-        ),
-    },
-    {
-        "id": "41",
-        "name": "Quanto tempo demora em média a transferência?",
-        "txt": (
-            "Em condições normais, até 10 dias — varia por administradora e pela agilidade "
-            "no envio de documentos por você e pelo fornecedor."
-        ),
-    },
-    {
-        "id": "42",
-        "name": "Estou negativado, consigo comprar?",
-        "txt": (
-            "Sim. Direcionamos créditos que permitem compra mesmo com restrição; na transferência "
-            "pode ser necessário avalista sem restrições e com renda comprovada."
-        ),
-    },
-]
+# FAQ: seed Paulo + CRUD em marketplace_chat_faq_service (admin /marketplace/chat-faq).
 
 
-def _faq_by_id(faq_id: str | None) -> dict[str, str] | None:
-    if not faq_id:
-        return None
-    key = str(faq_id).strip()
-    for row in MARKETPLACE_CHAT_FAQ:
-        if row["id"] == key:
-            return row
-    return None
+def _faq_by_id(db, org_id: str, faq_id: str | None) -> dict[str, str] | None:
+    from app.marketplace_chat_faq_service import find_active_for_chat
+
+    return find_active_for_chat(db, org_id, faq_id)
 
 
-def _faq_list_item() -> dict:
+def _faq_list_item(db, org_id: str) -> dict:
+    from app.marketplace_chat_faq_service import list_active_for_chat
+
+    rows = list_active_for_chat(db, org_id)
     return {
         "text": "Selecione uma dúvida:",
         "faq": True,
-        "items": [{"id": row["id"], "name": row["name"]} for row in MARKETPLACE_CHAT_FAQ],
+        "items": [{"id": row["id"], "name": row["name"]} for row in rows],
         "next": int(STEP_FAQ_ANSWER),
     }
 
@@ -1330,13 +1279,13 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
                 lead_id=lead.id,
             )
         if choice in {"yes", "sim", "1", "true"}:
-            return _wrap([_faq_list_item()], lead_id=lead.id)
+            return _wrap([_faq_list_item(db, org.id)], lead_id=lead.id)
         return _doubts_prompt(lead_id=lead.id)
 
     if step in {STEP_FAQ_LIST, "94"}:
         if not lead:
             raise HTTPException(422, "Sessão do chat expirada. Recomece pelo início.")
-        return _wrap([_faq_list_item()], lead_id=lead.id)
+        return _wrap([_faq_list_item(db, org.id)], lead_id=lead.id)
 
     if step in {STEP_FAQ_ANSWER, STEP_FAQ_ANSWER_LEGACY}:
         if not lead:
@@ -1349,9 +1298,9 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
         ).strip()
         if isinstance(data.get("option_save"), dict):
             faq_id = str(data["option_save"].get("faq_id") or faq_id)
-        row = _faq_by_id(faq_id)
+        row = _faq_by_id(db, org.id, faq_id)
         if not row:
-            item = _faq_list_item()
+            item = _faq_list_item(db, org.id)
             item["text"] = "Não encontrei essa dúvida. Escolha outra na lista:"
             return _wrap([item], lead_id=lead.id)
         return _wrap(

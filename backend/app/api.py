@@ -90,6 +90,7 @@ from app.schemas import (
     QuotaSupplierCreate, QuotaSupplierUpdate, QuotaSupplierView, QuotaInventorySyncView,
     SupplierPortalTokenResponse, SupplierPortalMeView, SupplierPortalTransferItem,
     SupplierLedgerItem, SupplierWithdrawalRequest, SupplierWithdrawalView, SupplierWithdrawalProcessRequest,
+    MarketplaceChatFaqCreate, MarketplaceChatFaqUpdate, MarketplaceChatFaqView,
     VendaDiretaManualCotaOption, VendaDiretaManualCadastroOption, VendaDiretaManualPartnerOption,
     VendaDiretaManualStoreRequest, VendaDiretaManualStoreResponse,
     CadastroListItem, CadastroDetailView, CadastroUpdateRequest, MarketplaceExtratoItem,
@@ -1848,6 +1849,75 @@ def marketplace_process_supplier_withdrawal(
     audit(db, user, "marketplace.supplier_withdrawal.process", "supplier_withdrawal", withdrawal_id, payload.model_dump())
     db.commit()
     return result
+
+
+@router.get("/marketplace/chat-faq", response_model=list[MarketplaceChatFaqView])
+def marketplace_chat_faq_list(
+    active_only: bool = False,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.marketplace_chat_faq_service import faq_view, list_faqs
+
+    return [faq_view(x) for x in list_faqs(db, user, active_only=active_only)]
+
+
+@router.post("/marketplace/chat-faq", response_model=MarketplaceChatFaqView, status_code=201)
+def marketplace_chat_faq_create(
+    payload: MarketplaceChatFaqCreate,
+    user: User = Depends(require_scope("inventory:write")),
+    db: Session = Depends(get_db),
+):
+    from app.marketplace_chat_faq_service import create_faq, faq_view
+
+    item = create_faq(db, user, payload.model_dump())
+    audit(db, user, "marketplace.chat_faq.created", "marketplace_chat_faq", item.id, {"name": item.name})
+    db.commit()
+    db.refresh(item)
+    return faq_view(item)
+
+
+@router.patch("/marketplace/chat-faq/{faq_id}", response_model=MarketplaceChatFaqView)
+def marketplace_chat_faq_update(
+    faq_id: str,
+    payload: MarketplaceChatFaqUpdate,
+    user: User = Depends(require_scope("inventory:write")),
+    db: Session = Depends(get_db),
+):
+    from app.marketplace_chat_faq_service import faq_view, update_faq
+
+    item = update_faq(db, user, faq_id, payload.model_dump(exclude_unset=True))
+    audit(db, user, "marketplace.chat_faq.updated", "marketplace_chat_faq", faq_id, payload.model_dump(exclude_unset=True))
+    db.commit()
+    db.refresh(item)
+    return faq_view(item)
+
+
+@router.delete("/marketplace/chat-faq/{faq_id}", status_code=204)
+def marketplace_chat_faq_delete(
+    faq_id: str,
+    user: User = Depends(require_scope("inventory:write")),
+    db: Session = Depends(get_db),
+):
+    from app.marketplace_chat_faq_service import delete_faq
+
+    delete_faq(db, user, faq_id)
+    audit(db, user, "marketplace.chat_faq.deleted", "marketplace_chat_faq", faq_id)
+    db.commit()
+    return Response(status_code=204)
+
+
+@router.post("/marketplace/chat-faq/ensure-defaults", response_model=list[MarketplaceChatFaqView])
+def marketplace_chat_faq_ensure_defaults(
+    user: User = Depends(require_scope("inventory:write")),
+    db: Session = Depends(get_db),
+):
+    from app.marketplace_chat_faq_service import ensure_default_faqs, faq_view, list_faqs
+
+    ensure_default_faqs(db, user.organization_id)
+    audit(db, user, "marketplace.chat_faq.ensure_defaults", "marketplace_chat_faq", user.organization_id)
+    db.commit()
+    return [faq_view(x) for x in list_faqs(db, user)]
 
 
 @router.post("/system/cron/marketplace-quota-sync", response_model=QuotaInventorySyncView)

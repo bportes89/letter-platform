@@ -2317,6 +2317,34 @@ class SupplierWithdrawalProcessRequest(BaseModel):
     notes: str | None = Field(default=None, max_length=500)
 
 
+class MarketplaceChatFaqCreate(BaseModel):
+    name: str = Field(min_length=3, max_length=255)
+    txt: str = Field(min_length=3)
+    legacy_key: str | None = Field(default=None, max_length=40)
+    active: bool = True
+    sort_order: int = 100
+
+
+class MarketplaceChatFaqUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=3, max_length=255)
+    txt: str | None = Field(default=None, min_length=3)
+    legacy_key: str | None = Field(default=None, max_length=40)
+    active: bool | None = None
+    sort_order: int | None = None
+
+
+class MarketplaceChatFaqView(BaseModel):
+    id: str
+    legacy_key: str | None = None
+    public_id: str
+    name: str
+    txt: str
+    active: bool
+    sort_order: int
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
 class QuotaInventorySyncView(BaseModel):
     organization_id: str | None = None
     supplier_id: str | None = None

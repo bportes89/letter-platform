@@ -305,6 +305,20 @@ class SupplierWithdrawal(TimestampMixin, Base):
     processed_by_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"))
 
 
+class MarketplaceChatFaq(TimestampMixin, Base):
+    """FAQ do chat público Marketplace (lista 10039 / resposta 10040)."""
+
+    __tablename__ = "marketplace_chat_faqs"
+    __table_args__ = (UniqueConstraint("organization_id", "legacy_key", name="uq_marketplace_faq_legacy"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    legacy_key: Mapped[str | None] = mapped_column(String(40), index=True)  # Paulo Items id (23, 25…)
+    name: Mapped[str] = mapped_column(String(255))
+    txt: Mapped[str] = mapped_column(Text)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+
+
 class QuotaOfferRange(TimestampMixin, Base):
     """Faixas editáveis do robô 'Vender minha cota' (tipo × prazo × % pago → % oferta)."""
 
