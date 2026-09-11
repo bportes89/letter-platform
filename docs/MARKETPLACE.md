@@ -254,4 +254,4 @@ Comportamento:
 - Someu do JSON → `INACTIVE` (não mexe em `RESERVED` / `SOLD`)
 - Lista vazia ou GET com falha → **não** zera o estoque daquele fornecedor
 - Markup **não** é somado no sync (Esteira 2 aplica no match)
-- `SCRAPE` (Uni/Lume HTML) reservado — ainda não portado
+- `SCRAPE` (HTML TablePress — Uni/Lume): `api_url` da página + `scrape_config` com `table_id` (ex. `tablepress-tab-imoveis`) e `category` (`REAL_ESTATE` / `VEHICLE`). Layouts `contempladosp` / `cartascontempladas` ficam para fase 2.

@@ -26,6 +26,7 @@ SYNC_JSON = "JSON"
 SYNC_SCRAPE = "SCRAPE"
 SYNC_NONE = "NONE"
 ORIGIN_JSON = "JSON"
+ORIGIN_SCRAPE = "SCRAPE"
 PROTECTED_STATUSES = {"RESERVED", "SOLD"}
 HTTP_TIMEOUT = 30.0
 
@@ -156,6 +157,7 @@ def _apply_row(
     row: dict,
     admin_cache: dict[str, Administrator],
     existing: dict[str, Quota],
+    sync_origin: str = ORIGIN_JSON,
 ) -> str:
     external_ref = str(row.get("id") or row.get("external_id") or row.get("codigo") or "").strip()
     if not external_ref:
@@ -190,7 +192,7 @@ def _apply_row(
         quota.remaining_installments = parcelas or None
         quota.administrator_name_txt = adm_name
         quota.synced_at = now
-        quota.sync_origin = ORIGIN_JSON
+        quota.sync_origin = sync_origin
         if has_due_date:
             quota.installment_due_date = due_date
         if quota.status not in PROTECTED_STATUSES:
@@ -211,7 +213,7 @@ def _apply_row(
         installment_due_date=due_date if has_due_date else None,
         supplier_source=normalize_supplier_key(supplier.source_key),
         external_ref=external_ref,
-        sync_origin=ORIGIN_JSON,
+        sync_origin=sync_origin,
         synced_at=now,
         administrator_name_txt=adm_name,
         status="AVAILABLE" if available else "INACTIVE",
@@ -232,7 +234,7 @@ def sync_organization_inventory(db: Session, organization_id: str) -> dict:
             select(QuotaSupplier).where(
                 QuotaSupplier.organization_id == organization_id,
                 QuotaSupplier.active.is_(True),
-                QuotaSupplier.sync_mode == SYNC_JSON,
+                QuotaSupplier.sync_mode.in_((SYNC_JSON, SYNC_SCRAPE)),
             ).order_by(QuotaSupplier.name)
         )
     )
@@ -272,24 +274,20 @@ def _stamp_supplier(supplier: QuotaSupplier, *, status: str, detail: dict) -> No
 
 
 def _sync_one(db: Session, *, organization_id: str, supplier: QuotaSupplier) -> dict:
-    if supplier.sync_mode == SYNC_SCRAPE:
-        detail = {
-            "supplier_id": supplier.id,
-            "source_key": supplier.source_key,
-            "status": "SKIPPED",
-            "message": "Sync SCRAPE (HTML) ainda não portado — use JSON ou cadastro manual.",
-        }
-        _stamp_supplier(supplier, status="SKIPPED", detail=detail)
-        db.flush()
-        return detail
-    if supplier.sync_mode != SYNC_JSON:
-        raise HTTPException(422, "Fornecedor sem sync_mode=JSON.")
+    if supplier.sync_mode not in {SYNC_JSON, SYNC_SCRAPE}:
+        raise HTTPException(422, "Fornecedor sem sync_mode=JSON ou SCRAPE.")
     url = (supplier.api_url or "").strip()
     if not url:
         raise HTTPException(422, "Configure api_url do fornecedor antes de sincronizar.")
 
+    sync_origin = ORIGIN_SCRAPE if supplier.sync_mode == SYNC_SCRAPE else ORIGIN_JSON
     try:
-        payload = _fetch_json_payload(url)
+        if supplier.sync_mode == SYNC_SCRAPE:
+            from app.quota_scrape_service import fetch_scrape_payload
+
+            payload = fetch_scrape_payload(supplier)
+        else:
+            payload = _fetch_json_payload(url)
     except HTTPException as exc:
         detail = {
             "supplier_id": supplier.id,
@@ -310,7 +308,7 @@ def _sync_one(db: Session, *, organization_id: str, supplier: QuotaSupplier) -> 
             select(Quota).where(
                 Quota.organization_id == organization_id,
                 Quota.supplier_source == source_key,
-                Quota.sync_origin == ORIGIN_JSON,
+                Quota.sync_origin == sync_origin,
             )
         )
     )
@@ -330,6 +328,7 @@ def _sync_one(db: Session, *, organization_id: str, supplier: QuotaSupplier) -> 
             row=row,
             admin_cache=admin_cache,
             existing=existing,
+            sync_origin=sync_origin,
         )
         if action == "created":
             created += 1

@@ -265,6 +265,7 @@ class QuotaSupplier(TimestampMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text)
     sync_mode: Mapped[str] = mapped_column(String(20), default="NONE")  # NONE | JSON | SCRAPE
     api_url: Mapped[str | None] = mapped_column(String(500))
+    scrape_config_json: Mapped[str] = mapped_column(Text, default="{}")
     last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_sync_status: Mapped[str | None] = mapped_column(String(40))
     last_sync_detail_json: Mapped[str] = mapped_column(Text, default="{}")

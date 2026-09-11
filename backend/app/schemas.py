@@ -2194,6 +2194,9 @@ class QuotaSupplierCreate(BaseModel):
     active: bool = True
     sync_mode: str = Field(default="NONE", max_length=20)
     api_url: str | None = Field(default=None, max_length=500)
+    scrape_config_json: str | None = None
+    scrape_table_id: str | None = Field(default=None, max_length=120)
+    scrape_category: str | None = Field(default=None, max_length=20)
 
 
 class QuotaSupplierUpdate(BaseModel):
@@ -2215,6 +2218,9 @@ class QuotaSupplierUpdate(BaseModel):
     active: bool | None = None
     sync_mode: str | None = Field(default=None, max_length=20)
     api_url: str | None = Field(default=None, max_length=500)
+    scrape_config_json: str | None = None
+    scrape_table_id: str | None = Field(default=None, max_length=120)
+    scrape_category: str | None = Field(default=None, max_length=20)
 
 
 class QuotaSupplierView(BaseModel):
@@ -2237,6 +2243,7 @@ class QuotaSupplierView(BaseModel):
     notes: str | None = None
     sync_mode: str = "NONE"
     api_url: str | None = None
+    scrape_config_json: str = "{}"
     last_sync_at: datetime | None = None
     last_sync_status: str | None = None
     last_sync_detail_json: str = "{}"

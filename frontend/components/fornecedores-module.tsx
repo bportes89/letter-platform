@@ -22,6 +22,7 @@ type QuotaSupplier = {
   notes: string | null;
   sync_mode: string;
   api_url: string | null;
+  scrape_config_json?: string;
   last_sync_at: string | null;
   last_sync_status: string | null;
   has_portal_token?: boolean;
@@ -188,6 +189,8 @@ export function FornecedoresModule() {
       active: fd.get("active") === "1",
       sync_mode: String(fd.get("sync_mode") || "NONE"),
       api_url: String(fd.get("api_url") || "") || null,
+      scrape_table_id: String(fd.get("scrape_table_id") || "") || null,
+      scrape_category: String(fd.get("scrape_category") || "REAL_ESTATE") || null,
     };
     try {
       if (editing) {
@@ -329,12 +332,50 @@ export function FornecedoresModule() {
               <select name="sync_mode" defaultValue={editing?.sync_mode || "NONE"}>
                 <option value="NONE">Manual</option>
                 <option value="JSON">API JSON</option>
-                <option value="SCRAPE">Scrape (em breve)</option>
+                <option value="SCRAPE">Scrape HTML (TablePress)</option>
               </select>
             </label>
             <label className="marketplace-field marketplace-field-wide">
-              API URL
+              API URL / página HTML
               <input name="api_url" placeholder="https://..." defaultValue={editing?.api_url || ""} />
+            </label>
+            <label className="marketplace-field marketplace-field-wide">
+              Table ID (SCRAPE)
+              <input
+                name="scrape_table_id"
+                placeholder="tablepress-tab-imoveis"
+                defaultValue={
+                  editing?.scrape_config_json
+                    ? (() => {
+                        try {
+                          return JSON.parse(editing.scrape_config_json).table_id || "";
+                        } catch {
+                          return "";
+                        }
+                      })()
+                    : ""
+                }
+              />
+            </label>
+            <label className="marketplace-field marketplace-field-compact">
+              Categoria (SCRAPE)
+              <select
+                name="scrape_category"
+                defaultValue={
+                  editing?.scrape_config_json
+                    ? (() => {
+                        try {
+                          return JSON.parse(editing.scrape_config_json).category || "REAL_ESTATE";
+                        } catch {
+                          return "REAL_ESTATE";
+                        }
+                      })()
+                    : "REAL_ESTATE"
+                }
+              >
+                <option value="REAL_ESTATE">Imóvel</option>
+                <option value="VEHICLE">Veículo</option>
+              </select>
             </label>
             <label className="marketplace-field">
               Banco

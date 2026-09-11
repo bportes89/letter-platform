@@ -5052,6 +5052,88 @@ def test_administrator_homologation_and_bacen_scr(client, auth_headers):
     assert captured["scr_reference"] == body["scr_reference"]
 
 
+def test_marketplace_supplier_scrape_sync_tablepress(client, auth_headers, monkeypatch):
+    """SCRAPE TablePress: parse HTML, upsert cotas e inativa sumidas."""
+    html_page = """
+    <table id="tablepress-tab-imoveis"><tbody>
+      <tr>
+        <td>R$ 200.000,00</td><td>R$ 30.000,00</td><td>48 X 2.200,00</td>
+        <td></td><td>Embracon</td><td>15/09/2026</td><td></td>
+      </tr>
+      <tr>
+        <td>R$ 150.000,00</td><td>R$ 20.000,00</td><td>36 X 1.800,00</td>
+        <td></td><td>HS Consorcios</td><td></td><td>Reservada</td>
+      </tr>
+    </tbody></table>
+    """
+
+    class FakeResponse:
+        status_code = 200
+        text = html_page
+
+        def raise_for_status(self):
+            return None
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def get(self, url):
+            assert "scrape.test" in url
+            return FakeResponse()
+
+    monkeypatch.setattr("app.quota_scrape_service.httpx.Client", FakeClient)
+
+    created = client.post(
+        "/api/v1/marketplace/suppliers",
+        headers=auth_headers,
+        json={
+            "name": "Uni Scrape Demo",
+            "source_key": "SCRAPE_DEMO",
+            "document": "88776655000144",
+            "markup_percent": "10",
+            "sync_mode": "SCRAPE",
+            "api_url": "https://scrape.test/imoveis",
+            "scrape_table_id": "tablepress-tab-imoveis",
+            "scrape_category": "REAL_ESTATE",
+        },
+    )
+    assert created.status_code == 201, created.text
+    supplier_id = created.json()["id"]
+
+    sync1 = client.post(f"/api/v1/marketplace/suppliers/{supplier_id}/sync", headers=auth_headers)
+    assert sync1.status_code == 200, sync1.text
+    body1 = sync1.json()
+    assert body1["status"] == "OK"
+    assert body1["created"] == 1
+
+    quotas = client.get("/api/v1/quotas", headers=auth_headers).json()
+    synced = [q for q in quotas if q.get("supplier_source") == "SCRAPE_DEMO"]
+    assert len(synced) == 1
+    assert synced[0]["credit_value"] in {"200000.00", "200000.0"}
+    assert synced[0]["installment_due_date"] == "2026-09-15"
+
+    html_round2 = """
+    <table id="tablepress-tab-imoveis"><tbody>
+      <tr>
+        <td>R$ 180.000,00</td><td>R$ 25.000,00</td><td>40 X 2.000,00</td>
+        <td></td><td>Embracon</td><td>20/10/2026</td><td></td>
+      </tr>
+    </tbody></table>
+    """
+    FakeResponse.text = html_round2
+    sync2 = client.post(f"/api/v1/marketplace/suppliers/{supplier_id}/sync", headers=auth_headers)
+    assert sync2.status_code == 200, sync2.text
+    assert sync2.json()["deactivated"] == 1
+    assert sync2.json()["created"] == 1
+
+
 def test_marketplace_quota_sync_cron(client, auth_headers):
     cron = client.post("/api/v1/system/cron/marketplace-quota-sync")
     assert cron.status_code == 200, cron.text

@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import QuotaSupplier, User
+from app.quota_scrape_service import normalized_scrape_config
 from app.services import money
 
 # Markup na entrada = % do crédito (Paulo). Fallback quando cadastro ainda não existe.
@@ -70,6 +71,7 @@ def supplier_view(item: QuotaSupplier) -> dict:
         "notes": item.notes,
         "sync_mode": item.sync_mode or "NONE",
         "api_url": item.api_url,
+        "scrape_config_json": item.scrape_config_json or "{}",
         "last_sync_at": item.last_sync_at,
         "last_sync_status": item.last_sync_status,
         "last_sync_detail_json": item.last_sync_detail_json or "{}",
@@ -123,8 +125,13 @@ def create_supplier(db: Session, user: User, data: dict) -> QuotaSupplier:
     if sync_mode not in {"NONE", "JSON", "SCRAPE"}:
         raise HTTPException(status_code=422, detail="sync_mode deve ser NONE, JSON ou SCRAPE.")
     api_url = (str(data["api_url"]).strip() if data.get("api_url") else None) or None
+    scrape_config_json = _scrape_config_payload(data, sync_mode=sync_mode)
     if sync_mode == "JSON" and not api_url:
         raise HTTPException(status_code=422, detail="api_url obrigatória quando sync_mode=JSON.")
+    if sync_mode == "SCRAPE":
+        if not api_url:
+            raise HTTPException(status_code=422, detail="api_url obrigatória quando sync_mode=SCRAPE.")
+        normalized_scrape_config(scrape_config_json)
     item = QuotaSupplier(
         organization_id=user.organization_id,
         active=bool(data.get("active", True)),
@@ -145,10 +152,28 @@ def create_supplier(db: Session, user: User, data: dict) -> QuotaSupplier:
         notes=data.get("notes"),
         sync_mode=sync_mode,
         api_url=api_url,
+        scrape_config_json=scrape_config_json,
     )
     db.add(item)
     db.flush()
     return item
+
+
+def _scrape_config_payload(data: dict, *, sync_mode: str) -> str:
+    if "scrape_config_json" in data and data["scrape_config_json"] is not None:
+        raw = data["scrape_config_json"]
+        if isinstance(raw, dict):
+            import json
+
+            return json.dumps(raw, ensure_ascii=False)
+        return str(raw) or "{}"
+    if sync_mode == "SCRAPE":
+        table_id = str(data.get("scrape_table_id") or "").strip()
+        category = str(data.get("scrape_category") or "REAL_ESTATE").strip().upper()
+        import json
+
+        return json.dumps({"layout": "tablepress", "table_id": table_id, "category": category}, ensure_ascii=False)
+    return "{}"
 
 
 def update_supplier(db: Session, user: User, supplier_id: str, data: dict) -> QuotaSupplier:
@@ -202,9 +227,18 @@ def update_supplier(db: Session, user: User, supplier_id: str, data: dict) -> Qu
         item.sync_mode = sync_mode
     if "api_url" in data:
         item.api_url = (str(data["api_url"]).strip() if data["api_url"] else None) or None
+    if any(key in data for key in ("scrape_config_json", "scrape_table_id", "scrape_category", "sync_mode")):
+        item.scrape_config_json = _scrape_config_payload(
+            {**data, "scrape_table_id": data.get("scrape_table_id"), "scrape_category": data.get("scrape_category")},
+            sync_mode=item.sync_mode or "NONE",
+        )
     final_mode = item.sync_mode or "NONE"
     if final_mode == "JSON" and not (item.api_url or "").strip():
         raise HTTPException(status_code=422, detail="api_url obrigatória quando sync_mode=JSON.")
+    if final_mode == "SCRAPE":
+        if not (item.api_url or "").strip():
+            raise HTTPException(status_code=422, detail="api_url obrigatória quando sync_mode=SCRAPE.")
+        normalized_scrape_config(item.scrape_config_json)
     db.flush()
     return item
 
