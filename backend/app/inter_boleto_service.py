@@ -276,8 +276,12 @@ def issue_marketplace_boleto(
         terms["total_entrada"] = str(amount)
     proposal.terms_json = json.dumps(terms, ensure_ascii=False)
     db.flush()
+    view = boleto_view_from_terms(terms, lead_id=lead.id)
+    from app.marketplace_notification_service import dispatch_boleto_issued_notifications
+
+    dispatch_boleto_issued_notifications(db, actor, lead, proposal, terms, boleto=view)
     return {
-        "boleto": boleto_view_from_terms(terms, lead_id=lead.id),
+        "boleto": view,
         "created": True,
         "proposal_id": proposal.id,
     }

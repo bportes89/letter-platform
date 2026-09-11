@@ -228,7 +228,12 @@ def apply_situation_transition(
         return  # idempotente
 
     if situation == SIT_PAGO:
+        already_paid = bool(life.get("paid_at"))
         _on_first_pago(db, proposal, terms, life)
+        if not already_paid:
+            from app.marketplace_notification_service import dispatch_payment_received_notifications
+
+            dispatch_payment_received_notifications(db, user, lead, proposal)
         lead.status = "PROPOSAL"
         return
 

@@ -813,6 +813,12 @@ def test_marketplace_inter_boleto_mock_and_webhook_pago(client, auth_headers, mo
     assert issued.status_code == 200, issued.text
     boleto = issued.json()["boleto"]
     assert issued.json()["created"] is True
+    deliveries_after_boleto = client.get("/api/v1/communications/deliveries", headers=auth_headers).json()
+    assert any(
+        d.get("rendered_body") and "ciclo.boleto@letter.test" in d.get("rendered_body", "").lower()
+        or "boleto" in (d.get("rendered_body") or "").lower()
+        for d in deliveries_after_boleto
+    ), deliveries_after_boleto[:3]
     assert boleto["provider"] == "MOCK"
     assert boleto["codigo_solicitacao"].startswith("DEV-")
     assert Decimal(boleto["amount"]) > 0
@@ -860,6 +866,11 @@ def test_marketplace_inter_boleto_mock_and_webhook_pago(client, auth_headers, mo
     assert detail.json()["situation"] == "PAGO"
     assert detail.json()["paid_at"]
     assert detail.json()["pipeline"] == "NEGOCIACAO"
+    deliveries_after_pago = client.get("/api/v1/communications/deliveries", headers=auth_headers).json()
+    payment_msgs = [
+        d for d in deliveries_after_pago if "pagamento" in (d.get("rendered_body") or "").lower()
+    ]
+    assert payment_msgs, deliveries_after_pago[:5]
 
     replay = client.post(
         "/api/v1/webhooks/inter",

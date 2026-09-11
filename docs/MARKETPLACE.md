@@ -171,6 +171,18 @@ Persistência em `proposal.terms_json.boleto` (`codigo_solicitacao`, `amount`, `
 
 Env: `LETTER_INTER_CLIENT_ID`, `LETTER_INTER_CLIENT_SECRET`, `LETTER_INTER_CONTA_CORRENTE`, `LETTER_INTER_CERT_PATH`, `LETTER_INTER_KEY_PATH`, `LETTER_INTER_WEBHOOK_ACCESS_TOKEN`, `LETTER_INTER_BOLETO_VENCIMENTO_DIAS`.
 
+### E-mails transacionais (D+0)
+
+Disparo automático via `CommunicationTemplate` + `queue_delivery` (sandbox: `mock_deliver`):
+
+| Evento | Template | Destinatário |
+|--------|----------|--------------|
+| Boleto emitido | `MARKETPLACE_BOLETO_CLIENT` | Cliente (`client_email` / snapshot do chat) |
+| Webhook Inter `RECEBIDO` → `PAGO` | `MARKETPLACE_PAYMENT_CLIENT` | Cliente |
+| Idem | `MARKETPLACE_PAYMENT_PARTNER` | Parceiro originador (`partner_user_id`), se houver |
+
+Idempotência por proposta (`mkt-boleto-{id}`, `mkt-pago-{id}`). Auditoria: `GET /api/v1/communications/deliveries`.
+
 ## Chat público nativo (site)
 
 Substitui o proxy `letter.app.br` quando `LETTER_CHAT_NATIVE_ENABLED=true` (padrão).
