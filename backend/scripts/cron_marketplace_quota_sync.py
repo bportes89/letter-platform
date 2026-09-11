@@ -25,7 +25,9 @@ def main() -> int:
         db.commit()
         print(json.dumps(result, ensure_ascii=False, default=str))
         failed = int(result.get("failed") or 0)
-        return 1 if failed else 0
+        suppliers = int(result.get("suppliers") or 0)
+        # Falha o job só se todos os fornecedores falharem (parcial ainda sincroniza estoque).
+        return 1 if suppliers > 0 and failed >= suppliers else 0
     except Exception as exc:
         db.rollback()
         print(json.dumps({"status": "ERROR", "error": str(exc)}, ensure_ascii=False))

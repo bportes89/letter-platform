@@ -19,6 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import Administrator, Organization, Quota, QuotaSupplier, User
+from app.quota_scrape_service import SCRAPE_HTTP_HEADERS
 from app.quota_supplier_service import get_supplier, normalize_supplier_key
 from app.services import money
 
@@ -125,7 +126,7 @@ def _resolve_administrator(db: Session, name: str | None, cache: dict[str, Admin
 
 def _fetch_json_payload(url: str) -> list[dict]:
     try:
-        with httpx.Client(timeout=HTTP_TIMEOUT, follow_redirects=True) as client:
+        with httpx.Client(timeout=HTTP_TIMEOUT, follow_redirects=True, headers=SCRAPE_HTTP_HEADERS) as client:
             response = client.get(url)
             response.raise_for_status()
             data = response.json()
@@ -254,6 +255,16 @@ def sync_organization_inventory(db: Session, organization_id: str) -> dict:
                 totals["failed"] += 1
         except HTTPException as exc:
             detail = {"supplier_id": supplier.id, "source_key": supplier.source_key, "status": "ERROR", "error": str(exc.detail)}
+            _stamp_supplier(supplier, status="ERROR", detail=detail)
+            results.append(detail)
+            totals["failed"] += 1
+        except Exception as exc:
+            detail = {
+                "supplier_id": supplier.id,
+                "source_key": supplier.source_key,
+                "status": "ERROR",
+                "error": str(exc)[:500],
+            }
             _stamp_supplier(supplier, status="ERROR", detail=detail)
             results.append(detail)
             totals["failed"] += 1

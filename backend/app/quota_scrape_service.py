@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import tempfile
 import unicodedata
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -248,20 +249,19 @@ def _tls_verify_bundle(ca: str | None) -> bool | str:
     if not extra.is_file():
         return True
     base = certifi.where()
-    bundle = CERTS_DIR / f"ca_{Path(ca).stem}.pem"
+    bundle_dir = Path(tempfile.gettempdir())
+    bundle = bundle_dir / f"letter-ca-{Path(ca).stem}.pem"
     stale = (
         not bundle.is_file()
         or bundle.stat().st_mtime < extra.stat().st_mtime
         or (os.path.isfile(base) and bundle.stat().st_mtime < os.path.getmtime(base))
     )
     if stale:
-        tmp = bundle.with_suffix(f".{os.getpid()}.tmp")
         with open(base, encoding="utf-8") as base_file:
             base_text = base_file.read()
         with open(extra, encoding="utf-8") as extra_file:
             extra_text = extra_file.read()
-        tmp.write_text(f"{base_text}\n{extra_text}", encoding="utf-8")
-        tmp.replace(bundle)
+        bundle.write_text(f"{base_text}\n{extra_text}", encoding="utf-8")
     return str(bundle)
 
 
