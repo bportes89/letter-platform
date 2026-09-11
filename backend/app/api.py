@@ -618,7 +618,13 @@ def admin_update_user(user_id:str,payload:UserUpdate,user:User=Depends(require_s
         if phone and len(normalize_digits(phone)) < 10:
             raise HTTPException(status_code=422, detail="Telefone celular inválido.")
         target.phone = phone or None
-    for field, value in data.items(): setattr(target, field, value)
+    if "porc_a_mais" in data and data["porc_a_mais"] is not None:
+        pct = data.pop("porc_a_mais")
+        if pct > 5:
+            raise HTTPException(status_code=422, detail="Porcentagem a mais não pode exceder 5%.")
+        target.porc_a_mais = float(pct)
+    for field, value in data.items():
+        setattr(target, field, value)
     if target.role == Role.MASTER_FRANCHISEE:
         from app.network_service import provision_master_network_on_signup
 

@@ -121,8 +121,16 @@ def apply_supplier_markup(
     }
 
 
-def pricing_for_quota(quota: Quota, *, as_of: date | None = None, suppliers: dict | None = None) -> dict:
+def pricing_for_quota(
+    quota: Quota,
+    *,
+    as_of: date | None = None,
+    suppliers: dict | None = None,
+    affiliate_markup: dict[str, str] | None = None,
+) -> dict:
     """Entrada efetiva após rollover 7 dias + markup do fornecedor (+ comissão embutida)."""
+    from app.affiliate_markup_service import affiliate_markup_amount
+
     credit = money(Decimal(str(quota.credit_value)))
     base_entrada = money(Decimal(str(quota.premium_value or 0)))
     installment = money(Decimal(str(quota.installment_value or 0)))
@@ -139,11 +147,15 @@ def pricing_for_quota(quota: Quota, *, as_of: date | None = None, suppliers: dic
         supplier_source=quota.supplier_source,
         suppliers=suppliers,
     )
+    affiliate_amount = affiliate_markup_amount(credit, affiliate_markup)
+    entrada_final = money(markup["entrada"] + affiliate_amount)
+    porc_a_mais = str((affiliate_markup or {}).get("porc_a_mais") or "0")
+    porc_a_mais_sellers = str((affiliate_markup or {}).get("porc_a_mais_sellers") or "0")
     return {
         "credit": credit,
         "entrada_base": base_entrada,
         "entrada_after_rollover": rollover["entrada"],
-        "entrada_final": markup["entrada"],
+        "entrada_final": entrada_final,
         "installment": installment,
         "rollover_applied": rollover["applied"],
         "remaining_installments": rollover["remaining_installments"],
@@ -153,11 +165,20 @@ def pricing_for_quota(quota: Quota, *, as_of: date | None = None, suppliers: dic
         "platform_fee_percent": markup.get("platform_fee_percent"),
         "quem_paga_comissao": markup.get("quem_paga_comissao", 0),
         "supplier_source": quota.supplier_source,
+        "porc_a_mais": porc_a_mais,
+        "porc_a_mais_sellers": porc_a_mais_sellers,
+        "affiliate_markup_amount": str(affiliate_amount),
     }
 
 
-def pricing_for_combo(quotas: list[Quota], *, as_of: date | None = None, suppliers: dict | None = None) -> dict:
-    rows = [pricing_for_quota(q, as_of=as_of, suppliers=suppliers) for q in quotas]
+def pricing_for_combo(
+    quotas: list[Quota],
+    *,
+    as_of: date | None = None,
+    suppliers: dict | None = None,
+    affiliate_markup: dict[str, str] | None = None,
+) -> dict:
+    rows = [pricing_for_quota(q, as_of=as_of, suppliers=suppliers, affiliate_markup=affiliate_markup) for q in quotas]
     credit = money(sum((r["credit"] for r in rows), Decimal("0")))
     entrada_final = money(sum((r["entrada_final"] for r in rows), Decimal("0")))
     installment = money(sum((r["installment"] for r in rows), Decimal("0")))
@@ -176,8 +197,15 @@ def pricing_for_combo(quotas: list[Quota], *, as_of: date | None = None, supplie
     }
 
 
-def _quota_summary(quota: Quota, admin: Administrator | None, *, as_of: date | None = None, suppliers: dict | None = None) -> dict:
-    pricing = pricing_for_quota(quota, as_of=as_of, suppliers=suppliers)
+def _quota_summary(
+    quota: Quota,
+    admin: Administrator | None,
+    *,
+    as_of: date | None = None,
+    suppliers: dict | None = None,
+    affiliate_markup: dict[str, str] | None = None,
+) -> dict:
+    pricing = pricing_for_quota(quota, as_of=as_of, suppliers=suppliers, affiliate_markup=affiliate_markup)
     return {
         "quota_id": quota.id,
         "group_code": quota.group_code,
@@ -326,11 +354,12 @@ def _eligible_combo_candidate(
     target_amount: Decimal,
     as_of: date | None = None,
     suppliers: dict | None = None,
+    affiliate_markup: dict[str, str] | None = None,
 ) -> dict | None:
     if len({q.administrator_id for q in quotas}) > 1:
         return None
     admin = db.get(Administrator, quotas[0].administrator_id)
-    pricing = pricing_for_combo(list(quotas), as_of=as_of, suppliers=suppliers)
+    pricing = pricing_for_combo(list(quotas), as_of=as_of, suppliers=suppliers, affiliate_markup=affiliate_markup)
     blockers = admin_profile_blockers(
         admin,
         category=category,
@@ -351,7 +380,13 @@ def _eligible_combo_candidate(
     return {
         "quota_ids": [q.id for q in quotas],
         "quotas": [
-            _quota_summary(q, db.get(Administrator, q.administrator_id), as_of=as_of, suppliers=suppliers)
+            _quota_summary(
+                q,
+                db.get(Administrator, q.administrator_id),
+                as_of=as_of,
+                suppliers=suppliers,
+                affiliate_markup=affiliate_markup,
+            )
             for q in quotas
         ],
         "total_credit": str(pricing["credit"]),
@@ -389,6 +424,7 @@ def _rank_alternatives(
     target_entrada: Decimal | None = None,
     band_percent: Decimal = ESTEIRA2_BAND_PERCENT,
     as_of: date | None = None,
+    affiliate_markup: dict[str, str] | None = None,
 ) -> list[dict]:
     """Candidatos na banda de crédito (e entrada, se informada)."""
     from app.quota_supplier_service import suppliers_index
@@ -420,6 +456,7 @@ def _rank_alternatives(
                 target_amount=target_amount,
                 as_of=as_of,
                 suppliers=suppliers,
+                affiliate_markup=affiliate_markup,
             )
             if not item:
                 continue
@@ -543,6 +580,7 @@ def esteira2_nina_curated_match(
     target_entrada: Decimal | None = None,
     limit: int = 8,
     as_of: date | None = None,
+    affiliate_markup: dict[str, str] | None = None,
 ) -> dict:
     """Esteira 2 robô: banda 5%, lanes crédito/entrada, rollover 7d e markup fornecedor."""
     del monthly_commitment
@@ -599,6 +637,7 @@ def esteira2_nina_curated_match(
         target_entrada=target_entrada,
         band_percent=ESTEIRA2_BAND_PERCENT,
         as_of=as_of,
+        affiliate_markup=affiliate_markup,
     )
 
     credit_lane: list[dict] = []

@@ -13,10 +13,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.affiliate_markup_service import resolve_affiliate_porc_a_mais
 from app.cadastro_service import seed_marketplace_lifecycle
 from app.marketplace_service import esteira2_nina_curated_match
 from app.models import Lead, Organization, Proposal, Quota, Role, User
-from app.public_site_service import headquarters_org
+from app.network_service import PARTNER_NETWORK_ROLES
+from app.public_site_service import headquarters_org, lookup_referral_code
 from app.quota_inventory_service import run_nina_quota_scan
 from app.sdc_desk_service import evaluate_sdc_desk, store_solicitation as store_sdc_solicitation
 from app.flash_desk_service import evaluate_flash_desk, store_solicitation as store_flash_solicitation
@@ -358,11 +360,44 @@ def _save_lead_snapshot(lead: Lead, snap: dict) -> None:
     lead.scr_detail_json = json.dumps(detail, ensure_ascii=False)
 
 
+def _bind_chat_partner(db: Session, org: Organization, lead: Lead, payload: dict, snap: dict) -> None:
+    """Vincula parceiro pelo ?ref= (regra: primeiro parceiro congelado)."""
+    if snap.get("partner_frozen"):
+        return
+    code = str(payload.get("referral_code") or "").strip()
+    if not code:
+        return
+    node = lookup_referral_code(db, org.id, code)
+    if not node:
+        return
+    partner = db.get(User, node.user_id)
+    if not partner or not partner.active or partner.role not in PARTNER_NETWORK_ROLES:
+        return
+    lead.owner_id = partner.id
+    snap["partner_user_id"] = partner.id
+    snap["partner_referral_code"] = node.referral_code
+    snap["partner_frozen"] = True
+    ref_tag = f":REF:{node.referral_code}"
+    if ref_tag not in (lead.source or ""):
+        lead.source = f"{SOURCE}{ref_tag}" if lead.source == SOURCE else f"{lead.source}{ref_tag}"
+
+
+def _chat_affiliate_markup(db: Session, org: Organization, snap: dict) -> dict[str, str] | None:
+    partner_id = snap.get("partner_user_id")
+    if not partner_id:
+        return None
+    return resolve_affiliate_porc_a_mais(db, org.id, str(partner_id), is_sdc=False)
+
+
 def _find_lead(db: Session, org: Organization, payload: dict) -> Lead | None:
     lead_id = str(payload.get("lead_id") or "").strip()
     if lead_id:
         lead = db.scalar(
-            select(Lead).where(Lead.id == lead_id, Lead.organization_id == org.id, Lead.source == SOURCE)
+            select(Lead).where(
+                Lead.id == lead_id,
+                Lead.organization_id == org.id,
+                Lead.source.startswith(SOURCE),
+            )
         )
         if lead:
             return lead
@@ -371,7 +406,7 @@ def _find_lead(db: Session, org: Organization, payload: dict) -> Lead | None:
         leads = list(
             db.scalars(
                 select(Lead)
-                .where(Lead.organization_id == org.id, Lead.source == SOURCE)
+                .where(Lead.organization_id == org.id, Lead.source.startswith(SOURCE))
                 .order_by(Lead.created_at.desc())
                 .limit(40)
             )
@@ -486,6 +521,7 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
             db.flush()
         snap = _lead_snapshot(lead)
         snap.update({"email": email, "name": name})
+        _bind_chat_partner(db, org, lead, data, snap)
         _save_lead_snapshot(lead, snap)
         lead.name = name
         db.flush()
@@ -513,6 +549,11 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
         )
 
     lead = _find_lead(db, org, data)
+    if lead:
+        snap = _lead_snapshot(lead)
+        _bind_chat_partner(db, org, lead, data, snap)
+        _save_lead_snapshot(lead, snap)
+        db.flush()
 
     if step == STEP_PHONE:
         phone = _digits(str(data.get("phone") or ""))
@@ -746,6 +787,7 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
         has_restriction = bool(snap.get("has_credit_restriction"))
         zero_km = bool(snap.get("asset_is_zero_km"))
 
+        affiliate_markup = _chat_affiliate_markup(db, org, snap)
         match = esteira2_nina_curated_match(
             db,
             actor,
@@ -758,6 +800,7 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
             has_credit_restriction=has_restriction,
             asset_is_zero_km=zero_km,
             target_entrada=target_entrada if target_entrada and target_entrada > 0 else None,
+            affiliate_markup=affiliate_markup,
         )
         options: list[dict] = []
         for lane_name, lane_rows in (
@@ -849,11 +892,19 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
         from app.quota_supplier_service import suppliers_index
 
         suppliers = suppliers_index(db, org.id)
+        snap = _lead_snapshot(lead)
+        affiliate_markup = _chat_affiliate_markup(db, org, snap)
+        porcs = affiliate_markup or {"porc_a_mais": "0", "porc_a_mais_sellers": "0"}
         total_entrada = money(
-            sum((pricing_for_quota(q, suppliers=suppliers)["entrada_final"] for q in quotas), Decimal("0"))
+            sum(
+                (
+                    pricing_for_quota(q, suppliers=suppliers, affiliate_markup=affiliate_markup)["entrada_final"]
+                    for q in quotas
+                ),
+                Decimal("0"),
+            )
         )
         if not existing:
-            snap = _lead_snapshot(lead)
             proposal = Proposal(
                 organization_id=org.id,
                 lead_id=lead.id,
@@ -868,6 +919,10 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
                             "total_credit": str(total),
                             "total_entrada": str(total_entrada),
                             "client_email": snap.get("email"),
+                            "partner_user_id": snap.get("partner_user_id"),
+                            "partner_referral_code": snap.get("partner_referral_code"),
+                            "porc_a_mais": porcs.get("porc_a_mais", "0"),
+                            "porc_a_mais_sellers": porcs.get("porc_a_mais_sellers", "0"),
                             "filters": snap,
                         }
                     ),
@@ -875,6 +930,7 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
                 ),
                 sale_channel="SELF_SERVICE",
                 created_by_user_id=actor.id,
+                commission_originator_id=snap.get("partner_user_id"),
             )
             db.add(proposal)
             db.flush()
@@ -885,7 +941,6 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
             proposal_id = proposal.id
         else:
             proposal_id = existing.id
-            snap = _lead_snapshot(lead)
 
         snap["chosen_quota_ids"] = quota_ids
         snap["proposal_id"] = proposal_id
@@ -899,7 +954,7 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
                 "administradora": getattr(q, "administrator_name_txt", None),
                 "tipo_credito": "Imóvel" if q.category == "REAL_ESTATE" else "Veículo",
                 "price": _brl(q.credit_value),
-                "price_entrada": _brl(_pfq(q, suppliers=suppliers)["entrada_final"]),
+                "price_entrada": _brl(_pfq(q, suppliers=suppliers, affiliate_markup=affiliate_markup)["entrada_final"]),
                 "parcelas": q.remaining_installments,
                 "price_parcela": _brl(q.installment_value or 0),
             }

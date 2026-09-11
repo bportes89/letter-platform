@@ -85,6 +85,8 @@ class User(TimestampMixin, Base):
     mfa_secret: Mapped[str | None] = mapped_column(String(64))
     mfa_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    porc_a_mais: Mapped[float] = mapped_column(Numeric(8, 2), default=0)
+    adicionar_comissao: Mapped[bool] = mapped_column(Boolean, default=False)
     organization: Mapped[Organization] = relationship()
 
 

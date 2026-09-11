@@ -3913,6 +3913,87 @@ def test_public_site_chat_native_marketplace_flow(client, auth_headers):
     assert body.get("boleto")
 
 
+def test_marketplace_chat_partner_referral_and_markup(client, auth_headers):
+    """Chat com ?ref= vincula parceiro congelado e embute porc_a_mais na entrada."""
+    users = client.get("/api/v1/admin/users", headers=auth_headers).json()
+    partner = next(u for u in users if u["email"] == "parceiro@letter.com.br")
+    node = client.post(
+        "/api/v1/network/nodes",
+        headers=auth_headers,
+        json={"user_id": partner["id"], "tree_type": "SALES"},
+    )
+    if node.status_code == 201:
+        referral_code = node.json()["referral_code"]
+    else:
+        nodes = client.get("/api/v1/network/nodes", headers=auth_headers, params={"tree_type": "SALES"}).json()
+        referral_code = next(n["referral_code"] for n in nodes if n["user_id"] == partner["id"])
+
+    patched = client.patch(
+        f"/api/v1/admin/users/{partner['id']}",
+        headers=auth_headers,
+        json={"porc_a_mais": "3"},
+    )
+    assert patched.status_code == 200
+
+    email = client.post(
+        "/api/v1/public/site/chat/home/10003",
+        json={
+            "name": "Cliente Referral Chat",
+            "email": "referral.chat@letter.test",
+            "referral_code": referral_code,
+        },
+    )
+    assert email.status_code == 200
+    lead_id = email.json()["OBJ"]["lead_id"]
+
+    leads = client.get("/api/v1/leads", headers=auth_headers).json()
+    lead = next(l for l in leads if l["id"] == lead_id)
+    assert lead["owner_id"] == partner["id"]
+    assert referral_code in lead["source"]
+
+    phone = client.post(
+        "/api/v1/public/site/chat/home/10004",
+        json={"lead_id": lead_id, "phone": "32988776644", "email": "referral.chat@letter.test", "referral_code": referral_code},
+    )
+    assert phone.status_code == 200
+
+    for step, body in [
+        ("10007", {"lead_id": lead_id, "option_id": "REAL_ESTATE", "option_save": "REAL_ESTATE", "referral_code": referral_code}),
+        ("10008", {"lead_id": lead_id, "option_id": "dirty_no", "option_save": "0", "referral_code": referral_code}),
+        ("10008", {"lead_id": lead_id, "target_amount": "400000", "referral_code": referral_code}),
+        ("10009", {"lead_id": lead_id, "target_entrada": "80000", "referral_code": referral_code}),
+        ("10010", {"lead_id": lead_id, "monthly_income": "50000", "referral_code": referral_code}),
+    ]:
+        resp = client.post(f"/api/v1/public/site/chat/home/{step}", json=body)
+        assert resp.status_code == 200, resp.text
+
+    match = client.post(
+        "/api/v1/public/site/chat/home/10011",
+        json={"lead_id": lead_id, "asset_value": "900000", "referral_code": referral_code},
+    )
+    assert match.status_code == 200, match.text
+    options = match.json()["OBJ"]["chat_next"][0].get("options") or []
+    assert options
+    quota_key = options[0]["id"]
+    for qid in str(quota_key).split("|"):
+        scan = client.post(f"/api/v1/quotas/{qid}/nina-scan", headers=auth_headers)
+        assert scan.status_code == 200
+
+    confirm = client.post(
+        "/api/v1/public/site/chat/home/10013",
+        json={"lead_id": lead_id, "option_id": quota_key, "option_save": quota_key, "referral_code": referral_code},
+    )
+    assert confirm.status_code == 200, confirm.text
+
+    detail = client.get(f"/api/v1/marketplace/cadastros/{lead_id}", headers=auth_headers)
+    assert detail.status_code == 200
+    body = detail.json()
+    terms = body.get("terms") or {}
+    assert terms.get("porc_a_mais") in {"3", "3.00", "3.0"}
+    assert terms.get("partner_user_id") == partner["id"]
+    assert body.get("partner_name")
+
+
 def test_marketplace_chat_sends_zapsign_on_contract_accept(client, auth_headers, monkeypatch):
     class FakeZapSignClient:
         def __init__(self, *args, **kwargs):

@@ -279,7 +279,7 @@ export function AttendanceBotSection() {
         pushFlow(data.chat_next, data.info);
         return;
       }
-      const payload = { ...mergedForm, back };
+      const payload = { ...mergedForm, back, referral_code: getStoredReferralCode() };
       const data = await fetchChatStep(step, payload);
       if (data.lead_id) {
         setForm({ ...mergedForm, lead_id: data.lead_id });

@@ -217,6 +217,8 @@ class UserUpdate(BaseModel):
     phone: str | None = Field(default=None, max_length=30)
     company_name: str | None = Field(default=None, max_length=180)
     company_cnpj: str | None = Field(default=None, max_length=20)
+    porc_a_mais: Decimal | None = Field(default=None, ge=0, le=5)
+    adicionar_comissao: bool | None = None
 
 
 class ProfileSelfUpdate(BaseModel):

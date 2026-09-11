@@ -100,7 +100,15 @@ Formulário único: parceiro opcional → categoria → **uma cota** do inventá
 2. `GET /api/v1/marketplace/venda-direta-manual/cadastros` / `partners`
 3. `POST /api/v1/marketplace/venda-direta-manual/store` — lead + proposta + Nina + trava 60 min
 
-Entrada exibida já aplica markup/comissão do fornecedor. **Não** embute markup de afiliado na entrada (só vínculo do parceiro para comissão na finalização).
+Entrada exibida já aplica markup/comissão do fornecedor. **Venda direta manual** não embute markup de afiliado (só vínculo do parceiro para comissão na finalização).
+
+### Markup afiliado (`porc_a_mais`) no chat público
+
+- `?ref=` no site grava o código em `localStorage` e o widget envia `referral_code` em cada passo do chat.
+- Na criação do lead, o parceiro é **vinculado e congelado** (`lead.owner_id`, `partner_frozen` no snapshot) — outro link não troca o originador.
+- Antes do match Esteira 2, o motor soma `porc_a_mais` (+ `porc_a_mais_sellers` para vendedor com flag) **embutido na entrada** exibida.
+- Regras espelham o legado: franquia raiz na cadeia SALES, teto **5%**, parceiro inativo não cobra; **SDC** zera markup.
+- Admin: `PATCH /api/v1/admin/users/{id}` com `porc_a_mais` (0–5) e `adicionar_comissao` (vendedor).
 
 ## Cadastros (admin)
 
