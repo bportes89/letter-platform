@@ -10,6 +10,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.models import QuotaSupplier, User
 from app.quota_scrape_service import normalized_scrape_config
 from app.services import money
@@ -67,6 +68,26 @@ SUPPLIER_SYNC_PRESETS: dict[str, dict[str, str]] = {
         ),
     },
 }
+
+
+def _json_sync_presets_from_env() -> dict[str, dict[str, str]]:
+    settings = get_settings()
+    presets: dict[str, dict[str, str]] = {}
+    for source_key, url in (
+        ("FRAGA", settings.marketplace_supplier_fraga_api_url),
+        ("BITTELO", settings.marketplace_supplier_bittelo_api_url),
+        ("LANCE", settings.marketplace_supplier_lance_api_url),
+    ):
+        cleaned = (url or "").strip()
+        if cleaned:
+            presets[source_key] = {"sync_mode": "JSON", "api_url": cleaned}
+    return presets
+
+
+def all_supplier_sync_presets() -> dict[str, dict[str, str]]:
+    merged = dict(SUPPLIER_SYNC_PRESETS)
+    merged.update(_json_sync_presets_from_env())
+    return merged
 
 
 def normalize_supplier_key(value: str | None) -> str:
@@ -299,9 +320,9 @@ def update_supplier(db: Session, user: User, supplier_id: str, data: dict) -> Qu
 
 
 def apply_supplier_sync_presets(db: Session, organization_id: str) -> int:
-    """Preenche sync SCRAPE nos fornecedores padrão ainda sem URL (não sobrescreve config manual)."""
+    """Preenche sync SCRAPE/JSON nos fornecedores padrão ainda sem URL (não sobrescreve config manual)."""
     applied = 0
-    for source_key, preset in SUPPLIER_SYNC_PRESETS.items():
+    for source_key, preset in all_supplier_sync_presets().items():
         item = db.scalar(
             select(QuotaSupplier).where(
                 QuotaSupplier.organization_id == organization_id,
@@ -316,7 +337,8 @@ def apply_supplier_sync_presets(db: Session, organization_id: str) -> int:
             continue
         item.sync_mode = preset["sync_mode"]
         item.api_url = preset["api_url"]
-        item.scrape_config_json = preset["scrape_config_json"]
+        if preset.get("scrape_config_json"):
+            item.scrape_config_json = preset["scrape_config_json"]
         applied += 1
     if applied:
         db.flush()
@@ -352,6 +374,13 @@ def ensure_default_suppliers(db: Session, organization_id: str) -> list[QuotaSup
         db.flush()
     apply_supplier_sync_presets(db, organization_id)
     return created
+
+
+def bootstrap_marketplace_suppliers(db: Session, organization_id: str) -> dict[str, int]:
+    """Garante fornecedores padrão + presets antes do cron/sync geral (idempotente)."""
+    created = ensure_default_suppliers(db, organization_id)
+    presets = apply_supplier_sync_presets(db, organization_id)
+    return {"suppliers_created": len(created), "presets_applied": presets}
 
 
 def suppliers_index(db: Session, organization_id: str) -> dict[str, QuotaSupplier]:

@@ -60,7 +60,7 @@ A API converte automaticamente para `postgresql+psycopg://` no startup.
 | `LETTER_DEMO_PASSWORD` | Senha forte compartilhada com os clientes |
 
 4. Deploy. Anote a URL: `https://letter-api-xxxx.onrender.com`.
-5. No serviço cron **letter-marketplace-quota-sync** (criado pelo blueprint), cole a **mesma** `LETTER_DATABASE_URL` do web service — sincroniza fornecedores `sync_mode=JSON` a cada 30 min.
+5. No serviço cron **letter-marketplace-quota-sync** (criado pelo blueprint), cole a **mesma** `LETTER_DATABASE_URL` do web service — a cada 30 min faz bootstrap dos fornecedores padrão + presets SCRAPE (Uni / Contemplado SP / Lume) e sincroniza quem tiver `sync_mode=JSON` ou `SCRAPE`. URLs JSON opcionais: `LETTER_MARKETPLACE_SUPPLIER_FRAGA_API_URL`, `..._BITTELO_...`, `..._LANCE_...`.
 6. Teste: `https://letter-api-xxxx.onrender.com/api/v1/health` → `{"status":"ok",...}`  
    Swagger: `https://letter-api-xxxx.onrender.com/docs`
 

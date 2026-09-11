@@ -249,6 +249,7 @@ Porta do cron Paulo (`QuotasApiCronsController`) para estoque vivo:
 3. `POST /api/v1/marketplace/inventory/sync` — todos os JSON ativos da org.
 4. Cron: `POST /api/v1/system/cron/marketplace-quota-sync` (header `x-cron-secret` se configurado).
 5. Render Blueprint (`deploy/render.yaml`): job `letter-marketplace-quota-sync` roda `python scripts/cron_marketplace_quota_sync.py` a cada **30 min** (mesma cadência Paulo). Requer `LETTER_DATABASE_URL` no cron.
+6. Antes de cada sync org-wide, o bootstrap cria fornecedores padrão (se faltarem) e aplica presets SCRAPE (Uni / Contemplado SP / Lume). URLs JSON opcionais via env: `LETTER_MARKETPLACE_SUPPLIER_FRAGA_API_URL`, `..._BITTELO_...`, `..._LANCE_...`.
 
 Comportamento:
 

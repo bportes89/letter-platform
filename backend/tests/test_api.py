@@ -5294,14 +5294,43 @@ def test_marketplace_supplier_scrape_sync_cartascontempladas(client, auth_header
     assert synced[0]["installment_due_date"] is None
 
 
-def test_marketplace_quota_sync_cron(client, auth_headers):
+def test_marketplace_quota_sync_cron(client, auth_headers, monkeypatch):
+    monkeypatch.setattr("app.quota_scrape_service.fetch_scrape_payload", lambda supplier: [])
+
     cron = client.post("/api/v1/system/cron/marketplace-quota-sync")
     assert cron.status_code == 200, cron.text
     body = cron.json()
     assert body["synced_at"]
-    assert body["suppliers"] == 0
+    assert body["suppliers"] >= 3
+    assert body["bootstrap"]["presets_applied"] >= 0
     assert body["created"] == 0
     assert body["failed"] == 0
+
+
+def test_marketplace_supplier_json_preset_from_env(client, auth_headers, monkeypatch):
+    listed = client.get("/api/v1/marketplace/suppliers", headers=auth_headers).json()
+    fraga_row = next(x for x in listed if x["source_key"] == "FRAGA")
+    client.patch(
+        f"/api/v1/marketplace/suppliers/{fraga_row['id']}",
+        headers=auth_headers,
+        json={"sync_mode": "NONE", "api_url": ""},
+    )
+    monkeypatch.setattr(
+        "app.quota_supplier_service._json_sync_presets_from_env",
+        lambda: {"FRAGA": {"sync_mode": "JSON", "api_url": "https://supplier.test/fraga.json"}},
+    )
+
+    seeded = client.post("/api/v1/marketplace/suppliers/ensure-defaults", headers=auth_headers)
+    assert seeded.status_code == 200
+    fraga = next(x for x in seeded.json() if x["source_key"] == "FRAGA")
+    assert fraga["sync_mode"] == "JSON"
+    assert fraga["api_url"] == "https://supplier.test/fraga.json"
+
+    client.patch(
+        f"/api/v1/marketplace/suppliers/{fraga_row['id']}",
+        headers=auth_headers,
+        json={"sync_mode": "NONE", "api_url": ""},
+    )
 
 
 def test_bacen_administrator_rules_sync_and_cron(client, auth_headers):

@@ -2373,6 +2373,7 @@ class QuotaInventorySyncView(BaseModel):
     error: str | None = None
     message: str | None = None
     synced_at: str | None = None
+    bootstrap: dict | None = None
 
 
 class VendaDiretaManualCotaOption(BaseModel):

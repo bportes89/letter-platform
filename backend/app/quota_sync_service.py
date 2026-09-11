@@ -229,6 +229,9 @@ def sync_supplier_inventory(db: Session, user: User, supplier_id: str) -> dict:
 
 
 def sync_organization_inventory(db: Session, organization_id: str) -> dict:
+    from app.quota_supplier_service import bootstrap_marketplace_suppliers
+
+    bootstrap = bootstrap_marketplace_suppliers(db, organization_id)
     suppliers = list(
         db.scalars(
             select(QuotaSupplier).where(
@@ -259,6 +262,7 @@ def sync_organization_inventory(db: Session, organization_id: str) -> dict:
         "suppliers": len(suppliers),
         "results": results,
         **totals,
+        "bootstrap": bootstrap,
         "synced_at": datetime.now(UTC).isoformat(),
     }
 
