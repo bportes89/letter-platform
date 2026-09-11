@@ -18,6 +18,13 @@ from fastapi import HTTPException
 from app.models import QuotaSupplier
 
 HTTP_TIMEOUT = 30.0
+SCRAPE_HTTP_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (compatible; LETTER-Marketplace-Sync/1.0; +https://letter.com.br)"
+    ),
+    "Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "pt-BR,pt;q=0.9",
+}
 CERTS_DIR = Path(__file__).resolve().parent.parent / "resources" / "certs"
 SUPPORTED_LAYOUTS = frozenset({"tablepress", "contempladosp", "cartascontempladas"})
 
@@ -266,7 +273,12 @@ def fetch_scrape_payload(supplier: QuotaSupplier) -> list[dict]:
     layout = LAYOUTS[config["layout"]]
     verify = _tls_verify_bundle(config.get("ca"))
     try:
-        with httpx.Client(timeout=HTTP_TIMEOUT, follow_redirects=True, verify=verify) as client:
+        with httpx.Client(
+            timeout=HTTP_TIMEOUT,
+            follow_redirects=True,
+            verify=verify,
+            headers=SCRAPE_HTTP_HEADERS,
+        ) as client:
             response = client.get(url)
             response.raise_for_status()
             html = response.text
