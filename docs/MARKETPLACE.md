@@ -180,7 +180,13 @@ No passo **10013** (escolha da cota no chat) e na **venda direta manual** com pa
 - Cadeia resolvida pela árvore SALES (`NetworkNode.sponsor_user_id`) mapeando roles LETTER → níveis Paulo
 - Admin: `users.porc` e `users.porc_capital_giro` via `PATCH /admin/users/{id}`
 
-Liberação em CONCLUIDO ainda usa MMN universal (Fase 2 trocará para os valores pré-calculados).
+## Comissão afiliada — liberação “bolo rachado” (Fase 2)
+
+No **CONCLUIDO** do cadastro Marketplace, quando `terms_json.chain_commissions` existe (chat 10013 ou venda direta manual com parceiro):
+
+- `release_marketplace_commissions` grava `CommissionEntry` com os valores pré-calculados (`price_partners` … `price_sellers`) em vez da grade universal MMN 3%
+- Snapshot `lifecycle.commission_release.affiliate_mode` = `BOLO_CHAIN`
+- Beneficiários inativos são ignorados na liberação; propostas antigas sem `chain_commissions` continuam no fallback MMN (`affiliate_mode` = `UNIVERSAL_MMN`)
 
 ## Cotas em análise (portal fornecedor)
 

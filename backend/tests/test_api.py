@@ -1169,11 +1169,17 @@ def test_supplier_portal_confirm_unlocks_conclude(client, auth_headers):
 
 
 def test_marketplace_conclude_allocates_affiliate_commission(client, auth_headers):
-    """Concluído com parceiro na árvore SALES gera CommissionEntry MARKETPLACE_RELEASE."""
+    """Concluído com parceiro na árvore SALES libera comissão bolo (pré-cálculo)."""
     partners = client.get("/api/v1/marketplace/venda-direta-manual/partners", headers=auth_headers)
     assert partners.status_code == 200
     assert partners.json(), "seed precisa de ao menos um parceiro SALES"
     partner_id = partners.json()[0]["id"]
+    patched = client.patch(
+        f"/api/v1/admin/users/{partner_id}",
+        headers=auth_headers,
+        json={"porc": "4", "porc_a_mais": "0"},
+    )
+    assert patched.status_code == 200
 
     cotas = client.get(
         "/api/v1/marketplace/venda-direta-manual/cotas?category=REAL_ESTATE",
@@ -1212,8 +1218,14 @@ def test_marketplace_conclude_allocates_affiliate_commission(client, auth_header
     assert done.json()["commission_release_status"] == "RELEASED"
     release = done.json()["commission_release"]
     assert release["affiliate_originator_id"] == partner_id
+    assert release.get("affiliate_mode") == "BOLO_CHAIN"
     assert release["affiliate_entry_ids"], release
     assert Decimal(release["affiliate_total"]) > 0
+    detail = client.get(f"/api/v1/marketplace/cadastros/{lead_id}", headers=auth_headers)
+    terms = detail.json().get("terms") or {}
+    expected = Decimal(str(terms.get("price_partners") or 0))
+    assert expected > 0
+    assert Decimal(release["affiliate_total"]) == expected
 
     extrato = client.get("/api/v1/marketplace/extrato?limit=50", headers=auth_headers)
     assert extrato.status_code == 200
@@ -4222,6 +4234,23 @@ def test_marketplace_chat_chain_commissions_bolo_seller_chain(client, auth_heade
     assert price_partners == Decimal("12000.00")  # residual 3% (4% bolo - 1% vendedor)
     assert chain.get("chain_user_ids", {}).get("vendedor") == seller["id"]
     assert chain.get("chain_user_ids", {}).get("franquia") == franchise["id"]
+
+    done = client.patch(
+        f"/api/v1/marketplace/cadastros/{lead_id}",
+        headers=auth_headers,
+        json={"situation": "CONCLUIDO", "force_admin_conclude": True},
+    )
+    assert done.status_code == 200, done.text
+    release = done.json().get("commission_release") or {}
+    assert release.get("affiliate_mode") == "BOLO_CHAIN"
+    assert Decimal(release.get("affiliate_total") or 0) == Decimal("16000.00")
+    aff = [
+        r
+        for r in client.get("/api/v1/marketplace/extrato?limit=50", headers=auth_headers).json()
+        if r.get("kind") == "affiliate" and r.get("reference") == release.get("reference")
+    ]
+    amounts = sorted(Decimal(str(r["amount"])) for r in aff)
+    assert amounts == [Decimal("4000.00"), Decimal("12000.00")]
 
 
 def test_marketplace_chat_sends_zapsign_on_contract_accept(client, auth_headers, monkeypatch):

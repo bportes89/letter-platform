@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from decimal import Decimal
 
+from fastapi import HTTPException
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.affiliate_markup_service import _sales_node
-from app.models import Proposal, Role, User
+from app.models import CommissionEntry, Proposal, Role, User
 from app.services import money
 
 CHAIN_KEYS = ("franquia", "regional", "manager", "supervisor", "vendedor")
@@ -18,6 +22,14 @@ PRICE_KEYS = (
     "price_managers",
     "price_supervisors",
     "price_sellers",
+)
+
+BOLO_RELEASE_LEVELS: tuple[tuple[int, str, str], ...] = (
+    (1, "franquia", "price_partners"),
+    (2, "regional", "price_regionais"),
+    (3, "manager", "price_managers"),
+    (4, "supervisor", "price_supervisors"),
+    (5, "vendedor", "price_sellers"),
 )
 
 
@@ -166,6 +178,108 @@ def merge_chain_commissions_into_terms(terms: dict, commissions: dict) -> dict:
     for key in PRICE_KEYS:
         terms[key] = commissions.get(key, "0.00")
     return terms
+
+
+def chain_commissions_block(terms: dict) -> dict | None:
+    """Retorna bloco chain_commissions se existir pré-cálculo bolo."""
+    block = terms.get("chain_commissions")
+    if not isinstance(block, dict):
+        return None
+    ids = block.get("chain_user_ids")
+    if not isinstance(ids, dict):
+        return None
+    return block
+
+
+def bolo_chain_affiliate_total(terms: dict) -> Decimal:
+    block = chain_commissions_block(terms)
+    if not block:
+        return Decimal("0")
+    return money(
+        sum(
+            (Decimal(str(block.get(key) or terms.get(key) or 0)) for key in PRICE_KEYS),
+            Decimal("0"),
+        )
+    )
+
+
+def allocate_bolo_chain_commissions(
+    db: Session,
+    actor: User,
+    *,
+    originator_id: str,
+    proposal: Proposal,
+    reference: str,
+    terms: dict,
+) -> list[CommissionEntry]:
+    """Libera CommissionEntry com valores pré-calculados (SalesFinalizeService / Paulo)."""
+    block = chain_commissions_block(terms)
+    if not block:
+        return []
+
+    chain_ids = block.get("chain_user_ids") or {}
+    base = money(
+        Decimal(
+            str(
+                block.get("price_base")
+                or terms.get("total_credit")
+                or proposal.requested_amount
+                or 0
+            )
+        )
+    )
+    if base <= 0:
+        return []
+
+    pool_pct = Decimal(str(block.get("bolo_total_pct") or "0"))
+    now = datetime.now(UTC)
+    entries: list[CommissionEntry] = []
+
+    for level, chain_key, price_key in BOLO_RELEASE_LEVELS:
+        beneficiary_id = chain_ids.get(chain_key)
+        if not beneficiary_id:
+            continue
+        amount = money(Decimal(str(block.get(price_key) or terms.get(price_key) or 0)))
+        if amount <= 0:
+            continue
+        beneficiary = db.get(User, str(beneficiary_id))
+        if (
+            not beneficiary
+            or not beneficiary.active
+            or beneficiary.organization_id != actor.organization_id
+        ):
+            continue
+        share_pct = money(amount / base * Decimal("100")) if base > 0 else Decimal("0")
+        entries.append(
+            CommissionEntry(
+                organization_id=actor.organization_id,
+                beneficiary_id=beneficiary.id,
+                originator_id=originator_id,
+                proposal_id=proposal.id,
+                reference=reference,
+                product="MARKETPLACE",
+                commission_type="SALES",
+                level=level,
+                calculation_base=base,
+                pool_rate_percent=pool_pct,
+                level_share_percent=share_pct,
+                amount=amount,
+                status="AVAILABLE",
+                released_at=now,
+            )
+        )
+
+    if not entries:
+        return []
+
+    for entry in entries:
+        db.add(entry)
+    try:
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Comissões desta referência já foram provisionadas")
+    return entries
 
 
 def persist_chain_commissions_on_proposal(

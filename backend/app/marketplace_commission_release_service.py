@@ -14,6 +14,11 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.affiliate_chain_commission_service import (
+    allocate_bolo_chain_commissions,
+    bolo_chain_affiliate_total,
+    chain_commissions_block,
+)
 from app.models import CommissionEntry, CommissionRule, Lead, NetworkNode, Proposal, Quota, User
 from app.network_service import LEVEL_SHARES, allocate_commissions
 from app.quota_supplier_service import normalize_supplier_key, suppliers_index
@@ -225,29 +230,25 @@ def release_marketplace_commissions(db: Session, actor: User, proposal: Proposal
     affiliate_ids: list[str] = [e.id for e in existing]
     affiliate_total = money(sum((Decimal(str(e.amount)) for e in existing), Decimal("0")))
     affiliate_skipped: str | None = None
+    affiliate_mode: str | None = None
 
     if not existing and originator_id:
-        ensure_marketplace_commission_rule(db, proposal.organization_id)
-        base = _affiliate_calculation_base(proposal, terms)
-        if base > 0:
+        use_bolo = chain_commissions_block(terms) is not None
+        if use_bolo:
+            affiliate_mode = "BOLO_CHAIN"
             try:
-                entries = allocate_commissions(
+                entries = allocate_bolo_chain_commissions(
                     db,
                     actor,
-                    originator_id,
-                    proposal.id,
-                    reference,
-                    "MARKETPLACE",
-                    "SALES",
-                    base,
+                    originator_id=originator_id,
+                    proposal=proposal,
+                    reference=reference,
+                    terms=terms,
                 )
-                now = datetime.now(UTC)
-                for entry in entries:
-                    entry.status = "AVAILABLE"
-                    entry.released_at = now
-                db.flush()
                 affiliate_ids = [e.id for e in entries]
                 affiliate_total = money(sum((Decimal(str(e.amount)) for e in entries), Decimal("0")))
+                if affiliate_total <= 0:
+                    affiliate_skipped = "bolo_chain_zero"
             except HTTPException as exc:
                 if exc.status_code == 409:
                     existing = _existing_entries(db, proposal, reference)
@@ -256,7 +257,37 @@ def release_marketplace_commissions(db: Session, actor: User, proposal: Proposal
                 else:
                     affiliate_skipped = str(exc.detail)
         else:
-            affiliate_skipped = "calculation_base_zero"
+            affiliate_mode = "UNIVERSAL_MMN"
+            ensure_marketplace_commission_rule(db, proposal.organization_id)
+            base = _affiliate_calculation_base(proposal, terms)
+            if base > 0:
+                try:
+                    entries = allocate_commissions(
+                        db,
+                        actor,
+                        originator_id,
+                        proposal.id,
+                        reference,
+                        "MARKETPLACE",
+                        "SALES",
+                        base,
+                    )
+                    now = datetime.now(UTC)
+                    for entry in entries:
+                        entry.status = "AVAILABLE"
+                        entry.released_at = now
+                    db.flush()
+                    affiliate_ids = [e.id for e in entries]
+                    affiliate_total = money(sum((Decimal(str(e.amount)) for e in entries), Decimal("0")))
+                except HTTPException as exc:
+                    if exc.status_code == 409:
+                        existing = _existing_entries(db, proposal, reference)
+                        affiliate_ids = [e.id for e in existing]
+                        affiliate_total = money(sum((Decimal(str(e.amount)) for e in existing), Decimal("0")))
+                    else:
+                        affiliate_skipped = str(exc.detail)
+            else:
+                affiliate_skipped = "calculation_base_zero"
     elif not originator_id:
         affiliate_skipped = "no_originator_in_sales_tree"
 
@@ -265,8 +296,12 @@ def release_marketplace_commissions(db: Session, actor: User, proposal: Proposal
         "released_at": datetime.now(UTC).isoformat(),
         "lines": lines,
         "affiliate_originator_id": originator_id,
+        "affiliate_mode": affiliate_mode,
         "affiliate_entry_ids": affiliate_ids,
         "affiliate_total": str(affiliate_total),
+        "affiliate_bolo_precalc_total": str(bolo_chain_affiliate_total(terms))
+        if chain_commissions_block(terms)
+        else None,
         "affiliate_skipped": affiliate_skipped,
         "platform_total": str(
             money(
