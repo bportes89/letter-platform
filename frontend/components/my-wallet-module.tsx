@@ -117,7 +117,17 @@ export function MyWalletModule() {
     return d.toISOString().slice(0, 10);
   });
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (options?: { refreshFromProvider?: boolean }) => {
+    if (options?.refreshFromProvider) {
+      try {
+        const peek = await api<WalletView>("/wallet/me");
+        if (peek.has_subaccount) {
+          await api<WalletView>("/wallet/me/sync", { method: "POST" });
+        }
+      } catch {
+        /* sync opcional — não bloqueia a tela */
+      }
+    }
     const [w, tx, docs, p, me, boletoList] = await Promise.all([
       api<WalletView>("/wallet/me"),
       api<{ items: WalletTransaction[] }>("/wallet/me/transactions").catch(() => ({ items: [] })),
@@ -141,7 +151,9 @@ export function MyWalletModule() {
   }, []);
 
   useEffect(() => {
-    load().catch((e) => setNotice(e instanceof Error ? e.message : "Falha ao carregar carteira")).finally(() => setLoading(false));
+    load({ refreshFromProvider: true })
+      .catch((e) => setNotice(e instanceof Error ? e.message : "Falha ao carregar carteira"))
+      .finally(() => setLoading(false));
   }, [load]);
 
   async function syncWallet() {
