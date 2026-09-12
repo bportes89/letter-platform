@@ -157,7 +157,7 @@ def register_public_client(
                 status_code=409,
                 detail="E-mail já cadastrado. Faça login para acessar sua conta.",
             )
-        normalized_email, normalized_cpf, _ = ensure_unique_account_fields(
+        normalized_email, normalized_cpf, normalized_cnpj = ensure_unique_account_fields(
             db,
             email=email,
             document=document,
@@ -166,6 +166,8 @@ def register_public_client(
         existing.email = normalized_email
         if normalized_cpf:
             existing.document = normalized_cpf
+        if normalized_cnpj:
+            existing.company_cnpj = normalized_cnpj
         existing.name = name.strip()
         existing.phone = phone.strip()
         existing.password_hash = hash_password(password)
@@ -182,7 +184,7 @@ def register_public_client(
             source_prefix="CLIENT_ACCOUNT_ACTIVATION",
         )
     else:
-        normalized_email, normalized_cpf, _ = ensure_unique_account_fields(
+        normalized_email, normalized_cpf, normalized_cnpj = ensure_unique_account_fields(
             db,
             email=email,
             document=document,
@@ -199,6 +201,7 @@ def register_public_client(
             email=normalized_email,
             phone=phone.strip(),
             document=normalized_cpf,
+            company_cnpj=normalized_cnpj,
             password_hash=hash_password(password),
             role=Role.CLIENT,
             referred_by_user_id=referrer_user_id,

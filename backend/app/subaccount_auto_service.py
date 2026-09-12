@@ -46,6 +46,8 @@ def build_subaccount_profile_for_user(user: User) -> EscrowSubaccountProfile:
     """Monta perfil Asaas — PJ usa CNPJ/razão social quando cadastrados no convite."""
     cnpj = _digits(user.company_cnpj)
     cpf = _digits(user.document)
+    if len(cnpj) != 14 and len(cpf) == 14:
+        cnpj, cpf = cpf, ""
     phone = (user.phone or "").strip() or None
 
     if len(cnpj) == 14:

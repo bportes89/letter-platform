@@ -46,7 +46,7 @@ def build_subaccount_profile(
             name = f"LETTER {org.name}"
 
     email = profile.email or user.email
-    document = _digits(profile.cpf_cnpj or org.document or user.document)
+    document = _digits(profile.cpf_cnpj or user.company_cnpj or user.document or org.document)
     if len(document) not in {11, 14}:
         raise HTTPException(
             status_code=422,

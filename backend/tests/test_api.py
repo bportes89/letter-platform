@@ -5376,6 +5376,29 @@ def test_public_brand_new_client_registration(client):
     assert login.status_code == 200
 
 
+def test_public_register_accepts_cnpj_in_document_field(client):
+    """Conta PJ: CNPJ no campo document não deve retornar 'CPF inválido'."""
+    email = f"pj.{uuid4().hex[:8]}@letter.com.br"
+    created = client.post(
+        "/api/v1/public/site/auth/register",
+        json={
+            "name": "Empresa PJ Teste",
+            "email": email,
+            "phone": "11988887777",
+            "password": "ClienteNovo1!",
+            "document": "57.255.607/0001-30",
+            "terms_accepted": True,
+        },
+    )
+    assert created.status_code == 201, created.text
+    login = client.post("/api/v1/auth/login", json={"email": email, "password": "ClienteNovo1!"})
+    assert login.status_code == 200
+    token = login.json()["access_token"]
+    profile = client.get("/api/v1/auth/me/profile", headers={"Authorization": f"Bearer {token}"})
+    assert profile.status_code == 200
+    assert profile.json()["company_cnpj"] == "57255607000130"
+
+
 def test_account_uniqueness_blocks_duplicate_cpf_email_and_cnpj(client, auth_headers):
     cpf = "98765432100"
     first_email = f"conta1.{uuid4().hex[:8]}@letter.com.br"
@@ -5430,10 +5453,10 @@ def test_account_uniqueness_blocks_duplicate_cpf_email_and_cnpj(client, auth_hea
     accepted = client.post("/api/v1/auth/invitations/accept", json={
         "token": token,
         "name": "Parceiro Duplicado",
-        "document": "22233344455",
+        "document": "39053344705",
         "password": "NovaSenha@123",
         "company_name": "Parceiro Duplicado Ltda",
-        "company_cnpj": "99887766000155",
+        "company_cnpj": "11.222.333/0001-81",
         "company_address": "Rua A, 10",
         "company_city": "Salvador",
         "company_state": "BA",
@@ -5453,10 +5476,10 @@ def test_account_uniqueness_blocks_duplicate_cpf_email_and_cnpj(client, auth_hea
     duplicate_cnpj = client.post("/api/v1/auth/invitations/accept", json={
         "token": invite2.json()["token"],
         "name": "Outro Parceiro",
-        "document": "33344455566",
+        "document": "52998224725",
         "password": "NovaSenha@123",
         "company_name": "Outro Parceiro Ltda",
-        "company_cnpj": "99.887.766/0001-55",
+        "company_cnpj": "11.222.333/0001-81",
         "company_address": "Rua B, 20",
         "company_city": "Salvador",
         "company_state": "BA",

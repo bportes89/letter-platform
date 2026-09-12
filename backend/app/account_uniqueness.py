@@ -69,6 +69,32 @@ def is_valid_cnpj(digits: str) -> bool:
     )
 
 
+def resolve_cpf_cnpj_fields(
+    *,
+    document: str | None = None,
+    company_cnpj: str | None = None,
+    field_label: str = "CPF/CNPJ",
+) -> tuple[str | None, str | None]:
+    """Normaliza CPF (11) e CNPJ (14) a partir dos campos de cadastro."""
+    normalized_cpf: str | None = None
+    normalized_cnpj: str | None = None
+
+    if document:
+        digits = assert_valid_cpf_or_cnpj(document, field_label=field_label)
+        if len(digits) == CPF_LENGTH:
+            normalized_cpf = digits
+        else:
+            normalized_cnpj = digits
+
+    if company_cnpj:
+        cnpj_digits = assert_valid_cpf_or_cnpj(company_cnpj, field_label="CNPJ")
+        if normalized_cnpj and normalized_cnpj != cnpj_digits:
+            raise HTTPException(status_code=422, detail="CNPJ informado em campos diferentes não coincide.")
+        normalized_cnpj = cnpj_digits
+
+    return normalized_cpf, normalized_cnpj
+
+
 def assert_valid_cpf_or_cnpj(value: str | None, *, field_label: str = "CPF/CNPJ") -> str:
     digits = normalize_digits(value)
     if len(digits) == CPF_LENGTH:
@@ -140,8 +166,10 @@ def ensure_unique_account_fields(
     exclude_user_id: str | None = None,
 ) -> tuple[str, str | None, str | None]:
     normalized_email = normalize_email(email)
-    normalized_cpf = normalize_cpf(document)
-    normalized_cnpj = normalize_cnpj(company_cnpj)
+    normalized_cpf, normalized_cnpj = resolve_cpf_cnpj_fields(
+        document=document,
+        company_cnpj=company_cnpj,
+    )
 
     if find_user_by_email(db, normalized_email, exclude_user_id=exclude_user_id):
         raise HTTPException(

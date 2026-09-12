@@ -366,21 +366,27 @@ def my_profile(user: User = Depends(get_current_user)):
 
 @router.patch("/auth/me/profile", response_model=UserView)
 def update_my_profile(payload: ProfileSelfUpdate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    from app.account_uniqueness import assert_valid_cpf_or_cnpj, find_user_by_cnpj, find_user_by_cpf, normalize_digits
+    from app.account_uniqueness import find_user_by_cnpj, find_user_by_cpf, normalize_digits, resolve_cpf_cnpj_fields
 
     data = payload.model_dump(exclude_unset=True)
-    if "document" in data and data["document"]:
-        cpf = assert_valid_cpf_or_cnpj(data["document"], field_label="CPF")
-        current_cpf = normalize_digits(user.document)
-        if cpf != current_cpf and find_user_by_cpf(db, cpf, exclude_user_id=user.id):
-            raise HTTPException(status_code=409, detail="CPF já cadastrado em outra conta.")
-        user.document = cpf
-    if "company_cnpj" in data and data["company_cnpj"]:
-        cnpj = assert_valid_cpf_or_cnpj(data["company_cnpj"], field_label="CNPJ")
-        current_cnpj = normalize_digits(user.company_cnpj)
-        if cnpj != current_cnpj and find_user_by_cnpj(db, cnpj, exclude_user_id=user.id):
-            raise HTTPException(status_code=409, detail="CNPJ já cadastrado em outra conta.")
-        user.company_cnpj = cnpj
+    doc_input = data.pop("document", None) if "document" in data else None
+    cnpj_input = data.pop("company_cnpj", None) if "company_cnpj" in data else None
+    if doc_input is not None or cnpj_input is not None:
+        cpf, cnpj = resolve_cpf_cnpj_fields(
+            document=doc_input,
+            company_cnpj=cnpj_input,
+            field_label="CPF/CNPJ",
+        )
+        if cpf is not None:
+            current_cpf = normalize_digits(user.document)
+            if cpf != current_cpf and find_user_by_cpf(db, cpf, exclude_user_id=user.id):
+                raise HTTPException(status_code=409, detail="CPF já cadastrado em outra conta.")
+            user.document = cpf
+        if cnpj is not None:
+            current_cnpj = normalize_digits(user.company_cnpj)
+            if cnpj != current_cnpj and find_user_by_cnpj(db, cnpj, exclude_user_id=user.id):
+                raise HTTPException(status_code=409, detail="CNPJ já cadastrado em outra conta.")
+            user.company_cnpj = cnpj
     if "phone" in data:
         phone = (data["phone"] or "").strip()
         if phone and len(normalize_digits(phone)) < 10:
