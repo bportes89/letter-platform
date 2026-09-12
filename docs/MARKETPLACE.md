@@ -169,6 +169,19 @@ Fornecedor pode se cadastrar sem passar pelo admin (conta **ativa imediata**):
 
 Admin continua podendo criar fornecedor e emitir token manual (`POST .../portal-token`) para quem não usa auto-cadastro.
 
+## Comissão afiliada — pré-cálculo “bolo rachado” (Fase 1)
+
+No passo **10013** (escolha da cota no chat) e na **venda direta manual** com parceiro, o sistema grava em `proposal.terms_json`:
+
+- `chain_commissions` — bloco com `price_partners`, `price_regionais`, `price_managers`, `price_supervisors`, `price_sellers`
+- Campos planos homônimos (compat Paulo) para leitura no Cadastro
+- Fórmula: `bolo = porc_franquia + porc_a_mais` → subordinados deduzem → franquia recebe residual `max(0, bolo − soma)`
+- Bônus `porc_a_mais_sellers` soma ao vendedor **fora** do bolo
+- Cadeia resolvida pela árvore SALES (`NetworkNode.sponsor_user_id`) mapeando roles LETTER → níveis Paulo
+- Admin: `users.porc` e `users.porc_capital_giro` via `PATCH /admin/users/{id}`
+
+Liberação em CONCLUIDO ainda usa MMN universal (Fase 2 trocará para os valores pré-calculados).
+
 ## Cotas em análise (portal fornecedor)
 
 Fornecedor cadastra cotas pelo portal; entram em `PENDING_REVIEW` até o admin aprovar:

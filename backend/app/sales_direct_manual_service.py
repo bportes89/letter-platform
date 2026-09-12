@@ -310,6 +310,20 @@ def store_manual(
     )
     db.add(proposal)
     db.flush()
+    if partner:
+        from app.affiliate_markup_service import resolve_affiliate_porc_a_mais
+        from app.affiliate_chain_commission_service import persist_chain_commissions_on_proposal
+
+        markup = resolve_affiliate_porc_a_mais(db, user.organization_id, partner.id, is_sdc=False)
+        persist_chain_commissions_on_proposal(
+            db,
+            proposal,
+            partner_user_id=partner.id,
+            price_base=pricing["credit"],
+            porc_a_mais_franquia=markup.get("porc_a_mais", "0"),
+            porc_a_mais_sellers=markup.get("porc_a_mais_sellers", "0"),
+            is_sdc=False,
+        )
     apply_proposal_attribution(
         db,
         user,

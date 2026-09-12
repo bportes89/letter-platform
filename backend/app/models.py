@@ -87,6 +87,8 @@ class User(TimestampMixin, Base):
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     porc_a_mais: Mapped[float] = mapped_column(Numeric(8, 2), default=0)
     adicionar_comissao: Mapped[bool] = mapped_column(Boolean, default=False)
+    porc: Mapped[float] = mapped_column(Numeric(8, 2), default=0)
+    porc_capital_giro: Mapped[float] = mapped_column(Numeric(8, 2), default=0)
     organization: Mapped[Organization] = relationship()
 
 

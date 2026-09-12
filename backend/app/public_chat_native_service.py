@@ -939,8 +939,22 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
                     reserve_quota(db, actor, quota, proposal.id, RESERVE_TTL)
             lead.status = "PROPOSAL"
             proposal_id = proposal.id
+            active_proposal = proposal
         else:
             proposal_id = existing.id
+            active_proposal = existing
+
+        from app.affiliate_chain_commission_service import persist_chain_commissions_on_proposal
+
+        persist_chain_commissions_on_proposal(
+            db,
+            active_proposal,
+            partner_user_id=snap.get("partner_user_id"),
+            price_base=total,
+            porc_a_mais_franquia=porcs.get("porc_a_mais", "0"),
+            porc_a_mais_sellers=porcs.get("porc_a_mais_sellers", "0"),
+            is_sdc=False,
+        )
 
         snap["chosen_quota_ids"] = quota_ids
         snap["proposal_id"] = proposal_id

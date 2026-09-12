@@ -626,6 +626,12 @@ def admin_update_user(user_id:str,payload:UserUpdate,user:User=Depends(require_s
         if pct > 5:
             raise HTTPException(status_code=422, detail="Porcentagem a mais não pode exceder 5%.")
         target.porc_a_mais = float(pct)
+    for pct_field in ("porc", "porc_capital_giro"):
+        if pct_field in data and data[pct_field] is not None:
+            pct = data.pop(pct_field)
+            if pct > 100:
+                raise HTTPException(status_code=422, detail=f"{pct_field} não pode exceder 100%.")
+            setattr(target, pct_field, float(pct))
     for field, value in data.items():
         setattr(target, field, value)
     if target.role == Role.MASTER_FRANCHISEE:

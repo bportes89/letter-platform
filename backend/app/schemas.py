@@ -219,6 +219,8 @@ class UserUpdate(BaseModel):
     company_cnpj: str | None = Field(default=None, max_length=20)
     porc_a_mais: Decimal | None = Field(default=None, ge=0, le=5)
     adicionar_comissao: bool | None = None
+    porc: Decimal | None = Field(default=None, ge=0, le=100)
+    porc_capital_giro: Decimal | None = Field(default=None, ge=0, le=100)
 
 
 class ProfileSelfUpdate(BaseModel):

@@ -4066,7 +4066,7 @@ def test_marketplace_chat_partner_referral_and_markup(client, auth_headers):
     patched = client.patch(
         f"/api/v1/admin/users/{partner['id']}",
         headers=auth_headers,
-        json={"porc_a_mais": "3"},
+        json={"porc": "4", "porc_a_mais": "3"},
     )
     assert patched.status_code == 200
 
@@ -4074,7 +4074,7 @@ def test_marketplace_chat_partner_referral_and_markup(client, auth_headers):
         "/api/v1/public/site/chat/home/10003",
         json={
             "name": "Cliente Referral Chat",
-            "email": "referral.chat@letter.test",
+            "email": "referral.chat@example.com",
             "referral_code": referral_code,
         },
     )
@@ -4088,7 +4088,7 @@ def test_marketplace_chat_partner_referral_and_markup(client, auth_headers):
 
     phone = client.post(
         "/api/v1/public/site/chat/home/10004",
-        json={"lead_id": lead_id, "phone": "32988776644", "email": "referral.chat@letter.test", "referral_code": referral_code},
+        json={"lead_id": lead_id, "phone": "32988776644", "email": "referral.chat@example.com", "referral_code": referral_code},
     )
     assert phone.status_code == 200
 
@@ -4127,6 +4127,101 @@ def test_marketplace_chat_partner_referral_and_markup(client, auth_headers):
     assert terms.get("porc_a_mais") in {"3", "3.00", "3.0"}
     assert terms.get("partner_user_id") == partner["id"]
     assert body.get("partner_name")
+    chain = terms.get("chain_commissions") or {}
+    assert Decimal(str(chain.get("price_partners") or terms.get("price_partners") or 0)) > 0
+    assert chain.get("chain_user_ids", {}).get("franquia") == partner["id"]
+
+
+def test_marketplace_chat_chain_commissions_bolo_seller_chain(client, auth_headers):
+    """Vendedor na cadeia SALES gera price_sellers + residual franquia no pré-cálculo."""
+    users = client.get("/api/v1/admin/users", headers=auth_headers).json()
+    franchise = next(u for u in users if u["email"] == "parceiro@letter.com.br")
+
+    seller_invite = client.post(
+        "/api/v1/admin/invitations",
+        headers=auth_headers,
+        json={"email": "vendedor.bolo@example.com", "role": "QUOTA_SELLER"},
+    )
+    assert seller_invite.status_code == 201, seller_invite.text
+    seller_accept = client.post(
+        "/api/v1/auth/invitations/accept",
+        json={
+            "token": seller_invite.json()["token"],
+            "name": "Vendedor Bolo",
+            "password": "SenhaForte123!",
+            "document": "39053344705",
+        },
+    )
+    assert seller_accept.status_code == 200, seller_accept.text
+    seller = next(u for u in client.get("/api/v1/admin/users", headers=auth_headers).json() if u["email"] == "vendedor.bolo@example.com")
+
+    client.patch(
+        f"/api/v1/admin/users/{franchise['id']}",
+        headers=auth_headers,
+        json={"porc": "4", "porc_a_mais": "0"},
+    )
+    client.patch(
+        f"/api/v1/admin/users/{seller['id']}",
+        headers=auth_headers,
+        json={"porc": "1", "porc_a_mais": "0"},
+    )
+
+    nodes = client.get("/api/v1/network/nodes", headers=auth_headers, params={"tree_type": "SALES"}).json()
+    franchise_code = next(n["referral_code"] for n in nodes if n["user_id"] == franchise["id"])
+
+    node_seller = client.post(
+        "/api/v1/network/nodes",
+        headers=auth_headers,
+        json={"user_id": seller["id"], "tree_type": "SALES", "sponsor_user_id": franchise["id"]},
+    )
+    assert node_seller.status_code in {200, 201}, node_seller.text
+    seller_code = node_seller.json()["referral_code"]
+
+    email = client.post(
+        "/api/v1/public/site/chat/home/10003",
+        json={"name": "Cliente Bolo", "email": "bolo.chain@example.com", "referral_code": seller_code},
+    )
+    assert email.status_code == 200
+    lead_id = email.json()["OBJ"]["lead_id"]
+
+    for step, body in [
+        ("10004", {"lead_id": lead_id, "phone": "32988776655", "email": "bolo.chain@example.com", "referral_code": seller_code}),
+        ("10007", {"lead_id": lead_id, "option_id": "REAL_ESTATE", "option_save": "REAL_ESTATE", "referral_code": seller_code}),
+        ("10008", {"lead_id": lead_id, "option_id": "dirty_no", "option_save": "0", "referral_code": seller_code}),
+        ("10008", {"lead_id": lead_id, "target_amount": "400000", "referral_code": seller_code}),
+        ("10009", {"lead_id": lead_id, "target_entrada": "80000", "referral_code": seller_code}),
+        ("10010", {"lead_id": lead_id, "monthly_income": "50000", "referral_code": seller_code}),
+    ]:
+        resp = client.post(f"/api/v1/public/site/chat/home/{step}", json=body)
+        assert resp.status_code == 200, resp.text
+
+    match = client.post(
+        "/api/v1/public/site/chat/home/10011",
+        json={"lead_id": lead_id, "asset_value": "900000", "referral_code": seller_code},
+    )
+    assert match.status_code == 200, match.text
+    options = match.json()["OBJ"]["chat_next"][0].get("options") or []
+    quota_key = options[0]["id"]
+    for qid in str(quota_key).split("|"):
+        scan = client.post(f"/api/v1/quotas/{qid}/nina-scan", headers=auth_headers)
+        assert scan.status_code == 200
+
+    confirm = client.post(
+        "/api/v1/public/site/chat/home/10013",
+        json={"lead_id": lead_id, "option_id": quota_key, "option_save": quota_key, "referral_code": seller_code},
+    )
+    assert confirm.status_code == 200, confirm.text
+
+    detail = client.get(f"/api/v1/marketplace/cadastros/{lead_id}", headers=auth_headers)
+    assert detail.status_code == 200
+    terms = detail.json().get("terms") or {}
+    chain = terms.get("chain_commissions") or {}
+    price_sellers = Decimal(str(chain.get("price_sellers") or terms.get("price_sellers") or 0))
+    price_partners = Decimal(str(chain.get("price_partners") or terms.get("price_partners") or 0))
+    assert price_sellers == Decimal("4000.00")  # 1% de 400k
+    assert price_partners == Decimal("12000.00")  # residual 3% (4% bolo - 1% vendedor)
+    assert chain.get("chain_user_ids", {}).get("vendedor") == seller["id"]
+    assert chain.get("chain_user_ids", {}).get("franquia") == franchise["id"]
 
 
 def test_marketplace_chat_sends_zapsign_on_contract_accept(client, auth_headers, monkeypatch):
