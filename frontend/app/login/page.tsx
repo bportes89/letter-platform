@@ -60,8 +60,8 @@ function LoginForm() {
   const searchParams = useSearchParams();
   const nextPath = searchParams.get("next");
   const leadIdFromUrl = searchParams.get("lead_id")?.trim() || null;
-  const [email, setEmail] = useState("admin@letter.com.br");
-  const [password, setPassword] = useState("Letter@123");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [otp, setOtp] = useState("");
   const [showMfa, setShowMfa] = useState(false);
   const [error, setError] = useState("");
@@ -128,7 +128,14 @@ function LoginForm() {
 
       <label>
         E-mail corporativo
-        <input value={email} onChange={(e) => setEmail(e.target.value)} type="email" required />
+        <input
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          type="email"
+          name="email"
+          autoComplete="username"
+          required
+        />
       </label>
       <label>
         Senha
@@ -136,6 +143,8 @@ function LoginForm() {
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           type="password"
+          name="password"
+          autoComplete="current-password"
           minLength={8}
           required
         />
