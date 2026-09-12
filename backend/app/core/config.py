@@ -63,6 +63,10 @@ class Settings(BaseSettings):
     lss_billing_grace_days: int = 3
     asaas_split_enabled: bool = False
     asaas_webhook_access_token: str | None = None
+    asaas_subaccount_webhooks_enabled: bool = True
+    api_public_url: str | None = None
+    public_app_url: str | None = None
+    wallet_customer_email_enabled: bool = True
     asaas_bank_code: str = "461"
     asaas_bank_name: str = "Asaas IP S.A."
     asaas_default_agency: str = "0001"

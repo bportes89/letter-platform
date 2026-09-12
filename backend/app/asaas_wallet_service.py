@@ -756,7 +756,10 @@ def _account_status_webhook(event: str) -> bool:
         "ACCOUNT_STATUS_UPDATED",
         "ACCOUNT_DOCUMENTATION_APPROVED",
         "ACCOUNT_DOCUMENTATION_REJECTED",
-    } or event.startswith("ACCOUNT_STATUS_")
+        "ACCOUNT_DOCUMENTATION_AWAITING_APPROVAL",
+        "ACCOUNT_STATUS_GENERAL_APPROVAL_APPROVED",
+        "ACCOUNT_STATUS_GENERAL_APPROVAL_REJECTED",
+    } or event.startswith("ACCOUNT_STATUS_") or event.startswith("ACCOUNT_DOCUMENTATION_")
 
 
 def handle_asaas_webhook(db: Session, payload: dict) -> dict:
@@ -840,6 +843,7 @@ def handle_asaas_webhook(db: Session, payload: dict) -> dict:
                 ensure_chart(db, actor)
 
     if account and _account_status_webhook(event):
+        previous_kyc = (account.asaas_kyc_status or "").upper()
         account_status = payload.get("accountStatus") if isinstance(payload.get("accountStatus"), dict) else {}
         if account_status:
             general = str(account_status.get("general") or "").upper()
@@ -850,7 +854,28 @@ def handle_asaas_webhook(db: Session, payload: dict) -> dict:
                 account.asaas_kyc_status = "REJECTED"
             elif general in {"AWAITING_APPROVAL", "PENDING"}:
                 account.asaas_kyc_status = general
+        elif event in {
+            "ACCOUNT_DOCUMENTATION_APPROVED",
+            "ACCOUNT_STATUS_GENERAL_APPROVAL_APPROVED",
+        }:
+            account.asaas_kyc_status = "APPROVED"
+        elif event in {
+            "ACCOUNT_DOCUMENTATION_REJECTED",
+            "ACCOUNT_STATUS_GENERAL_APPROVAL_REJECTED",
+        }:
+            account.asaas_kyc_status = "REJECTED"
         sync_account_from_asaas(db, account)
+        if (
+            previous_kyc not in {"APPROVED", "ACTIVE"}
+            and (account.asaas_kyc_status or "").upper() in {"APPROVED", "ACTIVE"}
+        ):
+            from app.wallet_notification_service import dispatch_wallet_kyc_approved_notification
+
+            actor = db.get(User, account.user_id) if account.user_id else db.scalar(
+                select(User).where(User.organization_id == account.organization_id).limit(1)
+            )
+            if actor:
+                dispatch_wallet_kyc_approved_notification(db, actor, account)
         processed = True
 
     if account and event.startswith("TRANSFER"):

@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.asaas_client import AsaasClient
 from app.asaas_common import asaas_configured, verify_wallet_id
+from app.asaas_webhook_config import build_subaccount_webhooks
 from app.core.config import settings
 from app.financial_service import ensure_chart
 from app.models import EscrowAccount, Operation, Organization, User
@@ -146,6 +147,7 @@ def create_mock_subaccount(
         from app.wallet_billing_service import ensure_escrow_billing_cycle
 
         ensure_escrow_billing_cycle(db, account)
+    _notify_wallet_opened(db, user, account)
     return account
 
 
@@ -175,6 +177,9 @@ def create_asaas_subaccount(
     from app.account_uniqueness import assert_valid_cpf_or_cnpj
 
     payload["cpfCnpj"] = assert_valid_cpf_or_cnpj(payload["cpfCnpj"])
+    webhooks = build_subaccount_webhooks()
+    if webhooks:
+        payload["webhooks"] = webhooks
 
     with AsaasClient() as client:
         verify_wallet_id(client)
@@ -227,7 +232,15 @@ def create_asaas_subaccount(
         from app.wallet_billing_service import ensure_escrow_billing_cycle
 
         ensure_escrow_billing_cycle(db, account)
+    _notify_wallet_opened(db, user, account)
     return account
+
+
+def _notify_wallet_opened(db: Session, actor: User, account: EscrowAccount) -> None:
+    from app.wallet_notification_service import dispatch_wallet_opened_notification
+
+    holder = db.get(User, account.user_id) if account.user_id else None
+    dispatch_wallet_opened_notification(db, actor, account, holder=holder)
 
 
 def create_asaas_subaccount_escrow(

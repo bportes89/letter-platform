@@ -4923,6 +4923,58 @@ def test_escrow_asaas_status_not_configured(client, auth_headers, monkeypatch):
     assert body["connected"] is False
 
 
+def test_subaccount_payload_includes_webhooks_when_api_url_configured(client, auth_headers, monkeypatch):
+    captured: list[dict] = []
+
+    class FakeAsaasClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def get_balance(self):
+            return {"balance": 1000.0}
+
+        def list_wallets(self):
+            return {"data": [{"id": "wallet-test-001"}]}
+
+        def create_subaccount(self, payload):
+            captured.append(payload)
+            return {"id": "acct-wh-001", "walletId": "wallet-wh-001", "apiKey": "secret-once"}
+
+        def configure_subaccount_escrow(self, account_id, **kwargs):
+            return {"enabled": True}
+
+        def configure_default_escrow(self, **kwargs):
+            return {"enabled": True}
+
+    monkeypatch.setattr("app.asaas_common.settings.asaas_api_key", "test-key")
+    monkeypatch.setattr("app.asaas_common.settings.asaas_wallet_id", "wallet-test-001")
+    monkeypatch.setattr("app.asaas_common.settings.api_public_url", "https://api.test.letter.com.br/api/v1")
+    monkeypatch.setattr("app.asaas_common.settings.asaas_webhook_access_token", "letter-webhook-token-32chars-minimum")
+    monkeypatch.setattr("app.asaas_escrow_service.AsaasClient", FakeAsaasClient)
+    monkeypatch.setattr("app.asaas_subaccount_service.AsaasClient", FakeAsaasClient)
+
+    created = client.post(
+        "/api/v1/escrow/accounts",
+        headers=auth_headers,
+        json={
+            "create_subaccount": True,
+            "enable_escrow": False,
+            "profile": {"cpf_cnpj": "57255607000130"},
+        },
+    )
+    assert created.status_code == 201, created.text
+    assert captured
+    webhooks = captured[0]["webhooks"]
+    assert webhooks[0]["url"] == "https://api.test.letter.com.br/api/v1/webhooks/asaas"
+    assert "ACCOUNT_DOCUMENTATION_APPROVED" in webhooks[0]["events"]
+
+
 def test_escrow_create_uses_asaas_subaccount_when_configured(client, auth_headers, monkeypatch):
     escrow_calls: list[dict] = []
 
@@ -4959,7 +5011,11 @@ def test_escrow_create_uses_asaas_subaccount_when_configured(client, auth_header
     monkeypatch.setattr("app.asaas_escrow_service.AsaasClient", FakeAsaasClient)
     monkeypatch.setattr("app.asaas_subaccount_service.AsaasClient", FakeAsaasClient)
 
-    created = client.post("/api/v1/escrow/accounts", headers=auth_headers, json={"create_subaccount": True, "enable_escrow": True})
+    created = client.post(
+        "/api/v1/escrow/accounts",
+        headers=auth_headers,
+        json={"create_subaccount": True, "enable_escrow": True, "profile": {"cpf_cnpj": "57255607000130"}},
+    )
     assert created.status_code == 201
     body = created.json()
     assert body["provider"] == "ASAAS_SUBACCOUNT"
@@ -5007,7 +5063,11 @@ def test_escrow_create_plain_subaccount_without_escrow(client, auth_headers, mon
     created = client.post(
         "/api/v1/escrow/accounts",
         headers=auth_headers,
-        json={"create_subaccount": True, "enable_escrow": False},
+        json={
+            "create_subaccount": True,
+            "enable_escrow": False,
+            "profile": {"cpf_cnpj": "57255607000130"},
+        },
     )
     assert created.status_code == 201
     body = created.json()
@@ -5999,6 +6059,17 @@ def test_auto_plain_subaccount_on_kyc_complete(client, monkeypatch):
     assert again.status_code == 200
     assert again.json()["subaccount"]["id"] == body["subaccount"]["id"]
 
+    admin_login = client.post("/api/v1/auth/login", json={"email": "admin@letter.com.br", "password": "Letter@123"})
+    deliveries = client.get(
+        "/api/v1/communications/deliveries",
+        headers={"Authorization": f"Bearer {admin_login.json()['access_token']}"},
+    ).json()
+    assert any(
+        "conta digital letter" in item["rendered_body"].lower()
+        and item["subject_id"] == body["subaccount"]["id"]
+        for item in deliveries
+    )
+
 
 def test_admin_kyc_approval_provisions_plain_subaccount(client, auth_headers, monkeypatch):
     monkeypatch.setattr("app.asaas_common.asaas_configured", lambda: False)
@@ -6791,4 +6862,82 @@ def test_mmn_asaas_split_preview_mock_payment_and_webhook(client, auth_headers, 
 
     settled = client.get("/api/v1/finops/mmn/split-instructions?reference=MMN-SPLIT-TEST-002", headers=auth_headers)
     assert any(row["status"] == "SETTLED" for row in settled.json())
+
+
+def test_asaas_webhook_sends_letter_kyc_approved_email(client, auth_headers, monkeypatch):
+    from app.db import SessionLocal
+    from app.models import EscrowAccount
+
+    monkeypatch.setattr("app.asaas_common.asaas_configured", lambda: False)
+    monkeypatch.setattr("app.asaas_common.settings.public_app_url", "https://plataformaletter.com.br")
+
+    suffix = uuid4().hex[:8]
+    registered = client.post("/api/v1/public/site/auth/register", json={
+        "name": "Cliente Webhook KYC",
+        "email": f"cliente.webhook.kyc.{suffix}@letter.com.br",
+        "phone": "11966665555",
+        "password": "ClienteKyc1!",
+        "document": "39053344705",
+        "terms_accepted": True,
+    })
+    assert registered.status_code == 201
+    client_headers = {"Authorization": f"Bearer {registered.json()['access_token']}"}
+
+    completed = client.post("/api/v1/kyc/me/complete", headers=client_headers)
+    assert completed.status_code == 200
+    account_id = completed.json()["subaccount"]["id"]
+
+    escrow = client.get("/api/v1/escrow/me", headers=client_headers).json()
+    asaas_account_id = escrow["asaas_account_id"]
+    with SessionLocal() as db:
+        account = db.get(EscrowAccount, account_id)
+        account.asaas_kyc_status = "PENDING"
+        db.commit()
+
+    class FakeAsaasClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def get_balance(self):
+            return {"balance": 0}
+
+        def get_commercial_info(self):
+            return {"documentationStatus": "APPROVED", "status": "APPROVED"}
+
+        def get_account_number(self):
+            return {"account": "12345-6", "agency": "0001"}
+
+        def list_documents(self):
+            return {"data": []}
+
+        def list_pix_keys(self):
+            return {"data": []}
+
+    monkeypatch.setattr("app.asaas_wallet_service.AsaasClient", FakeAsaasClient)
+    monkeypatch.setattr("app.asaas_common.settings.asaas_webhook_access_token", "webhook-test-token")
+
+    webhook = client.post(
+        "/api/v1/webhooks/asaas",
+        headers={"asaas-access-token": "webhook-test-token"},
+        json={
+            "event": "ACCOUNT_DOCUMENTATION_APPROVED",
+            "account": {"id": asaas_account_id},
+        },
+    )
+    assert webhook.status_code == 200
+    assert webhook.json()["account_id"] == account_id
+
+    deliveries = client.get("/api/v1/communications/deliveries", headers=auth_headers).json()
+    assert any(
+        "conta digital letter está ativa" in item["rendered_body"].lower()
+        and item["subject_id"] == account_id
+        and "plataformaletter.com.br" in item["rendered_body"]
+        for item in deliveries
+    )
 
