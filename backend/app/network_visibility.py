@@ -98,7 +98,7 @@ def visible_owner_ids(db: Session, user: User) -> set[str] | None:
         ids = downline_user_ids(db, user, include_self=True)
         return ids
     if user.role in PARTNER_ORIGIN_ROLES:
-        return {user.id}
+        return downline_user_ids(db, user, include_self=True)
     return set()
 
 

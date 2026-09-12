@@ -96,7 +96,8 @@ from app.schemas import (
     MarketplaceChatFaqCreate, MarketplaceChatFaqUpdate, MarketplaceChatFaqView,
     VendaDiretaManualCotaOption, VendaDiretaManualCadastroOption, VendaDiretaManualPartnerOption,
     VendaDiretaManualStoreRequest, VendaDiretaManualStoreResponse,
-    CadastroListItem, CadastroDetailView, CadastroUpdateRequest, MarketplaceExtratoItem,
+    CadastroListItem, CadastroDetailView, CadastroUpdateRequest, MarketplaceBlockedCommissionSummary,
+    MarketplaceExtratoItem,
     MarketplaceBoletoIssueResponse, MarketplaceInterMockWebhookRequest, MarketplaceZapSignRefreshResponse,
     MarketplaceBindChatLeadRequest, MarketplaceBindChatLeadResponse,
     VenderCotaCalculateRequest, VenderCotaStoreRequest, QuotaOfferRangeUpdate, QuotaSellOfferUpdate, VenderCotaCloseRequest,
@@ -913,6 +914,13 @@ def commission_allocate(payload: CommissionAllocate, user: User = Depends(requir
 @router.get("/wallet/commissions", response_model=list[CommissionEntryView])
 def commission_wallet(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     return list(db.scalars(select(CommissionEntry).where(CommissionEntry.organization_id==user.organization_id,CommissionEntry.beneficiary_id==user.id).order_by(CommissionEntry.created_at.desc())))
+
+
+@router.get("/wallet/commissions/blocked-summary", response_model=MarketplaceBlockedCommissionSummary)
+def commission_blocked_summary(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.affiliate_chain_commission_service import marketplace_blocked_commission_summary
+
+    return marketplace_blocked_commission_summary(db, user)
 
 
 @router.get("/wallet/commissions/sefaz/status", response_model=SefazRobotStatusView)

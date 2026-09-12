@@ -188,6 +188,18 @@ No **CONCLUIDO** do cadastro Marketplace, quando `terms_json.chain_commissions` 
 - Snapshot `lifecycle.commission_release.affiliate_mode` = `BOLO_CHAIN`
 - Beneficiários inativos são ignorados na liberação; propostas antigas sem `chain_commissions` continuam no fallback MMN (`affiliate_mode` = `UNIVERSAL_MMN`)
 
+## Comissão afiliada — dashboard “bloqueado” (Fase 3)
+
+Cada afiliado vê **apenas a fatia do seu nível** na cadeia (`my_chain_commission` em `GET /marketplace/cadastros`):
+
+- `level` / `level_label` — franquia, regional, gestor, supervisor ou vendedor
+- `amount` — valor pré-calculado (`price_partners` … `price_sellers`)
+- `status` — `BLOCKED` (até CONCLUIDO) ou `RELEASED`
+
+Parceiros (`PARTNER`, `QUOTA_SELLER`) acessam **Cadastros** no menu comercial (somente leitura). O detalhe não expõe `chain_commissions` completo para outros níveis.
+
+`GET /wallet/commissions/blocked-summary` — soma das fatias bloqueadas em vendas **pagas e não concluídas** (card “Marketplace bloqueado” em Rede e comissões).
+
 ## Cotas em análise (portal fornecedor)
 
 Fornecedor cadastra cotas pelo portal; entram em `PENDING_REVIEW` até o admin aprovar:

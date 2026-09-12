@@ -30,6 +30,12 @@ type CadastroRow = {
   commission_release_status?: string | null;
   paid_at?: string | null;
   lifecycle_editable?: boolean;
+  my_chain_commission?: {
+    level: string;
+    level_label: string;
+    amount: string;
+    status: "BLOCKED" | "RELEASED";
+  } | null;
 };
 
 type CadastroDetail = CadastroRow & {
@@ -83,6 +89,14 @@ export function CadastroMarketplaceModule() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
+  const [myRole, setMyRole] = useState("");
+  const partnerView = myRole === "PARTNER" || myRole === "QUOTA_SELLER";
+
+  useEffect(() => {
+    api<{ role: string }>("/auth/me")
+      .then((me) => setMyRole(me.role))
+      .catch(() => setMyRole(""));
+  }, []);
 
   const load = useCallback(async () => {
     const params = new URLSearchParams({ pipeline: tab });
@@ -199,10 +213,11 @@ export function CadastroMarketplaceModule() {
       <div className="page-heading">
         <div>
           <span className="eyebrow dark">CADASTRO</span>
-          <h1>Cadastros — Marketplace</h1>
+          <h1>{partnerView ? "Minhas vendas" : "Cadastros — Marketplace"}</h1>
           <p>
-            Onde mora a venda: chat, Venda Direta Manual e Robô. Filtre por etapa (novos, negociação, concluído,
-            incompleto) e edite dados do cliente sem alterar a compra.
+            {partnerView
+              ? "Acompanhe suas vendas do chat e veja a comissão bloqueada da sua fatia na cadeia até a conclusão."
+              : "Onde mora a venda: chat, Venda Direta Manual e Robô. Filtre por etapa (novos, negociação, concluído, incompleto) e edite dados do cliente sem alterar a compra."}
           </p>
         </div>
         <div className="operational-icon">
@@ -271,6 +286,7 @@ export function CadastroMarketplaceModule() {
                 <th>Crédito</th>
                 <th>Entrada</th>
                 <th>Parceiro</th>
+                <th>Minha comissão</th>
                 <th>Situação</th>
                 <th>Origem</th>
                 <th></th>
@@ -294,6 +310,11 @@ export function CadastroMarketplaceModule() {
                   <td>{row.entrada_value ? brl.format(Number(row.entrada_value)) : "—"}</td>
                   <td>{row.partner_name || "—"}</td>
                   <td>
+                    {row.my_chain_commission?.amount
+                      ? `${brl.format(Number(row.my_chain_commission.amount))} · ${row.my_chain_commission.status === "BLOCKED" ? "bloqueada" : "liberada"}`
+                      : "—"}
+                  </td>
+                  <td>
                     <span className={`pill pill-${row.situation.toLowerCase()}`}>{row.situation_label}</span>
                   </td>
                   <td>
@@ -308,7 +329,7 @@ export function CadastroMarketplaceModule() {
               ))}
               {!rows.length && (
                 <tr>
-                  <td colSpan={9}>Nenhum cadastro nesta etapa.</td>
+                  <td colSpan={10}>Nenhum cadastro nesta etapa.</td>
                 </tr>
               )}
             </tbody>
@@ -320,6 +341,13 @@ export function CadastroMarketplaceModule() {
             <h3>
               {selected.name} · {selected.situation_label}
             </h3>
+            {selected.my_chain_commission ? (
+              <div className="notice">
+                Sua comissão ({selected.my_chain_commission.level_label}):{" "}
+                <b>{brl.format(Number(selected.my_chain_commission.amount))}</b> ·{" "}
+                {selected.my_chain_commission.status === "BLOCKED" ? "bloqueada até concluir a venda" : "liberada"}
+              </div>
+            ) : null}
             <div className="notice">
               Compra (somente leitura): crédito{" "}
               {selected.credit_value ? brl.format(Number(selected.credit_value)) : "—"} · entrada{" "}
@@ -334,7 +362,7 @@ export function CadastroMarketplaceModule() {
                 </>
               ) : null}
             </div>
-            {selected.commission_release ? (
+            {!partnerView && selected.commission_release ? (
               <div className="notice">
                 Liberação: fornecedor{" "}
                 {selected.commission_release.supplier_total
@@ -354,7 +382,7 @@ export function CadastroMarketplaceModule() {
                 {selected.commission_release.reference ? ` · ${selected.commission_release.reference}` : ""}
               </div>
             ) : null}
-            {selected.lifecycle_editable && selected.situation === "AGUARDANDO_PAGAMENTO" ? (
+            {!partnerView && selected.lifecycle_editable && selected.situation === "AGUARDANDO_PAGAMENTO" ? (
               <div className="notice">
                 Boleto entrada:{" "}
                 {selected.boleto?.codigo_solicitacao
@@ -415,7 +443,7 @@ export function CadastroMarketplaceModule() {
                 E-mail
                 <input name="email" type="email" defaultValue={selected.email || ""} />
               </label>
-              {selected.lifecycle_editable ? (
+              {!partnerView && selected.lifecycle_editable ? (
                 <>
                   <label className="marketplace-field marketplace-field-compact">
                     Situação da venda
@@ -443,16 +471,18 @@ export function CadastroMarketplaceModule() {
                   </label>
                 </>
               ) : null}
-              <label className="marketplace-field marketplace-field-compact">
-                Status lead
-                <select name="lead_status" defaultValue={selected.lead_status}>
-                  {["NEW", "CONTACTED", "QUALIFIED", "PROPOSAL", "CONVERTED", "CANCELLED"].map((s) => (
-                    <option key={s} value={s}>
-                      {s}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              {!partnerView ? (
+                <label className="marketplace-field marketplace-field-compact">
+                  Status lead
+                  <select name="lead_status" defaultValue={selected.lead_status}>
+                    {["NEW", "CONTACTED", "QUALIFIED", "PROPOSAL", "CONVERTED", "CANCELLED"].map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
               <label className="marketplace-field marketplace-field-compact">
                 CEP
                 <input name="zipcode" defaultValue={selected.address?.zipcode || ""} />
@@ -478,10 +508,12 @@ export function CadastroMarketplaceModule() {
                 <input name="uf" defaultValue={selected.address?.uf || ""} maxLength={2} />
               </label>
             </div>
-            <button type="submit" className="marketplace-submit" disabled={busy}>
-              <RefreshCw />
-              {busy ? "Salvando…" : "Salvar cadastro"}
-            </button>
+            {!partnerView ? (
+              <button type="submit" className="marketplace-submit" disabled={busy}>
+                <RefreshCw />
+                {busy ? "Salvando…" : "Salvar cadastro"}
+              </button>
+            ) : null}
             <button type="button" className="table-action" style={{ marginLeft: "0.75rem" }} onClick={() => setSelected(null)}>
               Fechar
             </button>

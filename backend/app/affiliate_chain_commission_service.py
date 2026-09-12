@@ -32,6 +32,13 @@ BOLO_RELEASE_LEVELS: tuple[tuple[int, str, str], ...] = (
     (5, "vendedor", "price_sellers"),
 )
 
+CHAIN_LEVEL_LABELS = {
+    "franquia": "Franquia",
+    "regional": "Regional",
+    "manager": "Gestor",
+    "supervisor": "Supervisor",
+    "vendedor": "Vendedor",
+}
 
 def _pct(value: float | Decimal | None) -> Decimal:
     try:
@@ -180,6 +187,53 @@ def merge_chain_commissions_into_terms(terms: dict, commissions: dict) -> dict:
     return terms
 
 
+def partner_chain_commission_slice(
+    terms: dict,
+    user_id: str,
+    *,
+    situation: str | None = None,
+    commission_release_status: str | None = None,
+) -> dict | None:
+    """Fatia do afiliado logado (Paulo __estimated_commission_for_chain)."""
+    block = chain_commissions_block(terms)
+    if not block:
+        return None
+
+    chain_ids = block.get("chain_user_ids") or {}
+    uid = str(user_id)
+    level_key = next((key for key, value in chain_ids.items() if value and str(value) == uid), None)
+    if not level_key:
+        return None
+
+    price_key = next(price for _, chain_key, price in BOLO_RELEASE_LEVELS if chain_key == level_key)
+    amount = money(Decimal(str(block.get(price_key) or terms.get(price_key) or 0)))
+    if amount <= 0:
+        return None
+
+    released = str(commission_release_status or "").upper() in {"RELEASED", "RELEASED_STUB"} or str(
+        situation or ""
+    ).upper() in {"CONCLUIDO", "CONCLUIDA"}
+    return {
+        "level": level_key,
+        "level_label": CHAIN_LEVEL_LABELS.get(level_key, level_key),
+        "amount": str(amount),
+        "status": "RELEASED" if released else "BLOCKED",
+    }
+
+
+def sanitize_marketplace_terms_for_user(terms: dict, user: User) -> dict:
+    """Oculta valores dos outros níveis da cadeia para parceiros."""
+    from app.models import Role
+
+    if user.role in {Role.PLATFORM_ADMIN, Role.INTERNAL_STAFF, Role.MASTER_FRANCHISEE}:
+        return terms
+    safe = dict(terms)
+    safe.pop("chain_commissions", None)
+    for key in PRICE_KEYS:
+        safe.pop(key, None)
+    return safe
+
+
 def chain_commissions_block(terms: dict) -> dict | None:
     """Retorna bloco chain_commissions se existir pré-cálculo bolo."""
     block = terms.get("chain_commissions")
@@ -189,6 +243,39 @@ def chain_commissions_block(terms: dict) -> dict | None:
     if not isinstance(ids, dict):
         return None
     return block
+
+
+def marketplace_blocked_commission_summary(db: Session, user: User) -> dict:
+    """Saldo bloqueado: vendas pagas, não concluídas, com fatia do usuário."""
+    from app.cadastro_service import SIT_CONCLUIDO, SIT_PAGO, list_cadastros
+
+    blocked_total = Decimal("0")
+    blocked_count = 0
+    pipeline_total = Decimal("0")
+    pipeline_count = 0
+
+    for row in list_cadastros(db, user):
+        slice_ = row.get("my_chain_commission")
+        if not isinstance(slice_, dict) or slice_.get("status") != "BLOCKED":
+            continue
+        amount = money(Decimal(str(slice_.get("amount") or 0)))
+        if amount <= 0:
+            continue
+        situation = str(row.get("situation") or "").upper()
+        if situation in {SIT_CONCLUIDO, "CONCLUIDA"}:
+            continue
+        pipeline_total += amount
+        pipeline_count += 1
+        if situation == SIT_PAGO:
+            blocked_total += amount
+            blocked_count += 1
+
+    return {
+        "blocked_for_withdrawal": str(money(blocked_total)),
+        "blocked_sale_count": blocked_count,
+        "estimated_pipeline_total": str(money(pipeline_total)),
+        "estimated_pipeline_count": pipeline_count,
+    }
 
 
 def bolo_chain_affiliate_total(terms: dict) -> Decimal:

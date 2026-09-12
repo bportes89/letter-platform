@@ -39,7 +39,7 @@ export const PRODUCT_NAV: ProductNavItem[] = [
       { key: "marketplace", name: "Marketplace (esteiras)" },
       { key: "venda-direta-robo", name: "Venda Direta Robô", internalOnly: true },
       { key: "venda-direta-manual", name: "Venda Direta Manual", internalOnly: true },
-      { key: "cadastros", name: "Cadastros", internalOnly: true },
+      { key: "cadastros", name: "Cadastros" },
       { key: "minhas-compras", name: "Minhas compras", clientOnly: true },
       { key: "fornecedores", name: "Fornecedores", internalOnly: true },
       { key: "chat-faq", name: "FAQ do chat", internalOnly: true },

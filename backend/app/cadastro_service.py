@@ -10,6 +10,10 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.affiliate_chain_commission_service import (
+    partner_chain_commission_slice,
+    sanitize_marketplace_terms_for_user,
+)
 from app.models import Contract, Lead, Proposal, Quota, Role, User
 from app.network_visibility import get_lead_for_user, list_visible_leads, owner_map
 from app.services import money
@@ -349,6 +353,12 @@ def list_cadastros(db: Session, user: User, *, pipeline: str = PIPELINE_ALL, q: 
         if needle and needle not in label_bits:
             continue
 
+        my_chain_commission = partner_chain_commission_slice(
+            terms,
+            user.id,
+            situation=situation,
+            commission_release_status=life.get("commission_release_status"),
+        )
         rows.append(
             {
                 "lead_id": lead.id,
@@ -383,7 +393,15 @@ def list_cadastros(db: Session, user: User, *, pipeline: str = PIPELINE_ALL, q: 
                 "supplier_transfer_confirmed": bool(life.get("supplier_transfer_confirmed")),
                 "commission_release_status": life.get("commission_release_status"),
                 "paid_at": life.get("paid_at"),
-                "lifecycle_editable": bool(proposal),
+                "lifecycle_editable": bool(proposal)
+                and user.role
+                in {
+                    Role.PLATFORM_ADMIN,
+                    Role.INTERNAL_STAFF,
+                    Role.MASTER_FRANCHISEE,
+                    Role.MANAGER,
+                },
+                "my_chain_commission": my_chain_commission,
             }
         )
     return rows
@@ -441,10 +459,17 @@ def get_cadastro_detail(db: Session, user: User, lead_id: str) -> dict:
     contract_meta = site_contract_meta(terms, snap)
     from app.marketplace_zapsign_service import zapsign_view_from_terms
 
+    my_chain_commission = partner_chain_commission_slice(
+        terms,
+        user.id,
+        situation=life.get("situation") or row.get("situation"),
+        commission_release_status=life.get("commission_release_status"),
+    )
     return {
         **row,
         "snapshot": snap,
-        "terms": terms,
+        "terms": sanitize_marketplace_terms_for_user(terms, user),
+        "my_chain_commission": my_chain_commission or row.get("my_chain_commission"),
         "address": snap.get("address") or {},
         "purchase_readonly": {
             "credit_value": row.get("credit_value"),
@@ -456,7 +481,14 @@ def get_cadastro_detail(db: Session, user: User, lead_id: str) -> dict:
         "supplier_transfer_confirmed": bool(life.get("supplier_transfer_confirmed")),
         "commission_release_status": life.get("commission_release_status"),
         "paid_at": life.get("paid_at"),
-        "lifecycle_editable": bool(proposal),
+        "lifecycle_editable": bool(proposal)
+        and user.role
+        in {
+            Role.PLATFORM_ADMIN,
+            Role.INTERNAL_STAFF,
+            Role.MASTER_FRANCHISEE,
+            Role.MANAGER,
+        },
         "can_conclude": bool(proposal) and bool(life.get("supplier_transfer_confirmed")),
         "commission_release": life.get("commission_release") if isinstance(life.get("commission_release"), dict) else None,
         "boleto": boleto,

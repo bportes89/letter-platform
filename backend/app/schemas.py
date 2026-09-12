@@ -2496,6 +2496,20 @@ class VendaDiretaManualStoreResponse(BaseModel):
     message: str
 
 
+class MyChainCommissionView(BaseModel):
+    level: str
+    level_label: str
+    amount: str
+    status: str
+
+
+class MarketplaceBlockedCommissionSummary(BaseModel):
+    blocked_for_withdrawal: str
+    blocked_sale_count: int
+    estimated_pipeline_total: str
+    estimated_pipeline_count: int
+
+
 class CadastroListItem(BaseModel):
     lead_id: str
     created_at: datetime | None = None
@@ -2524,6 +2538,7 @@ class CadastroListItem(BaseModel):
     commission_release_status: str | None = None
     paid_at: str | None = None
     lifecycle_editable: bool = False
+    my_chain_commission: MyChainCommissionView | None = None
 
 
 class CadastroDetailView(CadastroListItem):

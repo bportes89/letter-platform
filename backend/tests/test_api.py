@@ -4253,6 +4253,94 @@ def test_marketplace_chat_chain_commissions_bolo_seller_chain(client, auth_heade
     assert amounts == [Decimal("4000.00"), Decimal("12000.00")]
 
 
+def test_marketplace_partner_sees_my_blocked_commission_slice(client, auth_headers):
+    """Parceiro/vendedor vê só a fatia do nível dele em cadastros (Fase 3)."""
+    users = client.get("/api/v1/admin/users", headers=auth_headers).json()
+    franchise = next(u for u in users if u["email"] == "parceiro@letter.com.br")
+
+    seller_invite = client.post(
+        "/api/v1/admin/invitations",
+        headers=auth_headers,
+        json={"email": "slice.seller@example.com", "role": "QUOTA_SELLER"},
+    )
+    assert seller_invite.status_code == 201
+    seller_accept = client.post(
+        "/api/v1/auth/invitations/accept",
+        json={
+            "token": seller_invite.json()["token"],
+            "name": "Vendedor Slice",
+            "password": "SenhaForte123!",
+            "document": "52998224725",
+        },
+    )
+    assert seller_accept.status_code == 200
+    seller = next(u for u in client.get("/api/v1/admin/users", headers=auth_headers).json() if u["email"] == "slice.seller@example.com")
+
+    client.patch(f"/api/v1/admin/users/{franchise['id']}", headers=auth_headers, json={"porc": "4"})
+    client.patch(f"/api/v1/admin/users/{seller['id']}", headers=auth_headers, json={"porc": "1"})
+    node_seller = client.post(
+        "/api/v1/network/nodes",
+        headers=auth_headers,
+        json={"user_id": seller["id"], "tree_type": "SALES", "sponsor_user_id": franchise["id"]},
+    )
+    assert node_seller.status_code in {200, 201}
+    seller_code = node_seller.json()["referral_code"]
+
+    email = client.post(
+        "/api/v1/public/site/chat/home/10003",
+        json={"name": "Cliente Slice", "email": "slice.client@example.com", "referral_code": seller_code},
+    )
+    lead_id = email.json()["OBJ"]["lead_id"]
+    for step, body in [
+        ("10004", {"lead_id": lead_id, "phone": "32988776655", "email": "slice.client@example.com", "referral_code": seller_code}),
+        ("10007", {"lead_id": lead_id, "option_id": "REAL_ESTATE", "option_save": "REAL_ESTATE", "referral_code": seller_code}),
+        ("10008", {"lead_id": lead_id, "option_id": "dirty_no", "option_save": "0", "referral_code": seller_code}),
+        ("10008", {"lead_id": lead_id, "target_amount": "400000", "referral_code": seller_code}),
+        ("10009", {"lead_id": lead_id, "target_entrada": "80000", "referral_code": seller_code}),
+        ("10010", {"lead_id": lead_id, "monthly_income": "50000", "referral_code": seller_code}),
+    ]:
+        assert client.post(f"/api/v1/public/site/chat/home/{step}", json=body).status_code == 200
+
+    match = client.post(
+        "/api/v1/public/site/chat/home/10011",
+        json={"lead_id": lead_id, "asset_value": "900000", "referral_code": seller_code},
+    )
+    quota_key = match.json()["OBJ"]["chat_next"][0]["options"][0]["id"]
+    for qid in str(quota_key).split("|"):
+        assert client.post(f"/api/v1/quotas/{qid}/nina-scan", headers=auth_headers).status_code == 200
+    assert client.post(
+        "/api/v1/public/site/chat/home/10013",
+        json={"lead_id": lead_id, "option_id": quota_key, "option_save": quota_key, "referral_code": seller_code},
+    ).status_code == 200
+
+    paid = client.patch(f"/api/v1/marketplace/cadastros/{lead_id}", headers=auth_headers, json={"situation": "PAGO"})
+    assert paid.status_code == 200
+
+    seller_login = client.post("/api/v1/auth/login", json={"email": "slice.seller@example.com", "password": "SenhaForte123!"})
+    assert seller_login.status_code == 200
+    seller_headers = {"Authorization": f"Bearer {seller_login.json()['access_token']}"}
+
+    seller_rows = client.get("/api/v1/marketplace/cadastros", headers=seller_headers).json()
+    row = next(r for r in seller_rows if r["lead_id"] == lead_id)
+    assert row["my_chain_commission"]["level"] == "vendedor"
+    assert Decimal(row["my_chain_commission"]["amount"]) == Decimal("4000.00")
+    assert row["my_chain_commission"]["status"] == "BLOCKED"
+
+    seller_detail = client.get(f"/api/v1/marketplace/cadastros/{lead_id}", headers=seller_headers).json()
+    assert "chain_commissions" not in (seller_detail.get("terms") or {})
+    assert seller_detail["my_chain_commission"]["amount"] == "4000.00"
+
+    franchise_login = client.post("/api/v1/auth/login", json={"email": "parceiro@letter.com.br", "password": "Letter@123"})
+    franchise_headers = {"Authorization": f"Bearer {franchise_login.json()['access_token']}"}
+    franchise_row = next(r for r in client.get("/api/v1/marketplace/cadastros", headers=franchise_headers).json() if r["lead_id"] == lead_id)
+    assert franchise_row["my_chain_commission"]["level"] == "franquia"
+    assert Decimal(franchise_row["my_chain_commission"]["amount"]) == Decimal("12000.00")
+
+    blocked = client.get("/api/v1/wallet/commissions/blocked-summary", headers=franchise_headers)
+    assert blocked.status_code == 200
+    assert Decimal(blocked.json()["blocked_for_withdrawal"]) >= Decimal("12000.00")
+
+
 def test_marketplace_chat_sends_zapsign_on_contract_accept(client, auth_headers, monkeypatch):
     class FakeZapSignClient:
         def __init__(self, *args, **kwargs):
