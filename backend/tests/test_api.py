@@ -2913,7 +2913,7 @@ def test_legal_manuals_public_catalog_and_authenticated_download(client, auth_he
     public = client.get("/api/v1/platform/legal-manuals")
     assert public.status_code == 200
     body = public.json()
-    assert len(body) >= 7
+    assert len(body) >= 16
     assert all(row["document_type"] == "manual" for row in body)
     assert all("Contrato" not in row["title"] for row in body)
     assert body[0]["requires_login"] is True
@@ -2930,8 +2930,8 @@ def test_legal_manuals_public_catalog_and_authenticated_download(client, auth_he
 
     download = client.get("/api/v1/legal-manuals/manual-sdc/download", headers=auth_headers)
     assert download.status_code == 200
-    assert download.headers["content-type"].startswith("application/vnd.openxmlformats-officedocument")
-    assert len(download.content) > 100
+    assert download.headers["content-type"].startswith("application/pdf")
+    assert len(download.content) > 10_000
 
     blocked = client.get("/api/v1/legal-manuals/master-franqueado/download", headers=auth_headers)
     assert blocked.status_code == 403

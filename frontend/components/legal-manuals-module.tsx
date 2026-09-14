@@ -28,10 +28,10 @@ export function LegalManualsModule() {
     void api<LegalManual[]>("/legal-manuals").then(setItems).catch((e) => setMessage(e instanceof Error ? e.message : "Falha ao carregar manuais"));
   }, []);
 
-  async function download(slug: string, title: string) {
+  async function download(item: LegalManual) {
     try {
       const token = localStorage.getItem("letter_access_token");
-      const response = await fetch(`${API_URL}/legal-manuals/${slug}/download`, {
+      const response = await fetch(`${API_URL}/legal-manuals/${item.slug}/download`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
       if (!response.ok) throw new Error("Download indisponível");
@@ -39,13 +39,18 @@ export function LegalManualsModule() {
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url;
-      anchor.download = `${slug}.docx`;
+      anchor.download = item.filename || `${item.slug}.pdf`;
       anchor.click();
       URL.revokeObjectURL(url);
-      setMessage(`Download iniciado: ${title}`);
+      setMessage(`Download iniciado: ${item.title}`);
     } catch (e) {
       setMessage(e instanceof Error ? e.message : "Falha no download");
     }
+  }
+
+  function downloadLabel(filename: string): string {
+    const ext = filename.split(".").pop()?.toUpperCase() || "PDF";
+    return `Baixar ${ext}`;
   }
 
   const manuals = useMemo(() => items.filter((item) => item.document_type === "manual"), [items]);
@@ -76,8 +81,8 @@ export function LegalManualsModule() {
                 <small>{item.description}</small>
                 <small>Público: {item.audience}</small>
                 <small>{item.available ? formatSize(item.size_bytes) : "Arquivo indisponível"}</small>
-                <button className="table-action" disabled={!item.available} onClick={() => void download(item.slug, item.title)}>
-                  <Download /> Baixar .docx
+                <button className="table-action" disabled={!item.available} onClick={() => void download(item)}>
+                  <Download /> {downloadLabel(item.filename)}
                 </button>
               </article>
             ))}
@@ -106,8 +111,8 @@ export function LegalManualsModule() {
                     <small>{item.description}</small>
                     <small>Público: {item.audience}</small>
                     <small>{item.available ? formatSize(item.size_bytes) : "Arquivo indisponível"}</small>
-                    <button className="table-action" disabled={!item.available} onClick={() => void download(item.slug, item.title)}>
-                      <Download /> Baixar .docx
+                    <button className="table-action" disabled={!item.available} onClick={() => void download(item)}>
+                      <Download /> {downloadLabel(item.filename)}
                     </button>
                   </article>
                 ))}
