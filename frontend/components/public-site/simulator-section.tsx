@@ -2,8 +2,10 @@
 
 import Link from "next/link";
 import Image from "next/image";
-import { FormEvent, useState } from "react";
+import { FormEvent, useState, type ReactNode } from "react";
+import { usePathname } from "next/navigation";
 import { useSearchParams } from "next/navigation";
+import { scrollToPublicSection } from "@/lib/public-site-hash";
 import {
   capturePublicLead,
   simulateFlashPublic,
@@ -355,6 +357,24 @@ function MmnNote({ mmn }: { mmn: MmnPreview }) {
   );
 }
 
+function NavSectionLink({ id, children }: { id: string; children: ReactNode }) {
+  const pathname = usePathname();
+
+  return (
+    <Link
+      href={`/#${id}`}
+      onClick={(event) => {
+        if (pathname !== "/") return;
+        event.preventDefault();
+        scrollToPublicSection(id);
+        window.history.pushState(null, "", `/#${id}`);
+      }}
+    >
+      {children}
+    </Link>
+  );
+}
+
 export function SiteNav() {
   return (
     <nav className="nav-shell" aria-label="Navegação principal">
@@ -369,13 +389,13 @@ export function SiteNav() {
         />
       </Link>
       <div className="nav-links">
-        <Link href="/#atendimento">Atendimento</Link>
-        <Link href="/#solucoes">Soluções</Link>
-        <Link href="/#simulador">Simuladores</Link>
+        <NavSectionLink id="atendimento">Atendimento</NavSectionLink>
+        <NavSectionLink id="solucoes">Soluções</NavSectionLink>
+        <NavSectionLink id="simulador">Simuladores</NavSectionLink>
         <Link href={venderCotaHref("/vender-minha-cota")}>Vender cota</Link>
-        <Link href="/#manuais">Manuais</Link>
-        <Link href="/#nina">Nina Engine</Link>
-        <Link href="/#leilao">Leilão</Link>
+        <NavSectionLink id="manuais">Manuais</NavSectionLink>
+        <NavSectionLink id="nina">Nina Engine</NavSectionLink>
+        <NavSectionLink id="leilao">Leilão</NavSectionLink>
       </div>
       <div className="nav-actions">
         <Link href="/cadastro" className="button button-small button-outline">

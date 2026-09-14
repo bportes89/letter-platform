@@ -352,6 +352,7 @@
   max-width: 1180px;
   margin: auto;
   padding: 112px 24px;
+  scroll-margin-top: 88px;
 }
 
 .section-heading {
