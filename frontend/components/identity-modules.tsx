@@ -8,13 +8,215 @@ import { MfaSetupPanel } from "@/components/mfa-setup-panel";
 const roles = ["PLATFORM_ADMIN","INTERNAL_STAFF","MASTER_FRANCHISEE","MANAGER","PARTNER","CLIENT","QUOTA_SELLER","RETAIL_INVESTOR","INSTITUTIONAL_FUND","AUDITOR"];
 const date = (value:string|null) => value ? new Date(value).toLocaleString("pt-BR") : "—";
 
-export function IdentityModule(){
-  const [users,setUsers]=useState<User[]>([]),[branches,setBranches]=useState<Branch[]>([]),[invites,setInvites]=useState<Invitation[]>([]),[message,setMessage]=useState("");
-  const load=useCallback(()=>Promise.all([api<User[]>("/admin/users"),api<Branch[]>("/admin/branches"),api<Invitation[]>("/admin/invitations")]).then(([u,b,i])=>{setUsers(u);setBranches(b);setInvites(i)}),[]);
-  useEffect(()=>{load().catch(e=>setMessage(e.message))},[load]);
-  async function branch(event:FormEvent<HTMLFormElement>){event.preventDefault();const form=event.currentTarget;const f=new FormData(form);await api("/admin/branches",{method:"POST",body:JSON.stringify({name:f.get("name"),code:f.get("code"),region:f.get("region")||null})});form.reset();setMessage("Filial criada.");await load()}
-  async function invite(event:FormEvent<HTMLFormElement>){event.preventDefault();const form=event.currentTarget;const f=new FormData(form);const item=await api<Invitation>("/admin/invitations",{method:"POST",body:JSON.stringify({email:f.get("email"),role:f.get("role"),branch_id:f.get("branch_id")||null})});form.reset();setMessage(`Convite criado. Token de desenvolvimento: ${item.token}`);await load()}
-  return <><Heading icon={<Users/>} eyebrow="IDENTIDADE E REDE" title="Pessoas, filiais e convites" text="Administração multiunidade com papéis, vínculo regional e ciclo de entrada controlado."/>{message&&<div className="notice"><ShieldCheck/>{message}</div>}<div className="admin-grid"><section className="panel"><h2><Building2/> Nova filial</h2><form className="stack-form" onSubmit={branch}><input name="name" placeholder="Nome da filial" required/><input name="code" placeholder="Código" required/><input name="region" placeholder="Região"/><button><Plus/>Criar filial</button></form></section><section className="panel"><h2><UserPlus/> Convidar usuário</h2><form className="stack-form" onSubmit={invite}><input name="email" type="email" placeholder="E-mail" required/><select name="role">{roles.map(r=><option key={r}>{r}</option>)}</select><select name="branch_id"><option value="">Sem filial</option>{branches.map(b=><option value={b.id} key={b.id}>{b.name}</option>)}</select><button><UserPlus/>Gerar convite</button></form></section></div><section className="panel identity-table"><div className="panel-title"><h2>Usuários ({users.length})</h2><span>{branches.length} filiais</span></div><div className="table-wrap"><table className="data-table"><thead><tr><th>Usuário</th><th>Papel</th><th>Filial</th><th>MFA</th><th>Último acesso</th><th>Status</th></tr></thead><tbody>{users.map(u=><tr key={u.id}><td><b>{u.name}</b><small>{u.email}</small></td><td>{u.role}</td><td>{branches.find(b=>b.id===u.branch_id)?.name??"Matriz"}</td><td><span className={`pill ${u.mfa_enabled?"pill-approved":""}`}>{u.mfa_enabled?"ATIVO":"PENDENTE"}</span></td><td>{date(u.last_login_at)}</td><td>{u.active?"Ativo":"Inativo"}</td></tr>)}</tbody></table></div></section><section className="panel identity-table"><h2>Convites recentes</h2>{invites.map(i=><div className="session-row" key={i.id}><div><b>{i.email}</b><small>{i.role} · expira {date(i.expires_at)}</small></div><span className={`pill pill-${i.status.toLowerCase()}`}>{i.status}</span></div>)}</section></>
+export function IdentityModule() {
+  const [users, setUsers] = useState<User[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [invites, setInvites] = useState<Invitation[]>([]);
+  const [message, setMessage] = useState("");
+  const [apiError, setApiError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [u, b, i] = await Promise.all([
+        api<User[]>("/admin/users"),
+        api<Branch[]>("/admin/branches"),
+        api<Invitation[]>("/admin/invitations"),
+      ]);
+      setUsers(u);
+      setBranches(b);
+      setInvites(i);
+      setApiError("");
+    } catch (e) {
+      setApiError(e instanceof Error ? e.message : "Falha ao carregar identidade.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function branch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const f = new FormData(form);
+    setBusy(true);
+    setMessage("");
+    try {
+      const created = await api<Branch>("/admin/branches", {
+        method: "POST",
+        body: JSON.stringify({
+          name: f.get("name"),
+          code: f.get("code"),
+          region: f.get("region") || null,
+        }),
+      });
+      form.reset();
+      setBranches((prev) => {
+        const next = [...prev.filter((item) => item.id !== created.id), created];
+        return next.sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+      });
+      setMessage(`Filial "${created.name}" criada (${created.code}).`);
+      setApiError("");
+      await load();
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : "Não foi possível criar a filial.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function invite(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const f = new FormData(form);
+    const branchId = String(f.get("branch_id") || "").trim();
+    setBusy(true);
+    setMessage("");
+    try {
+      const item = await api<Invitation>("/admin/invitations", {
+        method: "POST",
+        body: JSON.stringify({
+          email: f.get("email"),
+          role: f.get("role"),
+          branch_id: branchId || null,
+        }),
+      });
+      form.reset();
+      const link =
+        typeof window !== "undefined" && item.token
+          ? `${window.location.origin}/convite?token=${encodeURIComponent(item.token)}`
+          : null;
+      setMessage(
+        link
+          ? `Convite criado para ${item.email}. Link de aceite: ${link}`
+          : `Convite criado para ${item.email}.`,
+      );
+      setApiError("");
+      await load();
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : "Não foi possível gerar o convite.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      <Heading
+        icon={<Users />}
+        eyebrow="IDENTIDADE E REDE"
+        title="Pessoas, filiais e convites"
+        text="Administração multiunidade com papéis, vínculo regional e ciclo de entrada controlado."
+      />
+      {apiError && (
+        <div className="notice" style={{ borderColor: "#f5c2c0", background: "#fff5f5" }}>
+          <ShieldCheck />
+          {apiError} Aguarde até 1 minuto e clique em <b>Atualizar</b>.
+        </div>
+      )}
+      {message && <div className="notice"><ShieldCheck />{message}</div>}
+      <div className="admin-grid">
+        <section className="panel">
+          <div className="panel-title">
+            <h2><Building2 /> Nova filial</h2>
+            <button type="button" onClick={() => void load()} disabled={loading || busy}>
+              <RefreshCw />Atualizar
+            </button>
+          </div>
+          <form className="stack-form" onSubmit={branch}>
+            <input name="name" placeholder="Nome da filial" required disabled={busy} />
+            <input name="code" placeholder="Código" required disabled={busy} />
+            <input name="region" placeholder="Região" disabled={busy} />
+            <button disabled={busy}><Plus />{busy ? "Salvando…" : "Criar filial"}</button>
+          </form>
+          <div style={{ marginTop: 16 }}>
+            <small style={{ display: "block", color: "var(--muted)", marginBottom: 8 }}>
+              Filiais cadastradas ({branches.length})
+            </small>
+            {loading ? (
+              <small className="muted">Carregando filiais…</small>
+            ) : branches.length === 0 ? (
+              <small className="muted">Nenhuma filial ainda. Crie acima ou atualize após a API voltar.</small>
+            ) : (
+              branches.map((b) => (
+                <div className="session-row" key={b.id}>
+                  <div>
+                    <b>{b.name}</b>
+                    <small>{b.code}{b.region ? ` · ${b.region}` : ""}</small>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </section>
+        <section className="panel">
+          <h2><UserPlus /> Convidar usuário</h2>
+          <form className="stack-form" onSubmit={invite}>
+            <input name="email" type="email" placeholder="E-mail" required disabled={busy} />
+            <select name="role" disabled={busy}>
+              {roles.map((r) => <option key={r}>{r}</option>)}
+            </select>
+            <select name="branch_id" disabled={busy || branches.length === 0}>
+              <option value="">Sem filial (Matriz)</option>
+              {branches.map((b) => (
+                <option value={b.id} key={b.id}>{b.name} ({b.code})</option>
+              ))}
+            </select>
+            <button disabled={busy}><UserPlus />{busy ? "Gerando…" : "Gerar convite"}</button>
+          </form>
+        </section>
+      </div>
+      <section className="panel identity-table">
+        <div className="panel-title">
+          <h2>Usuários ({users.length})</h2>
+          <span>{branches.length} filiais</span>
+        </div>
+        <div className="table-wrap">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Usuário</th>
+                <th>Papel</th>
+                <th>Filial</th>
+                <th>MFA</th>
+                <th>Último acesso</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {users.map((u) => (
+                <tr key={u.id}>
+                  <td><b>{u.name}</b><small>{u.email}</small></td>
+                  <td>{u.role}</td>
+                  <td>{branches.find((b) => b.id === u.branch_id)?.name ?? "Matriz"}</td>
+                  <td><span className={`pill ${u.mfa_enabled ? "pill-approved" : ""}`}>{u.mfa_enabled ? "ATIVO" : "PENDENTE"}</span></td>
+                  <td>{date(u.last_login_at)}</td>
+                  <td>{u.active ? "Ativo" : "Inativo"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <section className="panel identity-table">
+        <h2>Convites recentes</h2>
+        {invites.map((i) => (
+          <div className="session-row" key={i.id}>
+            <div>
+              <b>{i.email}</b>
+              <small>{i.role} · expira {date(i.expires_at)}</small>
+            </div>
+            <span className={`pill pill-${i.status.toLowerCase()}`}>{i.status}</span>
+          </div>
+        ))}
+      </section>
+    </>
+  );
 }
 
 export function SecurityModule(){
