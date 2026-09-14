@@ -247,7 +247,6 @@ def bootstrap_page(db: Session) -> dict:
         "tipos": [{"id": k, "label": v} for k, v in TIPOS_LABEL.items()],
         "rules_summary": (
             "Só cotas contempladas. Percentual sobre o crédito. "
-            "Pago acima de 35% do crédito → recusa. "
             "Imóvel: prazo mínimo 60 meses. Autos/demais: mínimo 36 meses (72 meses entra na faixa 72+)."
         ),
         "organization_id": org_id,

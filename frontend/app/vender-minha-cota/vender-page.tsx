@@ -134,7 +134,7 @@ export default function VenderMinhaCotaPage() {
           <p className="eyebrow"><span /> Marketplace · compra de cota</p>
           <h1 style={{ fontSize: 34, margin: "8px 0 10px" }}>Venda sua cota contemplada</h1>
           <p className="site-light-muted" style={{ marginTop: 0 }}>
-            Preencha os dados e veja na hora quanto a Letter pagaria. Só cotas contempladas; percentual sobre o crédito; pago acima de 35% → recusa.
+            Preencha os dados e veja na hora quanto a Letter pagaria. Só cotas contempladas; percentual sobre o crédito.
           </p>
           {boot?.rules_summary && <p className="site-light-muted" style={{ fontSize: 13 }}>{boot.rules_summary}</p>}
           {error && <div className="error" style={{ marginBottom: 12 }}>{error}</div>}
