@@ -73,7 +73,7 @@ function FlashInvestCard({ item }: { item: PublicFlashInvestItem }) {
       <GatedSensitiveBlock
         label="Dados da operação (protegidos)"
         lines={[item.sensitive.borrower, item.sensitive.collateral, item.sensitive.registry, item.sensitive.operation_id]}
-        loginHint="Tomador, lastro, matrícula e memória completa disponíveis após abrir conta e login no Deal Room."
+        loginHint="Tomador, lastro, matrícula e memória completa disponíveis após abrir conta e login na plataforma."
       />
     </article>
   );
@@ -143,7 +143,7 @@ export function FlashInvestSection() {
       </div>
       <p className="vitrine-footnote">
         Após login, investidores habilitados acessam reservas, posições e documentação no módulo{" "}
-        <strong>Funding e investimentos</strong> do Deal Room.
+        <strong>Funding e investimentos</strong> na plataforma LETTER.
       </p>
     </section>
   );

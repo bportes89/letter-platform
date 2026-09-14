@@ -27,10 +27,10 @@ export function LegalManualsPublicSection() {
         <h2>
           Manuais operacionais
           <br />
-          <em>consulta pública · download na Deal Room.</em>
+          <em>consulta pública · download na área logada.</em>
         </h2>
         <p>
-          Consulte os manuais por produto. O download completo exige login na Deal Room. Contratos ficam disponíveis
+          Consulte os manuais por produto. O download completo exige login na plataforma. Contratos ficam disponíveis
           somente na área logada, após assinatura do serviço contratado.
         </p>
       </div>
@@ -61,7 +61,7 @@ export function LegalManualsPublicSection() {
           <p>Após criar sua conta, acesse <b>Plataforma → Manuais e contratos</b> para baixar manuais e contratos assinados.</p>
         </div>
         <Link className="button" href="/login?next=/modules/legal-manuals">
-          Entrar na Deal Room <span>→</span>
+          Acessar conta <span>→</span>
         </Link>
       </div>
     </section>

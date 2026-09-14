@@ -208,7 +208,7 @@ export default function PublicHomePage() {
             </h2>
           </div>
           <Link href="/login" className="button light">
-            Abrir conta / Deal Room <span>→</span>
+            Acessar conta <span>→</span>
           </Link>
         </section>
 

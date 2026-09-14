@@ -33,7 +33,7 @@ export function SiteFooter() {
       <div>
         <span>© {new Date().getFullYear()} {profile.trade_name || profile.legal_name}. Todos os direitos reservados.</span>
         <a href="/simulador/quitcon">Quitação consórcio</a>
-        <a href="/login">Deal Room</a>
+        <a href="/login">Acessar conta</a>
       </div>
     </footer>
   );

@@ -382,7 +382,7 @@ export function SiteNav() {
           Abra sua conta
         </Link>
         <Link href="/login" className="button button-small">
-          Deal Room <span>→</span>
+          Acessar conta <span>→</span>
         </Link>
       </div>
     </nav>
