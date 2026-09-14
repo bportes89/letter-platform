@@ -315,6 +315,7 @@ class InvitationView(ORMModel):
     status: str
     expires_at: datetime
     token: str | None = None
+    email_delivery_status: str | None = None
 
 
 class MfaSetupView(BaseModel):

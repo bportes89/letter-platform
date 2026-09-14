@@ -603,7 +603,8 @@ def admin_master_trees(user: User = Depends(require_scope("admin:users")), db: S
 
 @router.get("/admin/users",response_model=list[UserView])
 def admin_users(user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
-    return list(db.scalars(select(User).where(User.organization_id==user.organization_id).order_by(User.created_at.desc())))
+    from app.identity_admin_service import list_organization_users
+    return list_organization_users(db, user.organization_id)
 
 
 @router.patch("/admin/users/{user_id}",response_model=UserView)
@@ -660,8 +661,11 @@ def create_branch(payload:BranchCreate,user:User=Depends(require_scope("admin:us
 
 @router.post("/admin/invitations",response_model=InvitationView,status_code=201)
 def invite(payload:InviteCreate,user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
-    item,raw=create_invitation(db,user,str(payload.email),payload.role,payload.branch_id);db.flush();audit(db,user,"invitation.created","invitation",item.id);db.commit();db.refresh(item)
-    return InvitationView.model_validate(item).model_copy(update={"token":raw})
+    from app.identity_notification_service import dispatch_admin_invitation_notification
+    item,raw=create_invitation(db,user,str(payload.email),payload.role,payload.branch_id);db.flush()
+    email_status=dispatch_admin_invitation_notification(db,user,item,raw)
+    audit(db,user,"invitation.created","invitation",item.id,{"email_delivery_status":email_status});db.commit();db.refresh(item)
+    return InvitationView.model_validate(item).model_copy(update={"token":raw,"email_delivery_status":email_status})
 
 
 @router.post("/auth/invitations/accept",response_model=UserView)

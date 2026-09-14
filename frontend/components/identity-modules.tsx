@@ -8,33 +8,81 @@ import { MfaSetupPanel } from "@/components/mfa-setup-panel";
 const roles = ["PLATFORM_ADMIN","INTERNAL_STAFF","MASTER_FRANCHISEE","MANAGER","PARTNER","CLIENT","QUOTA_SELLER","RETAIL_INVESTOR","INSTITUTIONAL_FUND","AUDITOR"];
 const date = (value:string|null) => value ? new Date(value).toLocaleString("pt-BR") : "—";
 
+function inviteLink(token: string) {
+  return `${window.location.origin}/convite?token=${encodeURIComponent(token)}`;
+}
+
+async function copyText(value: string) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+  const area = document.createElement("textarea");
+  area.value = value;
+  document.body.appendChild(area);
+  area.select();
+  document.execCommand("copy");
+  document.body.removeChild(area);
+}
+
 export function IdentityModule() {
   const [users, setUsers] = useState<User[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [invites, setInvites] = useState<Invitation[]>([]);
   const [message, setMessage] = useState("");
   const [apiError, setApiError] = useState("");
+  const [usersError, setUsersError] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [lastInviteLink, setLastInviteLink] = useState("");
+
+  const loadBranches = useCallback(async () => api<Branch[]>("/admin/branches"), []);
+  const loadInvites = useCallback(async () => api<Invitation[]>("/admin/invitations"), []);
+  const loadUsers = useCallback(async () => api<User[]>("/admin/users"), []);
 
   const load = useCallback(async () => {
     setLoading(true);
-    try {
-      const [u, b, i] = await Promise.all([
-        api<User[]>("/admin/users"),
-        api<Branch[]>("/admin/branches"),
-        api<Invitation[]>("/admin/invitations"),
-      ]);
-      setUsers(u);
-      setBranches(b);
-      setInvites(i);
-      setApiError("");
-    } catch (e) {
-      setApiError(e instanceof Error ? e.message : "Falha ao carregar identidade.");
-    } finally {
-      setLoading(false);
+    const [usersResult, branchesResult, invitesResult] = await Promise.allSettled([
+      loadUsers(),
+      loadBranches(),
+      loadInvites(),
+    ]);
+    const errors: string[] = [];
+
+    if (branchesResult.status === "fulfilled") {
+      setBranches(branchesResult.value);
+    } else {
+      errors.push("filiais");
     }
-  }, []);
+
+    if (invitesResult.status === "fulfilled") {
+      setInvites(invitesResult.value);
+    } else {
+      errors.push("convites");
+    }
+
+    if (usersResult.status === "fulfilled") {
+      setUsers(usersResult.value);
+      setUsersError("");
+    } else {
+      setUsers([]);
+      setUsersError(
+        usersResult.reason instanceof Error
+          ? usersResult.reason.message
+          : "Não foi possível carregar a lista de usuários.",
+      );
+      errors.push("usuários");
+    }
+
+    if (errors.length === 3) {
+      const first = [usersResult, branchesResult, invitesResult].find((item) => item.status === "rejected") as PromiseRejectedResult;
+      setApiError(first.reason instanceof Error ? first.reason.message : "Falha ao carregar identidade.");
+    } else {
+      setApiError(errors.length ? `Alguns dados não carregaram (${errors.join(", ")}). Clique em Atualizar.` : "");
+    }
+
+    setLoading(false);
+  }, [loadBranches, loadInvites, loadUsers]);
 
   useEffect(() => {
     void load();
@@ -60,9 +108,13 @@ export function IdentityModule() {
         const next = [...prev.filter((item) => item.id !== created.id), created];
         return next.sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
       });
-      setMessage(`Filial "${created.name}" criada (${created.code}).`);
+      setMessage(`Filial "${created.name}" criada (${created.code}) e salva no sistema.`);
       setApiError("");
-      await load();
+      try {
+        setBranches(await loadBranches());
+      } catch {
+        /* mantém lista otimista se o reload falhar */
+      }
     } catch (e) {
       setMessage(e instanceof Error ? e.message : "Não foi possível criar a filial.");
     } finally {
@@ -87,17 +139,22 @@ export function IdentityModule() {
         }),
       });
       form.reset();
-      const link =
-        typeof window !== "undefined" && item.token
-          ? `${window.location.origin}/convite?token=${encodeURIComponent(item.token)}`
-          : null;
+      const link = typeof window !== "undefined" && item.token ? inviteLink(item.token) : "";
+      setLastInviteLink(link);
+      const emailed = item.email_delivery_status === "DELIVERED" || item.email_delivery_status === "QUEUED";
       setMessage(
         link
-          ? `Convite criado para ${item.email}. Link de aceite: ${link}`
+          ? emailed
+            ? `Convite criado para ${item.email}. E-mail enviado — se não chegar, copie o link abaixo.`
+            : `Convite criado para ${item.email}. Copie o link abaixo e envie manualmente ao convidado.`
           : `Convite criado para ${item.email}.`,
       );
       setApiError("");
-      await load();
+      try {
+        setInvites(await loadInvites());
+      } catch {
+        setInvites((prev) => [item, ...prev.filter((row) => row.id !== item.id)]);
+      }
     } catch (e) {
       setMessage(e instanceof Error ? e.message : "Não foi possível gerar o convite.");
     } finally {
@@ -120,6 +177,15 @@ export function IdentityModule() {
         </div>
       )}
       {message && <div className="notice"><ShieldCheck />{message}</div>}
+      {lastInviteLink && (
+        <div className="notice">
+          <ShieldCheck />
+          Link do convite: <code style={{ wordBreak: "break-all" }}>{lastInviteLink}</code>
+          <button type="button" style={{ marginLeft: 12 }} onClick={() => void copyText(lastInviteLink).then(() => setMessage("Link copiado."))}>
+            Copiar link
+          </button>
+        </div>
+      )}
       <div className="admin-grid">
         <section className="panel">
           <div className="panel-title">
@@ -169,6 +235,9 @@ export function IdentityModule() {
             </select>
             <button disabled={busy}><UserPlus />{busy ? "Gerando…" : "Gerar convite"}</button>
           </form>
+          <small className="muted" style={{ display: "block", marginTop: 12 }}>
+            O convite também é enviado por e-mail quando a API está disponível. Se o e-mail não chegar, copie o link gerado.
+          </small>
         </section>
       </div>
       <section className="panel identity-table">
@@ -176,6 +245,11 @@ export function IdentityModule() {
           <h2>Usuários ({users.length})</h2>
           <span>{branches.length} filiais</span>
         </div>
+        {usersError && (
+          <small className="muted" style={{ display: "block", marginBottom: 12, color: "#b42318" }}>
+            {usersError}
+          </small>
+        )}
         <div className="table-wrap">
           <table className="data-table">
             <thead>
