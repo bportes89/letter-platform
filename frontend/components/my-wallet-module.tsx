@@ -462,8 +462,7 @@ export function MyWalletModule() {
                 </div>
                 <div className="escrow-card">
                   <small>Banco</small>
-                  <b>{wallet.banking?.display_bank || wallet.banking?.bank_name || "LETTER / Asaas"}</b>
-                  <span>Código: {wallet.banking?.bank_code || "—"}</span>
+                  <b>{wallet.banking?.bank_code || "—"}</b>
                 </div>
                 <div className="escrow-card">
                   <small>Agência</small>
