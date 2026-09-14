@@ -84,7 +84,7 @@ from app.schemas import (
     FlashCreditCalculationRequest, MfaSetupView, MfaVerify, ModuleView, PasswordResetConfirm, PasswordResetRequest,
     AccountRecoveryLookupRequest, AccountRecoveryLookupResponse,
     ContractStatusView, ContractAcceptRequest, MasterTreeView,
-    NetworkNodeCreate, NetworkNodeView, NetworkDownlineMemberView, PayoutApprove, PayoutCreate, PayoutView, ProposalCreate, ProposalUpdate,
+    NetworkNodeCreate, NetworkNodeView, NetworkDownlineMemberView, NetworkReferralView, PayoutApprove, PayoutCreate, PayoutView, ProposalCreate, ProposalUpdate,
     ReconciliationBatchView, ReconciliationItemView, ReconciliationResolveRequest,
     MarketplaceEsteira1Request, MarketplaceEsteira1Response, MarketplaceEsteira2Request, MarketplaceEsteira2Response,
     VendaDiretaRoboSearchRequest, VendaDiretaRoboSearchResponse, VendaDiretaRoboConfirmRequest, VendaDiretaRoboConfirmResponse,
@@ -213,7 +213,7 @@ from app.public_site_service import (
 from app.flash_capital_params import get_active_flash_simulation_params, save_flash_simulation_params
 from app.network_service import (
     allocate_commissions, confirm_investment, create_network_node, create_rule,
-    downline_summary, reserve_investment,
+    downline_summary, referral_profile_for_user, resolve_public_app_url, reserve_investment,
 )
 from app.commission_attribution import (
     apply_proposal_attribution,
@@ -889,6 +889,18 @@ def network_my_summary(tree_type: str = "SALES", user: User = Depends(get_curren
         summary.update(pending_counts_for_network(db, user))
         summary["privacy_mode"] = "DOWNLINE_VISIBLE"
     return summary
+
+
+@router.get("/network/me/referral", response_model=NetworkReferralView)
+def network_my_referral(request: Request, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    app_base = resolve_public_app_url(
+        settings.public_app_url,
+        request.headers.get("origin"),
+        settings.cors_origins,
+    )
+    payload = referral_profile_for_user(db, user, app_base)
+    db.commit()
+    return payload
 
 
 @router.get("/network/me/downline", response_model=list[NetworkDownlineMemberView])

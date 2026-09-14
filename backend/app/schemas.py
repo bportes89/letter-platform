@@ -449,6 +449,19 @@ class NetworkDownlineMemberView(ORMModel):
     status: str
 
 
+class NetworkReferralLinksView(BaseModel):
+    cadastro: str
+    vender_cota: str
+    site: str
+
+
+class NetworkReferralView(BaseModel):
+    referral_code: str
+    tree_type: str
+    status: str
+    links: NetworkReferralLinksView
+
+
 class CommissionRuleCreate(BaseModel):
     product: str
     commission_type: str

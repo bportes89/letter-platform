@@ -12,6 +12,7 @@ export type KycCase = { id: string; subject_type: string; subject_id: string; pr
 export type NetworkNode = { id:string; user_id:string; sponsor_user_id:string|null; tree_type:string; referral_code:string; status:string };
 export type NetworkDownlineMember = { user_id:string; name:string; email:string; role:string; referral_code:string; level:number; sponsor_user_id:string|null; sponsor_name:string|null; status:string };
 export type NetworkSummary = { tree_type:string; total_downline:number; levels:Record<string,number>; privacy_mode:string; visible_proposals?:number; pending_proposals?:number; visible_leads?:number; open_leads?:number; downline_size?:number };
+export type NetworkReferral = { referral_code: string; tree_type: string; status: string; links: { cadastro: string; vender_cota: string; site: string } };
 export type CommissionRule = { id:string; product:string; commission_type:string; version:number; base_type:string; pool_rate_percent:string; levels_json:string; active:boolean };
 export type CommissionEntry = { id:string; beneficiary_id:string; reference:string; product:string; level:number; amount:string; status:string };
 export type FundingOpportunity = {

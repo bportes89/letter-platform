@@ -1899,6 +1899,26 @@ def test_five_level_commission_allocation_and_fiscal_hold(client, auth_headers):
     assert "names" not in summary.json()
 
 
+def test_network_me_referral_for_partner(client, monkeypatch):
+    monkeypatch.setattr("app.core.config.settings.public_app_url", "https://plataformaletter.com.br")
+    login = client.post("/api/v1/auth/login", json={"email": "parceiro@letter.com.br", "password": "Letter@123"}).json()
+    headers = {"Authorization": f"Bearer {login['access_token']}"}
+    referral = client.get("/api/v1/network/me/referral", headers=headers)
+    assert referral.status_code == 200
+    body = referral.json()
+    assert body["referral_code"].startswith("LTR-SAL-")
+    assert body["links"]["cadastro"] == f"https://plataformaletter.com.br/cadastro?ref={body['referral_code']}"
+    assert body["links"]["vender_cota"] == f"https://plataformaletter.com.br/vender-minha-cota?ref={body['referral_code']}"
+    assert body["links"]["site"] == f"https://plataformaletter.com.br/?ref={body['referral_code']}"
+
+
+def test_network_me_referral_forbidden_for_investor(client):
+    login = client.post("/api/v1/auth/login", json={"email": "investidor@letter.com.br", "password": "Letter@123"}).json()
+    headers = {"Authorization": f"Bearer {login['access_token']}"}
+    referral = client.get("/api/v1/network/me/referral", headers=headers)
+    assert referral.status_code == 403
+
+
 def test_funding_reservation_confirmation_and_profile_guard(client, auth_headers):
     opportunity = client.post("/api/v1/funding/opportunities", headers=auth_headers, json={
         "title":"Pool SDC Piloto","product":"SDC","capital_source":"RETAIL","instrument_type":"TOKEN",

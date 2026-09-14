@@ -31,6 +31,43 @@ PARTNER_NETWORK_ROLES = frozenset({
 })
 
 
+def resolve_public_app_url(public_app_url: str | None, origin: str | None, cors_origins: list[str]) -> str:
+    if public_app_url:
+        return public_app_url.rstrip("/")
+    if origin:
+        return origin.rstrip("/")
+    for item in cors_origins:
+        if item.startswith("http"):
+            return item.rstrip("/")
+    return "http://localhost:3000"
+
+
+def build_referral_links(app_base_url: str, referral_code: str) -> dict[str, str]:
+    base = app_base_url.rstrip("/")
+    query = f"?ref={referral_code}"
+    return {
+        "cadastro": f"{base}/cadastro{query}",
+        "vender_cota": f"{base}/vender-minha-cota{query}",
+        "site": f"{base}/{query}",
+    }
+
+
+def referral_profile_for_user(db: Session, user: User, app_base_url: str) -> dict:
+    if user.role not in PARTNER_NETWORK_ROLES:
+        raise HTTPException(status_code=403, detail="Perfil sem permissão para código de indicação.")
+    from app.network_visibility import ensure_network_node
+
+    node = ensure_network_node(db, user)
+    if not node:
+        raise HTTPException(status_code=422, detail="Participação na rede comercial não encontrada.")
+    return {
+        "referral_code": node.referral_code,
+        "tree_type": node.tree_type,
+        "status": node.status,
+        "links": build_referral_links(app_base_url, node.referral_code),
+    }
+
+
 def provision_master_network_on_signup(db: Session, user: User) -> NetworkNode | None:
     """Cria a rede comercial do master no cadastro (raiz com código de indicação)."""
     if user.role != Role.MASTER_FRANCHISEE:
