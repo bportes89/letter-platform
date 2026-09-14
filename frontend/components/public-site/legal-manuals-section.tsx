@@ -12,8 +12,6 @@ export function LegalManualsPublicSection() {
     void api<LegalManualPublic[]>("/platform/legal-manuals").then(setItems).catch(() => setItems([]));
   }, []);
 
-  if (!items.length) return null;
-
   const grouped = items.reduce<Record<string, LegalManualPublic[]>>((acc, item) => {
     acc[item.category] = acc[item.category] ?? [];
     acc[item.category].push(item);
@@ -35,7 +33,11 @@ export function LegalManualsPublicSection() {
         </p>
       </div>
       <div className="manuals-grid">
-        {Object.entries(grouped).map(([category, rows]) => (
+        {items.length === 0 ? (
+          <p className="site-light-muted" style={{ margin: 0 }}>
+            Carregando manuais… Se nada aparecer, atualize a página em instantes.
+          </p>
+        ) : Object.entries(grouped).map(([category, rows]) => (
           <article className="manuals-group" key={category}>
             <h3>{category}</h3>
             <ul>

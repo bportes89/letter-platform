@@ -369,13 +369,13 @@ export function SiteNav() {
         />
       </Link>
       <div className="nav-links">
-        <a href="#atendimento">Atendimento</a>
-        <a href="#solucoes">Soluções</a>
-        <a href="#simulador">Simuladores</a>
+        <Link href="/#atendimento">Atendimento</Link>
+        <Link href="/#solucoes">Soluções</Link>
+        <Link href="/#simulador">Simuladores</Link>
         <Link href={venderCotaHref("/vender-minha-cota")}>Vender cota</Link>
-        <a href="#manuais">Manuais</a>
-        <a href="#nina">Nina Engine</a>
-        <a href="#leilao">Leilão</a>
+        <Link href="/#manuais">Manuais</Link>
+        <Link href="/#nina">Nina Engine</Link>
+        <Link href="/#leilao">Leilão</Link>
       </div>
       <div className="nav-actions">
         <Link href="/cadastro" className="button button-small button-outline">
