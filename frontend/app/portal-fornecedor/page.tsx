@@ -61,7 +61,25 @@ type SupplierQuota = {
   remaining_installments: number | null;
   status: string;
   administrator_name?: string | null;
+  statement_document_id?: string | null;
+  statement_filename?: string | null;
+  compliance_rejection_reason?: string | null;
 };
+
+function portalFormFetch<T>(path: string, token: string, body: FormData): Promise<T> {
+  return fetch(`${API_URL}${path}`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body,
+  }).then(async (res) => {
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const detail = typeof data.detail === "string" ? data.detail : `Erro ${res.status}`;
+      throw new Error(detail);
+    }
+    return data as T;
+  });
+}
 
 function portalFetch<T>(path: string, token: string, init?: RequestInit): Promise<T> {
   return fetch(`${API_URL}${path}`, {
@@ -146,10 +164,15 @@ export default function PortalFornecedorPage() {
     if (!token) return;
     const form = e.currentTarget;
     const fd = new FormData(form);
+    const statement = fd.get("statement");
+    if (!(statement instanceof File) || !statement.size) {
+      setError("Anexe o extrato da cota (PDF, PNG ou JPG).");
+      return;
+    }
     setBusy(true);
     setError("");
     try {
-      await portalFetch("/supplier-portal/quotas", token, {
+      const created = await portalFetch<SupplierQuota>("/supplier-portal/quotas", token, {
         method: "POST",
         body: JSON.stringify({
           administrator_id: fd.get("administrator_id"),
@@ -163,7 +186,10 @@ export default function PortalFornecedorPage() {
           remaining_installments: fd.get("remaining_installments") ? Number(fd.get("remaining_installments")) : null,
         }),
       });
-      setNotice("Cota enviada para análise da LETTER.");
+      const upload = new FormData();
+      upload.append("file", statement);
+      await portalFormFetch(`/supplier-portal/quotas/${created.id}/statement`, token, upload);
+      setNotice("Cota e extrato enviados para análise de compliance da LETTER.");
       form.reset();
       await load(token);
     } catch (err) {
@@ -319,7 +345,7 @@ export default function PortalFornecedorPage() {
           {tab === "cotas" ? (
             <>
               <h2>Cadastrar cota</h2>
-              <p style={{ marginTop: 0 }}>Nova cota entra em <strong>análise</strong> até a LETTER aprovar para o estoque.</p>
+              <p style={{ marginTop: 0 }}>Cadastre a cota e anexe o <strong>extrato</strong>. A LETTER revisa o compliance antes de liberar no estoque.</p>
               <form onSubmit={(ev) => void submitQuota(ev)} style={{ display: "grid", gap: "0.75rem", maxWidth: 520, marginBottom: "2rem" }}>
                 <select name="administrator_id" required style={{ padding: "0.6rem" }}>
                   <option value="">Administradora</option>
@@ -338,7 +364,11 @@ export default function PortalFornecedorPage() {
                 <input name="installment_value" placeholder="Parcela (R$)" style={{ padding: "0.6rem" }} />
                 <input name="installment_due_date" type="date" required style={{ padding: "0.6rem" }} />
                 <input name="remaining_installments" type="number" min="0" placeholder="Parcelas restantes" style={{ padding: "0.6rem" }} />
-                <button type="submit" disabled={busy}>Enviar para análise</button>
+                <label style={{ display: "grid", gap: 6 }}>
+                  Extrato da cota (PDF, PNG ou JPG)
+                  <input name="statement" type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" required />
+                </label>
+                <button type="submit" disabled={busy}>Enviar cota + extrato</button>
               </form>
               <h2>Suas cotas</h2>
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -347,6 +377,7 @@ export default function PortalFornecedorPage() {
                     <th align="left">Cota</th>
                     <th align="left">Crédito</th>
                     <th align="left">Entrada</th>
+                    <th align="left">Extrato</th>
                     <th align="left">Status</th>
                   </tr>
                 </thead>
@@ -356,11 +387,15 @@ export default function PortalFornecedorPage() {
                       <td>{q.group_code}/{q.quota_code}<br /><small>{q.administrator_name || ""}</small></td>
                       <td>{brl.format(Number(q.credit_value))}</td>
                       <td>{brl.format(Number(q.premium_value))}</td>
-                      <td>{q.status === "PENDING_REVIEW" ? "Em análise" : q.status}</td>
+                      <td>{q.statement_document_id ? (q.statement_filename || "Anexado") : "Pendente"}</td>
+                      <td>
+                        {q.status === "PENDING_REVIEW" ? "Em análise" : q.status === "REJECTED" ? "Recusada" : q.status}
+                        {q.compliance_rejection_reason ? <><br /><small>{q.compliance_rejection_reason}</small></> : null}
+                      </td>
                     </tr>
                   ))}
                   {!quotas.length && (
-                    <tr><td colSpan={4}>Nenhuma cota cadastrada.</td></tr>
+                    <tr><td colSpan={5}>Nenhuma cota cadastrada.</td></tr>
                   )}
                 </tbody>
               </table>

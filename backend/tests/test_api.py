@@ -1005,6 +1005,18 @@ def test_supplier_portal_quota_submit_and_admin_approve(client, auth_headers):
     assert listed.status_code == 200
     assert any(q["id"] == quota_id for q in listed.json())
 
+    blocked = client.post(f"/api/v1/marketplace/quotas/{quota_id}/approve", headers=auth_headers)
+    assert blocked.status_code == 422
+
+    pdf = b"%PDF-1.4 supplier quota statement"
+    stmt = client.post(
+        f"/api/v1/supplier-portal/quotas/{quota_id}/statement",
+        headers=portal_headers,
+        files={"file": ("extrato-fornecedor.pdf", pdf, "application/pdf")},
+    )
+    assert stmt.status_code == 200, stmt.text
+    assert stmt.json()["statement_document_id"]
+
     public = client.get("/api/v1/public/site/quotas")
     assert public.status_code == 200
     assert not any(q["id"] == quota_id for q in public.json())

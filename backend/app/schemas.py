@@ -956,6 +956,13 @@ class QuotaView(ORMModel):
     nina_scanned_at: datetime | None
     status: str
     created_at: datetime
+    statement_document_id: str | None = None
+    statement_filename: str | None = None
+    compliance_rejection_reason: str | None = None
+
+
+class QuotaComplianceRejectRequest(BaseModel):
+    reason: str = Field(min_length=3, max_length=500)
 
 
 class NinaQuotaScanView(BaseModel):
@@ -2351,6 +2358,9 @@ class SupplierPortalQuotaItem(BaseModel):
     administrator_name: str | None = None
     change_reason: str | None = None
     created_at: str | None = None
+    statement_document_id: str | None = None
+    statement_filename: str | None = None
+    compliance_rejection_reason: str | None = None
 
 
 class SupplierPortalQuotaCreate(BaseModel):

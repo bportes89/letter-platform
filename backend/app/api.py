@@ -105,7 +105,7 @@ from app.schemas import (
     SdcDeskEvaluateRequest, SdcDeskStoreRequest, SdcDeskStatusUpdate, SdcDeskSaleCreate,
     FlashDeskEvaluateRequest, FlashDeskStoreRequest, FlashDeskStatusUpdate, FlashDeskSaleCreate,
     QuitConDeskEvaluateRequest, QuitConDeskStoreRequest, QuitConDeskStatusUpdate,
-    ProposalView, QuotaCreate, QuotaUpdate, QuotaView, NinaQuotaScanView, RecoveredAssetCreate, RecoveredAssetView, RefreshRequest,
+    ProposalView, QuotaCreate, QuotaUpdate, QuotaView, QuotaComplianceRejectRequest, NinaQuotaScanView, RecoveredAssetCreate, RecoveredAssetView, RefreshRequest,
     CommercialClientView,
     ReservationCreate, ReservationView, SdcCalculationRequest, SessionView, SignatureComplete,
     SignatureCreate, SignatureView, SignatureZapSignStatusView, StepUpRequest, TaxClosingRequest, TaxClosingView,
@@ -1740,7 +1740,10 @@ def escrow_account_billing(
 
 @router.get("/quotas", response_model=list[QuotaView])
 def list_quotas(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    return list(db.scalars(select(Quota).where(Quota.organization_id == user.organization_id).order_by(Quota.created_at.desc())))
+    from app.supplier_portal_quota_service import quota_admin_view
+
+    rows = list(db.scalars(select(Quota).where(Quota.organization_id == user.organization_id).order_by(Quota.created_at.desc())))
+    return [quota_admin_view(row) for row in rows]
 
 
 @router.get("/marketplace/suppliers", response_model=list[QuotaSupplierView])
@@ -1985,6 +1988,20 @@ def supplier_portal_update_quota(
     return result
 
 
+@router.post("/supplier-portal/quotas/{quota_id}/statement", response_model=SupplierPortalQuotaItem)
+async def supplier_portal_quota_statement(
+    quota_id: str,
+    file: UploadFile = File(...),
+    supplier: QuotaSupplier = Depends(get_current_supplier),
+    db: Session = Depends(get_db),
+):
+    from app.supplier_portal_quota_service import attach_supplier_quota_statement
+
+    result = await attach_supplier_quota_statement(db, supplier, quota_id, file)
+    db.commit()
+    return result
+
+
 @router.delete("/supplier-portal/quotas/{quota_id}", status_code=204)
 def supplier_portal_delete_quota(
     quota_id: str,
@@ -2003,13 +2020,41 @@ def marketplace_quota_approve(
     user: User = Depends(require_scope("inventory:write")),
     db: Session = Depends(get_db),
 ):
-    from app.supplier_portal_quota_service import approve_supplier_quota
+    from app.supplier_portal_quota_service import approve_supplier_quota, quota_admin_view
 
     quota = approve_supplier_quota(db, user, quota_id)
     audit(db, user, "quota.approved", "quota", quota.id)
     db.commit()
     db.refresh(quota)
-    return quota
+    return quota_admin_view(quota)
+
+
+@router.post("/marketplace/quotas/{quota_id}/reject", response_model=QuotaView)
+def marketplace_quota_reject(
+    quota_id: str,
+    payload: QuotaComplianceRejectRequest,
+    user: User = Depends(require_scope("inventory:write")),
+    db: Session = Depends(get_db),
+):
+    from app.supplier_portal_quota_service import quota_admin_view, reject_supplier_quota
+
+    quota = reject_supplier_quota(db, user, quota_id, payload.reason)
+    audit(db, user, "quota.rejected", "quota", quota.id, {"reason": payload.reason})
+    db.commit()
+    db.refresh(quota)
+    return quota_admin_view(quota)
+
+
+@router.get("/marketplace/quotas/{quota_id}/statement")
+def marketplace_quota_statement_download(
+    quota_id: str,
+    user: User = Depends(require_scope("inventory:write")),
+    db: Session = Depends(get_db),
+):
+    from app.supplier_portal_quota_service import statement_payload
+
+    data, filename, media = statement_payload(db, user, quota_id)
+    return Response(content=data, media_type=media, headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 
 @router.get("/marketplace/supplier-withdrawals", response_model=list[SupplierWithdrawalView])

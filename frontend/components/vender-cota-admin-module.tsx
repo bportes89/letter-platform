@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckCircle2, Download, RefreshCw, SlidersHorizontal, Upload, WalletCards } from "lucide-react";
+import { CheckCircle2, Download, RefreshCw, SlidersHorizontal, Upload, WalletCards, XCircle } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, apiForm, downloadApi } from "@/lib/api";
 
@@ -58,12 +58,13 @@ const STATUS_OPTIONS = [
 ] as const;
 
 const STATUS_LABEL: Record<string, string> = Object.fromEntries(STATUS_OPTIONS.map((s) => [s.value, s.label]));
+const PENDING_STATUSES = new Set(["AWAITING_STATEMENT", "UNDER_REVIEW"]);
 
 export function VenderCotaAdminModule() {
   const [tab, setTab] = useState<"offers" | "ranges">("offers");
   const [offers, setOffers] = useState<QuotaSellOffer[]>([]);
   const [ranges, setRanges] = useState<QuotaOfferRange[]>([]);
-  const [statusFilter, setStatusFilter] = useState("ALL");
+  const [statusFilter, setStatusFilter] = useState("PENDING");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(true);
@@ -92,10 +93,13 @@ export function VenderCotaAdminModule() {
       .finally(() => setLoading(false));
   }, [load]);
 
-  const filteredOffers = useMemo(
-    () => (statusFilter === "ALL" ? offers : offers.filter((o) => o.status === statusFilter)),
-    [offers, statusFilter],
-  );
+  const pendingCount = useMemo(() => offers.filter((o) => PENDING_STATUSES.has(o.status)).length, [offers]);
+
+  const filteredOffers = useMemo(() => {
+    if (statusFilter === "ALL") return offers;
+    if (statusFilter === "PENDING") return offers.filter((o) => PENDING_STATUSES.has(o.status));
+    return offers.filter((o) => o.status === statusFilter);
+  }, [offers, statusFilter]);
 
   async function updateOfferStatus(offer: QuotaSellOffer, status: string) {
     setError("");
@@ -208,12 +212,19 @@ export function VenderCotaAdminModule() {
     <>
       <div className="page-heading">
         <div>
-          <span className="eyebrow dark">OPERAÇÃO ATIVA</span>
+          <span className="eyebrow dark">COMPLIANCE · MARKETPLACE</span>
           <h1>Vender minha cota</h1>
-          <p>Ofertas públicas do site e tabela editável do robô (tipo × prazo × % pago → % que a Letter paga).</p>
+          <p>Fila de propostas do site público: revise o extrato, aprove ou recuse antes de fechar a compra. Cotas de fornecedores ficam em Inventário.</p>
         </div>
         <div className="operational-icon"><WalletCards /></div>
       </div>
+
+      {pendingCount > 0 && (
+        <div className="notice">
+          <CheckCircle2 />
+          {pendingCount} proposta(s) aguardando análise de compliance (extrato + dados da cota).
+        </div>
+      )}
 
       <section className="panel operational-panel">
         <div className="marketplace-tabs" style={{ gridTemplateColumns: "1fr 1fr" }}>
@@ -234,6 +245,7 @@ export function VenderCotaAdminModule() {
             <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11, fontWeight: 700, color: "#52605a" }}>
               Status
               <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid var(--line)" }}>
+                <option value="PENDING">Pendentes de análise</option>
                 <option value="ALL">Todas</option>
                 {STATUS_OPTIONS.map((s) => (
                   <option key={s.value} value={s.value}>{s.label}</option>
@@ -332,6 +344,27 @@ export function VenderCotaAdminModule() {
                     <td><small>{o.partner_referral_code || "—"}</small></td>
                     <td><span className={`pill pill-${o.status.toLowerCase()}`}>{STATUS_LABEL[o.status] ?? o.status}</span></td>
                     <td className="actions-cell">
+                      {PENDING_STATUSES.has(o.status) && (
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
+                          <button
+                            type="button"
+                            className="table-action"
+                            disabled={savingId === o.id || !o.statement_document_id}
+                            onClick={() => void updateOfferStatus(o, "ACCEPTED")}
+                            title={o.statement_document_id ? "Aprovar compliance" : "Anexe ou baixe o extrato antes de aprovar"}
+                          >
+                            <CheckCircle2 />Aprovar
+                          </button>
+                          <button
+                            type="button"
+                            className="table-action"
+                            disabled={savingId === o.id}
+                            onClick={() => void updateOfferStatus(o, "REJECTED")}
+                          >
+                            <XCircle />Recusar
+                          </button>
+                        </div>
+                      )}
                       <select
                         value={o.status}
                         disabled={savingId === o.id || o.status === "CLOSED"}
@@ -342,7 +375,7 @@ export function VenderCotaAdminModule() {
                           <option key={s.value} value={s.value}>{s.label}</option>
                         ))}
                       </select>
-                      {o.status !== "CLOSED" && o.status !== "REJECTED" && (
+                      {o.status !== "CLOSED" && o.status !== "REJECTED" && o.status === "ACCEPTED" && (
                         <button
                           type="button"
                           className="table-action lock"

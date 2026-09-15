@@ -5,15 +5,18 @@ from __future__ import annotations
 import json
 from datetime import date
 
-from fastapi import HTTPException
+from fastapi import HTTPException, UploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.administrator_service import APPROVED_STATUSES, homologated_administrators
-from app.models import Administrator, Proposal, Quota, QuotaSupplier, User
+from app.document_service import persist_upload
+from app.models import Administrator, Document, Proposal, Quota, QuotaSupplier, User
 from app.quota_supplier_service import normalize_supplier_key
+from app.storage_service import get_storage
 
 QUOTA_PENDING_REVIEW = "PENDING_REVIEW"
+QUOTA_REJECTED = "REJECTED"
 PROTECTED_STATUSES = {"RESERVED", "SOLD"}
 
 
@@ -56,9 +59,19 @@ def _quota_in_sale(db: Session, quota_id: str) -> bool:
     return False
 
 
+def quota_compliance_detail(quota: Quota) -> dict:
+    detail = _parse_detail(quota.nina_scan_detail_json)
+    return {
+        "statement_document_id": detail.get("statement_document_id"),
+        "statement_filename": detail.get("statement_filename"),
+        "compliance_rejection_reason": detail.get("compliance_rejection_reason"),
+    }
+
+
 def quota_portal_view(quota: Quota, administrator: Administrator | None = None) -> dict:
     detail = _parse_detail(quota.nina_scan_detail_json)
     admin_name = administrator.name if administrator else detail.get("administrator_name")
+    compliance = quota_compliance_detail(quota)
     return {
         "id": quota.id,
         "group_code": quota.group_code,
@@ -74,7 +87,16 @@ def quota_portal_view(quota: Quota, administrator: Administrator | None = None) 
         "administrator_name": admin_name,
         "change_reason": detail.get("supplier_change_reason"),
         "created_at": quota.created_at.isoformat() if quota.created_at else None,
+        **compliance,
     }
+
+
+def quota_admin_view(quota: Quota) -> dict:
+    from app.schemas import QuotaView
+
+    payload = QuotaView.model_validate(quota).model_dump()
+    payload.update(quota_compliance_detail(quota))
+    return payload
 
 
 def list_supplier_quotas(db: Session, supplier: QuotaSupplier) -> list[dict]:
@@ -220,12 +242,88 @@ def delete_supplier_quota(db: Session, supplier: QuotaSupplier, quota_id: str) -
     db.delete(quota)
 
 
+async def attach_supplier_quota_statement(
+    db: Session,
+    supplier: QuotaSupplier,
+    quota_id: str,
+    upload: UploadFile,
+) -> dict:
+    from app.vender_cota_service import org_ops_user
+
+    uploader = org_ops_user(db, supplier.organization_id)
+    if not uploader:
+        raise HTTPException(status_code=503, detail="Upload indisponível no momento.")
+    quota = db.get(Quota, quota_id)
+    if not quota or quota.organization_id != supplier.organization_id or not _quota_owned_by_supplier(quota, supplier):
+        raise HTTPException(status_code=404, detail="Cota não encontrada.")
+    if quota.status in PROTECTED_STATUSES:
+        raise HTTPException(status_code=409, detail="Cota em venda ou vendida não aceita novo extrato.")
+    document = await persist_upload(upload, uploader, "supplier_quota", quota.id, "QUOTA_STATEMENT")
+    document.status = "CLEAN"
+    db.add(document)
+    db.flush()
+    _write_detail(
+        quota,
+        statement_document_id=document.id,
+        statement_filename=document.filename,
+        compliance_rejection_reason=None,
+    )
+    if quota.status in {QUOTA_PENDING_REVIEW, QUOTA_REJECTED}:
+        quota.status = QUOTA_PENDING_REVIEW
+    admin = db.get(Administrator, quota.administrator_id)
+    db.flush()
+    return quota_portal_view(quota, admin)
+
+
+def statement_payload(db: Session, user: User, quota_id: str) -> tuple[bytes, str, str]:
+    quota = db.scalar(select(Quota).where(Quota.id == quota_id, Quota.organization_id == user.organization_id))
+    if not quota:
+        raise HTTPException(status_code=404, detail="Cota não encontrada.")
+    detail = _parse_detail(quota.nina_scan_detail_json)
+    document_id = detail.get("statement_document_id")
+    if not document_id:
+        raise HTTPException(status_code=404, detail="Extrato ainda não anexado.")
+    doc = db.get(Document, document_id)
+    if not doc or doc.organization_id != quota.organization_id:
+        raise HTTPException(status_code=404, detail="Documento do extrato não encontrado.")
+    try:
+        data = get_storage().get(doc.storage_key)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Arquivo do extrato não encontrado no storage") from exc
+    name = (doc.filename or "extrato.pdf").lower()
+    media = "application/pdf"
+    if name.endswith(".png"):
+        media = "image/png"
+    elif name.endswith(".jpg") or name.endswith(".jpeg"):
+        media = "image/jpeg"
+    return data, doc.filename, media
+
+
 def approve_supplier_quota(db: Session, user: User, quota_id: str) -> Quota:
     quota = db.scalar(select(Quota).where(Quota.id == quota_id, Quota.organization_id == user.organization_id))
     if not quota:
         raise HTTPException(status_code=404, detail="Cota não encontrada.")
     if quota.status != QUOTA_PENDING_REVIEW:
         raise HTTPException(status_code=409, detail="Somente cotas em análise podem ser aprovadas.")
+    detail = _parse_detail(quota.nina_scan_detail_json)
+    if not detail.get("statement_document_id"):
+        raise HTTPException(status_code=422, detail="Anexe e revise o extrato da cota antes de aprovar.")
     quota.status = "AVAILABLE"
+    _write_detail(quota, compliance_rejection_reason=None)
+    db.flush()
+    return quota
+
+
+def reject_supplier_quota(db: Session, user: User, quota_id: str, reason: str) -> Quota:
+    quota = db.scalar(select(Quota).where(Quota.id == quota_id, Quota.organization_id == user.organization_id))
+    if not quota:
+        raise HTTPException(status_code=404, detail="Cota não encontrada.")
+    if quota.status != QUOTA_PENDING_REVIEW:
+        raise HTTPException(status_code=409, detail="Somente cotas em análise podem ser recusadas.")
+    text = (reason or "").strip()
+    if len(text) < 3:
+        raise HTTPException(status_code=422, detail="Informe o motivo da recusa.")
+    quota.status = QUOTA_REJECTED
+    _write_detail(quota, compliance_rejection_reason=text)
     db.flush()
     return quota
