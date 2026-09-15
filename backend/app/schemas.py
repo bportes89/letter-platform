@@ -460,6 +460,7 @@ class NetworkReferralView(BaseModel):
     referral_code: str
     tree_type: str
     status: str
+    propagator_mode: bool = False
     links: NetworkReferralLinksView
 
 

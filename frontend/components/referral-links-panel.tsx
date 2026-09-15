@@ -10,7 +10,13 @@ const LINK_ITEMS: { key: keyof NetworkReferral["links"]; label: string }[] = [
   { key: "site", label: "Site LETTER (chat e simulador)" },
 ];
 
-export function ReferralLinksPanel({ onMessage }: { onMessage: (message: string) => void }) {
+export function ReferralLinksPanel({
+  onMessage,
+  variant = "partner",
+}: {
+  onMessage: (message: string) => void;
+  variant?: "partner" | "client";
+}) {
   const [referral, setReferral] = useState<NetworkReferral | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -49,7 +55,9 @@ export function ReferralLinksPanel({ onMessage }: { onMessage: (message: string)
     <section className="panel referral-panel">
       <h2><Link2 /> Meu link de indicação</h2>
       <p style={{ marginTop: 0, color: "var(--muted)", fontSize: "0.875rem" }}>
-        Compartilhe com clientes. Leads e cadastros feitos por esses links ficam vinculados à sua rede comercial.
+        {variant === "client" || referral.propagator_mode
+          ? "Compartilhe com amigos e familiares. Quem se cadastrar pelo seu link entra na sua indicação e permanece vinculado ao parceiro LETTER que te atende."
+          : "Compartilhe com clientes. Leads e cadastros feitos por esses links ficam vinculados à sua rede comercial."}
       </p>
       <div className="referral-code-row">
         <code className="referral-code">{referral.referral_code}</code>

@@ -183,6 +183,9 @@ def accept_invitation(
         )
     invite.status = "ACCEPTED"
     invite.accepted_at = datetime.now(UTC)
+    from app.client_propagator_service import provision_client_propagator_on_signup
+
+    provision_client_propagator_on_signup(db, user)
     return user
 
 

@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { ReferralLinksPanel } from "@/components/referral-links-panel";
 import { api, logout, Summary, User } from "@/lib/api";
 import { filterProductNav, personaLabel } from "@/lib/role-nav";
 import { getDashboardLayout } from "@/lib/role-dashboard";
@@ -27,6 +28,7 @@ const METRIC_ICONS = {
 export function PersonaDashboard() {
   const [data, setData] = useState<Summary | null>(null);
   const [user, setUser] = useState<User | null>(null);
+  const [referralMessage, setReferralMessage] = useState("");
 
   useEffect(() => {
     Promise.all([api<Summary>("/dashboard"), api<User>("/auth/me")])
@@ -70,6 +72,13 @@ export function PersonaDashboard() {
             <p>Transações financeiras permanecem bloqueadas até a homologação do BaaS e da conta escrow.</p>
           </div>
         </div>
+      )}
+
+      {user.role === "CLIENT" && (
+        <>
+          {referralMessage && <div className="notice">{referralMessage}</div>}
+          <ReferralLinksPanel onMessage={setReferralMessage} variant="client" />
+        </>
       )}
 
       <div className="metric-grid">

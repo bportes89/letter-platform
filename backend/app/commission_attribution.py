@@ -52,12 +52,14 @@ def resolve_commission_originator_id(
         else:
             return None
     elif sale_channel == SALE_CHANNEL_SELF:
-        if not client_user or not client_user.referred_by_user_id:
+        if not client_user:
             return None
-        referrer = db.get(User, client_user.referred_by_user_id)
-        if not referrer or not referrer.active or referrer.organization_id != organization_id:
+        from app.client_propagator_service import resolve_commercial_anchor
+
+        anchor = resolve_commercial_anchor(db, client_user)
+        if not anchor or not anchor.active or anchor.organization_id != organization_id:
             return None
-        candidate = referrer.id
+        candidate = anchor.id
     else:
         return None
 

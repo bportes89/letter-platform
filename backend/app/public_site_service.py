@@ -173,6 +173,9 @@ def register_public_client(
         existing.password_hash = hash_password(password)
         user = existing
         db.flush()
+        from app.client_propagator_service import provision_client_propagator_on_signup
+
+        provision_client_propagator_on_signup(db, user)
         referrer_node = None
         referrer_user_id = user.referred_by_user_id
         lead_id = _ensure_client_self_register_lead(
@@ -208,6 +211,9 @@ def register_public_client(
         )
         db.add(user)
         db.flush()
+        from app.client_propagator_service import provision_client_propagator_on_signup
+
+        provision_client_propagator_on_signup(db, user)
         lead_id = _ensure_client_self_register_lead(
             db,
             org=org,
@@ -267,12 +273,19 @@ def _ensure_client_self_register_lead(
     )
     if existing_lead:
         return existing_lead.id
+    from app.client_propagator_service import lead_owner_for_referrer
+
     lead_source = source_prefix
     if referrer_node:
         lead_source = f"{source_prefix}:REF:{referrer_node.referral_code}"
     lead = Lead(
         organization_id=org.id,
-        owner_id=referrer_node.user_id if referrer_node else user.referred_by_user_id,
+        owner_id=lead_owner_for_referrer(
+            db,
+            org.id,
+            referrer_node,
+            fallback_user_id=user.referred_by_user_id,
+        ),
         client_user_id=user.id,
         name=user.name,
         document=user.document,
@@ -300,22 +313,25 @@ def capture_public_lead(
     if not autorizacao_scr_bacen:
         raise HTTPException(422, "Autorização SCR/Registrato é obrigatória")
     org = headquarters_org(db)
+    from app.client_propagator_service import lead_owner_for_referrer
+
     referrer_node = lookup_referral_code(db, org.id, referral_code)
     referrer_user_id = referrer_node.user_id if referrer_node else None
     if referral_code and referral_code.strip() and not referrer_node:
         raise HTTPException(status_code=422, detail="Código de indicação inválido")
-    if not referrer_user_id:
+    owner_id = lead_owner_for_referrer(db, org.id, referrer_node)
+    if not owner_id:
         owner = db.scalar(
             select(User).where(User.organization_id == org.id, User.active.is_(True)).order_by(User.created_at)
         )
-        referrer_user_id = owner.id if owner else None
+        owner_id = owner.id if owner else None
     product_map = {"flash": "FLASH_CREDIT", "sdc": "SDC", "quitcon": "QUITCON"}
     lead_source = "SITE_BACEN_AUTHORIZED"
     if referrer_node:
         lead_source = f"SITE_BACEN_AUTHORIZED:REF:{referrer_node.referral_code}"
     lead = Lead(
         organization_id=org.id,
-        owner_id=referrer_user_id,
+        owner_id=owner_id,
         name=razao_social.strip(),
         document=document.strip() if document else None,
         phone=whatsapp.strip(),

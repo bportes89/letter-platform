@@ -53,17 +53,24 @@ def build_referral_links(app_base_url: str, referral_code: str) -> dict[str, str
 
 
 def referral_profile_for_user(db: Session, user: User, app_base_url: str) -> dict:
-    if user.role not in PARTNER_NETWORK_ROLES:
-        raise HTTPException(status_code=403, detail="Perfil sem permissão para código de indicação.")
+    from app.client_propagator_service import CLIENT_TREE_TYPE, ensure_client_propagator_node
     from app.network_visibility import ensure_network_node
 
-    node = ensure_network_node(db, user)
-    if not node:
-        raise HTTPException(status_code=422, detail="Participação na rede comercial não encontrada.")
+    if user.role in PARTNER_NETWORK_ROLES:
+        node = ensure_network_node(db, user)
+        if not node:
+            raise HTTPException(status_code=422, detail="Participação na rede comercial não encontrada.")
+    elif user.role == Role.CLIENT:
+        node = ensure_client_propagator_node(db, user)
+        if not node:
+            raise HTTPException(status_code=422, detail="Não foi possível gerar o código de indicação do cliente.")
+    else:
+        raise HTTPException(status_code=403, detail="Perfil sem permissão para código de indicação.")
     return {
         "referral_code": node.referral_code,
         "tree_type": node.tree_type,
         "status": node.status,
+        "propagator_mode": node.tree_type == CLIENT_TREE_TYPE,
         "links": build_referral_links(app_base_url, node.referral_code),
     }
 
