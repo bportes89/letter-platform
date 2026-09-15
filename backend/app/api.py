@@ -19,7 +19,7 @@ from app.models import (
     SellerEvidenceAudit, StructuredPropertyCase, StructuredPropertyEvent,
     FlashCreditPolicy, SaaSPlan, SaaSSubscription, SaaSTermsTemplate, ValidStamp,
     EarlySettlementQuote, FinOpsDomainEvent, NinaRoutingPolicy, NinaRoutingAssessment,
-    CollectionAction, CommissionEntry, CommissionRule, DelinquencyCase,
+    CollectionAction, CommissionEntry, CommissionRule, DelinquencyCase, StandaloneCharge,
     EscrowAccount, FundingOpportunity, Invoice, RecoveredAsset,
     InvestmentPosition, InvestmentReservation, KycCase, Lead, LedgerEntry,
     LedgerTransaction, NetworkNode, PaymentReceipt, PayoutApproval, PayoutRequest, PreAnalysisPauta, Proposal, LeaseEquityPauta, QuitConOperacao, CollateralNativeInspection,
@@ -60,6 +60,7 @@ from app.schemas import (
     NinaDistressEventView, NinaDocumentCreate, NinaGateApplyRequest, NinaLegalDocumentView, NinaTimelineEvaluateRequest,
     InviteAccept, InviteCreate, PartnerInviteCreate, InvitationPreviewView, PartnerContractAcceptanceView, KycCreate, KycDecision, KycSelfCompleteResponse, KycView, LeadCreate,
     InvestmentPositionView, InvestmentReservationView, InvestmentReserveRequest, InstrumentHintRequest, InvoicePaymentWebhook, InvoiceProcessorRequest, InvoiceView,
+    AdHocChargeView, StandaloneChargeCreate, StandaloneChargePaymentWebhook,
     ManualInvestmentCreate, ManualRentabilityCreate, MutuoAcceptSignRequest, MutuoContractCreate, MutuoInterestPostRequest, RentabilityCreditView,
     PaymentReceiptView, PreAnalysisEngineRequest, PreAnalysisPautaView, PreAnalysisProposalRequest,
     PreAnalysisTapafCheckoutAcceptRequest, PreAnalysisTapafPaymentWebhook, PreAnalysisValidateDocumentsRequest,
@@ -1328,6 +1329,48 @@ def invoice_payment_webhook(invoice_id: str, payload: InvoicePaymentWebhook, use
     response={"event_id":event.provider_event_id,"processed":processed,"match_status":event.status,"invoice_status":invoice.status,"paid_amount":str(invoice.paid_amount)}
     if receipt_payload: response["invoice_processor"]=receipt_payload
     return response
+
+
+@router.get("/collections/ad-hoc-charges", response_model=list[AdHocChargeView])
+def ad_hoc_charges(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.ad_hoc_billing_service import list_ad_hoc_charges
+    return list_ad_hoc_charges(db, user)
+
+
+@router.post("/collections/ad-hoc-charges", response_model=AdHocChargeView, status_code=201)
+def ad_hoc_charge_create(payload: StandaloneChargeCreate, user: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
+    from app.ad_hoc_billing_service import create_standalone_charge, list_ad_hoc_charges
+    item = create_standalone_charge(
+        db,
+        user,
+        kind=payload.kind,
+        description=payload.description,
+        due_date=payload.due_date,
+        total_amount=payload.total_amount,
+        reference_type=payload.reference_type,
+        reference_id=payload.reference_id,
+        payment_checkout_url=payload.payment_checkout_url,
+        notes=payload.notes,
+    )
+    audit(db, user, "collections.ad_hoc_charge_created", "standalone_charge", item.id, {"charge_number": item.charge_number, "kind": item.kind})
+    db.commit()
+    db.refresh(item)
+    return next(row for row in list_ad_hoc_charges(db, user) if row["id"] == item.id)
+
+
+@router.post("/collections/ad-hoc-charges/{charge_id}/mock-payment")
+def ad_hoc_charge_payment(charge_id: str, payload: StandaloneChargePaymentWebhook, user: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
+    from app.ad_hoc_billing_service import apply_standalone_payment
+    item = db.scalar(select(StandaloneCharge).where(StandaloneCharge.id == charge_id, StandaloneCharge.organization_id == user.organization_id))
+    if not item:
+        raise HTTPException(status_code=404, detail="Cobrança avulsa não encontrada")
+    if item.status in {"PAID", "CANCELLED"}:
+        raise HTTPException(status_code=409, detail="Cobrança já liquidada ou cancelada")
+    apply_standalone_payment(db, user, item, payload.event_id, payload.amount)
+    audit(db, user, "collections.ad_hoc_charge_paid", "standalone_charge", item.id, {"event_id": payload.event_id, "status": item.status})
+    db.commit()
+    db.refresh(item)
+    return {"charge_id": item.id, "status": item.status, "paid_amount": str(item.paid_amount)}
 
 
 @router.post("/reconciliation/import", response_model=ReconciliationBatchView, status_code=201)

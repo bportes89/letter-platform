@@ -679,6 +679,40 @@ class InvoicePaymentWebhook(BaseModel):
     metadata: dict = Field(default_factory=dict)
 
 
+class AdHocChargeView(ORMModel):
+    id: str
+    charge_number: str
+    kind: str
+    description: str
+    due_date: date
+    total_amount: Decimal
+    paid_amount: Decimal
+    status: str
+    source: str
+    reference_type: str | None = None
+    reference_id: str | None = None
+    payment_checkout_url: str | None = None
+    payable: bool = False
+    created_at: datetime | None = None
+
+
+class StandaloneChargeCreate(BaseModel):
+    kind: str = Field(default="MANUAL", max_length=30)
+    description: str = Field(min_length=3, max_length=300)
+    due_date: date
+    total_amount: Decimal = Field(gt=0)
+    reference_type: str | None = Field(default=None, max_length=60)
+    reference_id: str | None = Field(default=None, max_length=36)
+    payment_checkout_url: str | None = None
+    notes: str | None = Field(default=None, max_length=500)
+
+
+class StandaloneChargePaymentWebhook(BaseModel):
+    event_id: str
+    amount: Decimal = Field(gt=0)
+    metadata: dict = Field(default_factory=dict)
+
+
 class InvoiceProcessorRequest(BaseModel):
     invoice_id: str
 

@@ -2176,6 +2176,35 @@ def test_sdc_billing_schedule_and_idempotent_payment(client, auth_headers):
     assert replay.status_code == 200 and replay.json()["processed"] is False
 
 
+def test_ad_hoc_charges_create_list_and_pay(client, auth_headers):
+    created = client.post(
+        "/api/v1/collections/ad-hoc-charges",
+        headers=auth_headers,
+        json={
+            "kind": "START_FEE",
+            "description": "Taxa de Start complementar",
+            "due_date": "2026-02-15",
+            "total_amount": "500.00",
+        },
+    )
+    assert created.status_code == 201
+    body = created.json()
+    assert body["kind"] == "START_FEE"
+    assert body["source"] == "MANUAL"
+    assert body["status"] == "OPEN"
+
+    listed = client.get("/api/v1/collections/ad-hoc-charges", headers=auth_headers)
+    assert listed.status_code == 200
+    assert any(row["id"] == body["id"] for row in listed.json())
+
+    paid = client.post(
+        f"/api/v1/collections/ad-hoc-charges/{body['id']}/mock-payment",
+        headers=auth_headers,
+        json={"event_id": "evt_adhoc_001", "amount": "500.00", "metadata": {"provider": "pytest"}},
+    )
+    assert paid.status_code == 200 and paid.json()["status"] == "PAID"
+
+
 def test_finops_invoice_processor_v3_canonical_payload():
     from app.invoice_processor_service import MotorFaturamentoEFiscalLETTERV3
 

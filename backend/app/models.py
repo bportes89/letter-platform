@@ -1317,6 +1317,25 @@ class Invoice(TimestampMixin, Base):
     paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class StandaloneCharge(TimestampMixin, Base):
+    __tablename__ = "standalone_charges"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    charge_number: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    kind: Mapped[str] = mapped_column(String(30), default="MANUAL", index=True)
+    description: Mapped[str] = mapped_column(String(300))
+    reference_type: Mapped[str | None] = mapped_column(String(60))
+    reference_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    due_date: Mapped[date] = mapped_column(Date, index=True)
+    total_amount: Mapped[float] = mapped_column(Numeric(15, 2))
+    paid_amount: Mapped[float] = mapped_column(Numeric(15, 2), default=0)
+    status: Mapped[str] = mapped_column(String(30), default="OPEN", index=True)
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    payment_checkout_url: Mapped[str | None] = mapped_column(Text)
+    created_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"))
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
 class PaymentEvent(Base):
     __tablename__ = "payment_events"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)

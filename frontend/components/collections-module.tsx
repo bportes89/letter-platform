@@ -1,10 +1,11 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
-import { AlertTriangle, CalendarClock, CheckCircle2, ExternalLink, FileSpreadsheet, Gavel, RefreshCw, ReceiptText, ShieldCheck } from "lucide-react";
+import { AlertTriangle, CalendarClock, CheckCircle2, ExternalLink, FileSpreadsheet, Gavel, PlusCircle, RefreshCw, ReceiptText, ShieldCheck } from "lucide-react";
 import {
   api,
   apiForm,
+  AdHocCharge,
   CollectionAction,
   Contract,
   DelinquencyCase,
@@ -25,6 +26,14 @@ const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" 
 const fmt = (x: string) => new Date(`${x}T12:00:00`).toLocaleDateString("pt-BR");
 
 const LSS_OPEN_STATUSES = new Set(["PENDING_PAYMENT", "PAST_DUE", "SUSPENDED", "SUSPENDED_PAST_DUE_SANDBOX"]);
+const AD_HOC_OPEN_STATUSES = new Set(["OPEN", "CHECKOUT_ACCEPTED", "PARTIALLY_PAID", "OVERDUE"]);
+
+function adHocSourceLabel(source: string): string {
+  if (source === "MANUAL") return "Avulsa";
+  if (source === "TAPAF_CHECKOUT") return "TAPAF";
+  if (source === "TAPAF_SETTLEMENT") return "TAPAF liquidada";
+  return source;
+}
 
 function lssRowStatus(status: string): string {
   if (["ACTIVE", "ACTIVE_SANDBOX"].includes(status)) return "PAID";
@@ -39,6 +48,7 @@ export function CollectionsModule() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [lssSubs, setLssSubs] = useState<SaaSSubscription[]>([]);
   const [lssPlans, setLssPlans] = useState<SaaSPlan[]>([]);
+  const [adHocCharges, setAdHocCharges] = useState<AdHocCharge[]>([]);
   const [cases, setCases] = useState<DelinquencyCase[]>([]);
   const [actions, setActions] = useState<CollectionAction[]>([]);
   const [batches, setBatches] = useState<ReconciliationBatch[]>([]);
@@ -56,6 +66,7 @@ export function CollectionsModule() {
         api<Invoice[]>("/invoices"),
         api<SaaSSubscription[]>("/lss/subscriptions").catch(() => [] as SaaSSubscription[]),
         api<SaaSPlan[]>("/lss/plans").catch(() => [] as SaaSPlan[]),
+        api<AdHocCharge[]>("/collections/ad-hoc-charges").catch(() => [] as AdHocCharge[]),
         api<DelinquencyCase[]>("/collections/cases"),
         api<CollectionAction[]>("/collections/actions"),
         api<ReconciliationBatch[]>("/reconciliation/batches"),
@@ -64,11 +75,12 @@ export function CollectionsModule() {
         api<NinaCriticalApproval[]>("/nina-asset/approvals"),
         api<NinaLegalDocument[]>("/nina-asset/documents"),
         api<NinaDistressEvent[]>("/nina-asset/events"),
-      ]).then(([c, i, lss, plans, d, a, b, r, n, ap, doc, ev]) => {
+      ]).then(([c, i, lss, plans, adHoc, d, a, b, r, n, ap, doc, ev]) => {
         setContracts(c);
         setInvoices(i);
         setLssSubs(lss.filter((s) => s.status !== "CANCELLED"));
         setLssPlans(plans);
+        setAdHocCharges(adHoc);
         setCases(d);
         setActions(a);
         setBatches(b);
@@ -93,6 +105,34 @@ export function CollectionsModule() {
       body: JSON.stringify({ start_date: f.get("start_date") }),
     });
     setMessage(`${rows.length} cobranças geradas a partir da memória contratual.`);
+    await load();
+  }
+
+  async function createAdHoc(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const f = new FormData(e.currentTarget);
+    await api<AdHocCharge>("/collections/ad-hoc-charges", {
+      method: "POST",
+      body: JSON.stringify({
+        kind: f.get("kind"),
+        description: f.get("description"),
+        due_date: f.get("due_date"),
+        total_amount: f.get("total_amount"),
+        notes: f.get("notes") || null,
+      }),
+    });
+    setMessage("Cobrança avulsa registrada.");
+    e.currentTarget.reset();
+    await load();
+  }
+
+  async function payAdHoc(charge: AdHocCharge) {
+    const outstanding = Number(charge.total_amount) - Number(charge.paid_amount);
+    const result = await api<{ status: string }>(`/collections/ad-hoc-charges/${charge.id}/mock-payment`, {
+      method: "POST",
+      body: JSON.stringify({ event_id: `ui_adhoc_${charge.id}_${Date.now()}`, amount: outstanding.toFixed(2), metadata: { source: "DASHBOARD" } }),
+    });
+    setMessage(`Cobrança avulsa baixada: ${result.status}.`);
     await load();
   }
 
@@ -188,10 +228,13 @@ export function CollectionsModule() {
     const plan = planById.get(sub.plan_id);
     return sum + Number(plan?.monthly_price ?? 0);
   }, 0);
+  const adHocOpen = adHocCharges
+    .filter((c) => AD_HOC_OPEN_STATUSES.has(c.status))
+    .reduce((sum, c) => sum + Number(c.total_amount) - Number(c.paid_amount), 0);
   const contractOpen = invoices.filter((i) => i.status !== "PAID").reduce((s, i) => s + Number(i.total_amount) - Number(i.paid_amount), 0);
-  const open = contractOpen + lssOpen;
+  const open = contractOpen + lssOpen + adHocOpen;
   const overdue = cases.reduce((s, c) => s + Number(c.penalty_amount) + Number(c.late_interest_amount), 0);
-  const billableCount = invoices.length + lssSubs.length;
+  const billableCount = invoices.length + lssSubs.length + adHocCharges.length;
 
   return (
     <>
@@ -199,7 +242,7 @@ export function CollectionsModule() {
         <div>
           <span className="eyebrow dark">PÓS-CONTRATO</span>
           <h1>Cobrança e conciliação</h1>
-          <p>Parcelas contratuais, assinatura SaaS LSS, baixa idempotente, mora, caducidade e divergências bancárias.</p>
+          <p>Parcelas contratuais, cobranças avulsas (TAPAF e manuais), assinatura SaaS LSS, baixa idempotente, mora e divergências.</p>
         </div>
         <div className="operational-icon"><ReceiptText /></div>
       </div>
@@ -233,6 +276,24 @@ export function CollectionsModule() {
             <input name="as_of" type="date" required />
             <button>Calcular multa, mora e caducidade</button>
           </form>
+        </section>
+        <section className="panel">
+          <h2><PlusCircle />Nova cobrança avulsa</h2>
+          <form className="stack-form" onSubmit={createAdHoc}>
+            <select name="kind" defaultValue="MANUAL">
+              <option value="MANUAL">Avulsa</option>
+              <option value="TAPAF">TAPAF</option>
+              <option value="START_FEE">Taxa de Start</option>
+              <option value="TAXA">Taxa</option>
+              <option value="OUTRA">Outra</option>
+            </select>
+            <input name="description" placeholder="Descrição da cobrança" required />
+            <input name="due_date" type="date" required />
+            <CurrencyFormField name="total_amount" placeholder="Valor (R$)" required />
+            <input name="notes" placeholder="Observações (opcional)" />
+            <button>Registrar cobrança</button>
+          </form>
+          <small className="form-help">Complementa o cronograma automático do contrato e exibe TAPAF pendente/liquidado.</small>
         </section>
       </div>
       <section className="panel collection-panel">
@@ -300,6 +361,60 @@ export function CollectionsModule() {
             Mensalidades LSS são cobradas via Asaas (recorrência). Detalhes e aceite no módulo SaaS LSS.
           </small>
         )}
+      </section>
+      <section className="panel collection-panel">
+        <h2>Cobranças avulsas</h2>
+        <div className="table-wrap">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Cobrança</th>
+                <th>Vencimento</th>
+                <th>Tipo</th>
+                <th>Origem</th>
+                <th>Total</th>
+                <th>Pago</th>
+                <th>Status</th>
+                <th>Ação</th>
+              </tr>
+            </thead>
+            <tbody>
+              {adHocCharges.length === 0 ? (
+                <tr>
+                  <td colSpan={8}><span className="muted">Nenhuma cobrança avulsa ou TAPAF registrada.</span></td>
+                </tr>
+              ) : (
+                adHocCharges.map((charge) => (
+                  <tr key={charge.id}>
+                    <td>
+                      <b>{charge.charge_number}</b>
+                      <small>{charge.description}</small>
+                    </td>
+                    <td>{fmt(charge.due_date)}</td>
+                    <td>{charge.kind}</td>
+                    <td>{adHocSourceLabel(charge.source)}</td>
+                    <td>{brl.format(Number(charge.total_amount))}</td>
+                    <td>{brl.format(Number(charge.paid_amount))}</td>
+                    <td><span className={`pill pill-${charge.status.toLowerCase()}`}>{charge.status}</span></td>
+                    <td>
+                      {charge.source === "MANUAL" && charge.status !== "PAID" && (
+                        <button className="table-action" onClick={() => payAdHoc(charge)}><CheckCircle2 />Baixar mock</button>
+                      )}
+                      {charge.payment_checkout_url && charge.payable && (
+                        <a className="table-action" href={charge.payment_checkout_url} target="_blank" rel="noopener noreferrer">
+                          <ExternalLink />Pagar
+                        </a>
+                      )}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+        <small className="form-help">
+          TAPAF pendente vem das esteiras comercial (pré-análise, QuitCon, Lease Equity). Taxas de Start do SDC entram em Faturas e parcelas após gerar o cronograma do contrato.
+        </small>
       </section>
       <section className="panel">
         <div className="panel-title">
