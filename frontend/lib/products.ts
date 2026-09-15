@@ -8,6 +8,25 @@ export function productLabel(code: string): string {
   return PRODUCT_LABELS[code] ?? code.replaceAll("_", " ");
 }
 
+const CONTRACT_TEMPLATE_LABELS: Record<string, string> = {
+  "marketplace-v1": "MARKETPLACE",
+  "sdc-bullet-v1": "SDC",
+  "sdc-bullet-v2": "SDC",
+  "flash-credit-v1": "FLASH CAPITAL",
+  "flash-credit-v2": "FLASH CAPITAL",
+  "flash-capital-v1": "FLASH CAPITAL",
+  "flash-capital-v2": "FLASH CAPITAL",
+  "flash-capital-v3": "FLASH CAPITAL",
+};
+
+export function contractTemplateLabel(version: string): string {
+  if (CONTRACT_TEMPLATE_LABELS[version]) return CONTRACT_TEMPLATE_LABELS[version];
+  if (version.startsWith("flash-")) return "FLASH CAPITAL";
+  if (version.startsWith("sdc-")) return "SDC";
+  if (version.startsWith("marketplace")) return "MARKETPLACE";
+  return version.replace(/-v\d+$/, "").replaceAll("-", " ").toUpperCase();
+}
+
 export const SDC_CAPITAL_SOURCES = [
   { value: "POOL", label: "Pool — 4,5% total (repasse investidor ajustável)" },
   { value: "FUND", label: "Fundo — 4,5% integral ao fundo" },
