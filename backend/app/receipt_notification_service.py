@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import CommunicationTemplate, Lead, PaymentReceipt, User
-from app.tax_communication_service import mock_deliver, queue_delivery
+from app.tax_communication_service import deliver_communication, queue_delivery
 
 
 RECEIPT_EMAIL_TEMPLATE_KEY = "FINOPS_RECEIPT_V3"
@@ -100,6 +100,6 @@ def dispatch_receipt_notifications(
             variables=variables,
         )
         if created:
-            mock_deliver(delivery)
+            deliver_communication(delivery, dest, template.subject, template.channel)
         deliveries.append({"channel": template.channel, "destination": delivery.destination_masked, "status": delivery.status})
     return {"trigger_email_automatico": "SENT_D+0", "trigger_push_notificacao": "ACTIVE", "deliveries": deliveries}

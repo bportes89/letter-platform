@@ -98,5 +98,39 @@ def queue_delivery(db: Session, user: User, template: CommunicationTemplate, sub
 
 
 def mock_deliver(item: CommunicationDelivery) -> CommunicationDelivery:
-    if item.status == "DELIVERED": return item
-    item.status="DELIVERED";item.provider_message_id=f"mock_{uuid4().hex}";item.delivered_at=datetime.now(UTC);return item
+    if item.status in {"DELIVERED", "MOCK"}:
+        return item
+    item.status = "MOCK"
+    item.provider = "MOCK"
+    item.provider_message_id = f"mock_{uuid4().hex}"
+    item.delivered_at = datetime.now(UTC)
+    return item
+
+
+def deliver_communication(
+    item: CommunicationDelivery,
+    destination: str,
+    subject: str | None = None,
+    channel: str = "EMAIL",
+) -> CommunicationDelivery:
+    if item.status in {"DELIVERED", "MOCK"}:
+        return item
+    if channel != "EMAIL":
+        return mock_deliver(item)
+    from app.email_delivery_service import send_transactional_email
+
+    ok, provider, message_id = send_transactional_email(
+        destination,
+        (subject or "LETTER").strip() or "LETTER",
+        item.rendered_body,
+    )
+    item.provider = provider
+    if ok:
+        item.status = "DELIVERED"
+        item.provider_message_id = message_id
+        item.delivered_at = datetime.now(UTC)
+        return item
+    if provider == "MOCK":
+        return mock_deliver(item)
+    item.status = "FAILED"
+    return item

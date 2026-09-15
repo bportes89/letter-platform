@@ -31,7 +31,7 @@ from app.network_service import allocate_commissions
 from app.public_site_service import lookup_referral_code
 from app.services import money
 from app.storage_service import get_storage
-from app.tax_communication_service import mock_deliver, queue_delivery
+from app.tax_communication_service import deliver_communication, queue_delivery
 
 QUOTA_SELL_PRODUCT = "QUOTA_SELL"
 QUOTA_SELL_POOL_PERCENT = Decimal("3")
@@ -434,7 +434,7 @@ def notify_new_offer(db: Session, offer: QuotaSellOffer) -> dict:
                 variables=variables,
             )
             if created:
-                mock_deliver(delivery)
+                deliver_communication(delivery, dest, template.subject, template.channel)
             deliveries.append({"key": template.key, "destination": delivery.destination_masked, "status": delivery.status})
         except Exception:
             deliveries.append({"key": template.key, "destination": dest, "status": "FAILED"})

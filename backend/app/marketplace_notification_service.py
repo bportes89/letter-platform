@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.inter_boleto_service import boleto_public_token
 from app.models import CommunicationTemplate, Lead, Proposal, User
-from app.tax_communication_service import mock_deliver, queue_delivery
+from app.tax_communication_service import deliver_communication, queue_delivery
 
 
 BOLETO_CLIENT_KEY = "MARKETPLACE_BOLETO_CLIENT"
@@ -108,7 +108,7 @@ def _queue_and_deliver(
             variables=variables,
         )
         if created:
-            mock_deliver(delivery)
+            deliver_communication(delivery, destination, template.subject, template.channel)
         return {
             "key": template.key,
             "destination": delivery.destination_masked,

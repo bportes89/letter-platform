@@ -141,12 +141,12 @@ export function IdentityModule() {
       form.reset();
       const link = typeof window !== "undefined" && item.token ? inviteLink(item.token) : "";
       setLastInviteLink(link);
-      const emailed = item.email_delivery_status === "DELIVERED" || item.email_delivery_status === "QUEUED";
+      const emailed = item.email_delivery_status === "DELIVERED";
       setMessage(
         link
           ? emailed
-            ? `Convite criado para ${item.email}. E-mail enviado — se não chegar, copie o link abaixo.`
-            : `Convite criado para ${item.email}. Copie o link abaixo e envie manualmente ao convidado.`
+            ? `Convite criado para ${item.email}. E-mail enviado — se não chegar em alguns minutos, copie o link abaixo.`
+            : `Convite criado para ${item.email}. O envio automático por e-mail ainda não está ativo no servidor — copie o link abaixo e envie ao convidado.`
           : `Convite criado para ${item.email}.`,
       );
       setApiError("");
@@ -236,7 +236,7 @@ export function IdentityModule() {
             <button disabled={busy}><UserPlus />{busy ? "Gerando…" : "Gerar convite"}</button>
           </form>
           <small className="muted" style={{ display: "block", marginTop: 12 }}>
-            O convite também é enviado por e-mail quando a API está disponível. Se o e-mail não chegar, copie o link gerado.
+            Com SMTP ou Resend configurado no Render, o convite é enviado por e-mail. Caso contrário, copie o link gerado e envie manualmente.
           </small>
         </section>
       </div>

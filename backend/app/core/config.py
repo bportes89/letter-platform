@@ -67,6 +67,15 @@ class Settings(BaseSettings):
     api_public_url: str | None = None
     public_app_url: str | None = None
     wallet_customer_email_enabled: bool = True
+    resend_api_key: str | None = None
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_user: str | None = None
+    smtp_password: str | None = None
+    smtp_from_email: str | None = None
+    smtp_from_name: str | None = None
+    smtp_use_tls: bool = True
+    smtp_use_ssl: bool = False
     asaas_bank_code: str = "461"
     asaas_bank_name: str = "Asaas IP S.A."
     asaas_default_agency: str = "0001"

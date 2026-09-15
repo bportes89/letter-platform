@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models import CommunicationTemplate, EscrowAccount, User
-from app.tax_communication_service import mock_deliver, queue_delivery
+from app.tax_communication_service import deliver_communication, queue_delivery
 
 WALLET_OPENED_KEY = "WALLET_ACCOUNT_OPENED"
 WALLET_KYC_APPROVED_KEY = "WALLET_KYC_APPROVED"
@@ -87,11 +87,12 @@ def _queue_and_deliver(
             variables=variables,
         )
         if created:
-            mock_deliver(delivery)
+            deliver_communication(delivery, destination, template.subject, template.channel)
         return {
             "key": template.key,
             "destination": delivery.destination_masked,
             "status": delivery.status,
+            "provider": delivery.provider,
             "created": created,
         }
     except Exception:
