@@ -1,10 +1,11 @@
 "use client";
 
-import { CheckCircle2, Copy, Landmark, QrCode, RefreshCw, Send, Upload, Wallet } from "lucide-react";
+import { Camera, CheckCircle2, Copy, Landmark, QrCode, RefreshCw, Send, Upload, Wallet } from "lucide-react";
 import { useSearchParams } from "next/navigation";
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { API_URL, api, getToken, type User } from "@/lib/api";
 import { CurrencyInput } from "@/components/currency-input";
+import { KycIdentityWizard } from "@/components/kyc-identity-wizard";
 import {
   activateWalletAccount,
   redirectToPortalAfterWallet,
@@ -80,6 +81,7 @@ type KycDocument = {
   status: string;
   onboarding_url: string | null;
   accepts_api_upload: boolean;
+  capture_mode?: "link" | "camera" | "file";
 };
 
 type Profile = {
@@ -105,6 +107,8 @@ export function MyWalletModule() {
   const [documents, setDocuments] = useState<KycDocument[]>([]);
   const [documentsHint, setDocumentsHint] = useState("");
   const [documentsError, setDocumentsError] = useState("");
+  const [identityOnboardingUrl, setIdentityOnboardingUrl] = useState<string | null>(null);
+  const [showIdentityWizard, setShowIdentityWizard] = useState(false);
   const [pixQr, setPixQr] = useState<{ payload?: string; encoded_image?: string | null } | null>(null);
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(true);
@@ -142,12 +146,18 @@ export function MyWalletModule() {
     let docsError = "";
     if (w.has_subaccount) {
       try {
-        const docs = await api<{ items: KycDocument[]; hint?: string | null }>("/wallet/me/kyc/documents");
+        const docs = await api<{ items: KycDocument[]; hint?: string | null; identity_onboarding_url?: string | null }>(
+          "/wallet/me/kyc/documents",
+        );
         docsItems = docs.items ?? [];
         docsHint = docs.hint?.trim() ?? "";
+        setIdentityOnboardingUrl(docs.identity_onboarding_url ?? null);
       } catch (e) {
         docsError = e instanceof Error ? e.message : "Não foi possível carregar os documentos de verificação.";
+        setIdentityOnboardingUrl(null);
       }
+    } else {
+      setIdentityOnboardingUrl(null);
     }
     setWallet(w);
     setTransactions(tx.items ?? []);
@@ -165,11 +175,27 @@ export function MyWalletModule() {
     }
   }, []);
 
+  const hasPendingIdentity = useMemo(
+    () =>
+      documents.some((doc) => {
+        const type = (doc.type || "").toUpperCase();
+        if (type !== "IDENTIFICATION" && type !== "IDENTIFICATION_SELFIE") return false;
+        return (doc.status || "").toUpperCase() !== "APPROVED";
+      }),
+    [documents],
+  );
+
   useEffect(() => {
     load({ refreshFromProvider: true })
       .catch((e) => setNotice(e instanceof Error ? e.message : "Falha ao carregar carteira"))
       .finally(() => setLoading(false));
   }, [load]);
+
+  useEffect(() => {
+    if (onboarding && hasPendingIdentity) {
+      setShowIdentityWizard(true);
+    }
+  }, [onboarding, hasPendingIdentity]);
 
   async function syncWallet() {
     setNotice("");
@@ -555,6 +581,18 @@ export function MyWalletModule() {
                     Nenhum documento listado ainda. Toque em <strong>Atualizar dados bancários</strong> para sincronizar com o Asaas.
                   </div>
                 )}
+                {hasPendingIdentity && (
+                  <div className="kyc-identity-cta">
+                    <div>
+                      <b>RG e selfie</b>
+                      <small>Use a câmera do celular ou o fluxo oficial LETTER — tudo dentro da plataforma.</small>
+                    </div>
+                    <button type="button" className="table-action" onClick={() => setShowIdentityWizard(true)}>
+                      <Camera />
+                      Verificar identidade
+                    </button>
+                  </div>
+                )}
                 {documents.map((doc) => (
                   <div className="session-row" key={doc.id}>
                     <div>
@@ -597,9 +635,10 @@ export function MyWalletModule() {
                         />
                       </div>
                     ) : doc.type === "IDENTIFICATION" || doc.type === "IDENTIFICATION_SELFIE" ? (
-                      <small className="muted">
-                        Identificação via link oficial — toque em Atualizar dados bancários ou contate o suporte LETTER.
-                      </small>
+                      <button type="button" className="table-action" onClick={() => setShowIdentityWizard(true)}>
+                        <Camera />
+                        Verificar
+                      </button>
                     ) : (
                       <small className="muted">Aguardando análise</small>
                     )}
@@ -780,6 +819,18 @@ export function MyWalletModule() {
           </>
         )}
       </section>
+
+      {showIdentityWizard && (
+        <KycIdentityWizard
+          documents={documents}
+          identityOnboardingUrl={identityOnboardingUrl || wallet?.account?.asaas_onboarding_url}
+          onClose={() => setShowIdentityWizard(false)}
+          onComplete={(message) => {
+            setNotice(message);
+            void load();
+          }}
+        />
+      )}
     </>
   );
 }

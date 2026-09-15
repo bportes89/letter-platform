@@ -343,14 +343,30 @@ def _extract_onboarding_url(row: dict) -> str | None:
     return None
 
 
-def _document_accepts_api_upload(doc_type: str, onboarding_url: str | None) -> bool:
+def _document_capture_mode(doc_type: str, onboarding_url: str | None) -> str:
     if onboarding_url:
-        return False
-    # Em produção o Asaas costuma bloquear identificação/selfie via API no BaaS,
-    # mesmo quando o onboardingUrl ainda não veio na listagem inicial.
+        return "link"
     if doc_type in {"IDENTIFICATION", "IDENTIFICATION_SELFIE"}:
+        return "camera"
+    return "file"
+
+
+def _document_accepts_api_upload(doc_type: str, onboarding_url: str | None) -> bool:
+    mode = _document_capture_mode(doc_type, onboarding_url)
+    if mode == "link":
         return False
     return True
+
+
+def _identity_onboarding_url(items: list[dict]) -> str | None:
+    for row in items:
+        doc_type = str(row.get("type") or "").upper()
+        if doc_type not in {"IDENTIFICATION", "IDENTIFICATION_SELFIE"}:
+            continue
+        url = row.get("onboarding_url")
+        if isinstance(url, str) and url.strip():
+            return url.strip()
+    return None
 
 
 def _parse_kyc_document_rows(db: Session, account: EscrowAccount, data: list) -> list[dict]:
@@ -361,6 +377,7 @@ def _parse_kyc_document_rows(db: Session, account: EscrowAccount, data: list) ->
         title = str(row.get("title") or row.get("description") or doc_type or "Documento")
         if doc_type == "SOCIAL_CONTRACT" and "contrato" not in title.lower():
             title = "Contrato social"
+        capture_mode = _document_capture_mode(doc_type, onboarding_url)
         items.append(
             {
                 "id": str(row.get("id") or row.get("type") or uuid4()),
@@ -368,6 +385,7 @@ def _parse_kyc_document_rows(db: Session, account: EscrowAccount, data: list) ->
                 "type": doc_type,
                 "status": str(row.get("status") or "PENDING"),
                 "onboarding_url": onboarding_url,
+                "capture_mode": capture_mode,
                 "accepts_api_upload": _document_accepts_api_upload(doc_type, onboarding_url),
             }
         )
@@ -389,7 +407,8 @@ def list_kyc_documents(db: Session, account: EscrowAccount) -> dict:
                     "type": "IDENTIFICATION",
                     "status": "APPROVED",
                     "onboarding_url": None,
-                    "accepts_api_upload": False,
+                    "capture_mode": "camera",
+                    "accepts_api_upload": True,
                 },
                 {
                     "id": "social-contract",
@@ -397,6 +416,7 @@ def list_kyc_documents(db: Session, account: EscrowAccount) -> dict:
                     "type": "SOCIAL_CONTRACT",
                     "status": "NOT_SENT",
                     "onboarding_url": None,
+                    "capture_mode": "file",
                     "accepts_api_upload": True,
                 },
             ],
@@ -418,6 +438,7 @@ def list_kyc_documents(db: Session, account: EscrowAccount) -> dict:
                     "type": "IDENTIFICATION",
                     "status": "PENDING",
                     "onboarding_url": stored_url,
+                    "capture_mode": "link",
                     "accepts_api_upload": False,
                 }
             )
@@ -426,7 +447,12 @@ def list_kyc_documents(db: Session, account: EscrowAccount) -> dict:
                 "Nenhum documento listado pelo Asaas ainda. "
                 "Aguarde cerca de 1 minuto após abrir a conta e toque em «Atualizar dados bancários»."
             )
-    return {"source": "ASAAS", "items": items, "hint": hint}
+    return {
+        "source": "ASAAS",
+        "items": items,
+        "hint": hint,
+        "identity_onboarding_url": _identity_onboarding_url(items),
+    }
 
 
 async def upload_kyc_document(db: Session, account: EscrowAccount, document_id: str, file: UploadFile) -> dict:
@@ -461,9 +487,11 @@ async def upload_kyc_document(db: Session, account: EscrowAccount, document_id: 
     if target.get("onboarding_url"):
         raise HTTPException(
             status_code=422,
-            detail="Este documento deve ser enviado pelo link oficial de verificação Asaas.",
+            detail="Este documento deve ser enviado pelo link oficial de verificação LETTER (botão Verificar identidade).",
         )
     document_type = str(target.get("type") or "CUSTOM").upper()
+    if document_type in {"IDENTIFICATION", "IDENTIFICATION_SELFIE"} and not str(content_type).startswith("image/"):
+        raise HTTPException(status_code=422, detail="Para RG e selfie, envie uma foto em JPG ou PNG (use a câmera ou galeria).")
     # Contrato social e atas usam type do grupo; fallback sensato por título
     title_l = str(target.get("title") or "").lower()
     if document_type in {"", "CUSTOM"} and "contrato" in title_l:
