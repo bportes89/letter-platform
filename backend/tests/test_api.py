@@ -3,6 +3,13 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import uuid4
 
+_DEMO_SUBACCOUNT_PROFILE = {
+    "name": "LETTER Demo Subconta",
+    "cpf_cnpj": "57255607000130",
+    "mobile_phone": "11999999999",
+    "email": "admin@letter.com.br",
+}
+
 
 def test_health(client):
     response = client.get("/api/v1/health")
@@ -5171,13 +5178,80 @@ def test_escrow_create_main_wallet_legacy(client, auth_headers, monkeypatch):
     assert body["external_account_id"] == "wallet-test-001"
 
 
-def test_escrow_subaccount_preview(client, auth_headers):
+def test_escrow_subaccount_preview(client, auth_headers, monkeypatch):
+    monkeypatch.setattr("app.asaas_common.asaas_configured", lambda: False)
+    monkeypatch.setattr("app.subaccount_auto_service.settings.auto_plain_subaccount_on_kyc", False)
+
+    registered = client.post("/api/v1/public/site/auth/register", json={
+        "name": "Cliente Preview Subconta",
+        "email": "cliente.preview.subconta@letter.com.br",
+        "phone": "11955554444",
+        "password": "ClienteKyc1!",
+        "document": "39053344705",
+        "terms_accepted": True,
+    })
+    assert registered.status_code == 201
+    user_id = registered.json()["user"]["id"]
+
+    cases = client.get("/api/v1/kyc/cases", headers=auth_headers).json()
+    case = next(item for item in cases if item["subject_type"] == "USER" and item["subject_id"] == user_id)
+    decided = client.post(
+        f"/api/v1/kyc/cases/{case['id']}/mock-decision",
+        headers=auth_headers,
+        json={"status": "APPROVED", "risk_level": "LOW", "notes": "Aprovado para preview manual"},
+    )
+    assert decided.status_code == 200
+
+    pending = client.get("/api/v1/escrow/subaccounts/pending", headers=auth_headers)
+    assert pending.status_code == 200
+    assert any(item["user_id"] == user_id and item["ready"] for item in pending.json())
+
     response = client.post("/api/v1/escrow/subaccount/preview", headers=auth_headers, json={"create_subaccount": True})
     assert response.status_code == 200
     body = response.json()
+    assert body["user_id"] == user_id
     assert body["name"]
-    assert body["cpf_cnpj"]
+    assert body["cpf_cnpj"] == "39053344705"
     assert body["person_type"] in {"PF", "PJ"}
+
+
+def test_manual_subaccount_create_for_pending_kyc_user(client, auth_headers, monkeypatch):
+    monkeypatch.setattr("app.asaas_common.asaas_configured", lambda: False)
+    monkeypatch.setattr("app.subaccount_auto_service.settings.auto_plain_subaccount_on_kyc", False)
+
+    registered = client.post("/api/v1/public/site/auth/register", json={
+        "name": "Cliente Manual Subconta",
+        "email": "cliente.manual.subconta@letter.com.br",
+        "phone": "11944443333",
+        "password": "ClienteKyc1!",
+        "document": "15350946056",
+        "terms_accepted": True,
+    })
+    assert registered.status_code == 201
+    user_id = registered.json()["user"]["id"]
+
+    cases = client.get("/api/v1/kyc/cases", headers=auth_headers).json()
+    case = next(item for item in cases if item["subject_type"] == "USER" and item["subject_id"] == user_id)
+    decided = client.post(
+        f"/api/v1/kyc/cases/{case['id']}/mock-decision",
+        headers=auth_headers,
+        json={"status": "APPROVED", "risk_level": "LOW", "notes": "Aprovado para abertura manual"},
+    )
+    assert decided.status_code == 200
+
+    created = client.post(
+        "/api/v1/escrow/accounts",
+        headers=auth_headers,
+        json={"create_subaccount": True, "enable_escrow": False, "user_id": user_id},
+    )
+    assert created.status_code == 201
+    body = created.json()
+    assert body["provider"] == "MOCK_SUBACCOUNT"
+    assert body["user_id"] == user_id
+    assert body["escrow_enabled"] is False
+
+    pending = client.get("/api/v1/escrow/subaccounts/pending", headers=auth_headers)
+    assert all(item["user_id"] != user_id for item in pending.json())
 
 
 def test_escrow_create_mock_subaccount_without_asaas(client, auth_headers, monkeypatch):
@@ -5186,7 +5260,7 @@ def test_escrow_create_mock_subaccount_without_asaas(client, auth_headers, monke
     created = client.post(
         "/api/v1/escrow/accounts",
         headers=auth_headers,
-        json={"create_subaccount": True, "enable_escrow": True},
+        json={"create_subaccount": True, "enable_escrow": True, "profile": _DEMO_SUBACCOUNT_PROFILE},
     )
     assert created.status_code == 201
     body = created.json()
@@ -5201,7 +5275,7 @@ def test_escrow_create_mock_plain_subaccount_without_asaas(client, auth_headers,
     created = client.post(
         "/api/v1/escrow/accounts",
         headers=auth_headers,
-        json={"create_subaccount": True, "enable_escrow": False},
+        json={"create_subaccount": True, "enable_escrow": False, "profile": _DEMO_SUBACCOUNT_PROFILE},
     )
     assert created.status_code == 201
     body = created.json()
@@ -6273,7 +6347,7 @@ def test_asaas_account_status_general_approval_webhook(client, auth_headers, mon
     created = client.post(
         "/api/v1/escrow/accounts",
         headers=auth_headers,
-        json={"create_subaccount": True, "enable_escrow": False},
+        json={"create_subaccount": True, "enable_escrow": False, "profile": _DEMO_SUBACCOUNT_PROFILE},
     )
     assert created.status_code == 201
     account = created.json()
@@ -6316,7 +6390,7 @@ def test_escrow_monthly_billing_charge_and_delinquency(client, auth_headers, mon
     created = client.post(
         "/api/v1/escrow/accounts",
         headers=auth_headers,
-        json={"create_subaccount": True, "enable_escrow": True},
+        json={"create_subaccount": True, "enable_escrow": True, "profile": _DEMO_SUBACCOUNT_PROFILE},
     )
     assert created.status_code == 201
     account_id = created.json()["id"]
@@ -6361,7 +6435,7 @@ def test_escrow_billing_delinquency_retains_incoming(client, auth_headers, monke
     created = client.post(
         "/api/v1/escrow/accounts",
         headers=auth_headers,
-        json={"create_subaccount": True, "enable_escrow": True},
+        json={"create_subaccount": True, "enable_escrow": True, "profile": _DEMO_SUBACCOUNT_PROFILE},
     )
     account_id = created.json()["id"]
 
@@ -6396,7 +6470,7 @@ def test_escrow_incoming_fees_by_billing_type(client, auth_headers, monkeypatch)
     created = client.post(
         "/api/v1/escrow/accounts",
         headers=auth_headers,
-        json={"create_subaccount": True, "enable_escrow": True},
+        json={"create_subaccount": True, "enable_escrow": True, "profile": _DEMO_SUBACCOUNT_PROFILE},
     )
     account_id = created.json()["id"]
 

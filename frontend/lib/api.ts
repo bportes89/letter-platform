@@ -335,6 +335,19 @@ export type EscrowSubaccountPreview = {
   postal_code: string;
   person_type: string;
   operation_id: string | null;
+  user_id?: string | null;
+  user_name?: string | null;
+  user_email?: string | null;
+};
+export type EscrowPendingSubaccount = {
+  user_id: string;
+  name: string;
+  email: string;
+  role: string;
+  kyc_status: string;
+  ready: boolean;
+  blockers: string[];
+  preview: EscrowSubaccountPreview;
 };
 export type SignatureZapSignStatus = {
   configured: boolean;

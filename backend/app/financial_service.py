@@ -84,8 +84,9 @@ def create_client_plain_subaccount(
     client_user: User,
     *,
     profile: EscrowSubaccountProfile | None = None,
+    enable_escrow: bool = False,
 ) -> EscrowAccount:
-    """Subconta normal (sem Escrow) vinculada ao cliente — usada após KYC aprovado."""
+    """Subconta vinculada ao cliente — usada após KYC aprovado (manual ou automático)."""
     from app.asaas_common import asaas_configured
     from app.asaas_subaccount_service import create_asaas_subaccount, create_mock_subaccount
 
@@ -95,7 +96,7 @@ def create_client_plain_subaccount(
             actor,
             None,
             profile,
-            enable_escrow=False,
+            enable_escrow=enable_escrow,
             user_id=client_user.id,
         )
     return create_mock_subaccount(
@@ -103,7 +104,7 @@ def create_client_plain_subaccount(
         actor,
         None,
         profile,
-        enable_escrow=False,
+        enable_escrow=enable_escrow,
         user_id=client_user.id,
     )
 

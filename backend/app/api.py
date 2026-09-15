@@ -53,7 +53,7 @@ from app.schemas import (
     ValidStampCreate, ValidStampView, SaaSTermsCreate, SaaSTermsView, SaaSPlanCreate, SaaSPlanView,
     SaaSSubscribeCreate, SaaSSubscriptionView,
     BillingGenerateRequest, CollectionActionView, CommissionAllocate, CommissionEntryView, CommissionRuleCreate,
-    CommissionRuleView, DocumentView, EscrowAsaasStatusView, EscrowCreate, EscrowBillingCycleView, EscrowSubaccountPreviewView, EscrowToggleRequest, EscrowView, EscrowWebhook, WalletBillPaymentRequest, WalletBoletoIssueRequest, WalletBoletoView, WalletEscrowBillingSyncView, LssBillingSyncView, RecurringCommissionSettlementView, MmnSplitPreviewRequest, MmnSplitPreviewView, AsaasMmnPaymentCreate, AsaasMmnPaymentView, PaymentSplitRowView, LegalManualPublicView, LegalManualView, WalletPricingRowView, WalletTransferRequest,
+    CommissionRuleView, DocumentView, EscrowAsaasStatusView, EscrowCreate, EscrowBillingCycleView, EscrowPendingSubaccountView, EscrowSubaccountPreviewView, EscrowToggleRequest, EscrowView, EscrowWebhook, WalletBillPaymentRequest, WalletBoletoIssueRequest, WalletBoletoView, WalletEscrowBillingSyncView, LssBillingSyncView, RecurringCommissionSettlementView, MmnSplitPreviewRequest, MmnSplitPreviewView, AsaasMmnPaymentCreate, AsaasMmnPaymentView, PaymentSplitRowView, LegalManualPublicView, LegalManualView, WalletPricingRowView, WalletTransferRequest,
     FiscalEvidenceView, SefazRobotStatusView,
     DelinquencyView, FiscalReleaseRequest, FundingOpportunityCreate, FundingOpportunityView, FundingPropertyUpdate, InvitationView,
     NinaApprovalRequest, NinaCriticalApprovalView, NinaDistressCaseCreate, NinaDistressCaseView,
@@ -4921,14 +4921,24 @@ def balances(user: User = Depends(get_current_user), db: Session = Depends(get_d
 
 @router.post("/escrow/accounts", response_model=EscrowView, status_code=201)
 def create_escrow(payload: EscrowCreate, user: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
-    account = create_mock_escrow(
-        db,
-        user,
-        payload.operation_id,
-        create_subaccount=payload.create_subaccount,
-        enable_escrow=payload.enable_escrow,
-        profile=payload.profile,
-    )
+    from app.subaccount_auto_service import provision_manual_subaccount
+
+    if payload.create_subaccount and not payload.operation_id and not payload.profile:
+        account = provision_manual_subaccount(
+            db,
+            user,
+            user_id=payload.user_id,
+            enable_escrow=payload.enable_escrow,
+        )
+    else:
+        account = create_mock_escrow(
+            db,
+            user,
+            payload.operation_id,
+            create_subaccount=payload.create_subaccount,
+            enable_escrow=payload.enable_escrow,
+            profile=payload.profile,
+        )
     db.flush()
     audit(
         db,
@@ -4940,6 +4950,7 @@ def create_escrow(payload: EscrowCreate, user: User = Depends(require_scope("pay
             "provider": account.provider,
             "subaccount": payload.create_subaccount,
             "escrow_enabled": account.escrow_enabled,
+            "user_id": account.user_id,
         },
     )
     db.commit()
@@ -4947,10 +4958,26 @@ def create_escrow(payload: EscrowCreate, user: User = Depends(require_scope("pay
     return account
 
 
+@router.get("/escrow/subaccounts/pending", response_model=list[EscrowPendingSubaccountView])
+def escrow_pending_subaccounts(user: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
+    from app.subaccount_auto_service import list_pending_subaccount_provisions
+
+    return list_pending_subaccount_provisions(db, user.organization_id)
+
+
 @router.post("/escrow/subaccount/preview", response_model=EscrowSubaccountPreviewView)
 def escrow_subaccount_preview(payload: EscrowCreate, user: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
     from app.asaas_subaccount_service import subaccount_profile_preview
+    from app.subaccount_auto_service import manual_subaccount_preview
 
+    if payload.create_subaccount and not payload.operation_id and not payload.profile:
+        preview = manual_subaccount_preview(db, user, user_id=payload.user_id)
+        if preview:
+            return preview
+        raise HTTPException(
+            status_code=404,
+            detail="Nenhum usuário com KYC aprovado aguardando abertura de subconta.",
+        )
     return subaccount_profile_preview(db, user, payload.operation_id, payload.profile)
 
 
