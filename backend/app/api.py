@@ -53,7 +53,7 @@ from app.schemas import (
     ValidStampCreate, ValidStampView, SaaSTermsCreate, SaaSTermsView, SaaSPlanCreate, SaaSPlanView,
     SaaSSubscribeCreate, SaaSSubscriptionView,
     BillingGenerateRequest, CollectionActionView, CommissionAllocate, CommissionEntryView, CommissionRuleCreate,
-    CommissionRuleView, DocumentView, EscrowAsaasStatusView, EscrowCreate, EscrowBillingCycleView, EscrowPendingSubaccountView, EscrowSubaccountPreviewView, EscrowToggleRequest, EscrowView, EscrowWebhook, WalletBillPaymentRequest, WalletBoletoIssueRequest, WalletBoletoView, WalletEscrowBillingSyncView, LssBillingSyncView, RecurringCommissionSettlementView, MmnSplitPreviewRequest, MmnSplitPreviewView, AsaasMmnPaymentCreate, AsaasMmnPaymentView, PaymentSplitRowView, LegalManualPublicView, LegalManualView, WalletPricingRowView, WalletTransferRequest,
+    CommissionRuleView, DocumentView, EscrowAsaasStatusView, EscrowCreate, EscrowBillingCycleView, EscrowPendingSubaccountView, EscrowSubaccountPreviewView, EscrowToggleRequest, EscrowView, EscrowWebhook, AdminWalletTransferCreate, AdminWalletTransferView, WalletBillPaymentRequest, WalletBoletoIssueRequest, WalletBoletoView, WalletEscrowBillingSyncView, LssBillingSyncView, RecurringCommissionSettlementView, MmnSplitPreviewRequest, MmnSplitPreviewView, AsaasMmnPaymentCreate, AsaasMmnPaymentView, PaymentSplitRowView, LegalManualPublicView, LegalManualView, WalletPricingRowView, WalletTransferRequest,
     FiscalEvidenceView, SefazRobotStatusView,
     DelinquencyView, FiscalReleaseRequest, FundingOpportunityCreate, FundingOpportunityView, FundingPropertyUpdate, InvitationView,
     NinaApprovalRequest, NinaCriticalApprovalView, NinaDistressCaseCreate, NinaDistressCaseView,
@@ -4979,6 +4979,32 @@ def escrow_subaccount_preview(payload: EscrowCreate, user: User = Depends(requir
             detail="Nenhum usuário com KYC aprovado aguardando abertura de subconta.",
         )
     return subaccount_profile_preview(db, user, payload.operation_id, payload.profile)
+
+
+@router.post("/escrow/transfers", response_model=AdminWalletTransferView, status_code=201)
+def admin_escrow_transfer(payload: AdminWalletTransferCreate, user: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
+    from app.asaas_wallet_service import request_admin_platform_transfer
+
+    result = request_admin_platform_transfer(
+        db,
+        user,
+        source_escrow_account_id=payload.source_escrow_account_id,
+        destination_type=payload.destination_type,
+        destination_escrow_account_id=payload.destination_escrow_account_id,
+        pix_key=payload.pix_key,
+        amount=payload.amount,
+        description=payload.description,
+    )
+    audit(
+        db,
+        user,
+        "escrow.admin_transfer",
+        "escrow_account",
+        payload.source_escrow_account_id or payload.destination_escrow_account_id,
+        result,
+    )
+    db.commit()
+    return result
 
 
 @router.get("/escrow/asaas/status", response_model=EscrowAsaasStatusView)

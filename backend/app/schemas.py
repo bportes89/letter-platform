@@ -1756,6 +1756,26 @@ class WalletTransferRequest(BaseModel):
     description: str | None = Field(default=None, max_length=200)
 
 
+class AdminWalletTransferCreate(BaseModel):
+    source_escrow_account_id: str | None = None
+    destination_type: str = Field(pattern="^(SUBACCOUNT|PIX)$")
+    destination_escrow_account_id: str | None = None
+    pix_key: str | None = Field(default=None, max_length=180)
+    amount: Decimal = Field(gt=0)
+    description: str | None = Field(default=None, max_length=200)
+
+
+class AdminWalletTransferView(BaseModel):
+    provider: str
+    transfer_id: str
+    status: str
+    amount: str
+    destination_type: str
+    source_label: str
+    destination_label: str
+    fee: str | None = None
+
+
 class WalletBillPaymentRequest(BaseModel):
     barcode: str = Field(min_length=10, max_length=120)
     amount: Decimal = Field(gt=0)

@@ -349,6 +349,16 @@ export type EscrowPendingSubaccount = {
   blockers: string[];
   preview: EscrowSubaccountPreview;
 };
+export type AdminWalletTransfer = {
+  provider: string;
+  transfer_id: string;
+  status: string;
+  amount: string;
+  destination_type: string;
+  source_label: string;
+  destination_label: string;
+  fee?: string | null;
+};
 export type SignatureZapSignStatus = {
   configured: boolean;
   connected: boolean;

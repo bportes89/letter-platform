@@ -5215,6 +5215,95 @@ def test_escrow_subaccount_preview(client, auth_headers, monkeypatch):
     assert body["person_type"] in {"PF", "PJ"}
 
 
+def test_admin_transfer_matrix_to_subaccount(client, auth_headers, monkeypatch):
+    monkeypatch.setattr("app.asaas_common.settings.asaas_api_key", None)
+    monkeypatch.setattr("app.asaas_common.settings.asaas_wallet_id", None)
+
+    created = client.post(
+        "/api/v1/escrow/accounts",
+        headers=auth_headers,
+        json={"create_subaccount": True, "enable_escrow": False, "profile": _DEMO_SUBACCOUNT_PROFILE},
+    )
+    assert created.status_code == 201
+    target = created.json()
+    client.post(
+        f"/api/v1/escrow/accounts/{target['id']}/mock-webhook",
+        headers=auth_headers,
+        json={
+            "event_id": "admin_transfer_seed_001",
+            "event_type": "FUNDS_CONFIRMED",
+            "amount": "500.00",
+            "metadata": {"source": "TEST"},
+        },
+    )
+    before = Decimal(
+        next(item for item in client.get("/api/v1/escrow/accounts", headers=auth_headers).json() if item["id"] == target["id"])["available_balance"]
+    )
+
+    transfer = client.post(
+        "/api/v1/escrow/transfers",
+        headers=auth_headers,
+        json={
+            "source_escrow_account_id": None,
+            "destination_type": "SUBACCOUNT",
+            "destination_escrow_account_id": target["id"],
+            "amount": "100.00",
+            "description": "Crédito manual admin",
+        },
+    )
+    assert transfer.status_code == 201, transfer.text
+    body = transfer.json()
+    assert body["destination_type"] == "SUBACCOUNT"
+    assert body["status"] == "DONE"
+    assert body["amount"] == "100.00"
+
+    accounts = client.get("/api/v1/escrow/accounts", headers=auth_headers).json()
+    updated = next(item for item in accounts if item["id"] == target["id"])
+    assert Decimal(updated["available_balance"]) == before + Decimal("100.00")
+
+
+def test_admin_transfer_subaccount_to_pix(client, auth_headers, monkeypatch):
+    monkeypatch.setattr("app.asaas_common.settings.asaas_api_key", None)
+    monkeypatch.setattr("app.asaas_common.settings.asaas_wallet_id", None)
+
+    created = client.post(
+        "/api/v1/escrow/accounts",
+        headers=auth_headers,
+        json={"create_subaccount": True, "enable_escrow": False, "profile": _DEMO_SUBACCOUNT_PROFILE},
+    )
+    account_id = created.json()["id"]
+    client.post(
+        f"/api/v1/escrow/accounts/{account_id}/mock-webhook",
+        headers=auth_headers,
+        json={
+            "event_id": "admin_transfer_seed_002",
+            "event_type": "FUNDS_CONFIRMED",
+            "amount": "300.00",
+            "metadata": {"source": "TEST"},
+        },
+    )
+
+    transfer = client.post(
+        "/api/v1/escrow/transfers",
+        headers=auth_headers,
+        json={
+            "source_escrow_account_id": account_id,
+            "destination_type": "PIX",
+            "pix_key": "terceiro@pix.com.br",
+            "amount": "50.00",
+            "description": "Pix terceiro",
+        },
+    )
+    assert transfer.status_code == 201
+    body = transfer.json()
+    assert body["destination_type"] == "PIX"
+    assert body["amount"] == "50.00"
+
+    accounts = client.get("/api/v1/escrow/accounts", headers=auth_headers).json()
+    updated = next(item for item in accounts if item["id"] == account_id)
+    assert Decimal(updated["available_balance"]) < Decimal("300.00")
+
+
 def test_manual_subaccount_create_for_pending_kyc_user(client, auth_headers, monkeypatch):
     monkeypatch.setattr("app.asaas_common.asaas_configured", lambda: False)
     monkeypatch.setattr("app.subaccount_auto_service.settings.auto_plain_subaccount_on_kyc", False)

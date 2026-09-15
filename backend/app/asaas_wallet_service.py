@@ -482,6 +482,220 @@ def request_wallet_transfer(db: Session, user: User, account: EscrowAccount, *, 
     }
 
 
+def _org_escrow_account(db: Session, organization_id: str, account_id: str) -> EscrowAccount:
+    account = db.scalar(
+        select(EscrowAccount).where(
+            EscrowAccount.id == account_id,
+            EscrowAccount.organization_id == organization_id,
+        )
+    )
+    if not account:
+        raise HTTPException(status_code=404, detail="Conta de origem não encontrada.")
+    return account
+
+
+def _account_label(account: EscrowAccount | None, *, matrix: bool = False) -> str:
+    if matrix:
+        return "Carteira matriz LETTER"
+    if not account:
+        return "Conta"
+    return account.subaccount_name or account.external_account_id[-12:]
+
+
+def _record_internal_transfer_events(
+    db: Session,
+    *,
+    organization_id: str,
+    source: EscrowAccount | None,
+    destination: EscrowAccount | None,
+    amount: Decimal,
+    transfer_id: str,
+    description: str | None,
+) -> None:
+    payload = json.dumps({"transfer_id": transfer_id, "description": description}, ensure_ascii=False)
+    value = float(amount)
+    if source:
+        db.add(
+            EscrowEvent(
+                organization_id=organization_id,
+                escrow_account_id=source.id,
+                provider_event_id=f"internal_debit_{transfer_id}",
+                event_type="INTERNAL_TRANSFER_DEBIT",
+                amount=value,
+                payload_json=payload,
+            )
+        )
+    if destination:
+        db.add(
+            EscrowEvent(
+                organization_id=organization_id,
+                escrow_account_id=destination.id,
+                provider_event_id=f"internal_credit_{transfer_id}",
+                event_type="INTERNAL_TRANSFER_CREDIT",
+                amount=value,
+                payload_json=payload,
+            )
+        )
+
+
+def request_admin_platform_transfer(
+    db: Session,
+    actor: User,
+    *,
+    source_escrow_account_id: str | None,
+    destination_type: str,
+    destination_escrow_account_id: str | None,
+    pix_key: str | None,
+    amount: Decimal,
+    description: str | None,
+) -> dict:
+    """Admin: envia saldo da matriz ou de uma subconta para outra subconta ou Pix de terceiros."""
+    from app.wallet_billing_service import assert_withdrawals_allowed
+
+    destination_type = destination_type.upper()
+    if destination_type not in {"SUBACCOUNT", "PIX"}:
+        raise HTTPException(status_code=422, detail="destination_type deve ser SUBACCOUNT ou PIX.")
+
+    source = _org_escrow_account(db, actor.organization_id, source_escrow_account_id) if source_escrow_account_id else None
+    destination = None
+    if destination_type == "SUBACCOUNT":
+        if not destination_escrow_account_id:
+            raise HTTPException(status_code=422, detail="Selecione a subconta de destino.")
+        destination = _org_escrow_account(db, actor.organization_id, destination_escrow_account_id)
+        if source and source.id == destination.id:
+            raise HTTPException(status_code=422, detail="Origem e destino não podem ser a mesma conta.")
+    else:
+        clean_pix = (pix_key or "").strip()
+        if len(clean_pix) < 3:
+            raise HTTPException(status_code=422, detail="Informe a chave Pix de destino.")
+
+    value = money(amount)
+    transfer_description = (description or "Transferência LETTER").strip()
+    source_label = _account_label(source, matrix=source is None)
+    destination_label = _account_label(destination) if destination else (pix_key or "").strip()
+
+    if source:
+        if source.escrow_enabled:
+            raise HTTPException(status_code=422, detail="Subconta com Escrow — use o fluxo operacional para saídas.")
+        assert_withdrawals_allowed(db, source)
+        if Decimal(str(source.available_balance)) < value:
+            raise HTTPException(status_code=422, detail="Saldo insuficiente na conta de origem.")
+
+    use_mock = (source is None and not asaas_configured()) or (source is not None and _is_mock_account(source))
+    if destination_type == "SUBACCOUNT" and destination and _is_mock_account(destination):
+        use_mock = True
+
+    if destination_type == "PIX" and source is None and asaas_configured():
+        with AsaasClient() as client:
+            balance_payload = client.get_balance()
+            master_balance = Decimal(str(balance_payload.get("balance", 0)))
+            if master_balance < value:
+                raise HTTPException(status_code=422, detail="Saldo insuficiente na carteira matriz.")
+
+    if use_mock:
+        transfer_id = f"mock_admin_transfer_{uuid4().hex[:12]}"
+        if source:
+            source.available_balance = money(Decimal(str(source.available_balance)) - value)
+        if destination_type == "SUBACCOUNT" and destination:
+            destination.available_balance = money(Decimal(str(destination.available_balance)) + value)
+        elif destination_type == "PIX" and source:
+            db.add(
+                EscrowEvent(
+                    organization_id=actor.organization_id,
+                    escrow_account_id=source.id,
+                    provider_event_id=transfer_id,
+                    event_type="TRANSFER_SENT",
+                    amount=float(value),
+                    payload_json=json.dumps({"pix_key": pix_key, "description": transfer_description, "admin": True}, ensure_ascii=False),
+                )
+            )
+        _record_internal_transfer_events(
+            db,
+            organization_id=actor.organization_id,
+            source=source,
+            destination=destination if destination_type == "SUBACCOUNT" else None,
+            amount=value,
+            transfer_id=transfer_id,
+            description=transfer_description,
+        )
+        db.flush()
+        return {
+            "provider": "MOCK",
+            "transfer_id": transfer_id,
+            "status": "DONE",
+            "amount": str(value),
+            "destination_type": destination_type,
+            "source_label": source_label,
+            "destination_label": destination_label,
+            "fee": None,
+        }
+
+    if destination_type == "SUBACCOUNT" and destination:
+        target_wallet = (destination.external_account_id or "").strip()
+        if not target_wallet:
+            raise HTTPException(status_code=422, detail="Subconta de destino sem wallet Asaas.")
+        if source:
+            with subaccount_client(source) as client:
+                result = client.create_transfer(
+                    {"value": float(value), "walletId": target_wallet, "description": transfer_description}
+                )
+            source.available_balance = money(Decimal(str(source.available_balance)) - value)
+        else:
+            with AsaasClient() as client:
+                result = client.create_transfer(
+                    {"value": float(value), "walletId": target_wallet, "description": transfer_description}
+                )
+        destination.available_balance = money(Decimal(str(destination.available_balance)) + value)
+        transfer_id = str(result.get("id") or uuid4().hex[:12])
+        _record_internal_transfer_events(
+            db,
+            organization_id=actor.organization_id,
+            source=source,
+            destination=destination,
+            amount=value,
+            transfer_id=transfer_id,
+            description=transfer_description,
+        )
+        db.flush()
+        return {
+            "provider": "ASAAS",
+            "transfer_id": transfer_id,
+            "status": str(result.get("status") or "PENDING"),
+            "amount": str(value),
+            "destination_type": destination_type,
+            "source_label": source_label,
+            "destination_label": destination_label,
+            "fee": None,
+        }
+
+    if source:
+        return request_wallet_transfer(db, actor, source, pix_key=(pix_key or "").strip(), amount=value, description=transfer_description) | {
+            "destination_type": "PIX",
+            "source_label": source_label,
+            "destination_label": destination_label,
+        }
+
+    with AsaasClient() as client:
+        result = client.create_transfer(
+            {
+                "value": float(value),
+                "pixAddressKey": (pix_key or "").strip(),
+                "description": transfer_description,
+            }
+        )
+    db.flush()
+    return {
+        "provider": "ASAAS",
+        "transfer_id": str(result.get("id") or ""),
+        "status": str(result.get("status") or "PENDING"),
+        "amount": str(value),
+        "destination_type": "PIX",
+        "source_label": source_label,
+        "destination_label": destination_label,
+        "fee": None,
+    }
+
+
 def request_bill_payment(db: Session, account: EscrowAccount, *, barcode: str, amount: Decimal, description: str | None) -> dict:
     from app.wallet_billing_service import assert_withdrawals_allowed
 
