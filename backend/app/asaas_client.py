@@ -106,6 +106,18 @@ class AsaasClient:
     def get_account(self, account_id: str) -> dict:
         return self.request("GET", f"/accounts/{account_id}")
 
+    def create_subaccount_access_token(
+        self,
+        account_id: str,
+        *,
+        name: str,
+        expiration_date: str | None = None,
+    ) -> dict:
+        payload: dict[str, str] = {"name": name}
+        if expiration_date:
+            payload["expirationDate"] = expiration_date
+        return self.request("POST", f"/accounts/{account_id}/accessTokens", json=payload)
+
     def get_commercial_info(self) -> dict:
         return self.request("GET", "/myAccount/commercialInfo/")
 

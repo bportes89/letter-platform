@@ -5044,6 +5044,59 @@ def escrow_repair_plain_client_accounts(user: User = Depends(require_scope("paym
     return result
 
 
+@router.post("/escrow/repair/kyc-documents")
+def escrow_repair_kyc_documents(user: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
+    """Recupera credencial das subcontas e sincroniza documentos KYC pendentes no Asaas."""
+    from app.asaas_wallet_service import repair_subaccount_kyc_access
+
+    result = repair_subaccount_kyc_access(db, user.organization_id)
+    audit(
+        db,
+        user,
+        "escrow.kyc_documents_repaired",
+        "escrow_account",
+        None,
+        {"repaired_count": result["repaired_count"], "error_count": result["error_count"]},
+    )
+    db.commit()
+    return result
+
+
+@router.post("/escrow/accounts/{account_id}/kyc/sync")
+def escrow_sync_account_kyc(
+    account_id: str,
+    user: User = Depends(require_scope("payments:review")),
+    db: Session = Depends(get_db),
+):
+    from app.asaas_wallet_service import sync_escrow_account_kyc
+
+    account = db.scalar(
+        select(EscrowAccount).where(EscrowAccount.id == account_id, EscrowAccount.organization_id == user.organization_id)
+    )
+    if not account:
+        raise HTTPException(status_code=404, detail="Conta escrow não encontrada")
+    result = sync_escrow_account_kyc(db, account)
+    audit(db, user, "escrow.kyc_synced", "escrow_account", account.id)
+    db.commit()
+    return result
+
+
+@router.get("/escrow/accounts/{account_id}/kyc/documents")
+def escrow_list_account_kyc_documents(
+    account_id: str,
+    user: User = Depends(require_scope("payments:review")),
+    db: Session = Depends(get_db),
+):
+    from app.asaas_wallet_service import list_kyc_documents
+
+    account = db.scalar(
+        select(EscrowAccount).where(EscrowAccount.id == account_id, EscrowAccount.organization_id == user.organization_id)
+    )
+    if not account:
+        raise HTTPException(status_code=404, detail="Conta escrow não encontrada")
+    return list_kyc_documents(db, account)
+
+
 @router.post("/escrow/accounts/{account_id}/escrow", response_model=EscrowView)
 def escrow_set_account_flag(
     account_id: str,
@@ -5169,7 +5222,7 @@ def my_wallet_pix_qrcode(user: User = Depends(get_current_user), db: Session = D
     account = find_user_plain_subaccount(db, user)
     if not account:
         raise HTTPException(status_code=404, detail="Subconta não encontrada")
-    return get_wallet_pix_qrcode(account)
+    return get_wallet_pix_qrcode(db, account)
 
 
 @router.post("/wallet/me/transfer")

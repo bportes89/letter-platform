@@ -46,8 +46,63 @@ def _is_mock_account(account: EscrowAccount) -> bool:
     return account.provider in {"MOCK", "MOCK_SUBACCOUNT"} or not asaas_configured()
 
 
-def subaccount_client(account: EscrowAccount) -> AsaasClient:
+def _requires_subaccount_key(account: EscrowAccount) -> bool:
+    return (
+        not _is_mock_account(account)
+        and str(account.provider or "").startswith("ASAAS")
+        and bool((account.asaas_account_id or "").strip())
+    )
+
+
+def ensure_subaccount_api_key(db: Session, account: EscrowAccount) -> str | None:
+    """Gera e persiste API key da subconta quando ausente (ex.: contas antigas)."""
+    if not _requires_subaccount_key(account):
+        return None
     key = (account.asaas_subaccount_api_key or "").strip()
+    if key:
+        return key
+    asaas_id = str(account.asaas_account_id).strip()
+    with AsaasClient() as master:
+        payload = master.create_subaccount_access_token(
+            asaas_id,
+            name=f"LETTER-{account.id[:8]}",
+            expiration_date="2030-12-31 23:59:59",
+        )
+    key = str(payload.get("apiKey") or "").strip()
+    if not key:
+        access = payload.get("accessToken")
+        if isinstance(access, dict):
+            key = str(access.get("apiKey") or "").strip()
+    if not key:
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "Não foi possível obter credencial da subconta no Asaas. "
+                "No painel Asaas, habilite temporariamente o gerenciamento de chaves de subconta "
+                "(Integrações → Chaves API) e tente atualizar novamente."
+            ),
+        )
+    account.asaas_subaccount_api_key = key
+    db.flush()
+    return key
+
+
+def subaccount_client(account: EscrowAccount, *, db: Session | None = None) -> AsaasClient:
+    if _is_mock_account(account):
+        return AsaasClient()
+    key = (account.asaas_subaccount_api_key or "").strip()
+    if not key and db is not None and _requires_subaccount_key(account):
+        key = ensure_subaccount_api_key(db, account) or ""
+    if _requires_subaccount_key(account):
+        if not key:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "Credencial da subconta indisponível. "
+                    "Toque em «Atualizar dados bancários» ou contate o suporte LETTER."
+                ),
+            )
+        return AsaasClient(api_key=key)
     if key:
         return AsaasClient(api_key=key)
     return AsaasClient()
@@ -95,7 +150,7 @@ def sync_account_from_asaas(db: Session, account: EscrowAccount) -> EscrowAccoun
         db.flush()
         return account
 
-    with subaccount_client(account) as client:
+    with subaccount_client(account, db=db) as client:
         balance_payload = client.get_balance()
         commercial = client.get_commercial_info()
         try:
@@ -255,7 +310,7 @@ def list_wallet_transactions(db: Session, account: EscrowAccount, *, offset: int
         ]
         return {"total": len(rows), "items": rows, "source": "MOCK"}
 
-    with subaccount_client(account) as client:
+    with subaccount_client(account, db=db) as client:
         payload = client.list_financial_transactions(offset=offset, limit=limit)
     rows = []
     for item in payload.get("data", []):
@@ -272,6 +327,35 @@ def list_wallet_transactions(db: Session, account: EscrowAccount, *, offset: int
             }
         )
     return {"total": payload.get("totalCount", len(rows)), "items": rows, "source": "ASAAS"}
+
+
+def _parse_kyc_document_rows(db: Session, account: EscrowAccount, data: list) -> list[dict]:
+    items: list[dict] = []
+    for row in data:
+        onboarding_url = row.get("onboardingUrl") or row.get("onboarding_url")
+        if isinstance(onboarding_url, str):
+            onboarding_url = onboarding_url.strip() or None
+        else:
+            onboarding_url = None
+        doc_type = str(row.get("type") or row.get("documentType") or "CUSTOM").upper()
+        title = str(row.get("title") or row.get("description") or doc_type or "Documento")
+        if doc_type == "SOCIAL_CONTRACT" and "contrato" not in title.lower():
+            title = "Contrato social"
+        items.append(
+            {
+                "id": str(row.get("id") or row.get("type") or uuid4()),
+                "title": title,
+                "type": doc_type,
+                "status": str(row.get("status") or "PENDING"),
+                "onboarding_url": onboarding_url,
+                # Com onboardingUrl o Asaas rejeita upload via API — só o link cadastro.io.
+                "accepts_api_upload": not bool(onboarding_url),
+            }
+        )
+        if onboarding_url and not account.asaas_onboarding_url:
+            account.asaas_onboarding_url = str(onboarding_url)
+    db.flush()
+    return items
 
 
 def list_kyc_documents(db: Session, account: EscrowAccount) -> dict:
@@ -299,35 +383,31 @@ def list_kyc_documents(db: Session, account: EscrowAccount) -> dict:
             ],
         }
 
-    with subaccount_client(account) as client:
+    ensure_subaccount_api_key(db, account)
+    with subaccount_client(account, db=db) as client:
         payload = client.list_documents()
     data = payload.get("data") if isinstance(payload.get("data"), list) else payload if isinstance(payload, list) else []
-    items = []
-    for row in data:
-        onboarding_url = row.get("onboardingUrl") or row.get("onboarding_url")
-        if isinstance(onboarding_url, str):
-            onboarding_url = onboarding_url.strip() or None
+    items = _parse_kyc_document_rows(db, account, data)
+    hint = None
+    if not items:
+        stored_url = (account.asaas_onboarding_url or "").strip() or None
+        if stored_url:
+            items.append(
+                {
+                    "id": "identification",
+                    "title": "Documento de identificação + selfie",
+                    "type": "IDENTIFICATION",
+                    "status": "PENDING",
+                    "onboarding_url": stored_url,
+                    "accepts_api_upload": False,
+                }
+            )
         else:
-            onboarding_url = None
-        doc_type = str(row.get("type") or row.get("documentType") or "CUSTOM").upper()
-        title = str(row.get("title") or row.get("description") or doc_type or "Documento")
-        if doc_type == "SOCIAL_CONTRACT" and "contrato" not in title.lower():
-            title = "Contrato social"
-        items.append(
-            {
-                "id": str(row.get("id") or row.get("type") or uuid4()),
-                "title": title,
-                "type": doc_type,
-                "status": str(row.get("status") or "PENDING"),
-                "onboarding_url": onboarding_url,
-                # Com onboardingUrl o Asaas rejeita upload via API — só o link cadastro.io.
-                "accepts_api_upload": not bool(onboarding_url),
-            }
-        )
-        if onboarding_url and not account.asaas_onboarding_url:
-            account.asaas_onboarding_url = str(onboarding_url)
-    db.flush()
-    return {"source": "ASAAS", "items": items}
+            hint = (
+                "Nenhum documento listado pelo Asaas ainda. "
+                "Aguarde cerca de 1 minuto após abrir a conta e toque em «Atualizar dados bancários»."
+            )
+    return {"source": "ASAAS", "items": items, "hint": hint}
 
 
 async def upload_kyc_document(db: Session, account: EscrowAccount, document_id: str, file: UploadFile) -> dict:
@@ -354,21 +434,22 @@ async def upload_kyc_document(db: Session, account: EscrowAccount, document_id: 
         db.flush()
         return {"status": "UNDER_REVIEW", "message": f"Documento '{filename}' recebido em homologação (mock)."}
 
-    with subaccount_client(account) as client:
-        docs = list_kyc_documents(db, account)
-        target = next((item for item in docs["items"] if item["id"] == document_id), None)
-        if not target:
-            raise HTTPException(status_code=404, detail="Grupo documental não encontrado")
-        if target.get("onboarding_url"):
-            raise HTTPException(
-                status_code=422,
-                detail="Este documento deve ser enviado pelo link oficial de verificação Asaas.",
-            )
-        document_type = str(target.get("type") or "CUSTOM").upper()
-        # Contrato social e atas usam type do grupo; fallback sensato por título
-        title_l = str(target.get("title") or "").lower()
-        if document_type in {"", "CUSTOM"} and "contrato" in title_l:
-            document_type = "SOCIAL_CONTRACT"
+    ensure_subaccount_api_key(db, account)
+    docs = list_kyc_documents(db, account)
+    target = next((item for item in docs["items"] if item["id"] == document_id), None)
+    if not target:
+        raise HTTPException(status_code=404, detail="Grupo documental não encontrado")
+    if target.get("onboarding_url"):
+        raise HTTPException(
+            status_code=422,
+            detail="Este documento deve ser enviado pelo link oficial de verificação Asaas.",
+        )
+    document_type = str(target.get("type") or "CUSTOM").upper()
+    # Contrato social e atas usam type do grupo; fallback sensato por título
+    title_l = str(target.get("title") or "").lower()
+    if document_type in {"", "CUSTOM"} and "contrato" in title_l:
+        document_type = "SOCIAL_CONTRACT"
+    with subaccount_client(account, db=db) as client:
         result = client.upload_document(
             document_id,
             file_bytes=content,
@@ -393,7 +474,7 @@ def create_wallet_pix_key(db: Session, account: EscrowAccount) -> dict:
         db.flush()
         return {"pix_key": account.pix_key, "created": True, "message": "Chave Pix mock gerada."}
 
-    with subaccount_client(account) as client:
+    with subaccount_client(account, db=db) as client:
         created = client.create_pix_key(key_type="EVP")
         account.pix_key = str(created.get("key") or "")
         qr = client.get_pix_qrcode(account.pix_key) if account.pix_key else {}
@@ -407,7 +488,7 @@ def create_wallet_pix_key(db: Session, account: EscrowAccount) -> dict:
     }
 
 
-def get_wallet_pix_qrcode(account: EscrowAccount) -> dict:
+def get_wallet_pix_qrcode(db: Session, account: EscrowAccount) -> dict:
     if not account.pix_key:
         raise HTTPException(status_code=404, detail="Chave Pix não configurada.")
     if _is_mock_account(account):
@@ -416,7 +497,7 @@ def get_wallet_pix_qrcode(account: EscrowAccount) -> dict:
             "payload": f"00020126MOCKPIX{account.pix_key}",
             "encoded_image": None,
         }
-    with subaccount_client(account) as client:
+    with subaccount_client(account, db=db) as client:
         qr = client.get_pix_qrcode(account.pix_key)
     return {"pix_key": account.pix_key, "payload": qr.get("payload"), "encoded_image": qr.get("encodedImage")}
 
@@ -463,7 +544,7 @@ def request_wallet_transfer(db: Session, user: User, account: EscrowAccount, *, 
         db.flush()
         return {"provider": "MOCK", "transfer_id": event_id, "status": "DONE", "amount": str(value), "fee": str(transfer_fee)}
 
-    with subaccount_client(account) as client:
+    with subaccount_client(account, db=db) as client:
         result = client.create_transfer(
             {
                 "value": float(value),
@@ -635,7 +716,7 @@ def request_admin_platform_transfer(
         if not target_wallet:
             raise HTTPException(status_code=422, detail="Subconta de destino sem wallet Asaas.")
         if source:
-            with subaccount_client(source) as client:
+            with subaccount_client(source, db=db) as client:
                 result = client.create_transfer(
                     {"value": float(value), "walletId": target_wallet, "description": transfer_description}
                 )
@@ -722,7 +803,7 @@ def request_bill_payment(db: Session, account: EscrowAccount, *, barcode: str, a
         db.flush()
         return {"provider": "MOCK", "payment_id": event_id, "status": "DONE", "amount": str(value)}
 
-    with subaccount_client(account) as client:
+    with subaccount_client(account, db=db) as client:
         result = client.create_bill_payment(
             {
                 "identificationField": barcode,
@@ -845,7 +926,7 @@ def issue_wallet_boleto(
             description=desc,
         )
 
-    with subaccount_client(account) as client:
+    with subaccount_client(account, db=db) as client:
         customer_payload: dict = {
             "name": name,
             "cpfCnpj": document,
@@ -940,12 +1021,67 @@ def list_wallet_boletos(db: Session, account: EscrowAccount, *, limit: int = 20)
             )
         return {"items": items}
 
-    with subaccount_client(account) as client:
+    with subaccount_client(account, db=db) as client:
         payload = client.list_payments(limit=limit, billing_type="BOLETO")
     data = payload.get("data") if isinstance(payload, dict) else None
     rows = data if isinstance(data, list) else []
     items = [_boleto_view_from_payment(row, provider="ASAAS") for row in rows if isinstance(row, dict)]
     return {"items": items}
+
+
+def repair_subaccount_kyc_access(db: Session, organization_id: str) -> dict:
+    """Recupera credencial das subcontas (se necessário) e sincroniza documentos KYC pendentes."""
+    accounts = list(
+        db.scalars(
+            select(EscrowAccount).where(
+                EscrowAccount.organization_id == organization_id,
+                EscrowAccount.user_id.isnot(None),
+            )
+        )
+    )
+    repaired: list[dict] = []
+    skipped: list[str] = []
+    errors: list[dict] = []
+    for account in accounts:
+        if not _requires_subaccount_key(account):
+            skipped.append(account.id)
+            continue
+        try:
+            had_key = bool((account.asaas_subaccount_api_key or "").strip())
+            ensure_subaccount_api_key(db, account)
+            sync_account_from_asaas(db, account)
+            docs = list_kyc_documents(db, account)
+            repaired.append(
+                {
+                    "account_id": account.id,
+                    "name": account.subaccount_name,
+                    "api_key_recreated": not had_key,
+                    "documents_count": len(docs.get("items") or []),
+                    "has_onboarding_url": bool(account.asaas_onboarding_url),
+                    "kyc_status": account.asaas_kyc_status,
+                }
+            )
+        except HTTPException as exc:
+            errors.append({"account_id": account.id, "name": account.subaccount_name, "error": str(exc.detail)})
+        except Exception as exc:  # noqa: BLE001 — reparo parcial
+            errors.append({"account_id": account.id, "name": account.subaccount_name, "error": str(exc)})
+    return {
+        "repaired_count": len(repaired),
+        "repaired": repaired,
+        "skipped_count": len(skipped),
+        "error_count": len(errors),
+        "errors": errors,
+        "message": (
+            f"{len(repaired)} subconta(s) sincronizada(s) para envio de documentos. "
+            f"{len(errors)} erro(s)."
+        ),
+    }
+
+
+def sync_escrow_account_kyc(db: Session, account: EscrowAccount) -> dict:
+    ensure_subaccount_api_key(db, account)
+    sync_account_from_asaas(db, account)
+    return list_kyc_documents(db, account)
 
 
 def _resolve_webhook_account_id(payload: dict, payment: dict, transfer: dict) -> str | None:

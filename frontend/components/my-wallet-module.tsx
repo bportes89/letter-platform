@@ -103,6 +103,8 @@ export function MyWalletModule() {
   const [boletos, setBoletos] = useState<IssuedBoleto[]>([]);
   const [lastBoleto, setLastBoleto] = useState<IssuedBoleto | null>(null);
   const [documents, setDocuments] = useState<KycDocument[]>([]);
+  const [documentsHint, setDocumentsHint] = useState("");
+  const [documentsError, setDocumentsError] = useState("");
   const [pixQr, setPixQr] = useState<{ payload?: string; encoded_image?: string | null } | null>(null);
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(true);
@@ -128,17 +130,30 @@ export function MyWalletModule() {
         /* sync opcional — não bloqueia a tela */
       }
     }
-    const [w, tx, docs, p, me, boletoList] = await Promise.all([
+    const [w, tx, p, me, boletoList] = await Promise.all([
       api<WalletView>("/wallet/me"),
       api<{ items: WalletTransaction[] }>("/wallet/me/transactions").catch(() => ({ items: [] })),
-      api<{ items: KycDocument[] }>("/wallet/me/kyc/documents").catch(() => ({ items: [] })),
       api<Profile>("/auth/me/profile").catch(() => null),
       api<User>("/auth/me").catch(() => null),
       api<{ items: IssuedBoleto[] }>("/wallet/me/boletos").catch(() => ({ items: [] })),
     ]);
+    let docsItems: KycDocument[] = [];
+    let docsHint = "";
+    let docsError = "";
+    if (w.has_subaccount) {
+      try {
+        const docs = await api<{ items: KycDocument[]; hint?: string | null }>("/wallet/me/kyc/documents");
+        docsItems = docs.items ?? [];
+        docsHint = docs.hint?.trim() ?? "";
+      } catch (e) {
+        docsError = e instanceof Error ? e.message : "Não foi possível carregar os documentos de verificação.";
+      }
+    }
     setWallet(w);
     setTransactions(tx.items ?? []);
-    setDocuments(docs.items ?? []);
+    setDocuments(docsItems);
+    setDocumentsHint(docsHint);
+    setDocumentsError(docsError);
     setBoletos(boletoList.items ?? []);
     if (me?.name) setHolderName(me.name);
     if (p) {
@@ -158,10 +173,10 @@ export function MyWalletModule() {
 
   async function syncWallet() {
     setNotice("");
-    const w = await api<WalletView>("/wallet/me/sync", { method: "POST" });
-    setWallet(w);
+    setDocumentsError("");
+    await api<WalletView>("/wallet/me/sync", { method: "POST" });
     await load();
-    setNotice("Dados da conta LETTER atualizados.");
+    setNotice("Dados da conta LETTER e documentos de verificação atualizados.");
   }
 
   async function openWalletAccount() {
@@ -338,6 +353,13 @@ export function MyWalletModule() {
   if (loading) return <div className="loading">Carregando BANK...</div>;
 
   const bankReady = wallet ? walletAccountReady(wallet) : false;
+  const showKycDocs =
+    Boolean(wallet?.has_subaccount) &&
+    (!wallet?.onboarding_complete ||
+      wallet.account?.asaas_onboarding_url ||
+      documents.length > 0 ||
+      documentsError ||
+      documentsHint);
 
   return (
     <>
@@ -513,16 +535,24 @@ export function MyWalletModule() {
               )}
             </section>
 
-            {(wallet.account?.asaas_onboarding_url || documents.length > 0) && (
+            {showKycDocs && (
               <section className="panel">
                 <h3>Documentação de verificação</h3>
                 <p className="muted" style={{ marginTop: 0 }}>
-                  Envie o contrato social e demais documentos em PDF (até 10 MB). Após o envio, o status muda para análise.
+                  Envie o contrato social e demais documentos em PDF (até 10 MB). Documentos com link externo devem ser
+                  enviados pela verificação oficial LETTER.
                 </p>
+                {documentsError && <div className="error">{documentsError}</div>}
+                {documentsHint && !documentsError && <div className="notice">{documentsHint}</div>}
                 {wallet.account?.asaas_onboarding_url && (
                   <div className="notice">
                     Alguns documentos exigem o link oficial de verificação LETTER:{" "}
                     <a href={wallet.account.asaas_onboarding_url} target="_blank" rel="noreferrer">Abrir verificação</a>
+                  </div>
+                )}
+                {documents.length === 0 && !documentsError && (
+                  <div className="notice">
+                    Nenhum documento listado ainda. Toque em <strong>Atualizar dados bancários</strong> para sincronizar com o Asaas.
                   </div>
                 )}
                 {documents.map((doc) => (

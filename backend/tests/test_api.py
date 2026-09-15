@@ -5147,6 +5147,113 @@ def test_escrow_create_plain_subaccount_without_escrow(client, auth_headers, mon
     assert escrow_calls[0]["enabled"] is False
 
 
+def test_escrow_repair_kyc_documents_recreates_missing_api_key(client, auth_headers, monkeypatch):
+    class CreateFakeAsaasClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def get_balance(self):
+            return {"balance": 1000.0}
+
+        def list_wallets(self):
+            return {"data": [{"id": "wallet-test-001"}]}
+
+        def create_subaccount(self, payload):
+            return {"id": "acct-plain-001", "walletId": "wallet-plain-001", "apiKey": "secret-once"}
+
+        def configure_subaccount_escrow(self, account_id, **kwargs):
+            return {"enabled": False}
+
+        def configure_default_escrow(self, **kwargs):
+            return {"enabled": True}
+
+    monkeypatch.setattr("app.asaas_common.settings.asaas_api_key", "test-key")
+    monkeypatch.setattr("app.asaas_common.settings.asaas_wallet_id", "wallet-test-001")
+    monkeypatch.setattr("app.asaas_escrow_service.AsaasClient", CreateFakeAsaasClient)
+    monkeypatch.setattr("app.asaas_subaccount_service.AsaasClient", CreateFakeAsaasClient)
+
+    created = client.post(
+        "/api/v1/escrow/accounts",
+        headers=auth_headers,
+        json={
+            "create_subaccount": True,
+            "enable_escrow": False,
+            "profile": {"cpf_cnpj": "57255607000130"},
+        },
+    )
+    assert created.status_code == 201
+    account_id = created.json()["id"]
+
+    from sqlalchemy import select
+
+    from app.db import SessionLocal
+    from app.models import EscrowAccount, User
+
+    with SessionLocal() as db:
+        account = db.get(EscrowAccount, account_id)
+        assert account is not None
+        admin = db.scalar(select(User).where(User.email == "admin@letter.com.br"))
+        account.user_id = admin.id
+        account.asaas_subaccount_api_key = None
+        db.commit()
+
+    class RepairFakeAsaasClient:
+        def __init__(self, *args, **kwargs):
+            self.api_key = kwargs.get("api_key") or "master-key"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def create_subaccount_access_token(self, account_id, *, name, expiration_date=None):
+            assert account_id == "acct-plain-001"
+            return {"apiKey": "recreated-sub-key"}
+
+        def list_documents(self):
+            return {
+                "data": [
+                    {
+                        "id": "doc-soc",
+                        "title": "Contrato social",
+                        "type": "SOCIAL_CONTRACT",
+                        "status": "PENDING",
+                    }
+                ]
+            }
+
+        def get_balance(self):
+            return {"balance": 0}
+
+        def get_commercial_info(self):
+            return {"status": "PENDING", "documentationStatus": "PENDING"}
+
+        def get_account_number(self):
+            return {}
+
+        def list_pix_keys(self):
+            return {"data": []}
+
+    monkeypatch.setattr("app.asaas_wallet_service.AsaasClient", RepairFakeAsaasClient)
+
+    repair = client.post("/api/v1/escrow/repair/kyc-documents", headers=auth_headers)
+    assert repair.status_code == 200
+    body = repair.json()
+    assert body["repaired_count"] >= 1
+    assert any(row["documents_count"] >= 1 for row in body["repaired"])
+
+    with SessionLocal() as db:
+        account = db.get(EscrowAccount, account_id)
+        assert account.asaas_subaccount_api_key == "recreated-sub-key"
+
+
 def test_escrow_create_main_wallet_legacy(client, auth_headers, monkeypatch):
     class FakeAsaasClient:
         def __init__(self, *args, **kwargs):
