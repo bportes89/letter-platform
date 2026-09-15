@@ -329,14 +329,34 @@ def list_wallet_transactions(db: Session, account: EscrowAccount, *, offset: int
     return {"total": payload.get("totalCount", len(rows)), "items": rows, "source": "ASAAS"}
 
 
+def _extract_onboarding_url(row: dict) -> str | None:
+    url = row.get("onboardingUrl") or row.get("onboarding_url")
+    if isinstance(url, str) and url.strip():
+        return url.strip()
+    nested = row.get("documents")
+    if isinstance(nested, list):
+        for item in nested:
+            if isinstance(item, dict):
+                nested_url = item.get("onboardingUrl") or item.get("onboarding_url")
+                if isinstance(nested_url, str) and nested_url.strip():
+                    return nested_url.strip()
+    return None
+
+
+def _document_accepts_api_upload(doc_type: str, onboarding_url: str | None) -> bool:
+    if onboarding_url:
+        return False
+    # Em produção o Asaas costuma bloquear identificação/selfie via API no BaaS,
+    # mesmo quando o onboardingUrl ainda não veio na listagem inicial.
+    if doc_type in {"IDENTIFICATION", "IDENTIFICATION_SELFIE"}:
+        return False
+    return True
+
+
 def _parse_kyc_document_rows(db: Session, account: EscrowAccount, data: list) -> list[dict]:
     items: list[dict] = []
     for row in data:
-        onboarding_url = row.get("onboardingUrl") or row.get("onboarding_url")
-        if isinstance(onboarding_url, str):
-            onboarding_url = onboarding_url.strip() or None
-        else:
-            onboarding_url = None
+        onboarding_url = _extract_onboarding_url(row)
         doc_type = str(row.get("type") or row.get("documentType") or "CUSTOM").upper()
         title = str(row.get("title") or row.get("description") or doc_type or "Documento")
         if doc_type == "SOCIAL_CONTRACT" and "contrato" not in title.lower():
@@ -348,8 +368,7 @@ def _parse_kyc_document_rows(db: Session, account: EscrowAccount, data: list) ->
                 "type": doc_type,
                 "status": str(row.get("status") or "PENDING"),
                 "onboarding_url": onboarding_url,
-                # Com onboardingUrl o Asaas rejeita upload via API — só o link cadastro.io.
-                "accepts_api_upload": not bool(onboarding_url),
+                "accepts_api_upload": _document_accepts_api_upload(doc_type, onboarding_url),
             }
         )
         if onboarding_url and not account.asaas_onboarding_url:

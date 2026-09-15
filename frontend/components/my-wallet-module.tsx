@@ -596,6 +596,10 @@ export function MyWalletModule() {
                           }}
                         />
                       </div>
+                    ) : doc.type === "IDENTIFICATION" || doc.type === "IDENTIFICATION_SELFIE" ? (
+                      <small className="muted">
+                        Identificação via link oficial — toque em Atualizar dados bancários ou contate o suporte LETTER.
+                      </small>
                     ) : (
                       <small className="muted">Aguardando análise</small>
                     )}

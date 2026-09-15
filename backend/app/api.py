@@ -5097,6 +5097,34 @@ def escrow_list_account_kyc_documents(
     return list_kyc_documents(db, account)
 
 
+@router.post("/escrow/accounts/{account_id}/kyc/documents/{document_id}")
+async def escrow_upload_account_kyc_document(
+    account_id: str,
+    document_id: str,
+    file: UploadFile = File(...),
+    user: User = Depends(require_scope("payments:review")),
+    db: Session = Depends(get_db),
+):
+    from app.asaas_wallet_service import upload_kyc_document
+
+    account = db.scalar(
+        select(EscrowAccount).where(EscrowAccount.id == account_id, EscrowAccount.organization_id == user.organization_id)
+    )
+    if not account:
+        raise HTTPException(status_code=404, detail="Conta escrow não encontrada")
+    result = await upload_kyc_document(db, account, document_id, file)
+    audit(
+        db,
+        user,
+        "escrow.kyc_document_uploaded",
+        "escrow_account",
+        account.id,
+        {"document_id": document_id, "uploaded_by_admin": True},
+    )
+    db.commit()
+    return result
+
+
 @router.post("/escrow/accounts/{account_id}/escrow", response_model=EscrowView)
 def escrow_set_account_flag(
     account_id: str,
