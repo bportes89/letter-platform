@@ -15,9 +15,9 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("users", sa.Column("access_all", sa.Boolean(), nullable=False, server_default="0"))
+    op.add_column("users", sa.Column("access_all", sa.Boolean(), nullable=False, server_default=sa.false()))
     op.add_column("users", sa.Column("permissions_json", sa.Text(), nullable=True))
-    op.execute("UPDATE users SET access_all = 1 WHERE role = 'PLATFORM_ADMIN'")
+    op.execute(sa.text("UPDATE users SET access_all = true WHERE role = 'PLATFORM_ADMIN'"))
 
 
 def downgrade() -> None:
