@@ -242,7 +242,7 @@ def _banking_payload(account: EscrowAccount) -> dict:
         "agency": account.bank_agency or settings.asaas_default_agency,
         "account_number": account.bank_account_number,
         "pix_key": account.pix_key,
-        "display_bank": account.bank_code or settings.asaas_bank_code,
+        "display_bank": f"{account.bank_code or settings.asaas_bank_code} - {settings.asaas_bank_name}",
     }
 
 
