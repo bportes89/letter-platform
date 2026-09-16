@@ -2,7 +2,8 @@
 
 import { CheckCircle2, FileUp, RefreshCw, ShoppingCart, Landmark } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { api, apiForm, User } from "@/lib/api";
+import { AdminDocumentPanel } from "@/components/admin-document-panel";
+import { api, apiForm, deleteApi, downloadApi, User } from "@/lib/api";
 import { isInternalProductRole } from "@/lib/product-nav";
 import { FinOpsModule } from "@/components/finops-module";
 import { PreAnalysisModule } from "@/components/pre-analysis-module";
@@ -36,7 +37,7 @@ type FlashSolicitation = {
   source_channel_label: string | null;
   lead_id: string | null;
   required_docs: RequiredDoc[];
-  documents: Array<{ id: string; doc_type: string; created_at: string | null }>;
+  documents: Array<{ id: string; doc_type: string; document_id?: string | null; filename?: string | null; status?: string | null; created_at: string | null }>;
   can_create_sale: boolean;
 };
 
@@ -237,15 +238,15 @@ export function FlashDeskModule() {
     }
   }
 
-  async function uploadDoc(item: FlashSolicitation, file: File) {
+  async function uploadDoc(item: FlashSolicitation, file: File, type = docType) {
     setError("");
     setBusy(true);
     try {
       const body = new FormData();
       body.append("file", file);
-      body.append("doc_type", docType);
+      body.append("doc_type", type);
       await apiForm(`/flash/desk/solicitations/${item.id}/documents`, body);
-      setNotice(`Documento ${docType} anexado em ${item.contact_name}`);
+      setNotice(`Documento ${type} anexado em ${item.contact_name}`);
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Falha no upload");
@@ -253,6 +254,36 @@ export function FlashDeskModule() {
       setBusy(false);
     }
   }
+
+  async function deleteDoc(item: FlashSolicitation, docId: string) {
+    setError("");
+    setBusy(true);
+    try {
+      await deleteApi(`/flash/desk/solicitations/${item.id}/documents/${docId}`);
+      setNotice("Documento excluído.");
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Falha ao excluir documento");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const flashDocTypeOptions = useMemo(
+    () =>
+      (selected?.required_docs?.length
+        ? selected.required_docs
+        : [
+            { code: "MATRICULA_ENOTARIADO", label: "Matrícula e-notariado" },
+            { code: "FIPE_MOLICAR", label: "FIPE/Molicar" },
+            { code: "LAUDO_AVALIACAO", label: "Laudo" },
+            { code: "SERASA", label: "Serasa" },
+            { code: "BACEN", label: "Bacen" },
+            { code: "CRLV", label: "CRLV" },
+          ]
+      ).map((d) => ({ value: d.code, label: d.label })),
+    [selected],
+  );
 
   async function createSale() {
     if (!selectedId) return;
@@ -512,6 +543,18 @@ export function FlashDeskModule() {
                     <li key={d.code}>{d.uploaded ? "✓" : "○"} {d.label}</li>
                   ))}
                 </ul>
+                <AdminDocumentPanel
+                  title={`Documentos anexados (${selected.documents.length})`}
+                  hint="Anexe, baixe ou exclua arquivos desta solicitação Flash Capital."
+                  documents={selected.documents}
+                  busy={busy}
+                  canDelete={isInternal}
+                  docTypeOptions={flashDocTypeOptions}
+                  defaultDocType={docType}
+                  onUpload={(file, type) => uploadDoc(selected, file, type || docType)}
+                  onDownload={(doc) => downloadApi(`/documents/${doc.document_id}/download`, doc.filename || "documento")}
+                  onDelete={(doc) => deleteDoc(selected, doc.id)}
+                />
               </div>
             )}
           </div>

@@ -3,7 +3,9 @@
 import { CheckCircle2, ClipboardList, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
-import { api, API_URL, downloadApi } from "@/lib/api";
+import { AdminDocumentPanel } from "@/components/admin-document-panel";
+import { api, apiForm, deleteApi, downloadApi } from "@/lib/api";
+import { isInternalProductRole } from "@/lib/product-nav";
 
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
@@ -91,6 +93,8 @@ export function CadastroMarketplaceModule() {
   const [busy, setBusy] = useState(false);
   const [myRole, setMyRole] = useState("");
   const partnerView = myRole === "PARTNER" || myRole === "QUOTA_SELLER";
+  const canManageDocs = myRole !== "CLIENT";
+  const canDeleteDocs = isInternalProductRole(myRole);
 
   useEffect(() => {
     api<{ role: string }>("/auth/me")
@@ -131,14 +135,39 @@ export function CadastroMarketplaceModule() {
     }
   }
 
-  async function openDocument(docId: string, filename: string) {
+  async function reloadDocs() {
+    if (!selected) return;
+    setDocs(await api(`/marketplace/cadastros/${selected.lead_id}/documents`));
+  }
+
+  async function uploadMarketplaceDoc(file: File, kind?: string) {
     if (!selected) return;
     setBusy(true);
     setError("");
     try {
-      await downloadApi(`/marketplace/cadastros/${selected.lead_id}/documents/${docId}`, filename);
+      const body = new FormData();
+      body.append("file", file);
+      body.append("kind", kind || "OTHER");
+      await apiForm(`/marketplace/cadastros/${selected.lead_id}/documents`, body);
+      setNotice("Documento anexado ao cadastro.");
+      await reloadDocs();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Falha ao baixar documento");
+      setError(e instanceof Error ? e.message : "Falha ao anexar documento");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteMarketplaceDoc(docId: string) {
+    if (!selected) return;
+    setBusy(true);
+    setError("");
+    try {
+      await deleteApi(`/marketplace/cadastros/${selected.lead_id}/documents/${docId}`);
+      setNotice("Documento excluído.");
+      await reloadDocs();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Falha ao excluir documento");
     } finally {
       setBusy(false);
     }
@@ -409,23 +438,47 @@ export function CadastroMarketplaceModule() {
                 Ver contrato (PDF)
               </button>
             </div>
-            <div className="notice">
-              Documentos do cliente ({docs.length})
-              {!docs.length ? (
-                <small style={{ display: "block", marginTop: "0.35rem" }}>Nenhum upload ainda.</small>
-              ) : (
-                <ul style={{ margin: "0.5rem 0 0", paddingLeft: "1.1rem" }}>
-                  {docs.map((d) => (
-                    <li key={d.id}>
-                      {d.kind} — {d.filename} ({d.status}){" "}
-                      <button type="button" className="table-action" disabled={busy} onClick={() => void openDocument(d.id, d.filename)}>
-                        Baixar
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
+            {canManageDocs ? (
+              <AdminDocumentPanel
+                title={`Documentos do cliente (${docs.length})`}
+                hint="Anexe, baixe ou exclua documentos deste cadastro Marketplace."
+                documents={docs.map((d) => ({
+                  id: d.id,
+                  document_id: d.id,
+                  kind: d.kind,
+                  filename: d.filename,
+                  status: d.status,
+                }))}
+                busy={busy}
+                canDelete={canDeleteDocs}
+                docTypeOptions={[
+                  { value: "IDENTITY", label: "Identidade" },
+                  { value: "ADDRESS", label: "Endereço" },
+                  { value: "INCOME", label: "Renda" },
+                  { value: "CONTRACT", label: "Contrato" },
+                  { value: "PAYMENT_PROOF", label: "Comprovante de pagamento" },
+                  { value: "OTHER", label: "Outro" },
+                ]}
+                onUpload={(file, kind) => uploadMarketplaceDoc(file, kind)}
+                onDownload={(doc) => downloadApi(`/marketplace/cadastros/${selected.lead_id}/documents/${doc.id}`, doc.filename || "documento")}
+                onDelete={(doc) => deleteMarketplaceDoc(doc.id)}
+              />
+            ) : (
+              <div className="notice">
+                Documentos do cliente ({docs.length})
+                {!docs.length ? (
+                  <small style={{ display: "block", marginTop: "0.35rem" }}>Nenhum upload ainda.</small>
+                ) : (
+                  <ul style={{ margin: "0.5rem 0 0", paddingLeft: "1.1rem" }}>
+                    {docs.map((d) => (
+                      <li key={d.id}>
+                        {d.kind} — {d.filename} ({d.status})
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
             <div className="marketplace-form-row">
               <label className="marketplace-field">
                 Nome

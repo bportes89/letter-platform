@@ -2,7 +2,8 @@
 
 import { CheckCircle2, FileUp, RefreshCw, ShoppingCart, Scale } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { api, apiForm, User } from "@/lib/api";
+import { AdminDocumentPanel } from "@/components/admin-document-panel";
+import { api, apiForm, deleteApi, downloadApi, User } from "@/lib/api";
 import { isInternalProductRole } from "@/lib/product-nav";
 import { QuitConModule } from "@/components/quitcon-module";
 import { DeskSourceMetaRow } from "@/lib/desk-source-meta";
@@ -27,7 +28,7 @@ type QuitConSolicitation = {
   source_channel_label: string | null;
   lead_id: string | null;
   required_docs: RequiredDoc[];
-  documents: Array<{ id: string; doc_type: string; created_at: string | null }>;
+  documents: Array<{ id: string; doc_type: string; document_id?: string | null; filename?: string | null; status?: string | null; created_at: string | null }>;
   can_create_sale: boolean;
 };
 
@@ -208,13 +209,13 @@ export function QuitConDeskModule() {
     }
   }
 
-  async function uploadDoc(item: QuitConSolicitation, file: File) {
+  async function uploadDoc(item: QuitConSolicitation, file: File, type = docType) {
     setError("");
     setBusy(true);
     try {
       const body = new FormData();
       body.append("file", file);
-      body.append("doc_type", docType);
+      body.append("doc_type", type);
       await apiForm(`/quitcon/desk/solicitations/${item.id}/documents`, body);
       setNotice(`Documento anexado em ${item.contact_name}`);
       await load();
@@ -224,6 +225,34 @@ export function QuitConDeskModule() {
       setBusy(false);
     }
   }
+
+  async function deleteDoc(item: QuitConSolicitation, docId: string) {
+    setError("");
+    setBusy(true);
+    try {
+      await deleteApi(`/quitcon/desk/solicitations/${item.id}/documents/${docId}`);
+      setNotice("Documento excluído.");
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Falha ao excluir documento");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const quitconDocTypeOptions = useMemo(
+    () =>
+      (selected?.required_docs?.length
+        ? selected.required_docs
+        : [
+            { code: "EXTRATO_CONSORCIO", label: "Extrato" },
+            { code: "CONTRATO_CONSORCIO", label: "Contrato" },
+            { code: "DOCUMENTOS_PESSOAIS", label: "Docs pessoais" },
+            { code: "COMPROVANTE_PARCELAS", label: "Parcelas" },
+          ]
+      ).map((d) => ({ value: d.code, label: d.label })),
+    [selected],
+  );
 
   async function createSale() {
     if (!selectedId) return;
@@ -458,6 +487,28 @@ export function QuitConDeskModule() {
                 })}
               </tbody>
             </table>
+            {selected && (
+              <div className="notice" style={{ marginTop: 14 }}>
+                <b>Detalhe — {selected.contact_name}</b>
+                <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
+                  {selected.required_docs.map((d) => (
+                    <li key={d.code}>{d.uploaded ? "✓" : "○"} {d.label}</li>
+                  ))}
+                </ul>
+                <AdminDocumentPanel
+                  title={`Documentos anexados (${selected.documents.length})`}
+                  hint="Anexe, baixe ou exclua arquivos desta solicitação QuitCon."
+                  documents={selected.documents}
+                  busy={busy}
+                  canDelete={isInternal}
+                  docTypeOptions={quitconDocTypeOptions}
+                  defaultDocType={docType}
+                  onUpload={(file, type) => uploadDoc(selected, file, type || docType)}
+                  onDownload={(doc) => downloadApi(`/documents/${doc.document_id}/download`, doc.filename || "documento")}
+                  onDelete={(doc) => deleteDoc(selected, doc.id)}
+                />
+              </div>
+            )}
           </div>
         )}
 

@@ -6,6 +6,8 @@ from pathlib import Path
 from uuid import uuid4
 
 from fastapi import HTTPException, UploadFile
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 from reportlab.lib.colors import HexColor
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -14,7 +16,17 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, Tabl
 
 from app.core.config import settings
 from app.company_profile_service import company_profile
-from app.models import CalculationMemory, Contract, Document, Proposal, User
+from app.models import (
+    CalculationMemory,
+    Contract,
+    Document,
+    FlashSolicitationDocument,
+    Proposal,
+    QuitConSolicitationDocument,
+    Role,
+    SdcSolicitationDocument,
+    User,
+)
 from app.storage_service import get_storage
 
 ALLOWED_TYPES = {
@@ -31,6 +43,95 @@ def safe_name(filename: str) -> str:
     name = Path(filename).name
     name = re.sub(r"[^A-Za-z0-9._-]", "_", name)
     return name[:180] or "documento"
+
+
+def media_type_for_filename(filename: str) -> str:
+    lower = filename.lower()
+    if lower.endswith(".pdf"):
+        return "application/pdf"
+    if lower.endswith(".png"):
+        return "image/png"
+    if lower.endswith((".jpg", ".jpeg")):
+        return "image/jpeg"
+    if lower.endswith(".xml"):
+        return "application/xml"
+    if lower.endswith(".docx"):
+        return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    return "application/octet-stream"
+
+
+def read_stored_document(document: Document) -> tuple[bytes, str, str]:
+    try:
+        data = get_storage().get(document.storage_key)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Arquivo ausente no storage")
+    if not data:
+        raise HTTPException(status_code=404, detail="Arquivo ausente no storage")
+    return data, document.filename, media_type_for_filename(document.filename)
+
+
+def get_org_document(db: Session, user: User, document_id: str) -> Document:
+    document = db.scalar(
+        select(Document).where(Document.id == document_id, Document.organization_id == user.organization_id)
+    )
+    if not document:
+        raise HTTPException(status_code=404, detail="Documento não encontrado")
+    return document
+
+
+def _desk_entity_types() -> frozenset[str]:
+    return frozenset({"sdc_solicitation", "flash_solicitation", "quitcon_solicitation"})
+
+
+def assert_document_access(db: Session, user: User, document: Document) -> None:
+    if document.organization_id != user.organization_id:
+        raise HTTPException(status_code=403, detail="Sem acesso a este documento")
+    if user.role in {Role.PLATFORM_ADMIN, Role.INTERNAL_STAFF}:
+        return
+    if document.uploaded_by_id == user.id:
+        return
+    entity_type = document.entity_type
+    entity_id = document.entity_id
+    if entity_type == "marketplace_lead":
+        from app.network_visibility import get_lead_for_user
+
+        get_lead_for_user(db, user, entity_id)
+        return
+    if entity_type in _desk_entity_types():
+        if entity_type == "sdc_solicitation":
+            from app.sdc_desk_service import get_solicitation
+
+            get_solicitation(db, user, entity_id)
+        elif entity_type == "flash_solicitation":
+            from app.flash_desk_service import get_solicitation
+
+            get_solicitation(db, user, entity_id)
+        else:
+            from app.quitcon_desk_service import get_solicitation
+
+            get_solicitation(db, user, entity_id)
+        return
+    if entity_type == "contract":
+        contract = db.scalar(
+            select(Contract).where(Contract.id == entity_id, Contract.organization_id == user.organization_id)
+        )
+        if contract:
+            return
+    raise HTTPException(status_code=403, detail="Sem acesso a este documento")
+
+
+def purge_document(db: Session, document: Document) -> None:
+    try:
+        get_storage().delete(document.storage_key)
+    except FileNotFoundError:
+        pass
+    db.delete(document)
+
+
+def purge_document_links(db: Session, document_id: str) -> None:
+    for model in (SdcSolicitationDocument, FlashSolicitationDocument, QuitConSolicitationDocument):
+        for row in db.scalars(select(model).where(model.document_id == document_id)):
+            db.delete(row)
 
 
 async def persist_upload(upload: UploadFile, user: User, entity_type: str, entity_id: str, kind: str) -> Document:

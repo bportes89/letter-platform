@@ -7,6 +7,7 @@ from app.core.config import settings
 class StorageAdapter(Protocol):
     def put(self,key:str,data:bytes,content_type:str)->None: ...
     def get(self,key:str)->bytes: ...
+    def delete(self,key:str)->None: ...
     def health(self)->dict: ...
 
 
@@ -17,6 +18,10 @@ class LocalStorage:
         path=Path(settings.storage_path)/key
         if not path.exists(): raise FileNotFoundError(key)
         return path.read_bytes()
+    def delete(self,key:str)->None:
+        path=Path(settings.storage_path)/key
+        if path.exists():
+            path.unlink()
     def health(self)->dict:
         path=Path(settings.storage_path);path.mkdir(parents=True,exist_ok=True);return {"backend":"LOCAL","status":"UP","path":str(path)}
 
@@ -30,6 +35,8 @@ class S3Storage:
     def get(self,key:str)->bytes:
         response=self.client.get_object(Bucket=settings.s3_bucket,Key=key)
         return response["Body"].read()
+    def delete(self,key:str)->None:
+        self.client.delete_object(Bucket=settings.s3_bucket,Key=key)
     def health(self)->dict:
         self.client.head_bucket(Bucket=settings.s3_bucket);return {"backend":"S3","status":"UP","bucket":settings.s3_bucket}
 

@@ -2424,6 +2424,37 @@ def marketplace_cadastro_documents(lead_id: str, user: User = Depends(get_curren
     return list_marketplace_lead_documents(db, user, lead_id)
 
 
+@router.post("/marketplace/cadastros/{lead_id}/documents", response_model=DocumentView, status_code=201)
+async def marketplace_cadastro_upload_document(
+    lead_id: str,
+    kind: str = Form("OTHER"),
+    file: UploadFile = File(...),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.client_marketplace_service import upload_lead_document
+
+    document = await upload_lead_document(db, user, lead_id, kind=kind, file=file)
+    audit(db, user, "marketplace.admin.document.uploaded", "document", document.id, {"lead_id": lead_id, "kind": kind})
+    db.commit()
+    db.refresh(document)
+    return document
+
+
+@router.delete("/marketplace/cadastros/{lead_id}/documents/{document_id}", status_code=204)
+def marketplace_cadastro_delete_document(
+    lead_id: str,
+    document_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.client_marketplace_service import delete_lead_document
+
+    delete_lead_document(db, user, lead_id, document_id)
+    audit(db, user, "marketplace.admin.document.deleted", "document", document_id, {"lead_id": lead_id})
+    db.commit()
+
+
 @router.get("/marketplace/cadastros/{lead_id}/documents/{document_id}")
 def marketplace_cadastro_document_download(
     lead_id: str,
@@ -3311,14 +3342,14 @@ def sdc_desk_store(payload: SdcDeskStoreRequest, user: User = Depends(get_curren
     })
     db.commit()
     db.refresh(item)
-    return solicitation_view(item, list_documents(db, item.id))
+    return solicitation_view(item, list_documents(db, item.id), db)
 
 
 @router.get("/sdc/desk/solicitations")
 def sdc_desk_list(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     from app.sdc_desk_service import list_documents, list_solicitations, solicitation_view
 
-    return [solicitation_view(item, list_documents(db, item.id)) for item in list_solicitations(db, user)]
+    return [solicitation_view(item, list_documents(db, item.id), db) for item in list_solicitations(db, user)]
 
 
 @router.get("/sdc/desk/solicitations/{solicitation_id}")
@@ -3326,7 +3357,7 @@ def sdc_desk_get(solicitation_id: str, user: User = Depends(get_current_user), d
     from app.sdc_desk_service import get_solicitation, list_documents, solicitation_view
 
     item = get_solicitation(db, user, solicitation_id)
-    return solicitation_view(item, list_documents(db, item.id))
+    return solicitation_view(item, list_documents(db, item.id), db)
 
 
 @router.patch("/sdc/desk/solicitations/{solicitation_id}")
@@ -3346,7 +3377,7 @@ def sdc_desk_status(
     })
     db.commit()
     db.refresh(item)
-    return solicitation_view(item, list_documents(db, item.id))
+    return solicitation_view(item, list_documents(db, item.id), db)
 
 
 @router.post("/sdc/desk/solicitations/{solicitation_id}/documents")
@@ -3369,7 +3400,22 @@ async def sdc_desk_upload_doc(
     })
     db.commit()
     db.refresh(item)
-    return solicitation_view(item, list_documents(db, item.id))
+    return solicitation_view(item, list_documents(db, item.id), db)
+
+
+@router.delete("/sdc/desk/solicitations/{solicitation_id}/documents/{document_link_id}", status_code=204)
+def sdc_desk_delete_doc(
+    solicitation_id: str,
+    document_link_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.sdc_desk_service import get_solicitation, remove_document
+
+    item = get_solicitation(db, user, solicitation_id)
+    remove_document(db, user, item, document_link_id)
+    audit(db, user, "sdc_desk.document_deleted", "sdc_solicitation", item.id, {"document_link_id": document_link_id})
+    db.commit()
 
 
 @router.post("/sdc/desk/solicitations/{solicitation_id}/sale", status_code=201)
@@ -3387,7 +3433,7 @@ def sdc_desk_create_sale(
     db.commit()
     db.refresh(item)
     return {
-        "solicitation": solicitation_view(item, list_documents(db, item.id)),
+        "solicitation": solicitation_view(item, list_documents(db, item.id), db),
         **sale,
         "message": "Cadastro de venda Cap Giro criado e vinculado ao SDC",
     }
@@ -3412,14 +3458,14 @@ def flash_desk_store(payload: FlashDeskStoreRequest, user: User = Depends(get_cu
     })
     db.commit()
     db.refresh(item)
-    return solicitation_view(item, list_documents(db, item.id))
+    return solicitation_view(item, list_documents(db, item.id), db)
 
 
 @router.get("/flash/desk/solicitations")
 def flash_desk_list(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     from app.flash_desk_service import list_documents, list_solicitations, solicitation_view
 
-    return [solicitation_view(item, list_documents(db, item.id)) for item in list_solicitations(db, user)]
+    return [solicitation_view(item, list_documents(db, item.id), db) for item in list_solicitations(db, user)]
 
 
 @router.get("/flash/desk/solicitations/{solicitation_id}")
@@ -3427,7 +3473,7 @@ def flash_desk_get(solicitation_id: str, user: User = Depends(get_current_user),
     from app.flash_desk_service import get_solicitation, list_documents, solicitation_view
 
     item = get_solicitation(db, user, solicitation_id)
-    return solicitation_view(item, list_documents(db, item.id))
+    return solicitation_view(item, list_documents(db, item.id), db)
 
 
 @router.patch("/flash/desk/solicitations/{solicitation_id}")
@@ -3447,7 +3493,7 @@ def flash_desk_status(
     })
     db.commit()
     db.refresh(item)
-    return solicitation_view(item, list_documents(db, item.id))
+    return solicitation_view(item, list_documents(db, item.id), db)
 
 
 @router.post("/flash/desk/solicitations/{solicitation_id}/documents")
@@ -3470,7 +3516,22 @@ async def flash_desk_upload_doc(
     })
     db.commit()
     db.refresh(item)
-    return solicitation_view(item, list_documents(db, item.id))
+    return solicitation_view(item, list_documents(db, item.id), db)
+
+
+@router.delete("/flash/desk/solicitations/{solicitation_id}/documents/{document_link_id}", status_code=204)
+def flash_desk_delete_doc(
+    solicitation_id: str,
+    document_link_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.flash_desk_service import get_solicitation, remove_document
+
+    item = get_solicitation(db, user, solicitation_id)
+    remove_document(db, user, item, document_link_id)
+    audit(db, user, "flash_desk.document_deleted", "flash_solicitation", item.id, {"document_link_id": document_link_id})
+    db.commit()
 
 
 @router.post("/flash/desk/solicitations/{solicitation_id}/sale", status_code=201)
@@ -3489,7 +3550,7 @@ def flash_desk_create_sale(
     db.commit()
     db.refresh(item)
     return {
-        "solicitation": solicitation_view(item, list_documents(db, item.id)),
+        "solicitation": solicitation_view(item, list_documents(db, item.id), db),
         **sale,
         "message": "Proposta Flash Capital criada e vinculada à solicitação",
     }
@@ -3514,14 +3575,14 @@ def quitcon_desk_store(payload: QuitConDeskStoreRequest, user: User = Depends(ge
     })
     db.commit()
     db.refresh(item)
-    return solicitation_view(item, list_documents(db, item.id))
+    return solicitation_view(item, list_documents(db, item.id), db)
 
 
 @router.get("/quitcon/desk/solicitations")
 def quitcon_desk_list(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     from app.quitcon_desk_service import list_documents, list_solicitations, solicitation_view
 
-    return [solicitation_view(item, list_documents(db, item.id)) for item in list_solicitations(db, user)]
+    return [solicitation_view(item, list_documents(db, item.id), db) for item in list_solicitations(db, user)]
 
 
 @router.get("/quitcon/desk/solicitations/{solicitation_id}")
@@ -3529,7 +3590,7 @@ def quitcon_desk_get(solicitation_id: str, user: User = Depends(get_current_user
     from app.quitcon_desk_service import get_solicitation, list_documents, solicitation_view
 
     item = get_solicitation(db, user, solicitation_id)
-    return solicitation_view(item, list_documents(db, item.id))
+    return solicitation_view(item, list_documents(db, item.id), db)
 
 
 @router.patch("/quitcon/desk/solicitations/{solicitation_id}")
@@ -3549,7 +3610,7 @@ def quitcon_desk_status(
     })
     db.commit()
     db.refresh(item)
-    return solicitation_view(item, list_documents(db, item.id))
+    return solicitation_view(item, list_documents(db, item.id), db)
 
 
 @router.post("/quitcon/desk/solicitations/{solicitation_id}/documents")
@@ -3572,7 +3633,22 @@ async def quitcon_desk_upload_doc(
     })
     db.commit()
     db.refresh(item)
-    return solicitation_view(item, list_documents(db, item.id))
+    return solicitation_view(item, list_documents(db, item.id), db)
+
+
+@router.delete("/quitcon/desk/solicitations/{solicitation_id}/documents/{document_link_id}", status_code=204)
+def quitcon_desk_delete_doc(
+    solicitation_id: str,
+    document_link_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.quitcon_desk_service import get_solicitation, remove_document
+
+    item = get_solicitation(db, user, solicitation_id)
+    remove_document(db, user, item, document_link_id)
+    audit(db, user, "quitcon_desk.document_deleted", "quitcon_solicitation", item.id, {"document_link_id": document_link_id})
+    db.commit()
 
 
 @router.post("/quitcon/desk/solicitations/{solicitation_id}/sale", status_code=201)
@@ -3592,7 +3668,7 @@ def quitcon_desk_create_sale(
     db.commit()
     db.refresh(item)
     return {
-        "solicitation": solicitation_view(item, list_documents(db, item.id)),
+        "solicitation": solicitation_view(item, list_documents(db, item.id), db),
         **sale,
         "message": "Operação QuitCon aberta em AGUARDANDO_TAPAF",
     }
@@ -4840,6 +4916,35 @@ def list_documents(entity_type: str | None = None, entity_id: str | None = None,
     if entity_type: query=query.where(Document.entity_type==entity_type)
     if entity_id: query=query.where(Document.entity_id==entity_id)
     return list(db.scalars(query.order_by(Document.created_at.desc())))
+
+
+@router.get("/documents/{document_id}/download")
+def download_document(document_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.document_service import assert_document_access, get_org_document, read_stored_document
+
+    document = get_org_document(db, user, document_id)
+    assert_document_access(db, user, document)
+    content, filename, media = read_stored_document(document)
+    return Response(
+        content=content,
+        media_type=media,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.delete("/documents/{document_id}", status_code=204)
+def delete_document(document_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.document_service import assert_document_access, get_org_document, purge_document, purge_document_links
+
+    if user.role not in {Role.PLATFORM_ADMIN, Role.INTERNAL_STAFF, Role.MASTER_FRANCHISEE}:
+        raise HTTPException(status_code=403, detail="Apenas operação LETTER pode excluir documentos")
+    document = get_org_document(db, user, document_id)
+    assert_document_access(db, user, document)
+    filename = document.filename
+    purge_document_links(db, document.id)
+    purge_document(db, document)
+    audit(db, user, "document.deleted", "document", document_id, {"filename": filename})
+    db.commit()
 
 
 @router.post("/documents/{document_id}/mock-scan", response_model=DocumentView)

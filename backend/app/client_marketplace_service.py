@@ -16,7 +16,7 @@ from app.cadastro_service import (
     list_cadastros,
     seed_marketplace_lifecycle,
 )
-from app.document_service import persist_upload
+from app.document_service import persist_upload, purge_document
 from app.inter_boleto_service import issue_marketplace_boleto
 from app.models import Document, Lead, Proposal, Role, User
 from app.network_visibility import get_lead_for_user
@@ -205,6 +205,45 @@ def list_my_documents(db: Session, user: User, lead_id: str) -> list[Document]:
             .order_by(Document.created_at.desc())
         )
     )
+
+
+async def upload_lead_document(
+    db: Session,
+    user: User,
+    lead_id: str,
+    *,
+    kind: str,
+    file: UploadFile,
+) -> Document:
+    if user.role == Role.CLIENT:
+        raise HTTPException(status_code=403, detail="Somente operação LETTER e parceiros autorizados.")
+    get_lead_for_user(db, user, lead_id)
+    kind_norm = (kind or "OTHER").strip().upper()
+    if kind_norm not in DOC_KINDS:
+        raise HTTPException(status_code=422, detail=f"Tipo de documento inválido: {kind}")
+    document = await persist_upload(file, user, ENTITY_TYPE, lead_id, kind_norm)
+    document.status = "CLEAN"
+    db.add(document)
+    db.flush()
+    return document
+
+
+def delete_lead_document(db: Session, user: User, lead_id: str, document_id: str) -> None:
+    if user.role == Role.CLIENT:
+        raise HTTPException(status_code=403, detail="Somente operação LETTER e parceiros autorizados.")
+    get_lead_for_user(db, user, lead_id)
+    document = db.scalar(
+        select(Document).where(
+            Document.id == document_id,
+            Document.organization_id == user.organization_id,
+            Document.entity_type == ENTITY_TYPE,
+            Document.entity_id == lead_id,
+        )
+    )
+    if not document:
+        raise HTTPException(status_code=404, detail="Documento não encontrado")
+    purge_document(db, document)
+    db.flush()
 
 
 async def upload_my_document(

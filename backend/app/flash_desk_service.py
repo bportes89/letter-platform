@@ -11,9 +11,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.desk_solicitation_meta import evaluation_json_with_meta, evaluation_meta
-from app.document_service import persist_upload
+from app.document_service import persist_upload, purge_document, purge_document_links
 from app.flash_valid_lss_service import configure_flash_parties
-from app.models import FlashSolicitation, FlashSolicitationDocument, Lead, Proposal, Role, User
+from app.models import Document, FlashSolicitation, FlashSolicitationDocument, Lead, Proposal, Role, User
 from app.network_service import PARTNER_NETWORK_ROLES
 from app.product_service import FLASH_CAPITAL_PRODUCT, calculate_flash_credit
 from app.services import money
@@ -313,7 +313,7 @@ async def add_document(
     comment: str | None = None,
 ) -> FlashSolicitationDocument:
     assert_desk_access(user)
-    if item.status in STATUS_TERMINAL:
+    if item.status in STATUS_TERMINAL and not _is_admin(user):
         raise HTTPException(status_code=422, detail="Esta solicitação já está encerrada e não aceita mais documentos.")
     document = await persist_upload(upload, user, "flash_solicitation", item.id, doc_type or "FLASH_SUPPORT")
     document.status = "CLEAN"
@@ -332,6 +332,40 @@ async def add_document(
         item.status = STATUS_UNDER_REVIEW
     db.flush()
     return row
+
+
+def remove_document(db: Session, user: User, item: FlashSolicitation, link_id: str) -> None:
+    assert_desk_access(user)
+    if not _is_admin(user):
+        raise HTTPException(status_code=403, detail="Apenas operação LETTER pode excluir documentos")
+    row = db.scalar(
+        select(FlashSolicitationDocument).where(
+            FlashSolicitationDocument.id == link_id,
+            FlashSolicitationDocument.solicitation_id == item.id,
+            FlashSolicitationDocument.organization_id == user.organization_id,
+        )
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Documento não encontrado")
+    document = db.get(Document, row.document_id)
+    db.delete(row)
+    if document:
+        purge_document_links(db, document.id)
+        purge_document(db, document)
+    db.flush()
+
+
+def _document_link_view(db: Session, row: FlashSolicitationDocument) -> dict:
+    document = db.get(Document, row.document_id)
+    return {
+        "id": row.id,
+        "doc_type": row.doc_type,
+        "comment": row.comment,
+        "document_id": row.document_id,
+        "filename": document.filename if document else None,
+        "status": document.status if document else None,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+    }
 
 
 def create_sale_from_flash(
@@ -421,7 +455,11 @@ def create_sale_from_flash(
     }
 
 
-def solicitation_view(item: FlashSolicitation, docs: list[FlashSolicitationDocument] | None = None) -> dict:
+def solicitation_view(
+    item: FlashSolicitation,
+    docs: list[FlashSolicitationDocument] | None = None,
+    db: Session | None = None,
+) -> dict:
     uploaded = {d.doc_type for d in (docs or [])}
     required = _docs_for(item.asset_category)
     return {
@@ -460,11 +498,13 @@ def solicitation_view(item: FlashSolicitation, docs: list[FlashSolicitationDocum
             {**d, "uploaded": d["code"] in uploaded} for d in required
         ],
         "documents": [
-            {
+            _document_link_view(db, d) if db else {
                 "id": d.id,
                 "doc_type": d.doc_type,
                 "comment": d.comment,
                 "document_id": d.document_id,
+                "filename": None,
+                "status": None,
                 "created_at": d.created_at.isoformat() if d.created_at else None,
             }
             for d in (docs or [])

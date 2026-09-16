@@ -2,7 +2,8 @@
 
 import { CheckCircle2, FileUp, RefreshCw, ShoppingCart, ClipboardList } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { api, apiForm, User } from "@/lib/api";
+import { AdminDocumentPanel } from "@/components/admin-document-panel";
+import { api, apiForm, deleteApi, downloadApi, User } from "@/lib/api";
 import { isInternalProductRole } from "@/lib/product-nav";
 import { PreAnalysisModule } from "@/components/pre-analysis-module";
 import { DeskSourceMetaRow } from "@/lib/desk-source-meta";
@@ -32,7 +33,7 @@ type SdcSolicitation = {
   source_channel: string | null;
   source_channel_label: string | null;
   lead_id: string | null;
-  documents: Array<{ id: string; doc_type: string; created_at: string | null }>;
+  documents: Array<{ id: string; doc_type: string; document_id?: string | null; filename?: string | null; status?: string | null; created_at: string | null }>;
   can_create_sale: boolean;
 };
 
@@ -218,18 +219,32 @@ export function SdcDeskModule() {
     }
   }
 
-  async function uploadDoc(item: SdcSolicitation, file: File) {
+  async function uploadDoc(item: SdcSolicitation, file: File, type = docType) {
     setError("");
     setBusy(true);
     try {
       const body = new FormData();
       body.append("file", file);
-      body.append("doc_type", docType);
+      body.append("doc_type", type);
       await apiForm(`/sdc/desk/solicitations/${item.id}/documents`, body);
       setNotice(`Documento anexado em ${item.contact_name}`);
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Falha no upload");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteDoc(item: SdcSolicitation, docId: string) {
+    setError("");
+    setBusy(true);
+    try {
+      await deleteApi(`/sdc/desk/solicitations/${item.id}/documents/${docId}`);
+      setNotice("Documento excluído.");
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Falha ao excluir documento");
     } finally {
       setBusy(false);
     }
@@ -458,11 +473,23 @@ export function SdcDeskModule() {
                   label={selected.source_channel_label}
                   leadId={selected.lead_id}
                 />
-                <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
-                  {selected.documents.map((d) => (
-                    <li key={d.id}>{d.doc_type} — {d.created_at ? new Date(d.created_at).toLocaleString("pt-BR") : "—"}</li>
-                  ))}
-                </ul>
+                <AdminDocumentPanel
+                  title={`Documentos (${selected.documents.length})`}
+                  hint="Anexe, baixe ou exclua arquivos desta solicitação."
+                  documents={selected.documents}
+                  busy={busy}
+                  canDelete={isInternal}
+                  docTypeOptions={[
+                    { value: "SDC_SUPPORT", label: "Documento de apoio" },
+                    { value: "IDENTITY", label: "Identidade" },
+                    { value: "INCOME", label: "Renda" },
+                    { value: "ASSET", label: "Bem / garantia" },
+                  ]}
+                  defaultDocType={docType}
+                  onUpload={(file, type) => uploadDoc(selected, file, type || docType)}
+                  onDownload={(doc) => downloadApi(`/documents/${doc.document_id}/download`, doc.filename || "documento")}
+                  onDelete={(doc) => deleteDoc(selected, doc.id)}
+                />
               </div>
             )}
           </div>

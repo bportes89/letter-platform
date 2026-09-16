@@ -192,3 +192,13 @@ html,body{-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
 .spin{animation:kyc-spin 1s linear infinite}
 @keyframes kyc-spin{to{transform:rotate(360deg)}}
 @media(max-width:700px){.kyc-identity-cta{flex-direction:column;align-items:stretch}.kyc-wizard-actions{flex-direction:column}.kyc-wizard-primary,.kyc-wizard-secondary{width:100%;justify-content:center}}
+.admin-document-panel{margin-top:12px;padding:14px;border:1px solid var(--line);border-radius:12px;background:#fafcfb}
+.admin-document-panel__head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:10px}
+.admin-document-panel__actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.admin-document-panel__list{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.admin-document-panel__list li{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#fff}
+.admin-document-panel__list li b{display:block;font-size:13px}
+.admin-document-panel__list li small{display:block;color:var(--muted);font-size:11px;margin-top:2px}
+.admin-document-panel__row-actions{display:flex;gap:6px;flex-wrap:wrap}
+.escrow-kyc-panel{margin-top:12px;padding:14px;border:1px dashed var(--line);border-radius:12px;background:#fff}
+.escrow-kyc-panel .session-row{margin-top:8px}

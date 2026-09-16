@@ -420,7 +420,14 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
     }
     throw new Error(formatApiErrorDetail(body.detail));
   }
+  if (response.status === 204) {
+    return undefined as T;
+  }
   return response.json();
+}
+
+export async function deleteApi(path: string): Promise<void> {
+  await api<void>(path, { method: "DELETE" });
 }
 
 export async function apiForm<T>(path:string, body:FormData):Promise<T>{

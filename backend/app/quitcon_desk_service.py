@@ -10,9 +10,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.desk_solicitation_meta import evaluation_json_with_meta, evaluation_meta
-from app.document_service import persist_upload
+from app.document_service import persist_upload, purge_document, purge_document_links
 from app.models import (
     CommissionRule,
+    Document,
     Lead,
     Proposal,
     QuitConSolicitation,
@@ -279,7 +280,7 @@ async def add_document(
     comment: str | None = None,
 ) -> QuitConSolicitationDocument:
     assert_desk_access(user)
-    if item.status in STATUS_TERMINAL:
+    if item.status in STATUS_TERMINAL and not _is_admin(user):
         raise HTTPException(status_code=422, detail="Esta solicitação já está encerrada e não aceita mais documentos.")
     document = await persist_upload(upload, user, "quitcon_solicitation", item.id, doc_type or "QUITCON_SUPPORT")
     document.status = "CLEAN"
@@ -298,6 +299,40 @@ async def add_document(
         item.status = STATUS_UNDER_REVIEW
     db.flush()
     return row
+
+
+def remove_document(db: Session, user: User, item: QuitConSolicitation, link_id: str) -> None:
+    assert_desk_access(user)
+    if not _is_admin(user):
+        raise HTTPException(status_code=403, detail="Apenas operação LETTER pode excluir documentos")
+    row = db.scalar(
+        select(QuitConSolicitationDocument).where(
+            QuitConSolicitationDocument.id == link_id,
+            QuitConSolicitationDocument.solicitation_id == item.id,
+            QuitConSolicitationDocument.organization_id == user.organization_id,
+        )
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Documento não encontrado")
+    document = db.get(Document, row.document_id)
+    db.delete(row)
+    if document:
+        purge_document_links(db, document.id)
+        purge_document(db, document)
+    db.flush()
+
+
+def _document_link_view(db: Session, row: QuitConSolicitationDocument) -> dict:
+    document = db.get(Document, row.document_id)
+    return {
+        "id": row.id,
+        "doc_type": row.doc_type,
+        "comment": row.comment,
+        "document_id": row.document_id,
+        "filename": document.filename if document else None,
+        "status": document.status if document else None,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+    }
 
 
 def ensure_quitcon_commission_rule(db: Session, organization_id: str) -> CommissionRule:
@@ -408,7 +443,11 @@ def create_sale_from_quitcon(db: Session, user: User, item: QuitConSolicitation)
     }
 
 
-def solicitation_view(item: QuitConSolicitation, docs: list[QuitConSolicitationDocument] | None = None) -> dict:
+def solicitation_view(
+    item: QuitConSolicitation,
+    docs: list[QuitConSolicitationDocument] | None = None,
+    db: Session | None = None,
+) -> dict:
     uploaded = {d.doc_type for d in (docs or [])}
     return {
         "id": item.id,
@@ -440,11 +479,13 @@ def solicitation_view(item: QuitConSolicitation, docs: list[QuitConSolicitationD
         "quitcon_operacao_id": item.quitcon_operacao_id,
         "required_docs": [{**d, "uploaded": d["code"] in uploaded} for d in REQUIRED_DOCS],
         "documents": [
-            {
+            _document_link_view(db, d) if db else {
                 "id": d.id,
                 "doc_type": d.doc_type,
                 "comment": d.comment,
                 "document_id": d.document_id,
+                "filename": None,
+                "status": None,
                 "created_at": d.created_at.isoformat() if d.created_at else None,
             }
             for d in (docs or [])

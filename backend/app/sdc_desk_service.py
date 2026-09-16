@@ -12,8 +12,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.desk_solicitation_meta import evaluation_json_with_meta, evaluation_meta
-from app.document_service import persist_upload
-from app.models import Lead, Proposal, Quota, Role, SdcSolicitation, SdcSolicitationDocument, User
+from app.document_service import persist_upload, purge_document, purge_document_links
+from app.models import Document, Lead, Proposal, Quota, Role, SdcSolicitation, SdcSolicitationDocument, User
 from app.network_service import PARTNER_NETWORK_ROLES
 from app.services import money
 
@@ -284,7 +284,7 @@ async def add_document(
     comment: str | None = None,
 ) -> SdcSolicitationDocument:
     assert_desk_access(user)
-    if item.status in STATUS_TERMINAL:
+    if item.status in STATUS_TERMINAL and not _is_admin(user):
         raise HTTPException(status_code=422, detail="Esta solicitação já está encerrada e não aceita mais documentos.")
     document = await persist_upload(upload, user, "sdc_solicitation", item.id, doc_type or "SDC_SUPPORT")
     document.status = "CLEAN"
@@ -303,6 +303,40 @@ async def add_document(
         item.status = STATUS_UNDER_REVIEW
     db.flush()
     return row
+
+
+def remove_document(db: Session, user: User, item: SdcSolicitation, link_id: str) -> None:
+    assert_desk_access(user)
+    if not _is_admin(user):
+        raise HTTPException(status_code=403, detail="Apenas operação LETTER pode excluir documentos")
+    row = db.scalar(
+        select(SdcSolicitationDocument).where(
+            SdcSolicitationDocument.id == link_id,
+            SdcSolicitationDocument.solicitation_id == item.id,
+            SdcSolicitationDocument.organization_id == user.organization_id,
+        )
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Documento não encontrado")
+    document = db.get(Document, row.document_id)
+    db.delete(row)
+    if document:
+        purge_document_links(db, document.id)
+        purge_document(db, document)
+    db.flush()
+
+
+def _document_link_view(db: Session, row: SdcSolicitationDocument) -> dict:
+    document = db.get(Document, row.document_id)
+    return {
+        "id": row.id,
+        "doc_type": row.doc_type,
+        "comment": row.comment,
+        "document_id": row.document_id,
+        "filename": document.filename if document else None,
+        "status": document.status if document else None,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+    }
 
 
 def create_sale_from_sdc(
@@ -367,7 +401,11 @@ def create_sale_from_sdc(
     return {"proposal_id": proposal.id, "lead_id": lead.id, "quota_id": quota.id}
 
 
-def solicitation_view(item: SdcSolicitation, docs: list[SdcSolicitationDocument] | None = None) -> dict:
+def solicitation_view(
+    item: SdcSolicitation,
+    docs: list[SdcSolicitationDocument] | None = None,
+    db: Session | None = None,
+) -> dict:
     return {
         "id": item.id,
         "status": item.status,
@@ -396,11 +434,13 @@ def solicitation_view(item: SdcSolicitation, docs: list[SdcSolicitationDocument]
         "proposal_id": item.proposal_id,
         "quota_id": item.quota_id,
         "documents": [
-            {
+            _document_link_view(db, d) if db else {
                 "id": d.id,
                 "doc_type": d.doc_type,
                 "comment": d.comment,
                 "document_id": d.document_id,
+                "filename": None,
+                "status": None,
                 "created_at": d.created_at.isoformat() if d.created_at else None,
             }
             for d in (docs or [])
