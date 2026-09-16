@@ -4,7 +4,7 @@ import { CheckCircle2, ClipboardList, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { AdminDocumentPanel } from "@/components/admin-document-panel";
-import { api, apiForm, deleteApi, downloadApi } from "@/lib/api";
+import { api, API_URL, apiForm, deleteApi, downloadApi } from "@/lib/api";
 import { isInternalProductRole } from "@/lib/product-nav";
 
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
