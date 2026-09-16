@@ -24,12 +24,12 @@ import {
 } from "@/lib/main-nav";
 import { PLATFORM_HIDDEN_MODULE_KEYS } from "@/lib/product-nav";
 import {
-  canAccessModuleRoute,
-  canAccessPlatformModule,
-  filterPlatformModules,
-  filterProductNav,
-  personaLabel,
-} from "@/lib/role-nav";
+  canAccessModuleRouteForUser,
+  canAccessPlatformModuleForUser,
+  filterPlatformModulesForUser,
+  filterProductNavForUser,
+} from "@/lib/permission-nav";
+import { personaLabel } from "@/lib/role-nav";
 import { isPortalHomePath } from "@/lib/portal-routes";
 
 export function Shell({ children }: { children: React.ReactNode }) {
@@ -44,8 +44,8 @@ export function Shell({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     Promise.all([api<Module[]>("/modules"), api<User>("/auth/me")])
       .then(([m, u]) => {
-        const platform = filterPlatformModules(
-          u.role,
+        const platform = filterPlatformModulesForUser(
+          u,
           m.filter((x) => !PLATFORM_HIDDEN_MODULE_KEYS.has(x.key)),
         );
         setModules(platform);
@@ -62,7 +62,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
     }
   }, [pathname, user?.role]);
 
-  const productNav = user ? filterProductNav(user.role) : [];
+  const productNav = user ? filterProductNavForUser(user) : [];
   const commercialNav = useMemo(() => productNav.filter((item) => item.commercial), [productNav]);
   const platformProducts = useMemo(
     () => productNav.filter((item) => !item.commercial && !item.bank),
@@ -78,7 +78,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
       modules.filter(
         (m) =>
           (BANK_ACCOUNT_KEYS as readonly string[]).includes(m.key) &&
-          canAccessPlatformModule(user?.role, m.key),
+          canAccessPlatformModuleForUser(user, m.key),
       ),
     [modules, user?.role],
   );
@@ -87,7 +87,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
     return modules.filter(
       (m) =>
         (BANK_CONTROL_KEYS as readonly string[]).includes(m.key) &&
-        canAccessPlatformModule(user?.role, m.key),
+        canAccessPlatformModuleForUser(user, m.key),
     );
   }, [modules, user?.role]);
   const platformModules = useMemo(
@@ -108,7 +108,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
     setOpenGroups((prev) => ({ ...prev, [groupKey]: !prev[groupKey] }));
   };
 
-  const showBankControl = canSeeBankControl(user?.role) && canAccessModuleRoute(user?.role, "bank-control");
+  const showBankControl = canSeeBankControl(user?.role) && canAccessModuleRouteForUser(user, "bank-control");
   const showBankZone =
     bankAccountModules.length > 0 ||
     bankInvestments.length > 0 ||

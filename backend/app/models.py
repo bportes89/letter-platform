@@ -84,6 +84,8 @@ class User(TimestampMixin, Base):
     master_tree_key: Mapped[str | None] = mapped_column(String(40), index=True)
     mfa_secret: Mapped[str | None] = mapped_column(String(64))
     mfa_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    access_all: Mapped[bool] = mapped_column(Boolean, default=False)
+    permissions_json: Mapped[str | None] = mapped_column(Text)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     porc_a_mais: Mapped[float] = mapped_column(Numeric(8, 2), default=0)
     adicionar_comissao: Mapped[bool] = mapped_column(Boolean, default=False)

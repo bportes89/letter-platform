@@ -11,7 +11,8 @@ from sqlalchemy.orm import Session
 from app.account_uniqueness import ensure_unique_account_fields, find_user_by_email
 from app.core.config import settings
 from app.core.security import create_token, decode_token, hash_password, verify_password
-from app.models import AuthSession, KycCase, PasswordReset, ROLE_SCOPES, Role, User, UserInvitation
+from app.admin_permissions import get_effective_scopes
+from app.models import AuthSession, KycCase, PasswordReset, Role, User, UserInvitation
 from app.network_service import PARTNER_NETWORK_ROLES, attach_partner_under_sponsor, provision_master_network_on_signup
 from app.network_visibility import CONTRACT_REQUIRED_INVITE_ROLES, assert_invitable_role, ensure_network_node
 
@@ -33,7 +34,7 @@ def create_session_tokens(db: Session, user: User, user_agent: str | None, ip_ad
         ip_address=ip_address, expires_at=datetime.now(UTC)+timedelta(days=settings.refresh_token_days),
     )
     db.add(session); db.flush()
-    scopes=ROLE_SCOPES[user.role]
+    scopes=get_effective_scopes(user)
     access=create_token(user.id,"access",scopes,user.organization_id,session.id)
     refresh=create_token(user.id,"refresh",scopes,user.organization_id,session.id)
     session.refresh_token_hash=token_hash(refresh); user.last_login_at=datetime.now(UTC)
@@ -46,7 +47,7 @@ def rotate_refresh(db: Session, refresh_token: str):
     if payload.get("type")!="refresh": raise HTTPException(status_code=401,detail="Tipo de token inválido")
     session=db.get(AuthSession,payload.get("sid"));user=db.get(User,payload.get("sub"))
     if not session or not user or not session.active or session.refresh_token_hash!=token_hash(refresh_token) or as_utc(session.expires_at)<=datetime.now(UTC): raise HTTPException(status_code=401,detail="Sessão expirada ou revogada")
-    scopes=ROLE_SCOPES[user.role];access=create_token(user.id,"access",scopes,user.organization_id,session.id);refresh=create_token(user.id,"refresh",scopes,user.organization_id,session.id);session.refresh_token_hash=token_hash(refresh);session.last_seen_at=datetime.now(UTC)
+    scopes=get_effective_scopes(user);access=create_token(user.id,"access",scopes,user.organization_id,session.id);refresh=create_token(user.id,"refresh",scopes,user.organization_id,session.id);session.refresh_token_hash=token_hash(refresh);session.last_seen_at=datetime.now(UTC)
     return access,refresh
 
 

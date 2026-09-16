@@ -202,3 +202,16 @@ html,body{-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
 .admin-document-panel__row-actions{display:flex;gap:6px;flex-wrap:wrap}
 .escrow-kyc-panel{margin-top:12px;padding:14px;border:1px dashed var(--line);border-radius:12px;background:#fff}
 .escrow-kyc-panel .session-row{margin-top:8px}
+.admin-user-form h2{display:flex;align-items:center;gap:8px;margin:0 0 12px;font-size:18px}
+.admin-user-form__password-row{display:flex;gap:8px;align-items:center}
+.admin-user-form__password-row input{flex:1}
+.admin-user-form__checks{list-style:none;margin:0;padding:0;font-size:12px;color:var(--muted)}
+.admin-user-form__checks li{margin:4px 0}
+.admin-user-form__checks li.ok{color:#0b5d3b}
+.admin-user-form__checks li.err{color:#b42318}
+.admin-user-form__access-all{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.admin-user-form__permissions{margin-top:8px;padding:12px;border:1px solid var(--line);border-radius:12px;background:#fafcfb;max-height:360px;overflow:auto}
+.admin-user-form__permission-group{margin-top:12px}
+.admin-user-form__group-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;font-weight:700;font-size:13px}
+.admin-user-form__permission-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:6px}
+.admin-user-form__permission-item{display:flex;align-items:flex-start;gap:8px;font-size:12px;line-height:1.35}

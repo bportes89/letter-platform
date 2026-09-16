@@ -205,7 +205,31 @@ class UserView(ORMModel):
     role: Role
     active: bool
     mfa_enabled: bool
+    access_all: bool = False
+    permissions: list[str] = Field(default_factory=list)
+    effective_modules: list[str] | None = None
     last_login_at: datetime | None
+
+
+class AdminPermissionItemView(BaseModel):
+    key: str
+    label: str
+    modules: list[str] = Field(default_factory=list)
+
+
+class AdminPermissionGroupView(BaseModel):
+    group: str
+    items: list[AdminPermissionItemView]
+
+
+class AdminUserCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=180)
+    email: EmailStr
+    phone: str | None = Field(default=None, max_length=30)
+    password: str = Field(min_length=8, max_length=128)
+    branch_id: str | None = None
+    access_all: bool = False
+    permissions: list[str] = Field(default_factory=list)
 
 
 class UserUpdate(BaseModel):
@@ -213,6 +237,8 @@ class UserUpdate(BaseModel):
     role: Role | None = None
     branch_id: str | None = None
     active: bool | None = None
+    access_all: bool | None = None
+    permissions: list[str] | None = None
     document: str | None = Field(default=None, max_length=20)
     phone: str | None = Field(default=None, max_length=30)
     company_name: str | None = Field(default=None, max_length=180)

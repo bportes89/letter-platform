@@ -7,7 +7,8 @@ from sqlalchemy.orm import Session
 
 from app.core.security import decode_token
 from app.db import get_db
-from app.models import AuthSession, ROLE_SCOPES, User
+from app.admin_permissions import get_effective_scopes
+from app.models import AuthSession, User
 from datetime import UTC, datetime
 
 bearer = HTTPBearer(auto_error=False)
@@ -47,7 +48,7 @@ def get_current_user(
 
 def require_scope(required: str) -> Callable:
     def checker(user: User = Depends(get_current_user)) -> User:
-        scopes = ROLE_SCOPES[user.role]
+        scopes = get_effective_scopes(user)
         if "*" not in scopes and required not in scopes:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Escopo obrigatório: {required}")
         return user

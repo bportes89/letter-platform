@@ -112,6 +112,7 @@ from app.schemas import (
     TaxDocumentCreate, TaxDocumentView, TaxExceptionResolve, TaxExceptionView,
     TokenPair, UnderwritingAssessmentCreate, UnderwritingAssessmentView, OperationalJobCreate, OperationalJobView, JobProcessRequest, TenantQuotaUpdate, TenantQuotaView, SecurityEventView,
     UnderwritingDecisionCreate, UnderwritingDecisionView, UnderwritingPolicyCreate,
+    AdminPermissionGroupView, AdminPermissionItemView, AdminUserCreate,
     UnderwritingPolicyView, UserUpdate, UserView, QuotaRankingView, ProfileSelfUpdate, ProfileView,
     ProviderIntegrationCreate, ProviderIntegrationView, IntegrationProbeRequest,
     WebhookEndpointCreate, WebhookEndpointView, WebhookDispatchRequest, WebhookRetryRequest,
@@ -349,7 +350,9 @@ def refresh(payload:RefreshRequest,db:Session=Depends(get_db)):
 
 @router.get("/auth/me", response_model=UserView)
 def me(user: User = Depends(get_current_user)):
-    return user
+    from app.identity_admin_service import safe_user_view
+
+    return safe_user_view(user)
 
 
 @router.get("/auth/me/profile", response_model=ProfileView)
@@ -602,15 +605,43 @@ def admin_master_trees(user: User = Depends(require_scope("admin:users")), db: S
     return list_master_trees(db, user.organization_id)
 
 
+@router.get("/admin/permissions/catalog", response_model=list[AdminPermissionGroupView])
+def admin_permissions_catalog(user: User = Depends(require_scope("admin:users"))):
+    from app.admin_permissions import permission_catalog
+
+    return [
+        AdminPermissionGroupView(
+            group=group["group"],
+            items=[
+                AdminPermissionItemView(key=item["key"], label=item["label"], modules=item["modules"])
+                for item in group["items"]
+            ],
+        )
+        for group in permission_catalog()
+    ]
+
+
 @router.get("/admin/users",response_model=list[UserView])
 def admin_users(user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
     from app.identity_admin_service import list_organization_users
     return list_organization_users(db, user.organization_id)
 
 
+@router.post("/admin/users", response_model=UserView, status_code=201)
+def admin_create_user(payload: AdminUserCreate, user: User = Depends(require_scope("admin:users")), db: Session = Depends(get_db)):
+    from app.identity_admin_service import create_admin_user, safe_user_view
+
+    created = create_admin_user(db, user, payload)
+    audit(db, user, "user.created", "user", created.id, {"email": created.email, "access_all": created.access_all})
+    db.commit()
+    db.refresh(created)
+    return safe_user_view(created)
+
+
 @router.patch("/admin/users/{user_id}",response_model=UserView)
 def admin_update_user(user_id:str,payload:UserUpdate,user:User=Depends(require_scope("admin:users")),db:Session=Depends(get_db)):
     from app.account_uniqueness import assert_valid_cpf_or_cnpj, find_user_by_cnpj, find_user_by_cpf, normalize_digits
+    from app.identity_admin_service import apply_user_access_update, safe_user_view
 
     target=db.scalar(select(User).where(User.id==user_id,User.organization_id==user.organization_id))
     if not target: raise HTTPException(status_code=404,detail="Usuário não encontrado")
@@ -641,13 +672,16 @@ def admin_update_user(user_id:str,payload:UserUpdate,user:User=Depends(require_s
             if pct > 100:
                 raise HTTPException(status_code=422, detail=f"{pct_field} não pode exceder 100%.")
             setattr(target, pct_field, float(pct))
+    access_all = data.pop("access_all", None)
+    permissions = data.pop("permissions", None)
     for field, value in data.items():
         setattr(target, field, value)
+    apply_user_access_update(target, access_all=access_all, permissions=permissions)
     if target.role == Role.MASTER_FRANCHISEE:
         from app.network_service import provision_master_network_on_signup
 
         provision_master_network_on_signup(db, target)
-    audit(db,user,"user.updated","user",target.id,payload.model_dump(exclude_unset=True,mode="json"));db.commit();db.refresh(target);return target
+    audit(db,user,"user.updated","user",target.id,payload.model_dump(exclude_unset=True,mode="json"));db.commit();db.refresh(target);return safe_user_view(target)
 
 
 @router.get("/admin/branches",response_model=list[BranchView])

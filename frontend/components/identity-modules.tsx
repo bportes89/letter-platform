@@ -3,6 +3,7 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { Building2, KeyRound, Plus, RefreshCw, ShieldCheck, UserPlus, Users } from "lucide-react";
 import { api, AuthSession, Branch, Invitation, KycCase, User } from "@/lib/api";
+import { AdminUserForm } from "@/components/admin-user-form";
 import { MfaSetupPanel } from "@/components/mfa-setup-panel";
 
 const roles = ["PLATFORM_ADMIN","INTERNAL_STAFF","MASTER_FRANCHISEE","MANAGER","PARTNER","CLIENT","QUOTA_SELLER","RETAIL_INVESTOR","INSTITUTIONAL_FUND","AUDITOR"];
@@ -219,6 +220,18 @@ export function IdentityModule() {
               ))
             )}
           </div>
+        </section>
+        <section className="panel">
+          <AdminUserForm
+            branches={branches}
+            busy={busy || loading}
+            onCreated={(user) => {
+              setUsers((prev) => [user, ...prev.filter((row) => row.id !== user.id)]);
+              setMessage(`Administrador "${user.name}" criado com sucesso.`);
+              setApiError("");
+            }}
+            onError={(msg) => setMessage(msg)}
+          />
         </section>
         <section className="panel">
           <h2><UserPlus /> Convidar usuário</h2>

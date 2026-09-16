@@ -4,7 +4,22 @@ export const API_URL = (process.env.NEXT_PUBLIC_API_URL?.trim() || "http://local
 
 export type Module = { key: string; name: string; description: string; status: string; route: string; critical: boolean };
 export type Summary = { leads: number; available_quotas: number; active_proposals: number; active_operations: number; modules: number; financial_transactions_enabled: boolean };
-export type User = { id: string; name: string; email: string; role: string; organization_id: string; branch_id: string | null; active: boolean; mfa_enabled: boolean; last_login_at: string | null };
+export type User = {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  organization_id: string;
+  branch_id: string | null;
+  active: boolean;
+  mfa_enabled: boolean;
+  access_all?: boolean;
+  permissions?: string[];
+  effective_modules?: string[] | null;
+  last_login_at: string | null;
+};
+export type PermissionCatalogItem = { key: string; label: string; modules: string[] };
+export type PermissionCatalogGroup = { group: string; items: PermissionCatalogItem[] };
 export type Branch = { id: string; name: string; code: string; region: string | null; active: boolean };
 export type Invitation = { id: string; email: string; role: string; branch_id: string | null; status: string; expires_at: string; token?: string | null; email_delivery_status?: string | null };
 export type AuthSession = { id: string; user_agent: string | null; ip_address: string | null; active: boolean; created_at: string; expires_at: string; last_seen_at: string; step_up_until: string | null };

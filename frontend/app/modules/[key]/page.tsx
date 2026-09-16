@@ -33,7 +33,8 @@ import { SdcDeskModule } from "@/components/sdc-desk-module";
 import { FlashDeskModule } from "@/components/flash-desk-module";
 import { FlashInvestDeskModule } from "@/components/flash-invest-desk-module";
 import { BankControlModule } from "@/components/bank-control-module";
-import { canAccessModuleRoute, personaLabel } from "@/lib/role-nav";
+import { canAccessModuleRouteForUser } from "@/lib/permission-nav";
+import { personaLabel } from "@/lib/role-nav";
 import { STANDBY_PRODUCT_KEYS } from "@/lib/product-nav";
 import { portalHomeForRole } from "@/lib/portal-routes";
 
@@ -57,7 +58,7 @@ export default function ModulePage() {
   if (loading) return <div className="loading">Carregando módulo...</div>;
   if (!user) return null;
 
-  if (!canAccessModuleRoute(user.role, routeKey)) {
+  if (!canAccessModuleRouteForUser(user, routeKey)) {
     return (
       <div className="module-hero">
         <div>
