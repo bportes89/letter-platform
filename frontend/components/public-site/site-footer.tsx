@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { AsaasBaasSeal } from "@/components/asaas-baas-seal";
 import { api, CompanyProfile } from "@/lib/api";
 
 const FALLBACK: CompanyProfile = {
@@ -34,6 +35,9 @@ export function SiteFooter() {
         <span>© {new Date().getFullYear()} {profile.trade_name || profile.legal_name}. Todos os direitos reservados.</span>
         <a href="/simulador/quitcon">Quitação consórcio</a>
         <a href="/login">Acessar conta</a>
+      </div>
+      <div className="site-footer-asaas">
+        <AsaasBaasSeal />
       </div>
     </footer>
   );

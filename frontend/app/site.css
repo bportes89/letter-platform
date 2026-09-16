@@ -1123,6 +1123,29 @@
   color: #fff;
 }
 
+.asaas-baas-seal {
+  display: inline-flex;
+  line-height: 0;
+}
+
+.asaas-baas-seal img {
+  display: block;
+  width: 160px;
+  height: 48px;
+  max-width: 100%;
+}
+
+.site-footer-asaas {
+  grid-column: 1 / -1;
+  justify-self: start;
+  margin-top: 4px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.96);
+  text-transform: none;
+  letter-spacing: normal;
+}
+
 /* —— Vitrines gated (Flash Invest + Leilão) —— */
 .vitrine-section {
   border-top: 1px solid var(--line);

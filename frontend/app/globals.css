@@ -49,7 +49,10 @@ html,body{-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
 @keyframes ambient-drift{from{transform:translate(0,0) scale(1)}to{transform:translate(28px,-22px) scale(1.06)}}
 @keyframes card-float{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
 @keyframes fade-rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
-.content{position:relative;z-index:1;padding:36px 32px 52px}
+.content{position:relative;z-index:1;padding:36px 32px 28px}
+.workspace-footer{position:relative;z-index:1;padding:16px 32px 28px;border-top:1px solid var(--line);background:rgba(255,255,255,.78)}
+.asaas-baas-seal{display:inline-flex;line-height:0}
+.asaas-baas-seal img{display:block;width:160px;height:48px;max-width:100%}
 .topbar{background:var(--glass);backdrop-filter:blur(18px) saturate(1.25);-webkit-backdrop-filter:blur(18px) saturate(1.25);border-bottom:1px solid var(--glass-border);box-shadow:0 1px 0 rgb(255 255 255 / 0.65) inset,0 4px 24px rgb(6 19 15 / 0.04)}
 .sidebar{background:linear-gradient(180deg,#071810 0%,#06130f 52%,#040d0a 100%);box-shadow:4px 0 32px rgb(0 0 0 / 0.14);overflow:hidden;height:100vh;height:100dvh}
 .sidebar nav a{transition:background .2s ease,color .2s ease,transform .2s ease}

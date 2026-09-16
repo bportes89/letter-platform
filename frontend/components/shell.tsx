@@ -8,6 +8,7 @@ import {
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+import { AsaasBaasSeal } from "@/components/asaas-baas-seal";
 import { LetterLogo } from "@/components/brand/letter-logo";
 import { api, logout, Module, User } from "@/lib/api";
 import {
@@ -368,6 +369,9 @@ export function Shell({ children }: { children: React.ReactNode }) {
           </div>
         </header>
         <div className="content">{children}</div>
+        <footer className="workspace-footer">
+          <AsaasBaasSeal />
+        </footer>
       </section>
     </div>
   );
