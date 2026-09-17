@@ -638,6 +638,40 @@ def _map_pix_lookup_row(pix_key: str, key_type: str, row: dict) -> dict:
     }
 
 
+def lookup_platform_pix_key(
+    db: Session,
+    organization_id: str,
+    *,
+    source_escrow_account_id: str | None,
+    pix_key: str,
+    pix_key_type: str | None = None,
+) -> dict:
+    source = _org_escrow_account(db, organization_id, source_escrow_account_id) if source_escrow_account_id else None
+    if source:
+        return lookup_wallet_pix_key(db, source, pix_key=pix_key, pix_key_type=pix_key_type)
+
+    key_type = (pix_key_type or infer_pix_key_type(pix_key)).upper()
+    if key_type not in {"CPF", "CNPJ", "EMAIL", "PHONE", "EVP"}:
+        raise HTTPException(status_code=422, detail="Tipo de chave Pix inválido.")
+    normalized = normalize_pix_key(pix_key, key_type)
+    if len(normalized) < 3:
+        raise HTTPException(status_code=422, detail="Chave Pix inválida.")
+
+    if not asaas_configured():
+        return {
+            "pix_key": normalized,
+            "pix_key_type": key_type,
+            "owner_name": "Destinatário simulado (carteira matriz)",
+            "owner_document_masked": "***.***.***-**",
+            "institution_name": "Instituição simulada LETTER",
+            "valid": True,
+        }
+
+    with AsaasClient() as client:
+        row = client.lookup_external_pix_key(key_type=key_type, key=normalized)
+    return _map_pix_lookup_row(normalized, key_type, row if isinstance(row, dict) else {})
+
+
 def lookup_wallet_pix_key(db: Session, account: EscrowAccount, *, pix_key: str, pix_key_type: str | None = None) -> dict:
     key_type = (pix_key_type or infer_pix_key_type(pix_key)).upper()
     if key_type not in {"CPF", "CNPJ", "EMAIL", "PHONE", "EVP"}:
@@ -943,6 +977,7 @@ def request_admin_platform_transfer(
     pix_key: str | None,
     amount: Decimal,
     description: str | None,
+    pix_key_type: str | None = None,
 ) -> dict:
     """Admin: envia saldo da matriz ou de uma subconta para outra subconta ou Pix de terceiros."""
     from app.wallet_billing_service import assert_withdrawals_allowed
@@ -953,6 +988,7 @@ def request_admin_platform_transfer(
 
     source = _org_escrow_account(db, actor.organization_id, source_escrow_account_id) if source_escrow_account_id else None
     destination = None
+    pix_preview: dict | None = None
     if destination_type == "SUBACCOUNT":
         if not destination_escrow_account_id:
             raise HTTPException(status_code=422, detail="Selecione a subconta de destino.")
@@ -963,11 +999,25 @@ def request_admin_platform_transfer(
         clean_pix = (pix_key or "").strip()
         if len(clean_pix) < 3:
             raise HTTPException(status_code=422, detail="Informe a chave Pix de destino.")
+        pix_preview = lookup_platform_pix_key(
+            db,
+            actor.organization_id,
+            source_escrow_account_id=source_escrow_account_id,
+            pix_key=clean_pix,
+            pix_key_type=pix_key_type,
+        )
+        pix_key = pix_preview["pix_key"]
+        pix_key_type = pix_preview["pix_key_type"]
 
     value = money(amount)
     transfer_description = (description or "Transferência LETTER").strip()
     source_label = _account_label(source, matrix=source is None)
-    destination_label = _account_label(destination) if destination else (pix_key or "").strip()
+    if destination:
+        destination_label = _account_label(destination)
+    elif destination_type == "PIX" and pix_preview:
+        destination_label = str(pix_preview.get("owner_name") or pix_key or "")
+    else:
+        destination_label = (pix_key or "").strip()
 
     if source:
         if source.escrow_enabled:
@@ -1064,17 +1114,30 @@ def request_admin_platform_transfer(
         }
 
     if source:
-        return request_wallet_transfer(db, actor, source, pix_key=(pix_key or "").strip(), amount=value, description=transfer_description) | {
+        return request_wallet_transfer(
+            db,
+            actor,
+            source,
+            pix_key=(pix_key or "").strip(),
+            amount=value,
+            description=transfer_description,
+            pix_key_type=pix_key_type,
+            recipient_preview=pix_preview,
+        ) | {
             "destination_type": "PIX",
             "source_label": source_label,
             "destination_label": destination_label,
         }
 
+    resolved_type = (pix_key_type or infer_pix_key_type(pix_key or "")).upper()
+    normalized_key = normalize_pix_key(pix_key or "", resolved_type)
     with AsaasClient() as client:
         result = client.create_transfer(
             {
                 "value": float(value),
-                "pixAddressKey": (pix_key or "").strip(),
+                "pixAddressKey": normalized_key,
+                "pixAddressKeyType": resolved_type,
+                "operationType": "PIX",
                 "description": transfer_description,
             }
         )

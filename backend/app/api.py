@@ -5120,6 +5120,25 @@ def escrow_subaccount_preview(payload: EscrowCreate, user: User = Depends(requir
     return subaccount_profile_preview(db, user, payload.operation_id, payload.profile)
 
 
+@router.get("/escrow/pix-key/lookup", response_model=WalletPixKeyLookupView)
+def escrow_pix_key_lookup(
+    pix_key: str = Query(..., min_length=3, max_length=180),
+    pix_key_type: str | None = Query(default=None, max_length=10),
+    source_escrow_account_id: str | None = Query(default=None),
+    user: User = Depends(require_scope("payments:review")),
+    db: Session = Depends(get_db),
+):
+    from app.asaas_wallet_service import lookup_platform_pix_key
+
+    return lookup_platform_pix_key(
+        db,
+        user.organization_id,
+        source_escrow_account_id=source_escrow_account_id,
+        pix_key=pix_key,
+        pix_key_type=pix_key_type,
+    )
+
+
 @router.post("/escrow/transfers", response_model=AdminWalletTransferView, status_code=201)
 def admin_escrow_transfer(payload: AdminWalletTransferCreate, user: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
     from app.asaas_wallet_service import request_admin_platform_transfer
@@ -5133,6 +5152,7 @@ def admin_escrow_transfer(payload: AdminWalletTransferCreate, user: User = Depen
         pix_key=payload.pix_key,
         amount=payload.amount,
         description=payload.description,
+        pix_key_type=payload.pix_key_type,
     )
     audit(
         db,

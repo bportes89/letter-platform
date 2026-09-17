@@ -1812,6 +1812,7 @@ class AdminWalletTransferCreate(BaseModel):
     destination_type: str = Field(pattern="^(SUBACCOUNT|PIX)$")
     destination_escrow_account_id: str | None = None
     pix_key: str | None = Field(default=None, max_length=180)
+    pix_key_type: str | None = Field(default=None, max_length=10)
     amount: Decimal = Field(gt=0)
     description: str | None = Field(default=None, max_length=200)
 
