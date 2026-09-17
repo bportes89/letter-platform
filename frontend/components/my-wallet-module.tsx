@@ -57,6 +57,31 @@ type WalletTransaction = {
   amount: string;
   direction: "CREDIT" | "DEBIT";
   date: string;
+  receipt_transfer_id?: string | null;
+};
+
+type WalletPixLookup = {
+  pix_key: string;
+  pix_key_type: string;
+  owner_name: string;
+  owner_document_masked?: string | null;
+  institution_name?: string | null;
+  valid: boolean;
+};
+
+type WalletTransferReceipt = {
+  transfer_id: string;
+  status: string;
+  amount: string;
+  fee?: string | null;
+  pix_key: string;
+  pix_key_type?: string | null;
+  recipient_name?: string | null;
+  recipient_document_masked?: string | null;
+  institution_name?: string | null;
+  description?: string | null;
+  created_at?: string | null;
+  provider: string;
 };
 
 type IssuedBoleto = {
@@ -122,6 +147,10 @@ export function MyWalletModule() {
     d.setDate(d.getDate() + 3);
     return d.toISOString().slice(0, 10);
   });
+  const [pixDestKey, setPixDestKey] = useState("");
+  const [pixLookup, setPixLookup] = useState<WalletPixLookup | null>(null);
+  const [pixLookupLoading, setPixLookupLoading] = useState(false);
+  const [transferReceipt, setTransferReceipt] = useState<WalletTransferReceipt | null>(null);
 
   const load = useCallback(async (options?: { refreshFromProvider?: boolean }) => {
     if (options?.refreshFromProvider) {
@@ -262,20 +291,73 @@ export function MyWalletModule() {
     setPixQr(qr);
   }
 
+  async function lookupPixDestination() {
+    const key = pixDestKey.trim();
+    if (key.length < 3) {
+      setNotice("Informe a chave Pix de destino antes de validar.");
+      setPixLookup(null);
+      return;
+    }
+    setPixLookupLoading(true);
+    try {
+      const params = new URLSearchParams({ pix_key: key });
+      const result = await api<WalletPixLookup>(`/wallet/me/pix-key/lookup?${params.toString()}`);
+      setPixLookup(result);
+      setPixDestKey(result.pix_key);
+      setNotice(`Chave validada — recebedor: ${result.owner_name}`);
+    } catch (err) {
+      setPixLookup(null);
+      setNotice(err instanceof Error ? err.message : "Não foi possível validar a chave Pix.");
+    } finally {
+      setPixLookupLoading(false);
+    }
+  }
+
+  async function loadTransferReceipt(transferId: string) {
+    const receipt = await api<WalletTransferReceipt>(`/wallet/me/transfers/${encodeURIComponent(transferId)}/receipt`);
+    setTransferReceipt(receipt);
+  }
+
+  function receiptText(receipt: WalletTransferReceipt) {
+    const lines = [
+      "COMPROVANTE DE TRANSFERÊNCIA PIX — LETTER BANK",
+      `ID: ${receipt.transfer_id}`,
+      `Status: ${receipt.status}`,
+      `Data: ${receipt.created_at ? new Date(receipt.created_at).toLocaleString("pt-BR") : "—"}`,
+      `Valor: ${brl.format(Number(receipt.amount))}`,
+      receipt.fee ? `Taxa: ${brl.format(Number(receipt.fee))}` : "",
+      `Chave Pix: ${receipt.pix_key}`,
+      `Recebedor: ${receipt.recipient_name || "—"}`,
+      receipt.recipient_document_masked ? `CPF/CNPJ: ${receipt.recipient_document_masked}` : "",
+      receipt.institution_name ? `Instituição: ${receipt.institution_name}` : "",
+      receipt.description ? `Descrição: ${receipt.description}` : "",
+    ].filter(Boolean);
+    return lines.join("\n");
+  }
+
   async function transfer(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (!pixLookup?.valid) {
+      setNotice("Valide a chave Pix e confira o nome do recebedor antes de enviar.");
+      return;
+    }
     const fd = new FormData(e.currentTarget);
-    const result = await api<{ status: string; amount: string }>("/wallet/me/transfer", {
+    const result = await api<{ status: string; amount: string; receipt?: WalletTransferReceipt }>("/wallet/me/transfer", {
       method: "POST",
       body: JSON.stringify({
-        pix_key: fd.get("pix_key"),
+        pix_key: pixLookup.pix_key,
+        pix_key_type: pixLookup.pix_key_type,
         amount: transferAmount,
         description: fd.get("description") || "Saque LETTER",
       }),
     });
-    setNotice(`Transferência ${result.status} — ${brl.format(Number(result.amount))}`);
+    if (result.receipt) {
+      setTransferReceipt(result.receipt);
+    }
+    setNotice(`Pix ${result.status} — ${brl.format(Number(result.amount))}. Comprovante disponível abaixo.`);
     setTransferAmount("");
-    e.currentTarget.reset();
+    setPixDestKey("");
+    setPixLookup(null);
     await load();
   }
 
@@ -651,11 +733,70 @@ export function MyWalletModule() {
             {wallet.capabilities?.withdrawals_enabled && (
               <form className="stack-form" onSubmit={(e) => void transfer(e).catch((err) => setNotice(err.message))}>
                 <h3>Saque via Pix</h3>
-                <input name="pix_key" placeholder="Chave Pix de destino (mesma titularidade)" required />
+                <p className="muted" style={{ margin: 0 }}>
+                  Valide a chave antes de enviar. Você verá o nome e a instituição do recebedor (consulta oficial Asaas).
+                </p>
+                <input
+                  value={pixDestKey}
+                  onChange={(e) => {
+                    setPixDestKey(e.target.value);
+                    setPixLookup(null);
+                  }}
+                  placeholder="Chave Pix de destino (CPF, CNPJ, e-mail, celular ou aleatória)"
+                  required
+                />
+                <button type="button" disabled={pixLookupLoading} onClick={() => void lookupPixDestination()}>
+                  <RefreshCw />
+                  {pixLookupLoading ? "Validando chave…" : "Validar chave e ver recebedor"}
+                </button>
+                {pixLookup && (
+                  <div className="notice">
+                    <CheckCircle2 />
+                    <div>
+                      <strong>{pixLookup.owner_name}</strong>
+                      <p style={{ margin: "4px 0 0" }}>
+                        {pixLookup.owner_document_masked && <span>Documento: {pixLookup.owner_document_masked} · </span>}
+                        {pixLookup.institution_name && <span>{pixLookup.institution_name} · </span>}
+                        Tipo: {pixLookup.pix_key_type}
+                      </p>
+                    </div>
+                  </div>
+                )}
                 <CurrencyInput value={transferAmount} onChange={setTransferAmount} placeholder="Valor (R$)" required />
                 <input name="description" placeholder="Descrição (opcional)" />
-                <button><Send />Transferir</button>
+                <button disabled={!pixLookup?.valid}><Send />Confirmar envio do Pix</button>
               </form>
+            )}
+
+            {transferReceipt && (
+              <section className="panel">
+                <h3>Comprovante do Pix</h3>
+                <div className="escrow-grid">
+                  <div className="escrow-card">
+                    <small>Recebedor</small>
+                    <b>{transferReceipt.recipient_name || "—"}</b>
+                    <span>{transferReceipt.recipient_document_masked || ""}</span>
+                  </div>
+                  <div className="escrow-card">
+                    <small>Valor</small>
+                    <b>{brl.format(Number(transferReceipt.amount))}</b>
+                    <span>Status: {transferReceipt.status}</span>
+                  </div>
+                  <div className="escrow-card">
+                    <small>Chave Pix</small>
+                    <b style={{ wordBreak: "break-all" }}>{transferReceipt.pix_key}</b>
+                  </div>
+                  <div className="escrow-card">
+                    <small>ID da transferência</small>
+                    <b style={{ wordBreak: "break-all" }}>{transferReceipt.transfer_id}</b>
+                  </div>
+                </div>
+                <div className="toolbar">
+                  <button type="button" className="table-action" onClick={() => copyText(receiptText(transferReceipt))}>
+                    <Copy />Copiar comprovante
+                  </button>
+                </div>
+              </section>
             )}
 
             {(wallet.capabilities?.boleto_issuance_enabled ?? wallet.capabilities?.bill_payments_enabled) && (
@@ -801,16 +942,31 @@ export function MyWalletModule() {
               <div className="subheading"><h2>Extrato de movimentações</h2><button onClick={() => void load()}><RefreshCw />Atualizar</button></div>
               <div className="table-wrap">
                 <table className="data-table">
-                  <thead><tr><th>Data</th><th>Descrição</th><th>Tipo</th><th>Valor</th></tr></thead>
+                  <thead><tr><th>Data</th><th>Descrição</th><th>Tipo</th><th>Valor</th><th></th></tr></thead>
                   <tbody>
                     {transactions.length === 0 ? (
-                      <tr><td colSpan={4}><small className="muted">Nenhuma movimentação registrada ainda.</small></td></tr>
+                      <tr><td colSpan={5}><small className="muted">Nenhuma movimentação registrada ainda.</small></td></tr>
                     ) : transactions.map((tx) => (
                       <tr key={tx.id}>
                         <td>{new Date(tx.date).toLocaleString("pt-BR")}</td>
                         <td><b>{tx.label}</b><small>{tx.type}</small></td>
                         <td><span className={`pill pill-${tx.direction === "CREDIT" ? "approved" : "pending"}`}>{tx.direction === "CREDIT" ? "Entrada" : "Saída"}</span></td>
                         <td>{tx.direction === "CREDIT" ? "+" : "-"}{brl.format(Number(tx.amount))}</td>
+                        <td>
+                          {(tx.receipt_transfer_id || tx.type === "TRANSFER_SENT") && (
+                            <button
+                              type="button"
+                              className="table-action"
+                              onClick={() =>
+                                void loadTransferReceipt(tx.receipt_transfer_id || tx.id)
+                                  .then(() => setNotice("Comprovante carregado abaixo."))
+                                  .catch((err) => setNotice(err instanceof Error ? err.message : "Falha ao carregar comprovante"))
+                              }
+                            >
+                              Comprovante
+                            </button>
+                          )}
+                        </td>
                       </tr>
                     ))}
                   </tbody>

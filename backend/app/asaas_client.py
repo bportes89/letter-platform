@@ -183,8 +183,14 @@ class AsaasClient:
     def get_pix_qrcode(self, key: str) -> dict:
         return self.request("GET", f"/pix/addressKeys/{key}/qrCode")
 
+    def lookup_external_pix_key(self, *, key_type: str, key: str) -> dict:
+        return self.request("GET", "/pix/addressKeys/external", params={"type": key_type, "key": key})
+
     def create_transfer(self, payload: dict) -> dict:
         return self.request("POST", "/transfers", json=payload)
+
+    def get_transfer(self, transfer_id: str) -> dict:
+        return self.request("GET", f"/transfers/{transfer_id}")
 
     def create_bill_payment(self, payload: dict) -> dict:
         return self.request("POST", "/billPayments", json=payload)

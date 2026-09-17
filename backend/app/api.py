@@ -53,7 +53,7 @@ from app.schemas import (
     ValidStampCreate, ValidStampView, SaaSTermsCreate, SaaSTermsView, SaaSPlanCreate, SaaSPlanView,
     SaaSSubscribeCreate, SaaSSubscriptionView,
     BillingGenerateRequest, CollectionActionView, CommissionAllocate, CommissionEntryView, CommissionRuleCreate,
-    CommissionRuleView, DocumentView, EscrowAsaasStatusView, EscrowCreate, EscrowBillingCycleView, EscrowPendingSubaccountView, EscrowSubaccountPreviewView, EscrowToggleRequest, EscrowView, EscrowWebhook, AdminWalletTransferCreate, AdminWalletTransferView, WalletBillPaymentRequest, WalletBoletoIssueRequest, WalletBoletoView, WalletEscrowBillingSyncView, LssBillingSyncView, RecurringCommissionSettlementView, MmnSplitPreviewRequest, MmnSplitPreviewView, AsaasMmnPaymentCreate, AsaasMmnPaymentView, PaymentSplitRowView, LegalManualPublicView, LegalManualView, WalletPricingRowView, WalletTransferRequest,
+    CommissionRuleView, DocumentView, EscrowAsaasStatusView, EscrowCreate, EscrowBillingCycleView, EscrowPendingSubaccountView, EscrowSubaccountPreviewView, EscrowToggleRequest, EscrowView, EscrowWebhook, AdminWalletTransferCreate, AdminWalletTransferView, WalletBillPaymentRequest, WalletBoletoIssueRequest, WalletBoletoView, WalletEscrowBillingSyncView, LssBillingSyncView, RecurringCommissionSettlementView, MmnSplitPreviewRequest, MmnSplitPreviewView, AsaasMmnPaymentCreate, AsaasMmnPaymentView, PaymentSplitRowView, LegalManualPublicView, LegalManualView, WalletPricingRowView, WalletTransferRequest, WalletPixKeyLookupView, WalletTransferReceiptView,
     FiscalEvidenceView, SefazRobotStatusView,
     DelinquencyView, FiscalReleaseRequest, FundingOpportunityCreate, FundingOpportunityView, FundingPropertyUpdate, InvitationView,
     NinaApprovalRequest, NinaCriticalApprovalView, NinaDistressCaseCreate, NinaDistressCaseView,
@@ -5392,6 +5392,37 @@ def my_wallet_pix_qrcode(user: User = Depends(get_current_user), db: Session = D
     return get_wallet_pix_qrcode(db, account)
 
 
+@router.get("/wallet/me/pix-key/lookup", response_model=WalletPixKeyLookupView)
+def lookup_my_wallet_pix_key(
+    pix_key: str = Query(..., min_length=3, max_length=180),
+    pix_key_type: str | None = Query(default=None, max_length=10),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.asaas_wallet_service import lookup_wallet_pix_key
+    from app.subaccount_auto_service import find_user_plain_subaccount
+
+    account = find_user_plain_subaccount(db, user)
+    if not account:
+        raise HTTPException(status_code=404, detail="Subconta não encontrada")
+    return lookup_wallet_pix_key(db, account, pix_key=pix_key, pix_key_type=pix_key_type)
+
+
+@router.get("/wallet/me/transfers/{transfer_id}/receipt", response_model=WalletTransferReceiptView)
+def my_wallet_transfer_receipt(
+    transfer_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.asaas_wallet_service import get_wallet_transfer_receipt
+    from app.subaccount_auto_service import find_user_plain_subaccount
+
+    account = find_user_plain_subaccount(db, user)
+    if not account:
+        raise HTTPException(status_code=404, detail="Subconta não encontrada")
+    return get_wallet_transfer_receipt(db, account, transfer_id)
+
+
 @router.post("/wallet/me/transfer")
 def transfer_from_my_wallet(payload: WalletTransferRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     from app.asaas_wallet_service import request_wallet_transfer
@@ -5400,7 +5431,15 @@ def transfer_from_my_wallet(payload: WalletTransferRequest, user: User = Depends
     account = find_user_plain_subaccount(db, user)
     if not account:
         raise HTTPException(status_code=404, detail="Subconta não encontrada")
-    result = request_wallet_transfer(db, user, account, pix_key=payload.pix_key, amount=payload.amount, description=payload.description)
+    result = request_wallet_transfer(
+        db,
+        user,
+        account,
+        pix_key=payload.pix_key,
+        amount=payload.amount,
+        description=payload.description,
+        pix_key_type=payload.pix_key_type,
+    )
     audit(db, user, "wallet.transfer_requested", "escrow_account", account.id, result)
     db.commit()
     return result

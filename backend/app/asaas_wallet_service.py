@@ -305,6 +305,7 @@ def list_wallet_transactions(db: Session, account: EscrowAccount, *, offset: int
                 "amount": str(event.amount),
                 "direction": "CREDIT" if event.event_type in {"FUNDS_CONFIRMED", "PAYMENT_RECEIVED", "CREDIT"} else "DEBIT",
                 "date": event.processed_at.isoformat(),
+                "receipt_transfer_id": event.provider_event_id if event.event_type == "TRANSFER_SENT" else None,
             }
             for event in events
         ]
@@ -316,15 +317,47 @@ def list_wallet_transactions(db: Session, account: EscrowAccount, *, offset: int
     for item in payload.get("data", []):
         event_type = str(item.get("type") or item.get("event") or "MOVEMENT")
         value = item.get("value") or item.get("amount") or 0
+        row_id = str(item.get("id") or uuid4())
         rows.append(
             {
-                "id": str(item.get("id") or uuid4()),
+                "id": row_id,
                 "type": event_type,
                 "label": TRANSACTION_LABELS.get(event_type, event_type.replace("_", " ").title()),
                 "amount": str(abs(Decimal(str(value)))),
                 "direction": "CREDIT" if Decimal(str(value)) >= 0 else "DEBIT",
                 "date": str(item.get("date") or item.get("effectiveDate") or datetime.now(UTC).isoformat()),
+                "receipt_transfer_id": None,
             }
+        )
+    transfer_events = list(
+        db.scalars(
+            select(EscrowEvent)
+            .where(
+                EscrowEvent.escrow_account_id == account.id,
+                EscrowEvent.event_type == "TRANSFER_SENT",
+            )
+            .order_by(EscrowEvent.processed_at.desc())
+            .limit(200)
+        )
+    )
+    existing_ids = {row["id"] for row in rows}
+    for event in transfer_events:
+        if event.provider_event_id in existing_ids:
+            for row in rows:
+                if row["id"] == event.provider_event_id:
+                    row["receipt_transfer_id"] = event.provider_event_id
+            continue
+        rows.insert(
+            0,
+            {
+                "id": event.provider_event_id,
+                "type": event.event_type,
+                "label": TRANSACTION_LABELS.get(event.event_type, event.event_type),
+                "amount": str(event.amount),
+                "direction": "DEBIT",
+                "date": event.processed_at.isoformat(),
+                "receipt_transfer_id": event.provider_event_id,
+            },
         )
     return {"total": payload.get("totalCount", len(rows)), "items": rows, "source": "ASAAS"}
 
@@ -549,7 +582,190 @@ def get_wallet_pix_qrcode(db: Session, account: EscrowAccount) -> dict:
     return {"pix_key": account.pix_key, "payload": qr.get("payload"), "encoded_image": qr.get("encodedImage")}
 
 
-def request_wallet_transfer(db: Session, user: User, account: EscrowAccount, *, pix_key: str, amount: Decimal, description: str | None) -> dict:
+def _digits(value: str) -> str:
+    return re.sub(r"\D", "", value or "")
+
+
+def infer_pix_key_type(pix_key: str) -> str:
+    raw = (pix_key or "").strip()
+    if "@" in raw:
+        return "EMAIL"
+    if re.fullmatch(
+        r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+        raw,
+        re.IGNORECASE,
+    ):
+        return "EVP"
+    digits = _digits(raw)
+    if len(digits) == 14:
+        return "CNPJ"
+    if len(digits) == 11:
+        if digits[2] == "9":
+            return "PHONE"
+        return "CPF"
+    if len(digits) in {10, 11}:
+        return "PHONE"
+    raise HTTPException(status_code=422, detail="Informe uma chave Pix válida (CPF, CNPJ, e-mail, celular ou aleatória).")
+
+
+def normalize_pix_key(pix_key: str, key_type: str) -> str:
+    raw = (pix_key or "").strip()
+    key_type = (key_type or "").upper()
+    if key_type == "EMAIL":
+        return raw.lower()
+    if key_type in {"CPF", "CNPJ", "PHONE"}:
+        return _digits(raw)
+    return raw
+
+
+def _map_pix_lookup_row(pix_key: str, key_type: str, row: dict) -> dict:
+    owner_name = str(
+        row.get("ownerName")
+        or row.get("name")
+        or row.get("holderName")
+        or row.get("owner")
+        or "Titular da chave"
+    )
+    document = row.get("cpfCnpj") or row.get("ownerCpfCnpj") or row.get("document")
+    institution = row.get("ispbName") or row.get("bankName") or row.get("institutionName")
+    return {
+        "pix_key": pix_key,
+        "pix_key_type": key_type,
+        "owner_name": owner_name,
+        "owner_document_masked": str(document) if document else None,
+        "institution_name": str(institution) if institution else None,
+        "valid": True,
+    }
+
+
+def lookup_wallet_pix_key(db: Session, account: EscrowAccount, *, pix_key: str, pix_key_type: str | None = None) -> dict:
+    key_type = (pix_key_type or infer_pix_key_type(pix_key)).upper()
+    if key_type not in {"CPF", "CNPJ", "EMAIL", "PHONE", "EVP"}:
+        raise HTTPException(status_code=422, detail="Tipo de chave Pix inválido.")
+    normalized = normalize_pix_key(pix_key, key_type)
+    if len(normalized) < 3:
+        raise HTTPException(status_code=422, detail="Chave Pix inválida.")
+
+    if _is_mock_account(account):
+        return {
+            "pix_key": normalized,
+            "pix_key_type": key_type,
+            "owner_name": "Destinatário simulado (homologação)",
+            "owner_document_masked": "***.***.***-**",
+            "institution_name": "Instituição simulada LETTER",
+            "valid": True,
+        }
+
+    with subaccount_client(account, db=db) as client:
+        row = client.lookup_external_pix_key(key_type=key_type, key=normalized)
+    return _map_pix_lookup_row(normalized, key_type, row if isinstance(row, dict) else {})
+
+
+def _transfer_receipt_from_payload(
+    *,
+    transfer_id: str,
+    provider: str,
+    status: str,
+    amount: str,
+    fee: str | None,
+    payload: dict,
+    asaas_row: dict | None = None,
+) -> dict:
+    recipient_name = payload.get("recipient_name") or payload.get("owner_name")
+    recipient_document = payload.get("recipient_document_masked") or payload.get("owner_document_masked")
+    institution = payload.get("institution_name")
+    created_at = payload.get("created_at")
+    if asaas_row:
+        bank_account = asaas_row.get("bankAccount")
+        if isinstance(bank_account, dict):
+            recipient_name = recipient_name or bank_account.get("ownerName")
+        recipient_name = recipient_name or asaas_row.get("pixAddressKeyOwnerName")
+        created_at = created_at or asaas_row.get("dateCreated") or asaas_row.get("effectiveDate")
+        status = str(asaas_row.get("status") or status)
+    return {
+        "transfer_id": transfer_id,
+        "status": status,
+        "amount": amount,
+        "fee": fee,
+        "pix_key": str(payload.get("pix_key") or ""),
+        "pix_key_type": payload.get("pix_key_type"),
+        "recipient_name": recipient_name,
+        "recipient_document_masked": recipient_document,
+        "institution_name": institution,
+        "description": payload.get("description"),
+        "created_at": created_at,
+        "provider": provider,
+    }
+
+
+def get_wallet_transfer_receipt(db: Session, account: EscrowAccount, transfer_id: str) -> dict:
+    clean_id = (transfer_id or "").strip()
+    if not clean_id:
+        raise HTTPException(status_code=422, detail="Informe o identificador da transferência.")
+
+    event = db.scalar(
+        select(EscrowEvent).where(
+            EscrowEvent.escrow_account_id == account.id,
+            EscrowEvent.provider_event_id == clean_id,
+            EscrowEvent.event_type == "TRANSFER_SENT",
+        )
+    )
+    payload: dict = {}
+    if event and event.payload_json:
+        try:
+            payload = json.loads(event.payload_json)
+        except json.JSONDecodeError:
+            payload = {}
+
+    amount = str(payload.get("amount") or (event.amount if event else "0"))
+    fee = payload.get("fee")
+    status = str(payload.get("status") or "DONE")
+    provider = str(payload.get("provider") or ("MOCK" if _is_mock_account(account) else "ASAAS"))
+
+    if _is_mock_account(account) or not asaas_configured():
+        return _transfer_receipt_from_payload(
+            transfer_id=clean_id,
+            provider=provider,
+            status=status,
+            amount=amount,
+            fee=str(fee) if fee is not None else None,
+            payload=payload,
+        )
+
+    asaas_row: dict | None = None
+    try:
+        with subaccount_client(account, db=db) as client:
+            asaas_row = client.get_transfer(clean_id)
+    except HTTPException:
+        asaas_row = None
+
+    if asaas_row:
+        amount = str(asaas_row.get("value") or amount)
+        status = str(asaas_row.get("status") or status)
+        payload.setdefault("pix_key", asaas_row.get("pixAddressKey"))
+
+    return _transfer_receipt_from_payload(
+        transfer_id=clean_id,
+        provider=provider,
+        status=status,
+        amount=amount,
+        fee=str(fee) if fee is not None else None,
+        payload=payload,
+        asaas_row=asaas_row,
+    )
+
+
+def request_wallet_transfer(
+    db: Session,
+    user: User,
+    account: EscrowAccount,
+    *,
+    pix_key: str,
+    amount: Decimal,
+    description: str | None,
+    pix_key_type: str | None = None,
+    recipient_preview: dict | None = None,
+) -> dict:
     from app.wallet_billing_service import assert_withdrawals_allowed
     from app.wallet_pricing_service import customer_fee_for
 
@@ -564,9 +780,26 @@ def request_wallet_transfer(db: Session, user: User, account: EscrowAccount, *, 
     if Decimal(str(account.available_balance)) < total_debit:
         raise HTTPException(status_code=422, detail="Saldo insuficiente (valor + taxa de saque).")
 
+    resolved_type = (pix_key_type or infer_pix_key_type(pix_key)).upper()
+    normalized_key = normalize_pix_key(pix_key, resolved_type)
+    preview = recipient_preview or lookup_wallet_pix_key(db, account, pix_key=normalized_key, pix_key_type=resolved_type)
+    transfer_description = description or "Saque LETTER"
+    receipt_base = {
+        "pix_key": normalized_key,
+        "pix_key_type": resolved_type,
+        "description": transfer_description,
+        "amount": str(value),
+        "fee": str(transfer_fee),
+        "recipient_name": preview.get("owner_name"),
+        "recipient_document_masked": preview.get("owner_document_masked"),
+        "institution_name": preview.get("institution_name"),
+        "created_at": datetime.now(UTC).isoformat(),
+    }
+
     if _is_mock_account(account):
         account.available_balance = money(Decimal(str(account.available_balance)) - total_debit)
         event_id = f"mock_transfer_{uuid4().hex[:12]}"
+        payload = {**receipt_base, "provider": "MOCK", "status": "DONE"}
         db.add(
             EscrowEvent(
                 organization_id=account.organization_id,
@@ -574,7 +807,7 @@ def request_wallet_transfer(db: Session, user: User, account: EscrowAccount, *, 
                 provider_event_id=event_id,
                 event_type="TRANSFER_SENT",
                 amount=float(value),
-                payload_json=json.dumps({"pix_key": pix_key, "description": description, "fee": str(transfer_fee)}, ensure_ascii=False),
+                payload_json=json.dumps(payload, ensure_ascii=False),
             )
         )
         if transfer_fee > 0:
@@ -589,24 +822,58 @@ def request_wallet_transfer(db: Session, user: User, account: EscrowAccount, *, 
                 )
             )
         db.flush()
-        return {"provider": "MOCK", "transfer_id": event_id, "status": "DONE", "amount": str(value), "fee": str(transfer_fee)}
+        receipt = _transfer_receipt_from_payload(
+            transfer_id=event_id,
+            provider="MOCK",
+            status="DONE",
+            amount=str(value),
+            fee=str(transfer_fee),
+            payload=payload,
+        )
+        return {"provider": "MOCK", "transfer_id": event_id, "status": "DONE", "amount": str(value), "fee": str(transfer_fee), "receipt": receipt}
 
     with subaccount_client(account, db=db) as client:
         result = client.create_transfer(
             {
                 "value": float(value),
-                "pixAddressKey": pix_key,
-                "description": description or "Saque LETTER",
+                "pixAddressKey": normalized_key,
+                "pixAddressKeyType": resolved_type,
+                "operationType": "PIX",
+                "description": transfer_description,
             }
         )
+    transfer_id = str(result.get("id") or "")
+    status = str(result.get("status") or "PENDING")
     account.available_balance = money(Decimal(str(account.available_balance)) - total_debit)
+    payload = {**receipt_base, "provider": "ASAAS", "status": status}
+    if transfer_id:
+        db.add(
+            EscrowEvent(
+                organization_id=account.organization_id,
+                escrow_account_id=account.id,
+                provider_event_id=transfer_id,
+                event_type="TRANSFER_SENT",
+                amount=float(value),
+                payload_json=json.dumps(payload, ensure_ascii=False),
+            )
+        )
     db.flush()
+    receipt = _transfer_receipt_from_payload(
+        transfer_id=transfer_id,
+        provider="ASAAS",
+        status=status,
+        amount=str(value),
+        fee=str(transfer_fee),
+        payload=payload,
+        asaas_row=result if isinstance(result, dict) else None,
+    )
     return {
         "provider": "ASAAS",
-        "transfer_id": str(result.get("id") or ""),
-        "status": str(result.get("status") or "PENDING"),
+        "transfer_id": transfer_id,
+        "status": status,
         "amount": str(value),
         "fee": str(transfer_fee),
+        "receipt": receipt,
     }
 
 

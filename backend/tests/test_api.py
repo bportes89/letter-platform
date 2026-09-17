@@ -6487,13 +6487,30 @@ def test_my_wallet_view_and_operations(client, auth_headers, monkeypatch):
     assert tx.status_code == 200
     assert len(tx.json()["items"]) >= 1
 
+    lookup = client.get(
+        "/api/v1/wallet/me/pix-key/lookup",
+        headers=headers,
+        params={"pix_key": "cliente.carteira@letter.com.br"},
+    )
+    assert lookup.status_code == 200
+    assert lookup.json()["pix_key_type"] == "EMAIL"
+    assert lookup.json()["owner_name"]
+
     transfer = client.post("/api/v1/wallet/me/transfer", headers=headers, json={
         "pix_key": "cliente.carteira@letter.com.br",
+        "pix_key_type": "EMAIL",
         "amount": "100.00",
         "description": "Saque teste",
     })
     assert transfer.status_code == 200
     assert transfer.json()["status"] == "DONE"
+    assert transfer.json()["receipt"]["transfer_id"]
+    receipt = client.get(
+        f"/api/v1/wallet/me/transfers/{transfer.json()['transfer_id']}/receipt",
+        headers=headers,
+    )
+    assert receipt.status_code == 200
+    assert receipt.json()["amount"] == "100.00"
 
     bill = client.post("/api/v1/wallet/me/bill-payment", headers=headers, json={
         "barcode": "23793381286008301352856000063307701000063307",

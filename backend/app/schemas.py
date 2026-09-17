@@ -1780,6 +1780,31 @@ class WalletTransferRequest(BaseModel):
     pix_key: str = Field(min_length=3, max_length=180)
     amount: Decimal = Field(gt=0)
     description: str | None = Field(default=None, max_length=200)
+    pix_key_type: str | None = Field(default=None, max_length=10)
+
+
+class WalletPixKeyLookupView(BaseModel):
+    pix_key: str
+    pix_key_type: str
+    owner_name: str
+    owner_document_masked: str | None = None
+    institution_name: str | None = None
+    valid: bool = True
+
+
+class WalletTransferReceiptView(BaseModel):
+    transfer_id: str
+    status: str
+    amount: str
+    fee: str | None = None
+    pix_key: str
+    pix_key_type: str | None = None
+    recipient_name: str | None = None
+    recipient_document_masked: str | None = None
+    institution_name: str | None = None
+    description: str | None = None
+    created_at: str | None = None
+    provider: str
 
 
 class AdminWalletTransferCreate(BaseModel):
