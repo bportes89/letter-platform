@@ -103,7 +103,8 @@ export function CadastroMarketplaceModule() {
   }, []);
 
   const load = useCallback(async () => {
-    const params = new URLSearchParams({ pipeline: tab });
+    const pipeline = (tab || "ALL").toUpperCase();
+    const params = new URLSearchParams({ pipeline });
     if (q.trim()) params.set("q", q.trim());
     setRows(await api<CadastroRow[]>(`/marketplace/cadastros?${params}`));
   }, [tab, q]);

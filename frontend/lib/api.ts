@@ -399,6 +399,29 @@ export function getToken() {
   return typeof window === "undefined" ? null : localStorage.getItem("letter_access_token");
 }
 
+function getRefreshToken() {
+  return typeof window === "undefined" ? null : localStorage.getItem("letter_refresh_token");
+}
+
+async function refreshAccessToken(): Promise<string | null> {
+  const refresh = getRefreshToken();
+  if (!refresh) return null;
+  try {
+    const response = await fetch(`${API_URL}/auth/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: refresh }),
+    });
+    if (!response.ok) return null;
+    const result = (await response.json()) as { access_token: string; refresh_token: string };
+    localStorage.setItem("letter_access_token", result.access_token);
+    localStorage.setItem("letter_refresh_token", result.refresh_token);
+    return result.access_token;
+  } catch {
+    return null;
+  }
+}
+
 function formatApiErrorDetail(detail: unknown): string {
   if (typeof detail === "string") return detail;
   if (Array.isArray(detail)) {
@@ -416,17 +439,29 @@ function formatApiErrorDetail(detail: unknown): string {
 }
 
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const token = getToken();
+  let token = getToken();
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(options.headers as Record<string, string> | undefined),
+  };
   let response: Response;
   try {
-    response = await fetchWithRetry(`${API_URL}${path}`, {
-      ...options,
-      headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}), ...options.headers },
-    });
+    response = await fetchWithRetry(`${API_URL}${path}`, { ...options, headers });
   } catch {
     throw new Error(
       "Não foi possível conectar à API LETTER. O servidor pode estar iniciando — aguarde até 1 minuto e tente novamente.",
     );
+  }
+  if (response.status === 401 && token) {
+    const renewed = await refreshAccessToken();
+    if (renewed) {
+      token = renewed;
+      response = await fetchWithRetry(`${API_URL}${path}`, {
+        ...options,
+        headers: { ...headers, Authorization: `Bearer ${renewed}` },
+      });
+    }
   }
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
@@ -445,28 +480,66 @@ export async function deleteApi(path: string): Promise<void> {
   await api<void>(path, { method: "DELETE" });
 }
 
-export async function apiForm<T>(path:string, body:FormData):Promise<T>{
-  const token=getToken();const response=await fetch(`${API_URL}${path}`,{method:"POST",body,headers:{...(token?{Authorization:`Bearer ${token}`}:{})}});
-  if(!response.ok){const payload=await response.json().catch(()=>({}));throw new Error(payload.detail??"Não foi possível enviar o arquivo")}
+export async function apiForm<T>(path: string, body: FormData): Promise<T> {
+  let token = getToken();
+  let response = await fetch(`${API_URL}${path}`, {
+    method: "POST",
+    body,
+    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+  });
+  if (response.status === 401 && token) {
+    const renewed = await refreshAccessToken();
+    if (renewed) {
+      token = renewed;
+      response = await fetch(`${API_URL}${path}`, {
+        method: "POST",
+        body,
+        headers: { Authorization: `Bearer ${renewed}` },
+      });
+    }
+  }
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(formatApiErrorDetail(payload.detail) ?? "Não foi possível enviar o arquivo");
+  }
   return response.json();
 }
 
 export async function downloadApi(path:string,filename:string){const token=getToken();const response=await fetch(`${API_URL}${path}`,{headers:{...(token?{Authorization:`Bearer ${token}`}:{})}});if(!response.ok)throw new Error("Não foi possível exportar o relatório");const url=URL.createObjectURL(await response.blob());const link=document.createElement("a");link.href=url;link.download=filename;link.click();URL.revokeObjectURL(url)}
 
-export async function login(email: string, password: string, otp?: string) {
+export class LoginChallengeError extends Error {
+  kind: "email_otp" | "mfa";
+
+  constructor(kind: "email_otp" | "mfa", message: string) {
+    super(message);
+    this.kind = kind;
+  }
+}
+
+export async function login(email: string, password: string, opts?: { emailOtp?: string; mfaOtp?: string }) {
   const response = await fetch(`${API_URL}/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password, otp: otp?.trim() || undefined }),
+    body: JSON.stringify({
+      email,
+      password,
+      email_otp: opts?.emailOtp?.trim() || undefined,
+      otp: opts?.mfaOtp?.trim() || undefined,
+    }),
   });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
+    const detail = typeof body.detail === "string" ? body.detail : "";
     if (response.status === 428) {
-      throw new Error(
-        "Esta conta exige código do autenticador (MFA). Abra Google Authenticator, Microsoft Authenticator ou similar e informe o código de 6 dígitos.",
+      if (detail.toLowerCase().includes("e-mail")) {
+        throw new LoginChallengeError("email_otp", detail);
+      }
+      throw new LoginChallengeError(
+        "mfa",
+        detail || "Informe o código de 6 dígitos do seu app autenticador.",
       );
     }
-    throw new Error(body.detail ?? "E-mail ou senha inválidos");
+    throw new Error(detail || "E-mail ou senha inválidos");
   }
   const result = (await response.json()) as { access_token: string; refresh_token: string };
   localStorage.setItem("letter_access_token", result.access_token);

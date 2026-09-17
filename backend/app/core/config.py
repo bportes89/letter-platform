@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     public_rate_limit_per_minute: int = 300
     chat_native_enabled: bool = True
     login_rate_limit_per_minute: int = 20
+    login_email_otp: bool = True
     integration_circuit_failure_threshold: int = 3
     integration_circuit_cooldown_seconds: int = 60
     integration_http_timeout_seconds: float = 10.0

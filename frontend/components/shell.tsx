@@ -343,7 +343,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
           Sair
         </button>
       </aside>
-      <section className="workspace">
+      <section className="workspace module-shell">
         <div className="workspace-ambient" aria-hidden="true">
           <span className="ambient-orb ambient-orb-1" />
           <span className="ambient-orb ambient-orb-2" />

@@ -7,6 +7,7 @@ TEST_DATABASE_PATH.unlink(missing_ok=True)
 os.environ["LETTER_DATABASE_URL"] = f"sqlite:///{TEST_DATABASE_PATH}"
 os.environ["LETTER_SECRET_KEY"] = "test-secret-key-with-more-than-thirty-two-chars"
 os.environ["LETTER_LOGIN_RATE_LIMIT_PER_MINUTE"] = "1000"
+os.environ["LETTER_LOGIN_EMAIL_OTP"] = "false"
 os.environ["LETTER_PUBLIC_RATE_LIMIT_PER_MINUTE"] = "10000"
 
 import pytest

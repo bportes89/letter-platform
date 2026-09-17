@@ -6,7 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { FormEvent, Suspense, useEffect, useState } from "react";
 import "../site.css";
 import { SiteNav } from "@/components/public-site/simulator-section";
-import { getToken, login, api, User } from "@/lib/api";
+import { getToken, login, api, User, LoginChallengeError } from "@/lib/api";
 import { portalHomeForRole } from "@/lib/portal-routes";
 import {
   contractOnboardingPath,
@@ -56,15 +56,19 @@ async function redirectAfterLogin(user: User, nextPath: string | null, chatLeadI
   window.location.href = portalHomeForRole(user.role);
 }
 
+type LoginStep = "password" | "email_otp" | "mfa";
+
 function LoginForm() {
   const searchParams = useSearchParams();
   const nextPath = searchParams.get("next");
   const leadIdFromUrl = searchParams.get("lead_id")?.trim() || null;
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [otp, setOtp] = useState("");
-  const [showMfa, setShowMfa] = useState(false);
+  const [emailOtp, setEmailOtp] = useState("");
+  const [mfaOtp, setMfaOtp] = useState("");
+  const [step, setStep] = useState<LoginStep>("password");
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -92,30 +96,42 @@ function LoginForm() {
       });
   }, [nextPath, leadIdFromUrl]);
 
+  async function completeLogin() {
+    const user = await api<User>("/auth/me");
+    const stored =
+      leadIdFromUrl ||
+      (typeof window !== "undefined" ? sessionStorage.getItem("letter_chat_lead_id") : null);
+    await redirectAfterLogin(user, nextPath, stored);
+  }
+
   async function submit(event: FormEvent) {
     event.preventDefault();
     setError("");
+    setNotice("");
     setLoading(true);
     try {
-      await login(email, password, showMfa ? otp : undefined);
-      const user = await api<User>("/auth/me");
-      const stored =
-        leadIdFromUrl ||
-        (typeof window !== "undefined" ? sessionStorage.getItem("letter_chat_lead_id") : null);
-      await redirectAfterLogin(user, nextPath, stored);
+      await login(email, password, {
+        emailOtp: step === "email_otp" || step === "mfa" ? emailOtp : undefined,
+        mfaOtp: step === "mfa" ? mfaOtp : undefined,
+      });
+      await completeLogin();
     } catch (e) {
-      const message = e instanceof Error ? e.message : "Falha no acesso";
-      if (message.includes("autenticador (MFA)")) {
-        setShowMfa(true);
-        setError(
-          "Esta conta tem autenticação em duas etapas ativa. Informe o código de 6 dígitos do seu app autenticador abaixo.",
-        );
+      if (e instanceof LoginChallengeError) {
+        if (e.kind === "email_otp") {
+          setStep("email_otp");
+          setNotice(e.message);
+        } else {
+          setStep("mfa");
+          setError(e.message);
+        }
       } else {
-        setError(message);
+        setError(e instanceof Error ? e.message : "Falha no acesso");
       }
       setLoading(false);
     }
   }
+
+  const passwordLocked = step !== "password";
 
   return (
     <form className="site-login-card" onSubmit={submit}>
@@ -135,6 +151,7 @@ function LoginForm() {
           name="email"
           autoComplete="username"
           required
+          readOnly={passwordLocked}
         />
       </label>
       <label>
@@ -147,40 +164,71 @@ function LoginForm() {
           autoComplete="current-password"
           minLength={8}
           required
+          readOnly={passwordLocked}
         />
       </label>
-      <label className="site-login-mfa-toggle">
-        <input
-          type="checkbox"
-          checked={showMfa}
-          onChange={(e) => {
-            setShowMfa(e.target.checked);
-            if (!e.target.checked) setOtp("");
-          }}
-        />
-        Já ativei a autenticação em duas etapas (código no celular)
-      </label>
-      {showMfa && (
+
+      {step === "email_otp" && (
         <label>
-          Código do autenticador
-          <small>Use o app Google Authenticator, Microsoft Authenticator ou similar</small>
+          Código enviado por e-mail
+          <small>Digite os 6 dígitos que enviamos para {email}</small>
           <input
-            value={otp}
-            onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
+            value={emailOtp}
+            onChange={(e) => setEmailOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
             inputMode="numeric"
             placeholder="6 dígitos"
-            required={showMfa}
+            required
             autoComplete="one-time-code"
             autoFocus
           />
         </label>
       )}
 
+      {step === "mfa" && (
+        <label>
+          Código do autenticador
+          <small>Use o app Google Authenticator, Microsoft Authenticator ou similar</small>
+          <input
+            value={mfaOtp}
+            onChange={(e) => setMfaOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
+            inputMode="numeric"
+            placeholder="6 dígitos"
+            required
+            autoComplete="one-time-code"
+            autoFocus
+          />
+        </label>
+      )}
+
+      {notice && <p className="site-login-note">{notice}</p>}
       {error && <p className="site-error">{error}</p>}
 
       <button className="site-submit" type="submit" disabled={loading} style={{ width: "100%" }}>
-        {loading ? "Autenticando…" : "Entrar na plataforma"}
+        {loading
+          ? "Autenticando…"
+          : step === "password"
+            ? "Continuar"
+            : step === "email_otp"
+              ? "Confirmar código do e-mail"
+              : "Confirmar e entrar"}
       </button>
+
+      {passwordLocked && (
+        <button
+          type="button"
+          className="site-login-back"
+          style={{ border: 0, background: "none", cursor: "pointer", padding: 0 }}
+          onClick={() => {
+            setStep("password");
+            setEmailOtp("");
+            setMfaOtp("");
+            setNotice("");
+            setError("");
+          }}
+        >
+          ← Voltar e alterar e-mail ou senha
+        </button>
+      )}
 
       <p className="site-login-note">
         <LockKeyhole size={14} aria-hidden />

@@ -799,12 +799,20 @@ export function MyWalletModule() {
               </section>
             )}
 
-            {(wallet.capabilities?.boleto_issuance_enabled ?? wallet.capabilities?.bill_payments_enabled) && (
-              <form className="stack-form" onSubmit={(e) => void issueBoleto(e).catch((err) => setNotice(err.message))}>
-                <h3>Emitir boleto</h3>
-                <p className="muted" style={{ margin: 0 }}>
-                  Gere uma cobrança por boleto para o pagador. Após emitir, compartilhe o link ou a linha digitável.
+            <form
+              className={`stack-form${wallet.capabilities?.boleto_issuance_enabled ? "" : " wallet-locked-section"}`}
+              onSubmit={(e) => void issueBoleto(e).catch((err) => setNotice(err.message))}
+            >
+              <h3>Emitir boleto</h3>
+              {!wallet.capabilities?.boleto_issuance_enabled && (
+                <p className="notice" style={{ margin: 0 }}>
+                  Disponível após aprovação do KYC e habilitação da conta digital LETTER.
                 </p>
+              )}
+              <p className="muted" style={{ margin: 0 }}>
+                Gere uma cobrança por boleto para o pagador. Após emitir, compartilhe o link ou a linha digitável.
+              </p>
+              <fieldset disabled={!wallet.capabilities?.boleto_issuance_enabled} style={{ border: 0, margin: 0, padding: 0 }}>
                 <input name="customer_name" placeholder="Nome do pagador" required />
                 <input name="customer_document" placeholder="CPF ou CNPJ do pagador" required />
                 <input name="customer_email" type="email" placeholder="E-mail do pagador (opcional)" />
@@ -821,8 +829,8 @@ export function MyWalletModule() {
                 </label>
                 <input name="description" placeholder="Descrição da cobrança (opcional)" />
                 <button><Send />Emitir boleto</button>
-              </form>
-            )}
+              </fieldset>
+            </form>
 
             {lastBoleto && (
               <section className="panel">
@@ -872,15 +880,23 @@ export function MyWalletModule() {
               </section>
             )}
 
-            {wallet.capabilities?.bill_payments_enabled && (
-              <form className="stack-form" onSubmit={(e) => void payBill(e).catch((err) => setNotice(err.message))}>
-                <h3>Pagamento de contas</h3>
+            <form
+              className={`stack-form${wallet.capabilities?.bill_payments_enabled ? "" : " wallet-locked-section"}`}
+              onSubmit={(e) => void payBill(e).catch((err) => setNotice(err.message))}
+            >
+              <h3>Pagamento de contas</h3>
+              {!wallet.capabilities?.bill_payments_enabled && (
+                <p className="notice" style={{ margin: 0 }}>
+                  Disponível após aprovação do KYC e habilitação do pagamento de contas na sua carteira.
+                </p>
+              )}
+              <fieldset disabled={!wallet.capabilities?.bill_payments_enabled} style={{ border: 0, margin: 0, padding: 0 }}>
                 <input name="barcode" placeholder="Linha digitável ou código de barras" required />
                 <CurrencyInput value={billAmount} onChange={setBillAmount} placeholder="Valor (R$)" required />
                 <input name="description" placeholder="Descrição (opcional)" />
                 <button><Send />Pagar boleto</button>
-              </form>
-            )}
+              </fieldset>
+            </form>
 
             {(wallet.capabilities?.boleto_issuance_enabled ?? wallet.capabilities?.bill_payments_enabled) && (
               <section className="panel">

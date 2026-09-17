@@ -114,6 +114,13 @@ export function VendaDiretaManualModule() {
     setBusy(true);
     setDone(null);
     try {
+      const { validationMessageForPerson } = await import("@/lib/br-validation");
+      const invalid = validationMessageForPerson(document, email, phone);
+      if (invalid) {
+        setError(invalid);
+        setBusy(false);
+        return;
+      }
       const data = await api<StoreResult>("/marketplace/venda-direta-manual/store", {
         method: "POST",
         body: JSON.stringify({

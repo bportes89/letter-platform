@@ -18,7 +18,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Administrator, Organization, Quota, QuotaSupplier, User
+from app.models import Administrator, Organization, Quota, QuotaSupplier, Role, User
 from app.quota_scrape_service import SCRAPE_HTTP_HEADERS
 from app.quota_supplier_service import get_supplier, normalize_supplier_key
 from app.services import money
@@ -226,7 +226,7 @@ def _apply_row(
 
 def sync_supplier_inventory(db: Session, user: User, supplier_id: str) -> dict:
     supplier = get_supplier(db, user, supplier_id)
-    return _sync_one(db, organization_id=user.organization_id, supplier=supplier)
+    return _sync_one(db, organization_id=user.organization_id, supplier=supplier, actor=user)
 
 
 def sync_organization_inventory(db: Session, organization_id: str) -> dict:
@@ -288,7 +288,17 @@ def _stamp_supplier(supplier: QuotaSupplier, *, status: str, detail: dict) -> No
     supplier.last_sync_detail_json = json.dumps(detail, ensure_ascii=False)
 
 
-def _sync_one(db: Session, *, organization_id: str, supplier: QuotaSupplier) -> dict:
+def _sync_actor(db: Session, organization_id: str) -> User | None:
+    return db.scalar(
+        select(User).where(
+            User.organization_id == organization_id,
+            User.active.is_(True),
+            User.role.in_((Role.PLATFORM_ADMIN, Role.INTERNAL_STAFF)),
+        ).limit(1)
+    )
+
+
+def _sync_one(db: Session, *, organization_id: str, supplier: QuotaSupplier, actor: User | None = None) -> dict:
     if supplier.sync_mode not in {SYNC_JSON, SYNC_SCRAPE}:
         raise HTTPException(422, "Fornecedor sem sync_mode=JSON ou SCRAPE.")
     url = (supplier.api_url or "").strip()
@@ -379,6 +389,14 @@ def _sync_one(db: Session, *, organization_id: str, supplier: QuotaSupplier) -> 
         "skipped": skipped,
         "protected": protected,
     }
+    ingest_user = actor or _sync_actor(db, organization_id)
+    if ingest_user:
+        from app.quota_inventory_service import auto_nina_scan_on_ingest
+
+        for quota in existing.values():
+            if quota.status == "AVAILABLE" and (not quota.nina_scan_status or quota.nina_scan_status == "PENDING"):
+                auto_nina_scan_on_ingest(db, ingest_user, quota)
+
     _stamp_supplier(supplier, status="OK", detail=detail)
     db.flush()
     return detail

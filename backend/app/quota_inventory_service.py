@@ -90,6 +90,16 @@ def _nina_scan_fresh(quota: Quota) -> bool:
     return scanned >= utcnow() - timedelta(minutes=NINA_SCAN_MAX_AGE_MINUTES)
 
 
+def auto_nina_scan_on_ingest(db: Session, user: User, quota: Quota) -> None:
+    """Varredura Nina automática após criação/sync admin ou API (best-effort)."""
+    if quota.status not in {"AVAILABLE", "PENDING_REVIEW"}:
+        return
+    try:
+        run_nina_quota_scan(db, user, quota)
+    except HTTPException:
+        pass
+
+
 def ensure_nina_scan_before_lock(quota: Quota) -> None:
     if not _nina_scan_fresh(quota):
         raise HTTPException(

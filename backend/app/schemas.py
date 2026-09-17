@@ -183,6 +183,7 @@ class WebhookVerifyRequest(BaseModel):
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8)
+    email_otp: str | None = Field(default=None, min_length=6, max_length=6)
     otp: str | None = Field(default=None, min_length=6, max_length=6)
 
 

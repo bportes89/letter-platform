@@ -70,10 +70,10 @@ const emptyForm = {
   occupation: "",
   income_value: "",
   outstanding_balance: "",
-  meses_restantes: "48",
+  meses_restantes: "",
   registry_number: "",
   registry_office: "Embracon",
-  property_type: "CONSORCIO",
+  property_type: "VEICULO",
   operational_service: false,
   contemplada: true,
   bem_faturado: true,
@@ -131,9 +131,13 @@ export function QuitConDeskModule() {
   }
 
   function evaluatePayload() {
+    const meses = Number(form.meses_restantes);
+    if (!form.meses_restantes.trim() || !Number.isFinite(meses) || meses < 1) {
+      throw new Error("Informe os meses restantes (número válido).");
+    }
     return {
       outstanding_balance: moneyPayload(form.outstanding_balance),
-      meses_restantes: Number(form.meses_restantes),
+      meses_restantes: meses,
       registry_number: form.registry_number.trim(),
       registry_office: form.registry_office.trim(),
       property_type: form.property_type,
@@ -145,13 +149,22 @@ export function QuitConDeskModule() {
     };
   }
 
+  async function validateContactFields() {
+    const { validationMessageForPerson, isValidEmail } = await import("@/lib/br-validation");
+    const docMsg = validationMessageForPerson(form.person_type, form.document);
+    if (docMsg) throw new Error(docMsg);
+    if (!isValidEmail(form.contact_email)) throw new Error("E-mail inválido.");
+  }
+
   async function calculate() {
     setError("");
     setBusy(true);
     try {
+      await validateContactFields();
+      const payload = evaluatePayload();
       const res = await api<{ result: EvalResult }>("/quitcon/desk/evaluate", {
         method: "POST",
-        body: JSON.stringify(evaluatePayload()),
+        body: JSON.stringify(payload),
       });
       setEvalResult(res.result);
     } catch (e) {
@@ -165,10 +178,12 @@ export function QuitConDeskModule() {
     setError("");
     setBusy(true);
     try {
+      await validateContactFields();
+      const payload = evaluatePayload();
       const created = await api<QuitConSolicitation>("/quitcon/desk/solicitations", {
         method: "POST",
         body: JSON.stringify({
-          ...evaluatePayload(),
+          ...payload,
           contact_name: form.contact_name.trim(),
           contact_email: form.contact_email.trim(),
           contact_phone: form.contact_phone.trim(),
@@ -355,9 +370,10 @@ export function QuitConDeskModule() {
                   {ADMINS.map((a) => <option key={a} value={a}>{a}</option>)}
                 </select>
                 <select value={form.property_type} onChange={(e) => patchForm("property_type", e.target.value)}>
-                  <option value="CONSORCIO">Consórcio</option>
-                  <option value="REAL_ESTATE">Imóvel</option>
-                  <option value="RURAL">Rural</option>
+                  <option value="VEICULO">Veículo</option>
+                  <option value="PESADOS">Pesados</option>
+                  <option value="IMOVEL_URBANO">Imóvel urbano</option>
+                  <option value="IMOVEL_RURAL">Imóvel rural</option>
                 </select>
                 <input placeholder="Endereço" value={form.address} onChange={(e) => patchForm("address", e.target.value)} style={{ gridColumn: "1 / -1" }} />
               </div>

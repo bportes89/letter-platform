@@ -34,6 +34,10 @@ MARKETPLACE_SOURCES = frozenset(
         "PUBLIC_SITE",
         "CHAT",
         "SITE_CHAT",
+        "CADASTRO",
+        "CLIENT_SIGNUP",
+        "MARKETPLACE",
+        "SITE",
     }
 )
 
@@ -160,6 +164,9 @@ def _is_marketplace_row(lead: Lead, proposal: Proposal | None) -> bool:
     if lead.source in MARKETPLACE_SOURCES:
         return True
     if proposal and proposal.product == "MARKETPLACE":
+        return True
+    snap = _snapshot_from_lead(lead)
+    if snap and (snap.get("email") or snap.get("quota_id") or snap.get("quota_ids")):
         return True
     return False
 

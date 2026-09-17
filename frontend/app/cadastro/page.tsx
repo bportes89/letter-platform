@@ -87,6 +87,25 @@ function CadastroForm() {
     setError("");
     setLoading(true);
     try {
+      const { validationMessageForPerson, isValidEmail, isValidPhoneBr } = await import("@/lib/br-validation");
+      if (!isValidEmail(email)) {
+        setError("E-mail inválido.");
+        setLoading(false);
+        return;
+      }
+      if (!isValidPhoneBr(phone)) {
+        setError("Telefone inválido (10 ou 11 dígitos).");
+        setLoading(false);
+        return;
+      }
+      if (document.trim()) {
+        const docMsg = validationMessageForPerson(document, email, phone);
+        if (docMsg) {
+          setError(docMsg);
+          setLoading(false);
+          return;
+        }
+      }
       const chatLeadId =
         leadIdFromUrl ||
         (typeof window !== "undefined" ? sessionStorage.getItem("letter_chat_lead_id") : null) ||

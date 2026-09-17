@@ -97,6 +97,13 @@ export function VendaDiretaRoboModule() {
     setBusy(true);
     setConfirmed(null);
     try {
+      const { validationMessageForPerson } = await import("@/lib/br-validation");
+      const invalid = validationMessageForPerson(document, email, phone);
+      if (invalid) {
+        setError(invalid);
+        setBusy(false);
+        return;
+      }
       const data = await api<SearchResult>("/marketplace/venda-direta-robo/search", {
         method: "POST",
         body: JSON.stringify({

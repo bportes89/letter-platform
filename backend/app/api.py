@@ -334,10 +334,29 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
     if not user or not verify_password(payload.password, user.password_hash) or not user.active:
         record_security_event(db,"LOGIN_FAILED","MEDIUM",ip,payload.email.lower(),user.organization_id if user else None);db.commit()
         raise HTTPException(status_code=401, detail="E-mail ou senha inválidos")
-    if user.mfa_enabled and (not payload.otp or not verify_mfa(user,payload.otp)):
-        raise HTTPException(status_code=428,detail="Código MFA obrigatório ou inválido")
+    from app.login_email_otp_service import (
+        consume_login_email_otp,
+        email_login_otp_satisfied,
+        issue_login_email_otp,
+    )
+
+    if settings.login_email_otp:
+        if not email_login_otp_satisfied(db, user, payload.email_otp):
+            if payload.email_otp:
+                record_security_event(db, "LOGIN_EMAIL_OTP_FAILED", "MEDIUM", ip, payload.email.lower(), user.organization_id)
+            issue_login_email_otp(db, user)
+            db.commit()
+            raise HTTPException(
+                status_code=428,
+                detail="Enviamos um código de 6 dígitos para o seu e-mail. Informe-o para continuar.",
+            )
+    if user.mfa_enabled and (not payload.otp or not verify_mfa(user, payload.otp)):
+        db.commit()
+        raise HTTPException(status_code=428, detail="Código MFA obrigatório ou inválido")
     from app.master_tree_service import sync_user_master_tree
 
+    if settings.login_email_otp:
+        consume_login_email_otp(db, user, payload.email_otp)
     sync_user_master_tree(db, user)
     access,refresh,_=create_session_tokens(db,user,request.headers.get("user-agent"),request.client.host if request.client else None)
     db.commit();return TokenPair(access_token=access,refresh_token=refresh)
@@ -2057,6 +2076,9 @@ def marketplace_quota_approve(
     from app.supplier_portal_quota_service import approve_supplier_quota, quota_admin_view
 
     quota = approve_supplier_quota(db, user, quota_id)
+    from app.quota_inventory_service import auto_nina_scan_on_ingest
+
+    auto_nina_scan_on_ingest(db, user, quota)
     audit(db, user, "quota.approved", "quota", quota.id)
     db.commit()
     db.refresh(quota)
@@ -2209,7 +2231,14 @@ def create_quota(payload: QuotaCreate, user: User = Depends(require_scope("inven
     if not db.get(Administrator, payload.administrator_id):
         raise HTTPException(status_code=404, detail="Administradora não encontrada")
     quota = Quota(organization_id=user.organization_id, seller_id=user.id, **payload.model_dump())
-    db.add(quota); db.flush(); audit(db, user, "quota.created", "quota", quota.id); db.commit(); db.refresh(quota)
+    db.add(quota)
+    db.flush()
+    from app.quota_inventory_service import auto_nina_scan_on_ingest
+
+    auto_nina_scan_on_ingest(db, user, quota)
+    audit(db, user, "quota.created", "quota", quota.id)
+    db.commit()
+    db.refresh(quota)
     return quota
 
 
