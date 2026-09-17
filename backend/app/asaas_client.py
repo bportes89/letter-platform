@@ -166,6 +166,15 @@ class AsaasClient:
                     detail = errors[0].get("description") or errors[0].get("code") or detail
             except Exception:
                 pass
+            detail_lower = str(detail).lower()
+            if response.status_code == 400 and "não pode ser enviado via api" in detail_lower:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        "Este documento não pode ser enviado por upload (limitação Asaas). "
+                        "Use «Atualizar dados bancários» e depois «Verificar identidade» pelo link oficial."
+                    ),
+                )
             raise HTTPException(status_code=502, detail=f"Asaas retornou erro {response.status_code}: {detail}")
         if not response.content:
             return {}

@@ -1,7 +1,7 @@
 "use client";
 
 import { Camera, ChevronLeft, ExternalLink, RefreshCw, Upload, X } from "lucide-react";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { API_URL, getToken } from "@/lib/api";
 
 export type KycIdentityDocument = {
@@ -21,7 +21,7 @@ type Props = {
   onComplete: (message: string) => void;
 };
 
-type WizardMode = "choose" | "link" | "camera";
+type WizardMode = "choose" | "link" | "camera" | "waiting";
 
 function pendingIdentityDocs(documents: KycIdentityDocument[]) {
   return documents.filter((doc) => {
@@ -80,11 +80,20 @@ export function KycIdentityWizard({ documents, identityOnboardingUrl, onClose, o
     [identityDocs, identityOnboardingUrl],
   );
   const cameraDocs = useMemo(
-    () => identityDocs.filter((d) => (d.capture_mode || "camera") !== "link"),
+    () =>
+      identityDocs.filter(
+        (d) => d.accepts_api_upload && (d.capture_mode || "camera") !== "link",
+      ),
     [identityDocs],
   );
 
-  const [mode, setMode] = useState<WizardMode>(linkUrl ? "choose" : "camera");
+  const [mode, setMode] = useState<WizardMode>("waiting");
+
+  useEffect(() => {
+    setMode(linkUrl ? "choose" : cameraDocs.length ? "camera" : "waiting");
+    setStep(0);
+    setError("");
+  }, [linkUrl, cameraDocs.length, documents]);
   const [step, setStep] = useState(0);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -135,7 +144,13 @@ export function KycIdentityWizard({ documents, identityOnboardingUrl, onClose, o
       setStep((s) => s + 1);
       onComplete(message);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Falha no envio da foto.");
+      const message = e instanceof Error ? e.message : "Falha no envio da foto.";
+      setError(message);
+      const lower = message.toLowerCase();
+      if (lower.includes("link oficial") || lower.includes("limitação asaas") || lower.includes("não pode ser enviado")) {
+        setMode(linkUrl ? "link" : "waiting");
+        resetCapture();
+      }
     } finally {
       setUploading(false);
     }
@@ -169,10 +184,36 @@ export function KycIdentityWizard({ documents, identityOnboardingUrl, onClose, o
               <Camera />
               Verificação no app (recomendado)
             </button>
-            <button type="button" className="kyc-wizard-secondary" onClick={() => setMode("camera")} disabled={!cameraDocs.length}>
-              <Upload />
-              Enviar fotos manualmente
-            </button>
+            {cameraDocs.length > 0 && (
+              <button type="button" className="kyc-wizard-secondary" onClick={() => setMode("camera")}>
+                <Upload />
+                Enviar fotos manualmente (somente homologação)
+              </button>
+            )}
+          </div>
+        )}
+
+        {mode === "waiting" && (
+          <div className="kyc-wizard-body">
+            <p className="muted" style={{ marginTop: 0 }}>
+              Para <strong>RG e selfie</strong>, o Asaas não aceita envio de foto pela plataforma (pessoa física). É
+              obrigatório usar o <strong>link oficial de verificação</strong>.
+            </p>
+            <ol className="muted" style={{ margin: "0 0 16px", paddingLeft: 20 }}>
+              <li>Feche esta janela.</li>
+              <li>No BANK, toque em <strong>Atualizar dados bancários</strong>.</li>
+              <li>Aguarde cerca de 1 minuto e abra <strong>Verificar identidade</strong> de novo.</li>
+            </ol>
+            {linkUrl ? (
+              <button type="button" className="kyc-wizard-primary" onClick={() => setMode("link")}>
+                <ExternalLink />
+                Abrir verificação oficial
+              </button>
+            ) : (
+              <button type="button" className="kyc-wizard-secondary" onClick={closeWizard}>
+                Fechar e atualizar dados bancários
+              </button>
+            )}
           </div>
         )}
 
