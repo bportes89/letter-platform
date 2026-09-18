@@ -100,6 +100,8 @@ Formulário único: parceiro opcional → categoria → **uma cota** do inventá
 2. `GET /api/v1/marketplace/venda-direta-manual/cadastros` / `partners`
 3. `POST /api/v1/marketplace/venda-direta-manual/store` — lead + proposta + Nina + trava 60 min
 
+Antes de gravar, aplica o **mesmo gate de regras Bacen/approval_rules** da Esteira 2 (renda × parcela, SCR, idade do bem, lastro, etc.) via `admin_profile_blockers`. Exige renda e valor do bem; ano do bem se veículo; junção só na mesma administradora.
+
 Entrada exibida já aplica markup/comissão do fornecedor. **Venda direta manual** não embute markup de afiliado (só vínculo do parceiro para comissão na finalização).
 
 ### Markup afiliado (`porc_a_mais`) no chat público

@@ -2406,6 +2406,11 @@ def venda_direta_manual_store(payload: VendaDiretaManualStoreRequest, user: User
         uf=payload.uf,
         occupation=payload.occupation,
         monthly_income=payload.monthly_income,
+        monthly_commitment=payload.monthly_commitment,
+        asset_value=payload.asset_value,
+        asset_year=payload.asset_year,
+        has_credit_restriction=payload.has_credit_restriction,
+        asset_is_zero_km=payload.asset_is_zero_km,
     )
     audit(db, user, "marketplace.venda_direta_manual.store", "proposal", result["proposal_id"], {"quota_id": result["quota_id"]})
     db.commit()

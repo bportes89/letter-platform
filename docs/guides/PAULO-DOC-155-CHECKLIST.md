@@ -25,7 +25,7 @@ Legenda: **OK** implementado em código · **Parcial** depende de dados/homologa
 | Esteiras sem números fixos / ano só veículo | **OK** |
 | Validação CPF/e-mail/telefone + CEP | **OK** |
 | Venda direta robô — cadastros salvos | **OK** |
-| Venda direta manual — cotas + multi-cota | **OK** |
+| Venda direta manual — cotas + multi-cota + gate Bacen | **OK** |
 | Cadastros só do parceiro | **OK** (filtro `owner_id`) |
 | Cadastros pipelines (concluído/negociação…) | **OK** (cadastro_service) |
 | Inventário Nina pendente (admin/API) | **OK** auto-approve ingest |

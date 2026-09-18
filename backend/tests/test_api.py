@@ -638,6 +638,7 @@ def test_venda_direta_manual_store(client, auth_headers):
             "uf": "MG",
             "occupation": "Comerciante",
             "monthly_income": "15000",
+            "asset_value": "800000",
         },
     )
     assert store.status_code == 200, store.text
@@ -713,6 +714,8 @@ def test_marketplace_cadastro_situation_lifecycle(client, auth_headers):
             "neighborhood": "Centro",
             "city": "Juiz de Fora",
             "uf": "MG",
+            "monthly_income": "20000",
+            "asset_value": "800000",
         },
     )
     assert store.status_code == 200, store.text
@@ -811,6 +814,8 @@ def test_marketplace_inter_boleto_mock_and_webhook_pago(client, auth_headers, mo
             "neighborhood": "Centro",
             "city": "Juiz de Fora",
             "uf": "MG",
+            "monthly_income": "20000",
+            "asset_value": "800000",
         },
     )
     assert store.status_code == 200, store.text
@@ -1088,6 +1093,8 @@ def test_supplier_portal_confirm_unlocks_conclude(client, auth_headers):
             "neighborhood": "Centro",
             "city": "Juiz de Fora",
             "uf": "MG",
+            "monthly_income": "20000",
+            "asset_value": "800000",
         },
     )
     assert store.status_code == 200, store.text
@@ -1223,6 +1230,8 @@ def test_marketplace_conclude_allocates_affiliate_commission(client, auth_header
             "neighborhood": "Centro",
             "city": "Juiz de Fora",
             "uf": "MG",
+            "monthly_income": "20000",
+            "asset_value": "800000",
         },
     )
     assert store.status_code == 200, store.text

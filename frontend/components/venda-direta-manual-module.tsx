@@ -59,6 +59,11 @@ export function VendaDiretaManualModule() {
   const [document, setDocument] = useState("");
   const [occupation, setOccupation] = useState("");
   const [income, setIncome] = useState("");
+  const [commitment, setCommitment] = useState("");
+  const [assetValue, setAssetValue] = useState("");
+  const [assetYear, setAssetYear] = useState("");
+  const [dirty, setDirty] = useState(false);
+  const [zeroKm, setZeroKm] = useState(false);
   const [zipcode, setZipcode] = useState("");
   const [street, setStreet] = useState("");
   const [number, setNumber] = useState("");
@@ -140,7 +145,12 @@ export function VendaDiretaManualModule() {
           city,
           uf,
           occupation: occupation || null,
-          monthly_income: income || null,
+          monthly_income: income,
+          monthly_commitment: commitment || "0",
+          asset_value: assetValue,
+          asset_year: category === "VEHICLE" && assetYear ? Number(assetYear) : null,
+          has_credit_restriction: dirty,
+          asset_is_zero_km: zeroKm,
         }),
       });
       setDone(data);
@@ -172,8 +182,8 @@ export function VendaDiretaManualModule() {
           <span className="eyebrow dark">VENDAS</span>
           <h1>Venda Direta — Manual</h1>
           <p>
-            Admin escolhe a cota no inventário e grava a venda no braço (WhatsApp, ligação, reunião). Sem robô — uma
-            cota por vez. Entrada já considera markup/comissão do fornecedor.
+            Admin escolhe a(s) cota(s) no inventário e grava a venda (WhatsApp, ligação, reunião). Mesmas regras Bacen
+            da Venda Direta Robô (renda × parcela, SCR, idade do bem, lastro). Entrada já considera markup do fornecedor.
           </p>
         </div>
         <div className="operational-icon">
@@ -299,7 +309,29 @@ export function VendaDiretaManualModule() {
             </label>
             <label className="marketplace-field">
               Renda / faturamento (R$)
-              <CurrencyInput value={income} onChange={setIncome} />
+              <CurrencyInput value={income} onChange={setIncome} required />
+            </label>
+            <label className="marketplace-field">
+              Comprometimento (R$)
+              <CurrencyInput value={commitment} onChange={setCommitment} />
+            </label>
+            <label className="marketplace-field">
+              Valor do bem (R$)
+              <CurrencyInput value={assetValue} onChange={setAssetValue} required />
+            </label>
+            {category === "VEHICLE" && (
+              <label className="marketplace-field marketplace-field-compact">
+                Ano do bem
+                <input type="number" min={1980} max={2100} value={assetYear} onChange={(e) => setAssetYear(e.target.value)} required />
+              </label>
+            )}
+            <label className="marketplace-field marketplace-field-compact" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <input type="checkbox" checked={dirty} onChange={(e) => setDirty(e.target.checked)} />
+              Nome sujo / SPC
+            </label>
+            <label className="marketplace-field marketplace-field-compact" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <input type="checkbox" checked={zeroKm} onChange={(e) => setZeroKm(e.target.checked)} />
+              Bem zero km
             </label>
           </div>
 

@@ -2631,7 +2631,12 @@ class VendaDiretaManualStoreRequest(BaseModel):
     city: str = Field(min_length=2, max_length=120)
     uf: str = Field(min_length=2, max_length=2)
     occupation: str | None = Field(default=None, max_length=120)
-    monthly_income: Decimal | None = Field(default=None, ge=0)
+    monthly_income: Decimal = Field(gt=0)
+    monthly_commitment: Decimal = Field(default=Decimal("0"), ge=0)
+    asset_value: Decimal = Field(gt=0)
+    asset_year: int | None = Field(default=None, ge=1950, le=2100)
+    has_credit_restriction: bool = False
+    asset_is_zero_km: bool = False
 
 
 class VendaDiretaManualStoreResponse(BaseModel):

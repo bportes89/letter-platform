@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from fastapi import HTTPException
@@ -12,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.cadastro_service import seed_marketplace_lifecycle
 from app.commission_attribution import apply_proposal_attribution
-from app.marketplace_service import pricing_for_quota
+from app.marketplace_service import admin_profile_blockers, pricing_for_combo, pricing_for_quota
 from app.models import Administrator, Lead, Proposal, Quota, Role, User
 from app.quota_inventory_service import run_nina_quota_scan
 from app.quota_supplier_service import suppliers_index
@@ -171,6 +172,11 @@ def store_manual(
     uf: str | None = None,
     occupation: str | None = None,
     monthly_income: Decimal | None = None,
+    monthly_commitment: Decimal | None = None,
+    asset_value: Decimal | None = None,
+    asset_year: int | None = None,
+    has_credit_restriction: bool = False,
+    asset_is_zero_km: bool = False,
 ) -> dict:
     """Grava venda manual em uma operação: lead + proposta + trava 60 min."""
     person = (person_type or "PF").upper()
@@ -215,6 +221,46 @@ def store_manual(
             raise HTTPException(status_code=422, detail="Cota sem vencimento de parcela — complete no Inventário.")
         quotas.append(quota)
 
+    admin_ids = {q.administrator_id for q in quotas}
+    if len(admin_ids) > 1:
+        raise HTTPException(
+            status_code=422,
+            detail="Junção manual só permite cotas da mesma administradora.",
+        )
+
+    income = money(Decimal(str(monthly_income or 0)))
+    if income <= 0:
+        raise HTTPException(status_code=422, detail="Informe a renda mensal comprovada do cliente.")
+    collateral = money(Decimal(str(asset_value or 0)))
+    if collateral <= 0:
+        raise HTTPException(status_code=422, detail="Informe o valor de avaliação do bem.")
+
+    category = quotas[0].category
+    year = int(asset_year) if asset_year else datetime.now(UTC).year
+    if category == "VEHICLE" and not asset_year:
+        raise HTTPException(status_code=422, detail="Informe o ano do bem (veículo).")
+
+    suppliers = suppliers_index(db, user.organization_id)
+    combo_pricing = pricing_for_combo(quotas, suppliers=suppliers)
+    total_credit = Decimal(str(combo_pricing["credit"]))
+    installment_total = Decimal(str(combo_pricing["installment"]))
+
+    admin = db.get(Administrator, quotas[0].administrator_id)
+    blockers = admin_profile_blockers(
+        admin,
+        category=category,
+        asset_year=year,
+        asset_is_zero_km=asset_is_zero_km,
+        has_credit_restriction=has_credit_restriction,
+        credit_total=total_credit,
+        installment_total=installment_total,
+        monthly_income=income,
+        asset_value=collateral,
+        combo_size=len(quotas),
+    )
+    if blockers:
+        raise HTTPException(status_code=422, detail="; ".join(blockers))
+
     partner = None
     if partner_user_id:
         partner = db.scalar(
@@ -227,7 +273,6 @@ def store_manual(
         if not partner:
             raise HTTPException(status_code=404, detail="Parceiro não encontrado.")
 
-    suppliers = suppliers_index(db, user.organization_id)
     pricing_rows: list[dict] = []
     total_credit = Decimal("0")
     total_entrada = Decimal("0")
@@ -264,7 +309,12 @@ def store_manual(
         "email": email.strip(),
         "person_type": person,
         "occupation": occupation,
-        "monthly_income": str(monthly_income) if monthly_income is not None else None,
+        "monthly_income": str(income),
+        "monthly_commitment": str(money(Decimal(str(monthly_commitment or 0)))),
+        "asset_value": str(collateral),
+        "asset_year": year,
+        "has_credit_restriction": has_credit_restriction,
+        "asset_is_zero_km": asset_is_zero_km,
         "partner_user_id": partner.id if partner else None,
         "address": {
             "zipcode": zipcode.strip(),
