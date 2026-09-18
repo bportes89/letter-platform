@@ -5,11 +5,11 @@ import { KeyRound, ShieldCheck, Smartphone, LogIn } from "lucide-react";
 export function MfaGuidePanel({ onActivate }: { onActivate?: () => void }) {
   return (
     <section className="panel mfa-guide-panel">
-      <h2><ShieldCheck /> O que é autenticação em duas etapas?</h2>
+      <h2><ShieldCheck /> Login e camadas de segurança</h2>
       <p className="muted">
-        É uma <strong>camada extra de segurança</strong> na sua conta LETTER. Além da senha, você confirma o acesso
-        com um <strong>código de 6 dígitos</strong> que aparece no celular — assim, mesmo que alguém descubra sua senha,
-        não entra sem o seu telefone.
+        Ao entrar na plataforma, após e-mail e senha você recebe um <strong>código por e-mail</strong> — essa é a
+        verificação principal (obrigatória quando ativada na organização). O autenticador abaixo (TOTP) é uma
+        <strong> camada avançada opcional</strong>: um código de 6 dígitos no app do celular, para quem quer proteção extra.
       </p>
 
       <div className="mfa-guide-grid">
@@ -48,10 +48,10 @@ export function MfaGuidePanel({ onActivate }: { onActivate?: () => void }) {
       <div className="notice">
         <ShieldCheck size={16} />
         <div>
-          <strong>É opcional, mas recomendado</strong>
+          <strong>E-mail no login + TOTP opcional</strong>
           <p className="muted" style={{ margin: "4px 0 0" }}>
-            Quem não ativar continua entrando só com e-mail e senha. Quem ativar ganha proteção extra —
-            ideal para parceiros, gestores e quem movimenta operações na plataforma.
+            O código por e-mail no login não se desativa aqui — ele é gerenciado pela política LETTER.
+            O autenticador (esta página) é opcional e recomendado para parceiros, gestores e operações sensíveis.
           </p>
         </div>
       </div>

@@ -68,3 +68,42 @@ def is_valid_cpf_or_cnpj(value: str | None) -> bool:
     if len(digits) == 14:
         return is_valid_cnpj(digits)
     return False
+
+
+def contact_validation_errors(
+    *,
+    document: str | None,
+    email: str | None,
+    phone: str | None,
+    person_type: str | None = "PF",
+) -> list[str]:
+    errors: list[str] = []
+    person = (person_type or "PF").upper()
+    digits = only_digits(document)
+    if person == "PJ":
+        if not is_valid_cnpj(digits):
+            errors.append("CNPJ inválido.")
+    else:
+        if not is_valid_cpf(digits):
+            errors.append("CPF inválido.")
+    if not is_valid_email(email):
+        errors.append("E-mail inválido.")
+    if not is_valid_phone_br(phone):
+        errors.append("Telefone inválido (10 ou 11 dígitos).")
+    return errors
+
+
+def assert_valid_contact(
+    *,
+    document: str | None,
+    email: str | None,
+    phone: str | None,
+    person_type: str | None = "PF",
+) -> None:
+    from fastapi import HTTPException
+
+    errors = contact_validation_errors(
+        document=document, email=email, phone=phone, person_type=person_type
+    )
+    if errors:
+        raise HTTPException(status_code=422, detail=errors[0])

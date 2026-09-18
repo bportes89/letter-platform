@@ -5,6 +5,8 @@ import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { CurrencyInput } from "@/components/currency-input";
+import { lookupCep } from "@/lib/cep-lookup";
+import { validationMessageForPerson } from "@/lib/br-validation";
 
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
@@ -47,7 +49,7 @@ export function VendaDiretaManualModule() {
   const [cotas, setCotas] = useState<CotaOption[]>([]);
   const [cadastros, setCadastros] = useState<CadastroOption[]>([]);
   const [partners, setPartners] = useState<PartnerOption[]>([]);
-  const [quotaId, setQuotaId] = useState("");
+  const [quotaIds, setQuotaIds] = useState<string[]>([]);
   const [partnerId, setPartnerId] = useState("");
   const [existingId, setExistingId] = useState("");
   const [name, setName] = useState("");
@@ -114,7 +116,6 @@ export function VendaDiretaManualModule() {
     setBusy(true);
     setDone(null);
     try {
-      const { validationMessageForPerson } = await import("@/lib/br-validation");
       const invalid = validationMessageForPerson(document, email, phone);
       if (invalid) {
         setError(invalid);
@@ -129,7 +130,8 @@ export function VendaDiretaManualModule() {
           phone,
           person_type: personType,
           document,
-          quota_id: quotaId,
+          quota_ids: quotaIds,
+          quota_id: quotaIds[0],
           partner_user_id: partnerId || null,
           zipcode,
           street,
@@ -143,7 +145,7 @@ export function VendaDiretaManualModule() {
       });
       setDone(data);
       setNotice(data.message);
-      setQuotaId("");
+      setQuotaIds([]);
       await loadCotas(category);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Falha ao gravar venda");
@@ -152,7 +154,16 @@ export function VendaDiretaManualModule() {
     }
   }
 
-  const selected = cotas.find((c) => c.quota_id === quotaId);
+  const selectedList = cotas.filter((c) => quotaIds.includes(c.quota_id));
+
+  async function onCepBlur() {
+    const addr = await lookupCep(zipcode);
+    if (!addr) return;
+    setStreet(addr.street);
+    setNeighborhood(addr.neighborhood);
+    setCity(addr.city);
+    setUf(addr.uf);
+  }
 
   return (
     <>
@@ -213,29 +224,36 @@ export function VendaDiretaManualModule() {
                 value={category}
                 onChange={(e) => {
                   setCategory(e.target.value);
-                  setQuotaId("");
+                  setQuotaIds([]);
                 }}
               >
                 <option value="REAL_ESTATE">Imóvel</option>
                 <option value="VEHICLE">Veículo</option>
               </select>
             </label>
-            <label className="marketplace-field marketplace-field-wide">
-              Cota
-              <select value={quotaId} onChange={(e) => setQuotaId(e.target.value)} required>
-                <option value="">Selecione a cota</option>
+            <div className="marketplace-field marketplace-field-wide">
+              <b>Cotas (multi-seleção)</b>
+              <div style={{ maxHeight: 220, overflowY: "auto", marginTop: 8 }}>
                 {cotas.map((c) => (
-                  <option key={c.quota_id} value={c.quota_id}>
+                  <label key={c.quota_id} style={{ display: "block", marginBottom: 6 }}>
+                    <input
+                      type="checkbox"
+                      checked={quotaIds.includes(c.quota_id)}
+                      onChange={(e) =>
+                        setQuotaIds((ids) =>
+                          e.target.checked ? [...ids, c.quota_id] : ids.filter((id) => id !== c.quota_id),
+                        )
+                      }
+                    />
                     {c.label}
-                  </option>
+                  </label>
                 ))}
-              </select>
-            </label>
-            {selected && (
+              </div>
+            </div>
+            {selectedList.length > 0 && (
               <div className="notice" style={{ width: "100%" }}>
-                Crédito {brl.format(Number(selected.credit_value))} · Entrada efetiva{" "}
-                {brl.format(Number(selected.entrada_final))} · Parcela {brl.format(Number(selected.installment_value))} ·
-                Nina {selected.nina_scan_status ?? "PENDENTE"}
+                {selectedList.length} cota(s) selecionada(s) · crédito total{" "}
+                {brl.format(selectedList.reduce((s, c) => s + Number(c.credit_value), 0))}
               </div>
             )}
           </div>
@@ -288,7 +306,7 @@ export function VendaDiretaManualModule() {
           <div className="marketplace-form-row">
             <label className="marketplace-field marketplace-field-compact">
               CEP
-              <input value={zipcode} onChange={(e) => setZipcode(e.target.value)} required minLength={8} />
+              <input value={zipcode} onChange={(e) => setZipcode(e.target.value)} onBlur={() => void onCepBlur()} required minLength={8} />
             </label>
             <label className="marketplace-field">
               Endereço
@@ -312,7 +330,7 @@ export function VendaDiretaManualModule() {
             </label>
           </div>
 
-          <button type="submit" className="marketplace-submit" disabled={busy || !quotaId}>
+          <button type="submit" className="marketplace-submit" disabled={busy || quotaIds.length === 0}>
             <RefreshCw />
             {busy ? "Gravando…" : "Gravar venda"}
           </button>

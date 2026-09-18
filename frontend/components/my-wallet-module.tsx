@@ -48,6 +48,14 @@ export type WalletView = {
     pix_key_enabled: boolean;
     escrow_locked: boolean;
   };
+  letter_revenue_over?: {
+    available: boolean;
+    customer_fees_total: string;
+    asaas_cost_total?: string | null;
+    over_total?: string | null;
+    note?: string;
+    items?: Array<{ event_type: string; customer_fee: string; asaas_cost?: string | null; over?: string | null; date?: string | null }>;
+  };
 };
 
 type WalletTransaction = {
@@ -575,6 +583,39 @@ export function MyWalletModule() {
                 <span>{wallet.capabilities?.withdrawals_enabled ? "Saques liberados" : "Saques bloqueados"}</span>
               </div>
             </div>
+
+            <section className="panel" style={{ marginTop: 16 }}>
+              <h3>Receitas LETTER (over)</h3>
+              <p className="muted" style={{ marginTop: 0 }}>
+                Resumo do spread entre taxas cobradas na sua carteira e custo Asaas (quando registrado nos eventos).
+              </p>
+              {wallet.letter_revenue_over?.available ? (
+                <div className="escrow-grid">
+                  <div className="escrow-card">
+                    <small>Taxas cobradas (cliente)</small>
+                    <b>{brl.format(Number(wallet.letter_revenue_over.customer_fees_total || 0))}</b>
+                  </div>
+                  {wallet.letter_revenue_over.asaas_cost_total && (
+                    <div className="escrow-card">
+                      <small>Custo Asaas (extrato)</small>
+                      <b>{brl.format(Number(wallet.letter_revenue_over.asaas_cost_total))}</b>
+                    </div>
+                  )}
+                  {wallet.letter_revenue_over.over_total && (
+                    <div className="escrow-card">
+                      <small>Spread LETTER (over)</small>
+                      <b>{brl.format(Number(wallet.letter_revenue_over.over_total))}</b>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <p className="muted">
+                  Ainda não há taxas de transação registradas nesta carteira. Após movimentações (Pix, boleto, saques), o
+                  resumo aparece aqui. O custo Asaas detalhado depende da homologação BaaS.
+                </p>
+              )}
+              {wallet.letter_revenue_over?.note && <small className="form-help">{wallet.letter_revenue_over.note}</small>}
+            </section>
 
             <section className="panel" style={{ marginTop: 16 }}>
               <h3>Dados bancários do cliente</h3>

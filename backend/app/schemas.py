@@ -2621,7 +2621,8 @@ class VendaDiretaManualStoreRequest(BaseModel):
     phone: str = Field(min_length=8, max_length=40)
     person_type: str = Field(default="PF", max_length=2)
     document: str = Field(min_length=11, max_length=20)
-    quota_id: str
+    quota_id: str | None = None
+    quota_ids: list[str] | None = Field(default=None, min_length=1, max_length=12)
     partner_user_id: str | None = None
     zipcode: str = Field(min_length=8, max_length=12)
     street: str = Field(min_length=2, max_length=200)
@@ -2637,7 +2638,9 @@ class VendaDiretaManualStoreResponse(BaseModel):
     lead_id: str
     proposal_id: str
     quota_id: str
+    quota_ids: list[str] = Field(default_factory=list)
     reservation_id: str
+    reservation_ids: list[str] = Field(default_factory=list)
     requested_amount: str
     entrada_final: str
     message: str
@@ -2816,6 +2819,12 @@ class SdcDeskStoreRequest(SdcDeskEvaluateRequest):
     occupation: str | None = None
     income_value: Decimal = Field(ge=0, default=0)
     partner_user_id: str | None = None
+    requested_leverage_amount: Decimal | None = Field(default=None, gt=0)
+    property_registry: str | None = Field(default=None, max_length=4000)
+    vehicle_plate: str | None = Field(default=None, max_length=20)
+    vehicle_renavam: str | None = Field(default=None, max_length=20)
+    asset_full_address: str | None = Field(default=None, max_length=4000)
+    partners_json: list[dict] = Field(default_factory=list)
 
 
 class SdcDeskStatusUpdate(BaseModel):
@@ -2834,6 +2843,8 @@ class FlashDeskEvaluateRequest(BaseModel):
     asset_year: int | None = Field(default=None, ge=1950, le=2100)
     asset_paid_off: bool = True
     asset_has_lien: bool = False
+    lien_payoff_value: Decimal | None = Field(default=None, ge=0)
+    property_registry: str | None = Field(default=None, max_length=4000)
     docs_complete: bool = True
     term_months: int = Field(default=36)
     capital_source: str = "RETAIL"
@@ -2849,6 +2860,8 @@ class FlashDeskStoreRequest(FlashDeskEvaluateRequest):
     occupation: str | None = None
     income_value: Decimal = Field(ge=0, default=0)
     partner_user_id: str | None = None
+    asset_full_address: str | None = Field(default=None, max_length=4000)
+    partners_json: list[dict] = Field(default_factory=list)
 
 
 class FlashDeskStatusUpdate(BaseModel):
@@ -2868,10 +2881,10 @@ class FlashDeskSaleCreate(BaseModel):
 
 class QuitConDeskEvaluateRequest(BaseModel):
     outstanding_balance: Decimal = Field(gt=0)
-    meses_restantes: int = Field(default=48, ge=1, le=240)
+    meses_restantes: int = Field(ge=1, le=240)
     registry_number: str = Field(min_length=1, max_length=80)
     registry_office: str = Field(min_length=2, max_length=180)
-    property_type: str = "CONSORCIO"
+    property_type: str = Field(default="VEICULO", min_length=1, max_length=40)
     appraisal_value: Decimal | None = Field(default=None, gt=0)
     operational_service: bool = False
     contemplada: bool = True
@@ -2890,6 +2903,13 @@ class QuitConDeskStoreRequest(QuitConDeskEvaluateRequest):
     occupation: str | None = None
     income_value: Decimal = Field(ge=0, default=0)
     partner_user_id: str | None = None
+    quota_lines: list[dict] = Field(default_factory=list)
+    alienated_property_registry: str | None = None
+    alienated_asset_address: str | None = None
+    alienated_vehicle_plate: str | None = None
+    alienated_vehicle_chassi: str | None = None
+    alienated_vehicle_renavam: str | None = None
+    partners_json: list[dict] = Field(default_factory=list)
 
 
 class QuitConDeskStatusUpdate(BaseModel):

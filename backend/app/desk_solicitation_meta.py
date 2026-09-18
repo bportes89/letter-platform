@@ -46,3 +46,17 @@ def evaluation_json_with_meta(result: dict, *, channel: str, lead_id: str | None
     if lead_id:
         payload["lead_id"] = lead_id
     return json_dumps(payload, ensure_ascii=False)
+
+
+def desk_payload_extras(payload: dict, keys: tuple[str, ...]) -> dict:
+    out: dict = {}
+    for key in keys:
+        value = payload.get(key)
+        if value is None:
+            continue
+        if isinstance(value, list) and not value:
+            continue
+        if isinstance(value, str) and not value.strip():
+            continue
+        out[key] = value
+    return out

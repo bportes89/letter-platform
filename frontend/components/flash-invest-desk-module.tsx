@@ -228,6 +228,24 @@ export function FlashInvestDeskModule() {
       </div>
 
       <section className="panel operational-panel">
+        <div className="notice" style={{ margin: "0 18px 12px" }}>
+          <WalletCards />
+          <b>Painel operacional</b> —{" "}
+          <button type="button" className="table-action" style={{ display: "inline" }} onClick={() => setTab("oportunidades")}>
+            Oportunidades ({openOpps.length})
+          </button>
+          ·{" "}
+          <button type="button" className="table-action" style={{ display: "inline" }} onClick={() => setTab("aportes")}>
+            Reservas ({pendingReservations.length}/{reservations.length})
+          </button>
+          ·{" "}
+          <button type="button" className="table-action" style={{ display: "inline" }} onClick={() => setTab("aportes")}>
+            Posições ({positions.length})
+          </button>
+          <small style={{ display: "block", marginTop: 6 }}>
+            APIs: /funding/opportunities · /funding/reservations · /funding/positions
+          </small>
+        </div>
         <div className="marketplace-tabs" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
           <button type="button" className={`marketplace-tab${tab === "oportunidades" ? " active" : ""}`} onClick={() => setTab("oportunidades")}>
             Oportunidades

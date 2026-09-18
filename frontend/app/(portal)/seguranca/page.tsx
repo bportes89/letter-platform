@@ -25,10 +25,11 @@ export default function SegurancaPage() {
       <div className="page-heading">
         <div>
           <span className="eyebrow dark">CONTA</span>
-          <h1>Autenticação em duas etapas</h1>
+          <h1>Segurança da conta</h1>
           <p>
-            Proteja o acesso de <strong>{user.email}</strong> com uma camada extra de segurança no login.
-            {user.mfa_enabled ? " Sua proteção está ativa." : " Ative quando quiser — veja o guia abaixo."}
+            No login, a <strong>verificação por e-mail (código de 6 dígitos)</strong> é a proteção principal da plataforma
+            LETTER. O autenticador (TOTP) abaixo é <strong>opcional</strong> e recomendado para parceiros e gestores.
+            {user.mfa_enabled ? " Seu autenticador está ativo." : " Você pode ativar o autenticador quando quiser."}
           </p>
         </div>
         <div className="operational-icon"><ShieldCheck /></div>

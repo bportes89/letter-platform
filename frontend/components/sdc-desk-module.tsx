@@ -7,6 +7,8 @@ import { api, apiForm, deleteApi, downloadApi, User } from "@/lib/api";
 import { isInternalProductRole } from "@/lib/product-nav";
 import { PreAnalysisModule } from "@/components/pre-analysis-module";
 import { DeskSourceMetaRow } from "@/lib/desk-source-meta";
+import { PartnerSociosFields, SocioPartner, sociosPayload } from "@/components/partner-socios-fields";
+import { CurrencyInput } from "@/components/currency-input";
 
 type SdcSolicitation = {
   id: string;
@@ -89,6 +91,11 @@ const emptyForm = {
   asset_paid_off: true,
   asset_has_lien: false,
   docs_complete: true,
+  requested_leverage_amount: "",
+  property_registry: "",
+  vehicle_plate: "",
+  vehicle_renavam: "",
+  asset_full_address: "",
 };
 
 function moneyPayload(value: string) {
@@ -110,6 +117,7 @@ export function SdcDeskModule() {
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [socios, setSocios] = useState<SocioPartner[]>([]);
 
   const isInternal = isInternalProductRole(user?.role);
   const needsYear = ["veiculo_leve", "veiculo_pesado", "maquina"].includes(form.asset_type);
@@ -187,10 +195,17 @@ export function SdcDeskModule() {
           address: form.address.trim() || null,
           occupation: form.occupation.trim() || null,
           income_value: moneyPayload(form.income_value),
+          requested_leverage_amount: form.requested_leverage_amount ? moneyPayload(form.requested_leverage_amount) : null,
+          property_registry: form.property_registry.trim() || null,
+          vehicle_plate: form.vehicle_plate.trim() || null,
+          vehicle_renavam: form.vehicle_renavam.trim() || null,
+          asset_full_address: form.asset_full_address.trim() || null,
+          partners_json: sociosPayload(socios),
         }),
       });
       setNotice(`SDC gravado: ${created.contact_name} — ${created.status_label}`);
       setForm(emptyForm);
+      setSocios([]);
       setEvalResult(null);
       setSelectedId(created.id);
       setTab("lista");
@@ -350,8 +365,23 @@ export function SdcDeskModule() {
                 {needsYear && (
                   <input type="number" placeholder="Ano fabricação" value={form.asset_year} onChange={(e) => patchForm("asset_year", e.target.value)} />
                 )}
-                <input style={{ gridColumn: "1 / -1" }} placeholder="Endereço" value={form.address} onChange={(e) => patchForm("address", e.target.value)} />
+                <input style={{ gridColumn: "1 / -1" }} placeholder="Endereço resumido" value={form.address} onChange={(e) => patchForm("address", e.target.value)} />
+                <label style={{ gridColumn: "1 / -1" }}>
+                  Endereço completo do bem
+                  <textarea rows={2} value={form.asset_full_address} onChange={(e) => patchForm("asset_full_address", e.target.value)} />
+                </label>
+                <label>
+                  Valor alavancagem solicitado (R$)
+                  <CurrencyInput value={form.requested_leverage_amount} onChange={(v) => patchForm("requested_leverage_amount", v)} />
+                </label>
+                <label style={{ gridColumn: "1 / -1" }}>
+                  Matrícula(s) / registro
+                  <textarea rows={2} value={form.property_registry} onChange={(e) => patchForm("property_registry", e.target.value)} />
+                </label>
+                <input placeholder="Placa" value={form.vehicle_plate} onChange={(e) => patchForm("vehicle_plate", e.target.value)} />
+                <input placeholder="RENAVAM" value={form.vehicle_renavam} onChange={(e) => patchForm("vehicle_renavam", e.target.value)} />
               </div>
+              <PartnerSociosFields value={socios} onChange={setSocios} />
               <div style={{ display: "flex", flexWrap: "wrap", gap: 14, fontSize: 12, fontWeight: 700 }}>
                 <label><input type="checkbox" checked={form.asset_paid_off} onChange={(e) => patchForm("asset_paid_off", e.target.checked)} /> Bem quitado</label>
                 <label><input type="checkbox" checked={form.asset_has_lien} onChange={(e) => patchForm("asset_has_lien", e.target.checked)} /> Bem com pendência</label>

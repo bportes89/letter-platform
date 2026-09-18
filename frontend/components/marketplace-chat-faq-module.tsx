@@ -120,6 +120,11 @@ export function MarketplaceChatFaqModule() {
       <section className="panel operational-panel">
         <div className="notice">
           <HelpCircle />
+          Este módulo alimenta as respostas automáticas do <b>chat do site</b> (passos 10038–10040): cadastre perguntas
+          curtas que o visitante pode tocar durante a jornada de venda direta. Somente itens <b>ativos</b> entram no widget público.
+        </div>
+        <div className="notice">
+          <HelpCircle />
           O chat usa <b>public_id</b> (= legacy_key Paulo ou UUID). Seed: ids 23, 24, 25, 40–42.
         </div>
 

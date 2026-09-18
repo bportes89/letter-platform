@@ -7,6 +7,7 @@ import { api, apiForm, deleteApi, downloadApi, User } from "@/lib/api";
 import { isInternalProductRole } from "@/lib/product-nav";
 import { QuitConModule } from "@/components/quitcon-module";
 import { DeskSourceMetaRow } from "@/lib/desk-source-meta";
+import { PartnerSociosFields, SocioPartner, sociosPayload } from "@/components/partner-socios-fields";
 
 type RequiredDoc = { code: string; label: string; uploaded?: boolean };
 
@@ -99,8 +100,19 @@ export function QuitConDeskModule() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [lastCheckout, setLastCheckout] = useState<Record<string, unknown> | null>(null);
+  const [quotaLines, setQuotaLines] = useState([
+    { registry_number: "", outstanding_balance: "", credit_at_billing: "" },
+  ]);
+  const [alienatedRegistry, setAlienatedRegistry] = useState("");
+  const [alienatedAddress, setAlienatedAddress] = useState("");
+  const [alienatedPlate, setAlienatedPlate] = useState("");
+  const [alienatedChassi, setAlienatedChassi] = useState("");
+  const [alienatedRenavam, setAlienatedRenavam] = useState("");
+  const [socios, setSocios] = useState<SocioPartner[]>([]);
 
   const isInternal = isInternalProductRole(user?.role);
+  const isImovel =
+    form.property_type === "IMOVEL_URBANO" || form.property_type === "IMOVEL_RURAL";
 
   const load = useCallback(async () => {
     const [me, list] = await Promise.all([
@@ -191,10 +203,30 @@ export function QuitConDeskModule() {
           address: form.address.trim() || null,
           occupation: form.occupation.trim() || null,
           income_value: moneyPayload(form.income_value),
+          quota_lines: quotaLines
+            .filter((q) => q.registry_number.trim() || q.outstanding_balance.trim())
+            .map((q) => ({
+              registry_number: q.registry_number.trim(),
+              outstanding_balance: moneyPayload(q.outstanding_balance),
+              credit_at_billing: moneyPayload(q.credit_at_billing || "0"),
+            })),
+          alienated_property_registry: isImovel ? alienatedRegistry.trim() || null : null,
+          alienated_asset_address: isImovel ? alienatedAddress.trim() || null : null,
+          alienated_vehicle_plate: !isImovel ? alienatedPlate.trim() || null : null,
+          alienated_vehicle_chassi: !isImovel ? alienatedChassi.trim() || null : null,
+          alienated_vehicle_renavam: !isImovel ? alienatedRenavam.trim() || null : null,
+          partners_json: sociosPayload(socios),
         }),
       });
       setNotice(`QuitCon gravado: ${created.contact_name} — ${created.status_label}`);
       setForm(emptyForm);
+      setQuotaLines([{ registry_number: "", outstanding_balance: "", credit_at_billing: "" }]);
+      setAlienatedRegistry("");
+      setAlienatedAddress("");
+      setAlienatedPlate("");
+      setAlienatedChassi("");
+      setAlienatedRenavam("");
+      setSocios([]);
       setEvalResult(null);
       setSelectedId(created.id);
       setTab("lista");
@@ -376,6 +408,88 @@ export function QuitConDeskModule() {
                 </select>
                 <input placeholder="Endereço" value={form.address} onChange={(e) => patchForm("address", e.target.value)} style={{ gridColumn: "1 / -1" }} />
               </div>
+              <div style={{ display: "grid", gap: 8 }}>
+                <b>Cotas adicionais (grupo/cota, saldo e crédito no faturamento)</b>
+                {quotaLines.map((line, idx) => (
+                  <div key={idx} style={{ display: "grid", gap: 8, gridTemplateColumns: "1fr 1fr 1fr auto" }}>
+                    <input
+                      placeholder="Grupo/cota"
+                      value={line.registry_number}
+                      onChange={(e) => {
+                        const next = [...quotaLines];
+                        next[idx] = { ...next[idx], registry_number: e.target.value };
+                        setQuotaLines(next);
+                      }}
+                    />
+                    <input
+                      placeholder="Saldo devedor (R$)"
+                      value={line.outstanding_balance}
+                      onChange={(e) => {
+                        const next = [...quotaLines];
+                        next[idx] = { ...next[idx], outstanding_balance: e.target.value };
+                        setQuotaLines(next);
+                      }}
+                    />
+                    <input
+                      placeholder="Crédito no faturamento (R$)"
+                      value={line.credit_at_billing}
+                      onChange={(e) => {
+                        const next = [...quotaLines];
+                        next[idx] = { ...next[idx], credit_at_billing: e.target.value };
+                        setQuotaLines(next);
+                      }}
+                    />
+                    {quotaLines.length > 1 && (
+                      <button
+                        type="button"
+                        className="table-action"
+                        onClick={() => setQuotaLines(quotaLines.filter((_, i) => i !== idx))}
+                      >
+                        Remover
+                      </button>
+                    )}
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  className="table-action"
+                  onClick={() =>
+                    setQuotaLines([...quotaLines, { registry_number: "", outstanding_balance: "", credit_at_billing: "" }])
+                  }
+                >
+                  + Cota
+                </button>
+              </div>
+              <div style={{ display: "grid", gap: 8, gridTemplateColumns: "1fr 1fr" }}>
+                <b style={{ gridColumn: "1 / -1" }}>Bem alienado</b>
+                {isImovel ? (
+                  <>
+                    <input
+                      placeholder="Matrícula do imóvel"
+                      value={alienatedRegistry}
+                      onChange={(e) => setAlienatedRegistry(e.target.value)}
+                    />
+                    <input
+                      placeholder="Endereço completo do imóvel"
+                      value={alienatedAddress}
+                      onChange={(e) => setAlienatedAddress(e.target.value)}
+                      style={{ gridColumn: "1 / -1" }}
+                    />
+                  </>
+                ) : (
+                  <>
+                    <input placeholder="Placa" value={alienatedPlate} onChange={(e) => setAlienatedPlate(e.target.value)} />
+                    <input placeholder="Renavam" value={alienatedRenavam} onChange={(e) => setAlienatedRenavam(e.target.value)} />
+                    <input
+                      placeholder="Chassi"
+                      value={alienatedChassi}
+                      onChange={(e) => setAlienatedChassi(e.target.value)}
+                      style={{ gridColumn: "1 / -1" }}
+                    />
+                  </>
+                )}
+              </div>
+              <PartnerSociosFields value={socios} onChange={setSocios} />
               <div style={{ display: "flex", flexWrap: "wrap", gap: 14, fontSize: 12, fontWeight: 700 }}>
                 <label><input type="checkbox" checked={form.contemplada} onChange={(e) => patchForm("contemplada", e.target.checked)} /> Contemplada</label>
                 <label><input type="checkbox" checked={form.bem_faturado} onChange={(e) => patchForm("bem_faturado", e.target.checked)} /> Bem faturado</label>

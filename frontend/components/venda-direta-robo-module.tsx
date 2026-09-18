@@ -2,9 +2,11 @@
 
 import { Bot, CheckCircle2, RefreshCw, WalletCards } from "lucide-react";
 import Link from "next/link";
-import { FormEvent, useState } from "react";
+import { FormEvent, useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { CurrencyInput } from "@/components/currency-input";
+import { lookupCep } from "@/lib/cep-lookup";
+import { validationMessageForPerson } from "@/lib/br-validation";
 
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
@@ -74,13 +76,53 @@ export function VendaDiretaRoboModule() {
   const [phone, setPhone] = useState("");
   const [personType, setPersonType] = useState("PF");
   const [document, setDocument] = useState("");
-  const [targetAmount, setTargetAmount] = useState("400000");
-  const [targetEntrada, setTargetEntrada] = useState("80000");
+  const [targetAmount, setTargetAmount] = useState("");
+  const [targetEntrada, setTargetEntrada] = useState("");
   const [category, setCategory] = useState("REAL_ESTATE");
-  const [income, setIncome] = useState("30000");
-  const [commitment, setCommitment] = useState("0");
-  const [assetValue, setAssetValue] = useState("600000");
-  const [assetYear, setAssetYear] = useState("2020");
+  const [income, setIncome] = useState("");
+  const [commitment, setCommitment] = useState("");
+  const [assetValue, setAssetValue] = useState("");
+  const [assetYear, setAssetYear] = useState("");
+  const [cadastros, setCadastros] = useState<Array<{ lead_id: string; label: string; name: string; email: string | null; phone: string; document: string | null; person_type: string; address: Record<string, string> }>>([]);
+  const [existingId, setExistingId] = useState("");
+
+  const loadCadastros = useCallback(async () => {
+    try {
+      setCadastros(await api("/marketplace/venda-direta-manual/cadastros"));
+    } catch {
+      setCadastros([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadCadastros();
+  }, [loadCadastros]);
+
+  function applyCadastro(id: string) {
+    setExistingId(id);
+    const row = cadastros.find((x) => x.lead_id === id);
+    if (!row) return;
+    setName(row.name || "");
+    setEmail(row.email || "");
+    setPhone(row.phone || "");
+    setPersonType(row.person_type || "PF");
+    setDocument(row.document || "");
+    setZipcode(row.address?.zipcode || "");
+    setStreet(row.address?.street || "");
+    setNumber(row.address?.number || "");
+    setNeighborhood(row.address?.neighborhood || "");
+    setCity(row.address?.city || "");
+    setUf(row.address?.uf || "");
+  }
+
+  async function onCepBlur() {
+    const addr = await lookupCep(zipcode);
+    if (!addr) return;
+    setStreet(addr.street);
+    setNeighborhood(addr.neighborhood);
+    setCity(addr.city);
+    setUf(addr.uf);
+  }
   const [dirty, setDirty] = useState(false);
   const [zeroKm, setZeroKm] = useState(false);
   const [zipcode, setZipcode] = useState("");
@@ -97,7 +139,6 @@ export function VendaDiretaRoboModule() {
     setBusy(true);
     setConfirmed(null);
     try {
-      const { validationMessageForPerson } = await import("@/lib/br-validation");
       const invalid = validationMessageForPerson(document, email, phone);
       if (invalid) {
         setError(invalid);
@@ -118,7 +159,7 @@ export function VendaDiretaRoboModule() {
           monthly_income: income,
           monthly_commitment: commitment || "0",
           asset_value: assetValue,
-          asset_year: Number(assetYear),
+          asset_year: category === "VEHICLE" && assetYear ? Number(assetYear) : undefined,
           has_credit_restriction: dirty,
           asset_is_zero_km: zeroKm,
           zipcode: zipcode || null,
@@ -226,6 +267,15 @@ export function VendaDiretaRoboModule() {
         {step === 1 && (
           <form className="marketplace-form" onSubmit={search}>
             <div className="marketplace-form-row">
+              <label className="marketplace-field marketplace-field-wide">
+                Cadastro existente (atalho)
+                <select value={existingId} onChange={(e) => applyCadastro(e.target.value)}>
+                  <option value="">Novo cliente</option>
+                  {cadastros.map((c) => (
+                    <option key={c.lead_id} value={c.lead_id}>{c.label}</option>
+                  ))}
+                </select>
+              </label>
               <label className="marketplace-field">
                 Nome
                 <input value={name} onChange={(e) => setName(e.target.value)} required minLength={2} />
@@ -279,10 +329,12 @@ export function VendaDiretaRoboModule() {
                 Valor do bem (R$)
                 <CurrencyInput value={assetValue} onChange={setAssetValue} required />
               </label>
-              <label className="marketplace-field marketplace-field-compact">
-                Ano do bem
-                <input type="number" min={1980} max={2100} value={assetYear} onChange={(e) => setAssetYear(e.target.value)} required />
-              </label>
+              {category === "VEHICLE" && (
+                <label className="marketplace-field marketplace-field-compact">
+                  Ano do bem
+                  <input type="number" min={1980} max={2100} value={assetYear} onChange={(e) => setAssetYear(e.target.value)} required />
+                </label>
+              )}
               <label className="marketplace-field marketplace-field-compact" style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <input type="checkbox" checked={dirty} onChange={(e) => setDirty(e.target.checked)} />
                 Nome sujo / SPC
@@ -296,7 +348,7 @@ export function VendaDiretaRoboModule() {
             <div className="marketplace-form-row">
               <label className="marketplace-field marketplace-field-compact">
                 CEP
-                <input value={zipcode} onChange={(e) => setZipcode(e.target.value)} />
+                <input value={zipcode} onChange={(e) => setZipcode(e.target.value)} onBlur={() => void onCepBlur()} />
               </label>
               <label className="marketplace-field">
                 Endereço

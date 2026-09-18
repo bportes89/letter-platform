@@ -2297,7 +2297,15 @@ def marketplace_esteira2(payload: MarketplaceEsteira2Request, user: User = Depen
 
 @router.post("/marketplace/venda-direta-robo/search", response_model=VendaDiretaRoboSearchResponse)
 def venda_direta_robo_search(payload: VendaDiretaRoboSearchRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.br_validation import assert_valid_contact
     from app.sales_direct_robo_service import search_cotas
+
+    assert_valid_contact(
+        document=payload.document,
+        email=payload.email,
+        phone=payload.phone,
+        person_type=payload.person_type,
+    )
 
     result = search_cotas(
         db,
@@ -2367,7 +2375,17 @@ def venda_direta_manual_partners(user: User = Depends(get_current_user), db: Ses
 
 @router.post("/marketplace/venda-direta-manual/store", response_model=VendaDiretaManualStoreResponse)
 def venda_direta_manual_store(payload: VendaDiretaManualStoreRequest, user: User = Depends(require_scope("proposals:write")), db: Session = Depends(get_db)):
+    from app.br_validation import assert_valid_contact
     from app.sales_direct_manual_service import store_manual
+
+    if not payload.quota_id and not payload.quota_ids:
+        raise HTTPException(status_code=422, detail="Informe quota_id ou quota_ids.")
+    assert_valid_contact(
+        document=payload.document,
+        email=payload.email,
+        phone=payload.phone,
+        person_type=payload.person_type,
+    )
 
     result = store_manual(
         db,
@@ -2378,6 +2396,7 @@ def venda_direta_manual_store(payload: VendaDiretaManualStoreRequest, user: User
         person_type=payload.person_type,
         document=payload.document,
         quota_id=payload.quota_id,
+        quota_ids=payload.quota_ids,
         partner_user_id=payload.partner_user_id,
         zipcode=payload.zipcode,
         street=payload.street,
@@ -3396,8 +3415,15 @@ def sdc_desk_evaluate(payload: SdcDeskEvaluateRequest, user: User = Depends(get_
 
 @router.post("/sdc/desk/solicitations", status_code=201)
 def sdc_desk_store(payload: SdcDeskStoreRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.br_validation import assert_valid_contact
     from app.sdc_desk_service import list_documents, solicitation_view, store_solicitation
 
+    assert_valid_contact(
+        document=payload.document,
+        email=payload.contact_email,
+        phone=payload.contact_phone,
+        person_type=payload.person_type,
+    )
     item = store_solicitation(db, user, payload.model_dump())
     audit(db, user, "sdc_desk.solicitation_created", "sdc_solicitation", item.id, {
         "asset_type": item.asset_type,
@@ -3512,8 +3538,15 @@ def flash_desk_evaluate(payload: FlashDeskEvaluateRequest, user: User = Depends(
 
 @router.post("/flash/desk/solicitations", status_code=201)
 def flash_desk_store(payload: FlashDeskStoreRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.br_validation import assert_valid_contact
     from app.flash_desk_service import list_documents, solicitation_view, store_solicitation
 
+    assert_valid_contact(
+        document=payload.document,
+        email=payload.contact_email,
+        phone=payload.contact_phone,
+        person_type=payload.person_type,
+    )
     item = store_solicitation(db, user, payload.model_dump())
     audit(db, user, "flash_desk.solicitation_created", "flash_solicitation", item.id, {
         "asset_type": item.asset_type,
@@ -3629,8 +3662,15 @@ def quitcon_desk_evaluate(payload: QuitConDeskEvaluateRequest, user: User = Depe
 
 @router.post("/quitcon/desk/solicitations", status_code=201)
 def quitcon_desk_store(payload: QuitConDeskStoreRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.br_validation import assert_valid_contact
     from app.quitcon_desk_service import list_documents, solicitation_view, store_solicitation
 
+    assert_valid_contact(
+        document=payload.document,
+        email=payload.contact_email,
+        phone=payload.contact_phone,
+        person_type=payload.person_type,
+    )
     item = store_solicitation(db, user, payload.model_dump())
     audit(db, user, "quitcon_desk.solicitation_created", "quitcon_solicitation", item.id, {
         "registry_office": item.registry_office,

@@ -225,3 +225,5 @@ html,body{-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
 .admin-user-form__group-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;font-weight:700;font-size:13px}
 .admin-user-form__permission-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:6px}
 .admin-user-form__permission-item{display:flex;align-items:flex-start;gap:8px;font-size:12px;line-height:1.35}
+.data-table .table-wrap,.table-wrap .data-table,.operational-panel .table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;max-width:100%}
+.site.css .data-table,.portal-shell .data-table{display:block;max-width:100%}

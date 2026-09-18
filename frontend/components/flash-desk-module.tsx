@@ -8,6 +8,8 @@ import { isInternalProductRole } from "@/lib/product-nav";
 import { FinOpsModule } from "@/components/finops-module";
 import { PreAnalysisModule } from "@/components/pre-analysis-module";
 import { DeskSourceMetaRow } from "@/lib/desk-source-meta";
+import { CurrencyInput } from "@/components/currency-input";
+import { PartnerSociosFields, SocioPartner, sociosPayload } from "@/components/partner-socios-fields";
 
 type RequiredDoc = { code: string; label: string; uploaded?: boolean };
 
@@ -92,6 +94,9 @@ const emptyForm = {
   docs_complete: true,
   term_months: "36",
   capital_source: "RETAIL",
+  property_registry: "",
+  lien_payoff_value: "",
+  asset_full_address: "",
 };
 
 const emptyParties = {
@@ -122,6 +127,7 @@ export function FlashDeskModule() {
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [socios, setSocios] = useState<SocioPartner[]>([]);
 
   const isInternal = isInternalProductRole(user?.role);
 
@@ -168,6 +174,8 @@ export function FlashDeskModule() {
       asset_year: form.asset_year ? Number(form.asset_year) : null,
       asset_paid_off: form.asset_paid_off,
       asset_has_lien: form.asset_has_lien,
+      lien_payoff_value: form.asset_has_lien && form.lien_payoff_value ? moneyPayload(form.lien_payoff_value) : null,
+      property_registry: form.property_registry.trim() || null,
       docs_complete: form.docs_complete,
       term_months: Number(form.term_months),
       capital_source: form.capital_source,
@@ -206,10 +214,13 @@ export function FlashDeskModule() {
           address: form.address.trim() || null,
           occupation: form.occupation.trim() || null,
           income_value: moneyPayload(form.income_value),
+          asset_full_address: form.asset_full_address.trim() || null,
+          partners_json: sociosPayload(socios),
         }),
       });
       setNotice(`Flash gravado: ${created.contact_name} — ${created.status_label}`);
       setForm(emptyForm);
+      setSocios([]);
       setEvalResult(null);
       setSelectedId(created.id);
       setTab("lista");
@@ -397,8 +408,8 @@ export function FlashDeskModule() {
                 <select value={form.asset_type} onChange={(e) => patchForm("asset_type", e.target.value)}>
                   {ASSET_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
                 </select>
-                <input placeholder="Valor do bem (R$)" value={form.asset_value} onChange={(e) => patchForm("asset_value", e.target.value)} />
-                <input placeholder="Principal solicitado (opcional, máx 40%)" value={form.requested_amount} onChange={(e) => patchForm("requested_amount", e.target.value)} />
+                <label>Valor do bem (R$)<CurrencyInput value={form.asset_value} onChange={(v) => patchForm("asset_value", v)} /></label>
+                <label>Valor solicitado (R$)<CurrencyInput value={form.requested_amount} onChange={(v) => patchForm("requested_amount", v)} /></label>
                 <select value={form.term_months} onChange={(e) => patchForm("term_months", e.target.value)}>
                   <option value="36">36 meses</option>
                   <option value="60">60 meses (balloon 36)</option>
@@ -410,7 +421,19 @@ export function FlashDeskModule() {
                 <input placeholder="Renda / faturamento" value={form.income_value} onChange={(e) => patchForm("income_value", e.target.value)} />
                 <input placeholder="Profissão / ramo" value={form.occupation} onChange={(e) => patchForm("occupation", e.target.value)} />
                 <input style={{ gridColumn: "1 / -1" }} placeholder="Endereço" value={form.address} onChange={(e) => patchForm("address", e.target.value)} />
+                <label style={{ gridColumn: "1 / -1" }}>
+                  Matrícula(s)
+                  <textarea rows={2} value={form.property_registry} onChange={(e) => patchForm("property_registry", e.target.value)} />
+                </label>
+                <label style={{ gridColumn: "1 / -1" }}>
+                  Endereço completo do bem
+                  <textarea rows={2} value={form.asset_full_address} onChange={(e) => patchForm("asset_full_address", e.target.value)} />
+                </label>
+                {form.asset_has_lien && (
+                  <label>Valor quitação gravame (R$)<CurrencyInput value={form.lien_payoff_value} onChange={(v) => patchForm("lien_payoff_value", v)} /></label>
+                )}
               </div>
+              <PartnerSociosFields value={socios} onChange={setSocios} />
               <div style={{ display: "flex", flexWrap: "wrap", gap: 14, fontSize: 12, fontWeight: 700 }}>
                 <label><input type="checkbox" checked={form.asset_paid_off} onChange={(e) => patchForm("asset_paid_off", e.target.checked)} /> Bem quitado</label>
                 <label><input type="checkbox" checked={form.asset_has_lien} onChange={(e) => patchForm("asset_has_lien", e.target.checked)} /> Bem com pendência</label>

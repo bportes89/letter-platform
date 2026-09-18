@@ -182,6 +182,58 @@ def sync_account_from_asaas(db: Session, account: EscrowAccount) -> EscrowAccoun
     return account
 
 
+def _letter_revenue_over_summary(db: Session, account: EscrowAccount) -> dict:
+    """Resumo de taxas cobradas do cliente vs custo Asaas (spread LETTER), quando houver eventos."""
+    fee_types = {"PAYMENT_FEE", "ESCROW_MONTHLY_FEE", "TRANSFER_FEE"}
+    events = list(
+        db.scalars(
+            select(EscrowEvent)
+            .where(
+                EscrowEvent.escrow_account_id == account.id,
+                EscrowEvent.event_type.in_(fee_types),
+            )
+            .order_by(EscrowEvent.processed_at.desc())
+            .limit(500)
+        )
+    )
+    customer_total = Decimal("0")
+    asaas_total = Decimal("0")
+    lines: list[dict] = []
+    for event in events:
+        amount = Decimal(str(event.amount or 0))
+        customer_total += amount
+        asaas_cost = Decimal("0")
+        try:
+            payload = json.loads(event.payload_json or "{}")
+            if isinstance(payload, dict) and payload.get("asaas_cost") is not None:
+                asaas_cost = Decimal(str(payload["asaas_cost"]))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            pass
+        asaas_total += asaas_cost
+        if amount > 0:
+            lines.append(
+                {
+                    "event_type": event.event_type,
+                    "customer_fee": str(money(amount)),
+                    "asaas_cost": str(money(asaas_cost)) if asaas_cost > 0 else None,
+                    "over": str(money(amount - asaas_cost)) if asaas_cost > 0 else None,
+                    "date": event.processed_at.isoformat() if event.processed_at else None,
+                }
+            )
+    over = money(customer_total - asaas_total) if asaas_total > 0 else None
+    return {
+        "available": len(events) > 0,
+        "customer_fees_total": str(money(customer_total)),
+        "asaas_cost_total": str(money(asaas_total)) if asaas_total > 0 else None,
+        "over_total": str(over) if over is not None else None,
+        "items": lines[:20],
+        "note": (
+            "Spread = taxa LETTER cobrada do cliente menos custo Asaas registrado no evento. "
+            "Sem custo Asaas no extrato, o over aparece após homologação BaaS."
+        ),
+    }
+
+
 def wallet_view(db: Session, user: User) -> dict:
     account = find_user_plain_subaccount(db, user)
     kyc_case = None
@@ -216,6 +268,7 @@ def wallet_view(db: Session, user: User) -> dict:
         "account": _account_payload(account),
         "banking": _banking_payload(account),
         "capabilities": _capabilities(account, db),
+        "letter_revenue_over": _letter_revenue_over_summary(db, account),
         "message": _wallet_message(account, db),
     }
 

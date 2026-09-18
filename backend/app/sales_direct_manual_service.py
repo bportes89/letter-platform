@@ -90,12 +90,10 @@ def list_cotas_options(db: Session, user: User, *, category: str) -> list[dict]:
 
 def list_cadastros(db: Session, user: User, *, q: str | None = None) -> list[dict]:
     """Atalho: leads recentes da org para auto-preencher."""
-    stmt = (
-        select(Lead)
-        .where(Lead.organization_id == user.organization_id)
-        .order_by(Lead.created_at.desc())
-        .limit(80)
-    )
+    stmt = select(Lead).where(Lead.organization_id == user.organization_id)
+    if user.role == Role.PARTNER:
+        stmt = stmt.where(Lead.owner_id == user.id)
+    stmt = stmt.order_by(Lead.created_at.desc()).limit(80)
     leads = list(db.scalars(stmt))
     needle = (q or "").strip().lower()
     rows = []
@@ -162,7 +160,8 @@ def store_manual(
     phone: str,
     person_type: str,
     document: str | None,
-    quota_id: str,
+    quota_id: str | None = None,
+    quota_ids: list[str] | None = None,
     partner_user_id: str | None = None,
     zipcode: str | None = None,
     street: str | None = None,
@@ -196,15 +195,25 @@ def store_manual(
         if not (value or "").strip():
             raise HTTPException(status_code=422, detail=f"Campo obrigatório: {field_name}.")
 
-    quota = db.scalar(
-        select(Quota).where(Quota.id == quota_id, Quota.organization_id == user.organization_id)
-    )
-    if not quota:
-        raise HTTPException(status_code=404, detail="Cota não encontrada.")
-    if quota.status != "AVAILABLE":
-        raise HTTPException(status_code=422, detail="Cota indisponível para venda.")
-    if not quota.installment_due_date:
-        raise HTTPException(status_code=422, detail="Cota sem vencimento de parcela — complete no Inventário.")
+    resolved_ids = [str(x).strip() for x in (quota_ids or []) if str(x).strip()]
+    if quota_id and str(quota_id).strip():
+        resolved_ids = [str(quota_id).strip(), *resolved_ids]
+    resolved_ids = list(dict.fromkeys(resolved_ids))
+    if not resolved_ids:
+        raise HTTPException(status_code=422, detail="Informe ao menos uma cota.")
+
+    quotas: list[Quota] = []
+    for qid in resolved_ids:
+        quota = db.scalar(
+            select(Quota).where(Quota.id == qid, Quota.organization_id == user.organization_id)
+        )
+        if not quota:
+            raise HTTPException(status_code=404, detail=f"Cota não encontrada: {qid}.")
+        if quota.status != "AVAILABLE":
+            raise HTTPException(status_code=422, detail=f"Cota indisponível: {qid}.")
+        if not quota.installment_due_date:
+            raise HTTPException(status_code=422, detail="Cota sem vencimento de parcela — complete no Inventário.")
+        quotas.append(quota)
 
     partner = None
     if partner_user_id:
@@ -219,16 +228,37 @@ def store_manual(
             raise HTTPException(status_code=404, detail="Parceiro não encontrado.")
 
     suppliers = suppliers_index(db, user.organization_id)
-    pricing = pricing_for_quota(quota, suppliers=suppliers)
-
-    # Nina scan antes da trava (igual Inventário / Robô)
-    if quota.nina_scan_status != "CLEARED":
-        result = run_nina_quota_scan(db, user, quota)
-        if result.get("status") != "CLEARED":
-            raise HTTPException(
-                status_code=422,
-                detail=result.get("message") or "Varredura Nina reprovou a cota.",
-            )
+    pricing_rows: list[dict] = []
+    total_credit = Decimal("0")
+    total_entrada = Decimal("0")
+    quota_payloads: list[dict] = []
+    for quota in quotas:
+        pricing = pricing_for_quota(quota, suppliers=suppliers)
+        pricing_rows.append(pricing)
+        total_credit += Decimal(str(pricing["credit"]))
+        total_entrada += Decimal(str(pricing["entrada_final"]))
+        if quota.nina_scan_status != "CLEARED":
+            result = run_nina_quota_scan(db, user, quota)
+            if result.get("status") != "CLEARED":
+                raise HTTPException(
+                    status_code=422,
+                    detail=result.get("message") or "Varredura Nina reprovou a cota.",
+                )
+        quota_payloads.append(
+            {
+                "quota_id": quota.id,
+                "group_code": quota.group_code,
+                "quota_code": quota.quota_code,
+                "credit_value": str(quota.credit_value),
+                "premium_value": str(quota.premium_value),
+                "entrada_final": str(pricing["entrada_final"]),
+                "installment_value": str(quota.installment_value or 0),
+                "supplier_source": quota.supplier_source,
+                "administrator_id": quota.administrator_id,
+            }
+        )
+    primary = quotas[0]
+    primary_pricing = pricing_rows[0]
 
     snapshot = {
         "email": email.strip(),
@@ -245,12 +275,13 @@ def store_manual(
             "uf": (uf or "").strip().upper(),
         },
         "pricing": {
-            "credit": str(pricing["credit"]),
-            "entrada_final": str(pricing["entrada_final"]),
-            "markup_percent": pricing["markup_percent"],
-            "markup_amount": pricing["markup_amount"],
-            "quem_paga_comissao": pricing.get("quem_paga_comissao", 0),
+            "credit": str(total_credit),
+            "entrada_final": str(total_entrada),
+            "markup_percent": primary_pricing["markup_percent"],
+            "markup_amount": primary_pricing["markup_amount"],
+            "quem_paga_comissao": primary_pricing.get("quem_paga_comissao", 0),
         },
+        "quota_ids": resolved_ids,
     }
 
     lead = Lead(
@@ -271,34 +302,22 @@ def store_manual(
         organization_id=user.organization_id,
         lead_id=lead.id,
         product=PRODUCT,
-        requested_amount=pricing["credit"],
+        requested_amount=total_credit,
         status="SUBMITTED",
         terms_json=json.dumps(
             seed_marketplace_lifecycle(
                 {
                     "channel": SOURCE,
-                    "quota_ids": [quota.id],
-                    "total_credit": str(pricing["credit"]),
-                    "total_entrada": str(pricing["entrada_final"]),
+                    "quota_ids": resolved_ids,
+                    "total_credit": str(total_credit),
+                    "total_entrada": str(total_entrada),
                     "client_email": email.strip(),
                     "person_type": person,
                     "partner_user_id": partner.id if partner else None,
                     "porc_a_mais": "0",
                     "porc_a_mais_sellers": "0",
                     "filters": snapshot,
-                    "quotas": [
-                        {
-                            "quota_id": quota.id,
-                            "group_code": quota.group_code,
-                            "quota_code": quota.quota_code,
-                            "credit_value": str(quota.credit_value),
-                            "premium_value": str(quota.premium_value),
-                            "entrada_final": str(pricing["entrada_final"]),
-                            "installment_value": str(quota.installment_value or 0),
-                            "supplier_source": quota.supplier_source,
-                            "administrator_id": quota.administrator_id,
-                        }
-                    ],
+                    "quotas": quota_payloads,
                 }
             ),
             ensure_ascii=False,
@@ -319,7 +338,7 @@ def store_manual(
             db,
             proposal,
             partner_user_id=partner.id,
-            price_base=pricing["credit"],
+            price_base=total_credit,
             porc_a_mais_franquia=markup.get("porc_a_mais", "0"),
             porc_a_mais_sellers=markup.get("porc_a_mais_sellers", "0"),
             is_sdc=False,
@@ -337,18 +356,22 @@ def store_manual(
         proposal.commission_originator_id = partner.id
         proposal.served_by_user_id = user.id
 
-    reservation = reserve_quota(db, user, quota, proposal.id, RESERVE_TTL_MINUTES)
+    reservations = []
+    for quota in quotas:
+        reservations.append(reserve_quota(db, user, quota, proposal.id, RESERVE_TTL_MINUTES))
     db.flush()
 
     return {
         "lead_id": lead.id,
         "proposal_id": proposal.id,
-        "quota_id": quota.id,
-        "reservation_id": reservation.id,
-        "requested_amount": str(money(pricing["credit"])),
-        "entrada_final": str(pricing["entrada_final"]),
+        "quota_id": primary.id,
+        "quota_ids": resolved_ids,
+        "reservation_id": reservations[0].id,
+        "reservation_ids": [r.id for r in reservations],
+        "requested_amount": str(money(total_credit)),
+        "entrada_final": str(money(total_entrada)),
         "message": (
-            f"Venda manual gravada. Cota travada por {RESERVE_TTL_MINUTES} min. "
+            f"Venda manual gravada ({len(resolved_ids)} cota(s)). Trava de {RESERVE_TTL_MINUTES} min. "
             "Finalize o cálculo e o contrato em Propostas."
         ),
     }

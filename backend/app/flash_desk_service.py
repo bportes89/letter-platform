@@ -10,7 +10,7 @@ from fastapi import HTTPException, UploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.desk_solicitation_meta import evaluation_json_with_meta, evaluation_meta
+from app.desk_solicitation_meta import desk_payload_extras, evaluation_json_with_meta, evaluation_meta
 from app.document_service import persist_upload, purge_document, purge_document_links
 from app.flash_valid_lss_service import configure_flash_parties
 from app.models import Document, FlashSolicitation, FlashSolicitationDocument, Lead, Proposal, Role, User
@@ -156,6 +156,15 @@ def evaluate_flash_desk(data: dict) -> dict:
     net = money(principal - platform_fee - itbi)
     parcela = _price_payment(principal, RATE_MONTHLY, term)
 
+    ipca_note = None
+    if capital_source == "INSTITUTIONAL":
+        from app.flash_capital_params import DEFAULT_IPCA_PROJECTED_PERCENT
+
+        ipca_note = (
+            f"Origem fundo: IPCA projetado {DEFAULT_IPCA_PROJECTED_PERCENT}% a.a. referenciado na memória "
+            "(fruição 2,5% a.m. inalterada)."
+        )
+
     return {
         "viable": True,
         "motivos": [],
@@ -171,6 +180,7 @@ def evaluate_flash_desk(data: dict) -> dict:
         "term_months": term,
         "interest_rate_monthly": str(RATE_MONTHLY),
         "capital_source": capital_source,
+        "ipca_note": ipca_note,
         "message": "Operação viável — Flash Capital",
     }
 
@@ -278,11 +288,25 @@ def store_solicitation(db: Session, user: User, payload: dict) -> FlashSolicitat
         installment_estimated=money(_dec(result["monthly_payment"])),
         interest_rate_monthly=money(_dec(result["interest_rate_monthly"])),
         evaluation_json=evaluation_json_with_meta(
-            result,
+            {
+                **result,
+                **desk_payload_extras(
+                    payload,
+                    (
+                        "property_registry",
+                        "lien_payoff_value",
+                        "asset_full_address",
+                        "partners_json",
+                    ),
+                ),
+            },
             channel="FLASH_DESK",
             lead_id=str(payload.get("lead_id") or "").strip() or None,
         ),
-        parties_json="{}",
+        parties_json=json_dumps(
+            {"partners_json": payload.get("partners_json") or []},
+            ensure_ascii=False,
+        ),
     )
     db.add(item)
     db.flush()

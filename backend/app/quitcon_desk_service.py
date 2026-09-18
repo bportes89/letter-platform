@@ -9,7 +9,7 @@ from fastapi import HTTPException, UploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.desk_solicitation_meta import evaluation_json_with_meta, evaluation_meta
+from app.desk_solicitation_meta import desk_payload_extras, evaluation_json_with_meta, evaluation_meta
 from app.document_service import persist_upload, purge_document, purge_document_links
 from app.models import (
     CommissionRule,
@@ -81,7 +81,11 @@ def evaluate_quitcon_desk(data: dict) -> dict:
     if saldo <= 0:
         motivos.append("Informe o saldo devedor bruto da cota.")
 
-    meses = int(data.get("meses_restantes") or 48)
+    raw_meses = data.get("meses_restantes")
+    if raw_meses is None or str(raw_meses).strip() == "":
+        meses = 0
+    else:
+        meses = int(raw_meses)
     if meses <= 0 or meses > 240:
         motivos.append("Meses restantes inválidos.")
 
@@ -234,7 +238,7 @@ def store_solicitation(db: Session, user: User, payload: dict) -> QuitConSolicit
         occupation=str(payload.get("occupation") or "").strip() or None,
         income_value=money(_dec(payload.get("income_value") or 0)),
         outstanding_balance=money(_dec(payload["outstanding_balance"])),
-        meses_restantes=int(payload.get("meses_restantes") or 48),
+        meses_restantes=int(payload["meses_restantes"]),
         registry_number=str(payload["registry_number"]).strip(),
         registry_office=str(payload["registry_office"]).strip(),
         property_type=str(payload.get("property_type") or "CONSORCIO").upper()[:40],
@@ -246,7 +250,21 @@ def store_solicitation(db: Session, user: User, payload: dict) -> QuitConSolicit
         docs_complete=bool(payload.get("docs_complete", True)),
         quitacao_vp_amount=money(_dec(result["valor_presente_quitacao"])),
         evaluation_json=evaluation_json_with_meta(
-            result,
+            {
+                **result,
+                **desk_payload_extras(
+                    payload,
+                    (
+                        "quota_lines",
+                        "alienated_property_registry",
+                        "alienated_asset_address",
+                        "alienated_vehicle_plate",
+                        "alienated_vehicle_chassi",
+                        "alienated_vehicle_renavam",
+                        "partners_json",
+                    ),
+                ),
+            },
             channel="QUITCON_DESK",
             lead_id=str(payload.get("lead_id") or "").strip() or None,
         ),

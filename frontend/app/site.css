@@ -2259,3 +2259,12 @@
     justify-content: flex-end;
   }
 }
+
+/* Logged-in operational tables — horizontal scroll */
+.data-table .table-wrap,
+.table-wrap,
+.operational-panel .table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  max-width: 100%;
+}

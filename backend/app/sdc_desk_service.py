@@ -11,7 +11,7 @@ from fastapi import HTTPException, UploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.desk_solicitation_meta import evaluation_json_with_meta, evaluation_meta
+from app.desk_solicitation_meta import desk_payload_extras, evaluation_json_with_meta, evaluation_meta
 from app.document_service import persist_upload, purge_document, purge_document_links
 from app.models import Document, Lead, Proposal, Quota, Role, SdcSolicitation, SdcSolicitationDocument, User
 from app.network_service import PARTNER_NETWORK_ROLES
@@ -247,7 +247,20 @@ def store_solicitation(db: Session, user: User, payload: dict) -> SdcSolicitatio
         term_months=int(result["prazo_meses"]),
         interest_rate_monthly=money(_dec(result["taxa_juros_mensal"])),
         evaluation_json=evaluation_json_with_meta(
-            result,
+            {
+                **result,
+                **desk_payload_extras(
+                    payload,
+                    (
+                        "requested_leverage_amount",
+                        "property_registry",
+                        "vehicle_plate",
+                        "vehicle_renavam",
+                        "asset_full_address",
+                        "partners_json",
+                    ),
+                ),
+            },
             channel="SDC_DESK",
             lead_id=str(payload.get("lead_id") or "").strip() or None,
         ),
