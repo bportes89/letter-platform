@@ -150,10 +150,9 @@ export function QuitConDeskModule() {
   }
 
   async function validateContactFields() {
-    const { validationMessageForPerson, isValidEmail } = await import("@/lib/br-validation");
-    const docMsg = validationMessageForPerson(form.person_type, form.document);
+    const { validationMessageForPerson } = await import("@/lib/br-validation");
+    const docMsg = validationMessageForPerson(form.document, form.contact_email, form.contact_phone);
     if (docMsg) throw new Error(docMsg);
-    if (!isValidEmail(form.contact_email)) throw new Error("E-mail inválido.");
   }
 
   async function calculate() {
