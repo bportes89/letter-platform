@@ -357,7 +357,15 @@ function MmnNote({ mmn }: { mmn: MmnPreview }) {
   );
 }
 
-function NavSectionLink({ id, children }: { id: string; children: ReactNode }) {
+function NavSectionLink({
+  id,
+  children,
+  onNavigate,
+}: {
+  id: string;
+  children: ReactNode;
+  onNavigate?: () => void;
+}) {
   const pathname = usePathname();
 
   return (
@@ -368,6 +376,7 @@ function NavSectionLink({ id, children }: { id: string; children: ReactNode }) {
         event.preventDefault();
         scrollToPublicSection(id);
         window.history.pushState(null, "", `/#${id}`);
+        onNavigate?.();
       }}
     >
       {children}
@@ -376,9 +385,15 @@ function NavSectionLink({ id, children }: { id: string; children: ReactNode }) {
 }
 
 export function SiteNav() {
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  function closeMenu() {
+    setMenuOpen(false);
+  }
+
   return (
     <nav className="nav-shell" aria-label="Navegação principal">
-      <Link href="/" className="logo" aria-label="LETTER — início">
+      <Link href="/" className="logo" aria-label="LETTER — início" onClick={closeMenu}>
         <Image
           className="logo-image"
           src="/brand/letter-logo-oficial.png"
@@ -388,21 +403,30 @@ export function SiteNav() {
           priority
         />
       </Link>
-      <div className="nav-links">
-        <NavSectionLink id="atendimento">Atendimento</NavSectionLink>
-        <NavSectionLink id="solucoes">Soluções</NavSectionLink>
-        <NavSectionLink id="simulador">Simuladores</NavSectionLink>
-        <Link href={venderCotaHref("/vender-minha-cota")}>Vender cota</Link>
-        <NavSectionLink id="manuais">Manuais</NavSectionLink>
-        <NavSectionLink id="nina">Nina Engine</NavSectionLink>
-        <NavSectionLink id="leilao">Leilão</NavSectionLink>
+      <button
+        type="button"
+        className="nav-menu-toggle"
+        aria-expanded={menuOpen}
+        aria-controls="site-nav-drawer"
+        onClick={() => setMenuOpen((v) => !v)}
+      >
+        {menuOpen ? "Fechar" : "Menu"}
+      </button>
+      <div id="site-nav-drawer" className={`nav-links nav-drawer${menuOpen ? " nav-drawer-open" : ""}`}>
+        <NavSectionLink id="atendimento" onNavigate={closeMenu}>Atendimento</NavSectionLink>
+        <NavSectionLink id="solucoes" onNavigate={closeMenu}>Soluções</NavSectionLink>
+        <NavSectionLink id="simulador" onNavigate={closeMenu}>Simuladores</NavSectionLink>
+        <Link href={venderCotaHref("/vender-minha-cota")} onClick={closeMenu}>Vender cota</Link>
+        <NavSectionLink id="manuais" onNavigate={closeMenu}>Manuais</NavSectionLink>
+        <NavSectionLink id="nina" onNavigate={closeMenu}>Nina Engine</NavSectionLink>
+        <NavSectionLink id="leilao" onNavigate={closeMenu}>Leilão</NavSectionLink>
       </div>
       <div className="nav-actions">
-        <Link href="/cadastro" className="button button-small button-outline">
-          Abra sua conta
+        <Link href="/cadastro/conta" className="button button-small button-outline nav-btn-register" onClick={closeMenu}>
+          Abrir conta
         </Link>
-        <Link href="/login" className="button button-small">
-          Acessar conta <span>→</span>
+        <Link href="/login" className="button button-small nav-btn-login" aria-label="Acessar conta" onClick={closeMenu}>
+          <span className="nav-btn-label">Acessar</span> <span aria-hidden="true">→</span>
         </Link>
       </div>
     </nav>
