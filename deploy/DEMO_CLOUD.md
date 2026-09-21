@@ -151,7 +151,7 @@ Criadas no primeiro seed (`LETTER_DEMO_PASSWORD`):
 
 | Papel | E-mail | Uso |
 |-------|--------|-----|
-| Admin | `admin@letter.com.br` | Acesso total |
+| Admin | `comercial@letter.app.br` (cloud; demo local: `admin@letter.com.br`) | Acesso total |
 | Revisor 1 | `revisor1@letter.com.br` | Dupla aprovação |
 | Revisor 2 | `revisor2@letter.com.br` | Dupla aprovação |
 | Investidor | `investidor@letter.com.br` | Funding / perfil investidor |
@@ -171,7 +171,7 @@ Olá! Segue o ambiente de demonstração da LETTER Platform:
 URL: https://seu-app.vercel.app
 
 Contas de teste (mesma senha em todas):
-- Admin: admin@letter.com.br
+- Admin: comercial@letter.app.br
 - Revisor 1: revisor1@letter.com.br
 - Revisor 2: revisor2@letter.com.br
 - Investidor: investidor@letter.com.br

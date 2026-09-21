@@ -11,6 +11,8 @@ from app.models import Administrator, CommissionRule, Lead, Organization, Propos
 
 
 LEVEL_SHARES = ["50", "35", "7", "5", "3"]
+LEGACY_PLATFORM_ADMIN_EMAIL = "admin@letter.com.br"
+
 DEMO_USER_EMAILS = (
     "admin@letter.com.br",
     "parceiro@letter.com.br",
@@ -110,6 +112,41 @@ def _sync_headquarters_org(db) -> None:
     db.commit()
 
 
+def _platform_admin_login_email() -> str:
+    from app.core.config import settings
+
+    return (settings.platform_admin_email or "comercial@letter.app.br").strip().lower()
+
+
+def _sync_platform_admin_email(db) -> None:
+    """Em cloud, troca o login demo admin@letter.com.br pelo e-mail corporativo real."""
+    from app.core.config import settings
+
+    if settings.env not in {"staging", "production"}:
+        return
+    target = _platform_admin_login_email()
+    legacy = LEGACY_PLATFORM_ADMIN_EMAIL
+    if target == legacy:
+        return
+    admin = db.scalar(select(User).where(User.email == legacy, User.role == Role.PLATFORM_ADMIN))
+    if not admin:
+        return
+    taken = db.scalar(select(User).where(User.email == target))
+    if taken and taken.id != admin.id:
+        print(f"Aviso: login admin não migrado — {target} já pertence a outro usuário.")
+        return
+    admin.email = target
+    db.commit()
+    print(f"Login admin plataforma atualizado: {legacy} → {target}")
+
+
+def _seed_bootstrap_done(db) -> bool:
+    if db.scalar(select(User).where(User.email == LEGACY_PLATFORM_ADMIN_EMAIL)):
+        return True
+    target = _platform_admin_login_email()
+    return bool(db.scalar(select(User).where(User.email == target, User.role == Role.PLATFORM_ADMIN)))
+
+
 def _ensure_master_trees(db, org_id: str, password: str) -> None:
     from app.master_tree_service import MASTER_TREE_LETTER_BANK, ensure_master_roots, sync_user_master_tree
 
@@ -127,7 +164,7 @@ def seed():
     Base.metadata.create_all(engine)
     password = _demo_password()
     with SessionLocal() as db:
-        if db.scalar(select(User).where(User.email == "admin@letter.com.br")):
+        if _seed_bootstrap_done(db):
             org = db.scalar(select(Organization).limit(1))
             if org:
                 _ensure_profile_demo_users(db, org.id, password)
@@ -144,6 +181,7 @@ def seed():
             _sync_headquarters_org(db)
             _sync_demo_phones(db)
             _sync_demo_passwords(db, password)
+            _sync_platform_admin_email(db)
             print("Seed já aplicado.")
             return
         org = Organization(name="LETTER FRANQUEADORA LTDA", document="57255607000130", kind="HEADQUARTERS")
@@ -232,7 +270,9 @@ def seed():
         ensure_default_ranges(db, org.id)
         db.commit()
         _ensure_master_trees(db, org.id, password)
-        print("Seed concluído: admin@letter.com.br / (senha de LETTER_DEMO_PASSWORD ou Letter@123)")
+        _sync_platform_admin_email(db)
+        login_email = _platform_admin_login_email()
+        print(f"Seed concluído: {login_email} / (senha de LETTER_DEMO_PASSWORD ou Letter@123)")
 
 
 if __name__ == "__main__":
