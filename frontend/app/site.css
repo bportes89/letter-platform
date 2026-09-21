@@ -1930,8 +1930,8 @@
   }
 
   .attendance-chat {
-    min-height: 320px;
-    padding-bottom: 4.5rem;
+    min-height: 0;
+    padding-bottom: 3.5rem;
   }
 }
 
@@ -2078,6 +2078,9 @@
   .attendance-chat {
     display: flex;
     flex-direction: column;
+    min-height: 0;
+    padding-top: 0.25rem;
+    padding-bottom: 1rem;
   }
 
   .attendance-mascot-wrap {
@@ -2086,8 +2089,9 @@
     top: auto;
     transform: none;
     order: -1;
-    margin: 0 auto 0.75rem;
+    margin: 0 auto 0.5rem !important;
     width: 72px;
+    transition: none;
   }
 
   .attendance-bot-row,

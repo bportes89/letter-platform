@@ -102,6 +102,7 @@ export function AttendanceBotSection() {
   const [error, setError] = useState("");
   const blockRef = useRef<HTMLDivElement>(null);
   const [mascotTop, setMascotTop] = useState(0);
+  const [mascotDocked, setMascotDocked] = useState(false);
 
   const currentFlowIndex = flows.length - 1;
   const isCurrent = (flowIndex: number) => flowIndex === currentFlowIndex;
@@ -115,7 +116,11 @@ export function AttendanceBotSection() {
       const last = items[items.length - 1] as HTMLElement | undefined;
       if (last) {
         last.scrollIntoView({ behavior: "smooth", block: "nearest" });
-        setMascotTop(Math.max(0, last.offsetTop + last.offsetHeight - 100));
+        if (window.matchMedia("(min-width: 851px)").matches) {
+          setMascotTop(Math.max(0, last.offsetTop + last.offsetHeight - 100));
+        } else {
+          setMascotTop(0);
+        }
       }
     });
   }, []);
@@ -155,6 +160,19 @@ export function AttendanceBotSection() {
   useEffect(() => {
     void loadInitial();
   }, [loadInitial]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const mq = window.matchMedia("(min-width: 851px)");
+    const sync = () => {
+      const docked = mq.matches;
+      setMascotDocked(docked);
+      if (!docked) setMascotTop(0);
+    };
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
 
   useEffect(() => {
     if (!booting) return;
@@ -472,7 +490,10 @@ export function AttendanceBotSection() {
             </div>
           ) : null}
 
-          <div className="attendance-mascot-wrap" style={{ marginTop: flows.length > 0 ? mascotTop : 0 }}>
+          <div
+            className="attendance-mascot-wrap"
+            style={mascotDocked && flows.length > 0 ? { marginTop: mascotTop } : undefined}
+          >
             <Image
               src="/brand/letter-mascote.png"
               alt="Mascote Letter"
