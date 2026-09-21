@@ -10,8 +10,17 @@ export type WalletProfile = {
   company_cnpj?: string | null;
 };
 
-/** Perfis operacionais que podem usar o portal sem carteira LETTER aberta. */
-const WALLET_OPTIONAL_ROLES = new Set(["PLATFORM_ADMIN", "INTERNAL_STAFF", "AUDITOR"]);
+/**
+ * Perfis que navegam na plataforma sem bloqueio global na carteira.
+ * A conta LETTER continua disponível em BANK → Carteira (onboarding lá, sem redirecionar o menu).
+ */
+const WALLET_OPTIONAL_ROLES = new Set([
+  "PLATFORM_ADMIN",
+  "INTERNAL_STAFF",
+  "AUDITOR",
+  "MASTER_FRANCHISEE",
+  "MANAGER",
+]);
 
 /** Cliente, parceiro e demais perfis comerciais — exigem conta LETTER antes do escritório. */
 const WALLET_REQUIRED_ROLES = new Set([
