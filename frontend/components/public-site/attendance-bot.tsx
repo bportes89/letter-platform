@@ -97,6 +97,7 @@ export function AttendanceBotSection() {
   const [echoes, setEchoes] = useState<UserEcho[]>([]);
   const [siteInfo, setSiteInfo] = useState<ChatSiteInfo | undefined>();
   const [booting, setBooting] = useState(true);
+  const [bootSlow, setBootSlow] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const blockRef = useRef<HTMLDivElement>(null);
@@ -123,7 +124,14 @@ export function AttendanceBotSection() {
     (items: ChatItem[], info?: ChatSiteInfo) => {
       if (info) setSiteInfo((prev) => ({ ...prev, ...info }));
       setFlows((prev) => [...prev, items]);
-      setMeta((prev) => [...prev, { visibleCount: 0, optionReveal: {}, loading: Boolean(items[0]?.load) }]);
+      setMeta((prev) => [
+        ...prev,
+        {
+          visibleCount: items.length > 0 ? 1 : 0,
+          optionReveal: {},
+          loading: Boolean(items[0]?.load),
+        },
+      ]);
       scrollToBottom();
     },
     [scrollToBottom],
@@ -131,6 +139,7 @@ export function AttendanceBotSection() {
 
   const loadInitial = useCallback(async () => {
     setBooting(true);
+    setBootSlow(false);
     setError("");
     try {
       const data = await fetchChatHome({});
@@ -139,12 +148,19 @@ export function AttendanceBotSection() {
       setError(e instanceof Error ? e.message : "Falha ao iniciar atendimento.");
     } finally {
       setBooting(false);
+      setBootSlow(false);
     }
   }, [pushFlow]);
 
   useEffect(() => {
     void loadInitial();
   }, [loadInitial]);
+
+  useEffect(() => {
+    if (!booting) return;
+    const slowTimer = window.setTimeout(() => setBootSlow(true), 4000);
+    return () => window.clearTimeout(slowTimer);
+  }, [booting]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -432,11 +448,31 @@ export function AttendanceBotSection() {
       </div>
 
       <div className="attendance-shell">
-        {booting ? <p className="attendance-status">Iniciando atendimento…</p> : null}
+        {booting ? (
+          <p className="attendance-status">
+            Iniciando atendimento…
+            {bootSlow ? " A primeira conexão pode levar até meio minuto; aguarde um instante." : null}
+          </p>
+        ) : null}
         {error ? <p className="attendance-error">{error}</p> : null}
+        {error && flows.length === 0 ? (
+          <div className="attendance-actions attendance-retry-wrap">
+            <button type="button" className="attendance-primary" disabled={booting} onClick={() => void loadInitial()}>
+              Tentar novamente
+            </button>
+          </div>
+        ) : null}
 
         <div className="attendance-chat" ref={blockRef}>
-          <div className="attendance-mascot-wrap" style={{ marginTop: mascotTop }}>
+          {booting && flows.length === 0 ? (
+            <div className="attendance-bot-row attendance-boot-placeholder" data-chat-item>
+              <div className="attendance-bot-bubble">
+                Olá! Sou o Letter. Estou conectando ao atendimento — em instantes você verá as opções aqui.
+              </div>
+            </div>
+          ) : null}
+
+          <div className="attendance-mascot-wrap" style={{ marginTop: flows.length > 0 ? mascotTop : 0 }}>
             <Image
               src="/brand/letter-mascote.png"
               alt="Mascote Letter"

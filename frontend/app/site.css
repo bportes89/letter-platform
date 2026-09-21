@@ -2075,20 +2075,36 @@
     grid-template-columns: 1fr;
   }
 
+  .attendance-chat {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .attendance-mascot-wrap {
+    position: relative;
+    left: auto;
+    top: auto;
+    transform: none;
+    order: -1;
+    margin: 0 auto 0.75rem;
+    width: 72px;
+  }
+
   .attendance-bot-row,
   .attendance-actions,
   .attendance-form-wrap,
   .attendance-options,
   .attendance-resumo,
   .attendance-sdc-result,
-  .attendance-contract {
+  .attendance-contract,
+  .attendance-boot-placeholder {
     padding-left: 0;
-    padding-top: 4.5rem;
+    padding-top: 0;
   }
 
-  .attendance-mascot-wrap {
-    left: 50%;
-    transform: translateX(-50%);
+  .attendance-retry-wrap {
+    padding-left: 0;
+    margin-bottom: 1rem;
   }
 
   .attendance-sdc-grid {

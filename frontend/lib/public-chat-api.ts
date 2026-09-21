@@ -102,16 +102,31 @@ export type ChatHomeResponse = {
   lead_id?: string;
 };
 
-async function chatFetch<T>(path: string, body: Record<string, unknown> = {}): Promise<T> {
+const CHAT_FETCH_TIMEOUT_MS = 45_000;
+
+async function chatFetch<T>(
+  path: string,
+  body: Record<string, unknown> = {},
+  options?: { timeoutMs?: number },
+): Promise<T> {
+  const timeoutMs = options?.timeoutMs ?? CHAT_FETCH_TIMEOUT_MS;
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
   let response: Response;
   try {
     response = await fetch(`${API_URL}${path}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+      signal: controller.signal,
     });
-  } catch {
-    throw new Error("Não foi possível conectar ao atendimento. Tente novamente em instantes.");
+  } catch (e) {
+    if (e instanceof DOMException && e.name === "AbortError") {
+      throw new Error("O servidor demorou para responder. Toque em «Tentar novamente».");
+    }
+    throw new Error("Não foi possível conectar ao atendimento. Verifique sua internet e tente de novo.");
+  } finally {
+    window.clearTimeout(timer);
   }
   if (!response.ok) {
     const payload = (await response.json().catch(() => ({}))) as { detail?: string };
@@ -125,8 +140,12 @@ export async function fetchChatHome(body: Record<string, unknown> = {}): Promise
     "/public/site/chat/home",
     body,
   );
+  const chat_next = data.OBJ?.chat_next ?? [];
+  if (!Array.isArray(chat_next) || chat_next.length === 0) {
+    throw new Error("Resposta inválida do atendimento. Tente novamente.");
+  }
   return {
-    chat_next: data.OBJ?.chat_next ?? [],
+    chat_next,
     info: data.OBJ?.info,
     lead_id: typeof data.OBJ?.lead_id === "string" ? data.OBJ.lead_id : undefined,
   };
