@@ -8,10 +8,9 @@ from sqlalchemy import select
 from app.core.security import hash_password
 from app.db import Base, SessionLocal, engine
 from app.models import Administrator, CommissionRule, Lead, Organization, Proposal, Quota, Role, User
-
+from app.platform_admin_login import LEGACY_PLATFORM_ADMIN_EMAIL, platform_admin_login_email
 
 LEVEL_SHARES = ["50", "35", "7", "5", "3"]
-LEGACY_PLATFORM_ADMIN_EMAIL = "admin@letter.com.br"
 
 DEMO_USER_EMAILS = (
     "admin@letter.com.br",
@@ -62,7 +61,9 @@ def _sync_demo_passwords(db, password: str) -> None:
     """Em staging/dev, realinha senhas demo com LETTER_DEMO_PASSWORD a cada deploy."""
     if os.environ.get("LETTER_ENV", "development") not in {"development", "staging"}:
         return
-    users = list(db.scalars(select(User).where(User.email.in_(DEMO_USER_EMAILS))))
+    emails = set(DEMO_USER_EMAILS)
+    emails.add(platform_admin_login_email())
+    users = list(db.scalars(select(User).where(User.email.in_(emails))))
     if not users:
         return
     hashed = hash_password(password)
@@ -112,19 +113,13 @@ def _sync_headquarters_org(db) -> None:
     db.commit()
 
 
-def _platform_admin_login_email() -> str:
-    from app.core.config import settings
-
-    return (settings.platform_admin_email or "comercial@letter.app.br").strip().lower()
-
-
 def _sync_platform_admin_email(db) -> None:
     """Em cloud, troca o login demo admin@letter.com.br pelo e-mail corporativo real."""
     from app.core.config import settings
 
     if settings.env not in {"staging", "production"}:
         return
-    target = _platform_admin_login_email()
+    target = platform_admin_login_email()
     legacy = LEGACY_PLATFORM_ADMIN_EMAIL
     if target == legacy:
         return
@@ -133,8 +128,12 @@ def _sync_platform_admin_email(db) -> None:
         return
     taken = db.scalar(select(User).where(User.email == target))
     if taken and taken.id != admin.id:
-        print(f"Aviso: login admin não migrado — {target} já pertence a outro usuário.")
-        return
+        relocated = f"relocated-{taken.id[:8]}@letter.com.br"
+        if db.scalar(select(User).where(User.email == relocated)):
+            relocated = f"relocated-{taken.id}@letter.com.br"
+        print(f"Login admin: reubicando {target} ({taken.role}) → {relocated}")
+        taken.email = relocated
+        db.flush()
     admin.email = target
     db.commit()
     print(f"Login admin plataforma atualizado: {legacy} → {target}")
@@ -143,7 +142,7 @@ def _sync_platform_admin_email(db) -> None:
 def _seed_bootstrap_done(db) -> bool:
     if db.scalar(select(User).where(User.email == LEGACY_PLATFORM_ADMIN_EMAIL)):
         return True
-    target = _platform_admin_login_email()
+    target = platform_admin_login_email()
     return bool(db.scalar(select(User).where(User.email == target, User.role == Role.PLATFORM_ADMIN)))
 
 
@@ -271,7 +270,7 @@ def seed():
         db.commit()
         _ensure_master_trees(db, org.id, password)
         _sync_platform_admin_email(db)
-        login_email = _platform_admin_login_email()
+        login_email = platform_admin_login_email()
         print(f"Seed concluído: {login_email} / (senha de LETTER_DEMO_PASSWORD ou Letter@123)")
 
 

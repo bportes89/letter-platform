@@ -1756,6 +1756,17 @@ def test_all_profiles_eligible_for_digital_wallet(client, monkeypatch):
     assert wallet.json()["has_subaccount"] is True
 
 
+def test_login_platform_admin_email_alias(client, monkeypatch):
+    monkeypatch.setattr("app.core.config.settings.platform_admin_email", "comercial@letter.app.br")
+    monkeypatch.setattr("app.core.config.settings.login_email_otp", False)
+    response = client.post(
+        "/api/v1/auth/login",
+        json={"email": "comercial@letter.app.br", "password": "Letter@123"},
+    )
+    assert response.status_code == 200
+    assert response.json().get("access_token")
+
+
 def test_login_email_otp_requires_email_delivery(client, monkeypatch):
     monkeypatch.setattr("app.core.config.settings.login_email_otp", True)
     monkeypatch.setattr(

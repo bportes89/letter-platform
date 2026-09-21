@@ -330,17 +330,21 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
     if not allowed:
         record_security_event(db,"AUTH_RATE_LIMITED","HIGH",ip,payload.email.lower());db.commit()
         raise HTTPException(status_code=429,detail="Muitas tentativas de login",headers={"Retry-After":str(retry)})
-    user = db.scalar(select(User).where(User.email == payload.email.lower()))
-    if not user or not verify_password(payload.password, user.password_hash) or not user.active:
-        record_security_event(db,"LOGIN_FAILED","MEDIUM",ip,payload.email.lower(),user.organization_id if user else None);db.commit()
+    from app.platform_admin_login import authenticate_platform_login
+
+    user = authenticate_platform_login(db, payload.email, payload.password)
+    if not user:
+        record_security_event(db,"LOGIN_FAILED","MEDIUM",ip,payload.email.lower());db.commit()
         raise HTTPException(status_code=401, detail="E-mail ou senha inválidos")
+    from app.email_delivery_service import email_delivery_configured
     from app.login_email_otp_service import (
         consume_login_email_otp,
         email_login_otp_satisfied,
         issue_login_email_otp,
     )
 
-    if settings.login_email_otp:
+    login_otp_enabled = settings.login_email_otp and email_delivery_configured()
+    if login_otp_enabled:
         if not email_login_otp_satisfied(db, user, payload.email_otp):
             if payload.email_otp:
                 record_security_event(db, "LOGIN_EMAIL_OTP_FAILED", "MEDIUM", ip, payload.email.lower(), user.organization_id)
@@ -364,7 +368,7 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
         raise HTTPException(status_code=428, detail="Código MFA obrigatório ou inválido")
     from app.master_tree_service import sync_user_master_tree
 
-    if settings.login_email_otp:
+    if login_otp_enabled:
         consume_login_email_otp(db, user, payload.email_otp)
     sync_user_master_tree(db, user)
     access,refresh,_=create_session_tokens(db,user,request.headers.get("user-agent"),request.client.host if request.client else None)
