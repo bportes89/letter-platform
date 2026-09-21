@@ -195,7 +195,9 @@ Observações:
 - [ ] `LETTER_CORS_ORIGINS` = URL da Vercel
 - [ ] `LETTER_DEMO_PASSWORD` forte
 - [ ] `LETTER_FINANCIAL_TRANSACTIONS_ENABLED=false`
-- [ ] Login no frontend com `admin@letter.com.br`
+- [ ] `LETTER_RESEND_API_KEY` (ou SMTP) se `LETTER_LOGIN_EMAIL_OTP=true`
+- [ ] E-mail do admin em produção = caixa real do cliente (não só `admin@letter.com.br` de demo)
+- [ ] Login no frontend com o e-mail corporativo cadastrado
 
 ---
 

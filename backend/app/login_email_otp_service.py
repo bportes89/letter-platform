@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import secrets
 from datetime import UTC, datetime, timedelta
 
@@ -13,6 +14,8 @@ from app.email_delivery_service import send_transactional_email
 from app.identity_service import token_hash
 from app.models import LoginEmailOtp, User
 
+logger = logging.getLogger("letter.login_email_otp")
+
 OTP_TTL_MINUTES = 10
 
 
@@ -20,9 +23,22 @@ def _generate_code() -> str:
     return f"{secrets.randbelow(1_000_000):06d}"
 
 
-def issue_login_email_otp(db: Session, user: User) -> None:
+def issue_login_email_otp(db: Session, user: User) -> bool:
     raw = _generate_code()
     now = datetime.now(UTC)
+    subject = "Código de acesso LETTER"
+    body = (
+        f"Olá, {user.name}.\n\n"
+        f"Seu código de verificação para entrar na plataforma LETTER é: {raw}\n\n"
+        f"Ele expira em {OTP_TTL_MINUTES} minutos. Se você não tentou entrar, ignore este e-mail.\n"
+    )
+    ok, provider, _ = send_transactional_email(user.email, subject, body)
+    if not ok:
+        logger.warning(
+            "login_email_otp_send_failed",
+            extra={"user_id": str(user.id), "email": user.email, "provider": provider},
+        )
+        return False
     for item in db.scalars(select(LoginEmailOtp).where(LoginEmailOtp.user_id == user.id, LoginEmailOtp.used_at.is_(None))):
         item.used_at = now
     challenge = LoginEmailOtp(
@@ -31,13 +47,7 @@ def issue_login_email_otp(db: Session, user: User) -> None:
         expires_at=now + timedelta(minutes=OTP_TTL_MINUTES),
     )
     db.add(challenge)
-    subject = "Código de acesso LETTER"
-    body = (
-        f"Olá, {user.name}.\n\n"
-        f"Seu código de verificação para entrar na plataforma LETTER é: {raw}\n\n"
-        f"Ele expira em {OTP_TTL_MINUTES} minutos. Se você não tentou entrar, ignore este e-mail.\n"
-    )
-    send_transactional_email(user.email, subject, body)
+    return True
 
 
 def _active_email_otp(db: Session, user: User, code: str) -> LoginEmailOtp | None:

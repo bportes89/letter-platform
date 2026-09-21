@@ -1756,6 +1756,17 @@ def test_all_profiles_eligible_for_digital_wallet(client, monkeypatch):
     assert wallet.json()["has_subaccount"] is True
 
 
+def test_login_email_otp_requires_email_delivery(client, monkeypatch):
+    monkeypatch.setattr("app.core.config.settings.login_email_otp", True)
+    monkeypatch.setattr(
+        "app.login_email_otp_service.send_transactional_email",
+        lambda *args, **kwargs: (False, "MOCK", None),
+    )
+    response = client.post("/api/v1/auth/login", json={"email": "admin@letter.com.br", "password": "Letter@123"})
+    assert response.status_code == 503
+    assert "Não foi possível enviar" in response.json()["detail"]
+
+
 def test_mfa_activation_and_login_challenge(client, auth_headers):
     import pyotp
     setup = client.post("/api/v1/auth/mfa/setup", headers=auth_headers)

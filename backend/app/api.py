@@ -344,7 +344,16 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
         if not email_login_otp_satisfied(db, user, payload.email_otp):
             if payload.email_otp:
                 record_security_event(db, "LOGIN_EMAIL_OTP_FAILED", "MEDIUM", ip, payload.email.lower(), user.organization_id)
-            issue_login_email_otp(db, user)
+            if not issue_login_email_otp(db, user):
+                db.commit()
+                raise HTTPException(
+                    status_code=503,
+                    detail=(
+                        "Não foi possível enviar o código para o e-mail cadastrado. "
+                        "Use um endereço corporativo real (caixa de entrada ativa) ou peça ao suporte LETTER "
+                        "para atualizar seu usuário e configurar o envio de e-mails (Resend/SMTP)."
+                    ),
+                )
             db.commit()
             raise HTTPException(
                 status_code=428,
