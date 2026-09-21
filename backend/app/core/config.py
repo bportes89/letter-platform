@@ -108,6 +108,8 @@ class Settings(BaseSettings):
     serasa_retailer_document: str | None = None
     judis_api_key: str | None = None
     infosimples_api_token: str | None = None
+    valid_stamp_api_key: str | None = None
+    valid_stamp_api_base_url: str | None = None
     serpro_api_key: str | None = None
     fipe_api_token: str | None = None
     molicar_api_token: str | None = None
