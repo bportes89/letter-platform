@@ -58,11 +58,12 @@
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
   background: rgb(30 74 60 / 0.9);
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
+  column-gap: clamp(20px, 2.5vw, 40px);
   height: 76px;
   padding: 0 max(24px, 50vw - 590px);
-  display: flex;
   position: sticky;
   top: 0;
 }
@@ -70,16 +71,22 @@
 .logo {
   align-items: center;
   display: flex;
+  flex-shrink: 0;
 }
 
 .nav-links {
   color: #c8d5cf;
   text-transform: uppercase;
-  letter-spacing: 0.1em;
-  gap: 34px;
-  font-size: 12px;
+  letter-spacing: 0.07em;
+  gap: clamp(14px, 1.15vw, 22px);
+  font-size: 11px;
   font-weight: 700;
   display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 0 4px;
+  min-width: 0;
 }
 
 .nav-links a:hover {
@@ -1932,6 +1939,12 @@
   .attendance-chat {
     min-height: 0;
     padding-bottom: 3.5rem;
+  }
+}
+
+@media (min-width: 851px) {
+  .nav-links.nav-drawer {
+    flex-wrap: nowrap;
   }
 }
 
