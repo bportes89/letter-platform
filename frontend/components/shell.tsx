@@ -139,16 +139,19 @@ export function Shell({ children }: { children: React.ReactNode }) {
           <nav className="main-nav">
             {showBankZone && (
               <div className={`nav-zone${bankZoneOpen ? " open" : ""}${isBankPath(pathname) ? " active-zone" : ""}`}>
-                <button
-                  type="button"
-                  className={`nav-zone-header${isBankPath(pathname) ? " active" : ""}`}
-                  onClick={() => setBankZoneOpen((v) => !v)}
-                  aria-expanded={bankZoneOpen}
-                >
+                <div className={`nav-zone-header${isBankPath(pathname) ? " active" : ""}`}>
                   <Landmark size={18} />
                   <span>BANK</span>
-                  <ChevronDown size={14} className="nav-zone-chevron" />
-                </button>
+                  <button
+                    type="button"
+                    className="nav-zone-header-toggle"
+                    onClick={() => setBankZoneOpen((v) => !v)}
+                    aria-expanded={bankZoneOpen}
+                    aria-label={bankZoneOpen ? "Recolher menu BANK" : "Expandir menu BANK"}
+                  >
+                    <ChevronDown size={14} className="nav-zone-chevron" />
+                  </button>
+                </div>
                 {bankZoneOpen && (
                   <div className="nav-zone-body">
                     {(bankAccountModules.length > 0 || showBankControl) && (

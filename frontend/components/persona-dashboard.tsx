@@ -13,6 +13,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { ReferralLinksPanel } from "@/components/referral-links-panel";
 import { api, logout, Summary, User } from "@/lib/api";
+import { BANK_INVESTMENT_KEYS } from "@/lib/main-nav";
 import { filterProductNav, personaLabel } from "@/lib/role-nav";
 import { getDashboardLayout } from "@/lib/role-dashboard";
 
@@ -45,6 +46,9 @@ export function PersonaDashboard() {
 
   const layout = getDashboardLayout(user.role);
   const products = filterProductNav(user.role);
+  const bankInvestments = products.filter((p) => (BANK_INVESTMENT_KEYS as readonly string[]).includes(p.key));
+  const platformProducts = products.filter((p) => !(BANK_INVESTMENT_KEYS as readonly string[]).includes(p.key));
+  const quickAccessProducts = [...platformProducts, ...bankInvestments];
   const persona = personaLabel(user.role);
 
   return (
@@ -99,8 +103,8 @@ export function PersonaDashboard() {
 
       <div className="dashboard-grid">
         {layout.panels.includes("pipeline") && <PipelinePanel />}
-        {layout.panels.includes("quick-access") && products.length > 0 && (
-          <QuickAccessPanel products={products} />
+        {layout.panels.includes("quick-access") && quickAccessProducts.length > 0 && (
+          <QuickAccessPanel products={quickAccessProducts} />
         )}
         {layout.panels.includes("nina") && <NinaPanel />}
         {layout.panels.includes("risk") && <RiskPanel persona={persona} />}

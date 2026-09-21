@@ -29,7 +29,7 @@ const LAYOUTS: Record<LetterRole, DashboardLayout> = {
       { key: "active_proposals", label: "Propostas ativas", trend: "Em acompanhamento" },
       { key: "active_operations", label: "Operações ativas", trend: "Ledger protegido" },
     ],
-    panels: ["pipeline", "nina", "risk", "financial"],
+    panels: ["pipeline", "quick-access", "nina", "risk", "financial"],
     exportLabel: "Exportar relatório",
   },
   INTERNAL_STAFF: {
@@ -42,7 +42,7 @@ const LAYOUTS: Record<LetterRole, DashboardLayout> = {
       { key: "active_operations", label: "Operações ativas", trend: "Em execução" },
       { key: "available_quotas", label: "Cotas disponíveis", trend: "Inventário" },
     ],
-    panels: ["pipeline", "risk", "nina", "financial"],
+    panels: ["pipeline", "quick-access", "risk", "nina", "financial"],
     exportLabel: "Exportar relatório",
   },
   MASTER_FRANCHISEE: {

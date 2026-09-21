@@ -217,7 +217,7 @@ export function FlashInvestDeskModule() {
     <>
       <div className="page-heading">
         <div>
-          <span className="eyebrow dark">BANK</span>
+          <span className="eyebrow dark">INVESTIMENTOS · LETTER BANK</span>
           <h1>Flash Invest</h1>
           <p>
             Captação por token (≥ R$ 100) e mútuo (≥ R$ 10.000). Reserve → checkout Pix → posição.

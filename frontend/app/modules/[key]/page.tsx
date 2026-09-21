@@ -55,6 +55,10 @@ export default function ModulePage() {
       .finally(() => setLoading(false));
   }, [routeKey]);
 
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }, [routeKey]);
+
   if (loading) return <div className="loading">Carregando módulo...</div>;
   if (!user) return null;
 
