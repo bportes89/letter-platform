@@ -40,7 +40,11 @@ MASTER_ROOT_SPECS: tuple[dict, ...] = (
 
 def _master_email(tree_key: str) -> str:
     if tree_key == MASTER_TREE_LETTER_BANK:
-        return settings.master_letter_bank_email
+        configured = (settings.master_letter_bank_email or "").strip()
+        admin_login = (settings.platform_admin_email or "comercial@letter.app.br").strip().lower()
+        if configured.lower() == admin_login:
+            return MASTER_ROOT_SPECS[0]["email"]
+        return configured
     if tree_key == MASTER_TREE_RMK_BEVI:
         return settings.master_rmk_bevi_email
     return ""
@@ -138,6 +142,8 @@ def _resolve_master_user(
             user = conflict
     if not user:
         user = db.scalar(select(User).where(User.email == target_email))
+    if user and user.role in {Role.PLATFORM_ADMIN, Role.INTERNAL_STAFF}:
+        user = None
     if not user:
         user = User(
             organization_id=organization_id,
@@ -154,8 +160,9 @@ def _resolve_master_user(
         db.flush()
     else:
         user.organization_id = organization_id
-        user.role = Role.MASTER_FRANCHISEE
-        user.master_tree_key = tree_key
+        if user.role not in {Role.PLATFORM_ADMIN, Role.INTERNAL_STAFF}:
+            user.role = Role.MASTER_FRANCHISEE
+            user.master_tree_key = tree_key
         user.active = True
         if not (user.name or "").strip():
             user.name = spec["name"]

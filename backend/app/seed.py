@@ -113,6 +113,22 @@ def _sync_headquarters_org(db) -> None:
     db.commit()
 
 
+def _guard_corporate_login_platform_admin(db) -> None:
+    """Evita que sync de árvore master rebaixe o login corporativo (comercial) para franqueado."""
+    from app.core.config import settings
+
+    if settings.env not in {"staging", "production"}:
+        return
+    target = platform_admin_login_email()
+    user = db.scalar(select(User).where(User.email == target))
+    if not user or user.role == Role.PLATFORM_ADMIN:
+        return
+    user.role = Role.PLATFORM_ADMIN
+    user.master_tree_key = None
+    db.commit()
+    print(f"Perfil restaurado: {target} → PLATFORM_ADMIN (acesso matriz).")
+
+
 def _sync_platform_admin_email(db) -> None:
     """Em cloud, troca o login demo admin@letter.com.br pelo e-mail corporativo real."""
     from app.core.config import settings
@@ -167,7 +183,6 @@ def seed():
             org = db.scalar(select(Organization).limit(1))
             if org:
                 _ensure_profile_demo_users(db, org.id, password)
-                _ensure_master_trees(db, org.id, password)
                 from app.vender_cota_service import ensure_default_ranges, ensure_quota_sell_commission_rule
                 from app.quota_supplier_service import ensure_default_suppliers
                 from app.marketplace_commission_release_service import ensure_marketplace_commission_rule
@@ -181,6 +196,9 @@ def seed():
             _sync_demo_phones(db)
             _sync_demo_passwords(db, password)
             _sync_platform_admin_email(db)
+            if org:
+                _ensure_master_trees(db, org.id, password)
+            _guard_corporate_login_platform_admin(db)
             print("Seed já aplicado.")
             return
         org = Organization(name="LETTER FRANQUEADORA LTDA", document="57255607000130", kind="HEADQUARTERS")
