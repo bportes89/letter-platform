@@ -102,7 +102,6 @@ export function AttendanceBotSection() {
   const [error, setError] = useState("");
   const blockRef = useRef<HTMLDivElement>(null);
   const [mascotTop, setMascotTop] = useState(0);
-  const [mascotDocked, setMascotDocked] = useState(false);
 
   const currentFlowIndex = flows.length - 1;
   const isCurrent = (flowIndex: number) => flowIndex === currentFlowIndex;
@@ -116,11 +115,10 @@ export function AttendanceBotSection() {
       const last = items[items.length - 1] as HTMLElement | undefined;
       if (last) {
         last.scrollIntoView({ behavior: "smooth", block: "nearest" });
-        if (window.matchMedia("(min-width: 851px)").matches) {
-          setMascotTop(Math.max(0, last.offsetTop + last.offsetHeight - 100));
-        } else {
-          setMascotTop(0);
-        }
+        const dockOffset = window.matchMedia("(min-width: 851px)").matches ? 100 : 72;
+        const raw = Math.max(0, last.offsetTop + last.offsetHeight - dockOffset);
+        const mobile = !window.matchMedia("(min-width: 851px)").matches;
+        setMascotTop(mobile ? Math.min(raw, 240) : raw);
       }
     });
   }, []);
@@ -162,19 +160,6 @@ export function AttendanceBotSection() {
   }, [loadInitial]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    const mq = window.matchMedia("(min-width: 851px)");
-    const sync = () => {
-      const docked = mq.matches;
-      setMascotDocked(docked);
-      if (!docked) setMascotTop(0);
-    };
-    sync();
-    mq.addEventListener("change", sync);
-    return () => mq.removeEventListener("change", sync);
-  }, []);
-
-  useEffect(() => {
     if (!booting) return;
     const slowTimer = window.setTimeout(() => setBootSlow(true), 4000);
     return () => window.clearTimeout(slowTimer);
@@ -190,6 +175,8 @@ export function AttendanceBotSection() {
     if (flows.length === 0) return;
     const flowIndex = flows.length - 1;
     const items = flows[flowIndex];
+    const stepMs =
+      typeof window !== "undefined" && window.matchMedia("(max-width: 850px)").matches ? 550 : 900;
     const timer = window.setInterval(() => {
       setMeta((prev) => {
         const current = prev[flowIndex];
@@ -204,7 +191,7 @@ export function AttendanceBotSection() {
         scrollToBottom();
         return next;
       });
-    }, 900);
+    }, stepMs);
     return () => window.clearInterval(timer);
   }, [flows.length, flows, scrollToBottom]);
 
@@ -490,10 +477,7 @@ export function AttendanceBotSection() {
             </div>
           ) : null}
 
-          <div
-            className="attendance-mascot-wrap"
-            style={mascotDocked && flows.length > 0 ? { marginTop: mascotTop } : undefined}
-          >
+          <div className="attendance-mascot-wrap" style={flows.length > 0 ? { marginTop: mascotTop } : undefined}>
             <Image
               src="/brand/letter-mascote.png"
               alt="Mascote Letter"

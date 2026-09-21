@@ -2076,22 +2076,20 @@
   }
 
   .attendance-chat {
-    display: flex;
-    flex-direction: column;
     min-height: 0;
-    padding-top: 0.25rem;
-    padding-bottom: 1rem;
+    padding: 0.5rem 0 1.25rem;
   }
 
   .attendance-mascot-wrap {
-    position: relative;
-    left: auto;
-    top: auto;
-    transform: none;
-    order: -1;
-    margin: 0 auto 0.5rem !important;
-    width: 72px;
-    transition: none;
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 56px;
+    transition: margin-top 0.45s ease-out;
+  }
+
+  .attendance-mascot {
+    width: 56px;
   }
 
   .attendance-bot-row,
@@ -2102,13 +2100,38 @@
   .attendance-sdc-result,
   .attendance-contract,
   .attendance-boot-placeholder {
-    padding-left: 0;
+    padding-left: 3.75rem;
     padding-top: 0;
+    margin-bottom: 0.75rem;
   }
 
   .attendance-retry-wrap {
     padding-left: 0;
     margin-bottom: 1rem;
+  }
+
+  .attendance-bot-bubble {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    font-size: 0.88rem;
+    padding: 0.9rem 1rem;
+  }
+
+  .attendance-options {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .attendance-option,
+  .attendance-primary {
+    width: 100%;
+    text-align: center;
+    box-sizing: border-box;
+  }
+
+  .attendance-actions .attendance-primary {
+    width: 100%;
   }
 
   .attendance-sdc-grid {
