@@ -3459,14 +3459,25 @@ def sdc_desk_store(payload: SdcDeskStoreRequest, user: User = Depends(get_curren
         phone=payload.contact_phone,
         person_type=payload.person_type,
     )
+    from app.sdc_desk_service import open_tapaf_checkout_for_solicitation
+
     item = store_solicitation(db, user, payload.model_dump())
+    tapaf_bundle = None
+    try:
+        tapaf_bundle = open_tapaf_checkout_for_solicitation(db, user, item)
+    except HTTPException:
+        tapaf_bundle = None
     audit(db, user, "sdc_desk.solicitation_created", "sdc_solicitation", item.id, {
         "asset_type": item.asset_type,
         "credit_estimated": str(item.credit_estimated),
     })
     db.commit()
     db.refresh(item)
-    return solicitation_view(item, list_documents(db, item.id), db)
+    view = solicitation_view(item, list_documents(db, item.id), db)
+    if tapaf_bundle:
+        view["tapaf_proposal_id"] = tapaf_bundle.get("proposal_id")
+        view["tapaf_checkout"] = tapaf_bundle.get("interface_checkout_tapaf") or tapaf_bundle
+    return view
 
 
 @router.get("/sdc/desk/solicitations")

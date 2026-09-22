@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckCircle2, FileUp, Plus, RefreshCw, ShoppingCart, ClipboardList, Trash2 } from "lucide-react";
+import { CheckCircle2, FileUp, HelpCircle, Plus, RefreshCw, ShoppingCart, ClipboardList, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AdminDocumentPanel } from "@/components/admin-document-panel";
 import { api, apiForm, deleteApi, downloadApi, User } from "@/lib/api";
@@ -39,14 +39,46 @@ type SdcSolicitation = {
   can_create_sale: boolean;
 };
 
+type EvalSimRow = {
+  credito: string;
+  parcela_estimada: string;
+  prazo_meses: number;
+  taxa_juros_mensal: string;
+};
+
 type EvalResult = {
   viable: boolean;
   motivos: string[];
   credito_estimado: string;
+  limite_maximo_credito?: string;
+  credito_solicitado?: string | null;
+  requested_exceeds_limit?: boolean;
+  excesso_sobre_limite?: string | null;
+  simulacao_limite?: EvalSimRow;
+  simulacao_solicitada?: EvalSimRow | null;
+  show_choice?: boolean;
   parcela_estimada: string;
   prazo_meses: number;
   taxa_juros_mensal: string;
   message: string;
+};
+
+type TapafCheckoutUi = {
+  valor_nominal_taxa: string;
+  texto_explicativo_tooltip_interrogacao: string;
+  checkbox_obrigatorio_01: string;
+  checkbox_obrigatorio_02: string;
+  manifesto_html: string;
+  botao_habilitado?: boolean;
+  botao_label?: string;
+  checkout_url?: string | null;
+  checkout_mode?: string;
+  pix_copy_paste?: string;
+};
+
+type StoreResponse = SdcSolicitation & {
+  tapaf_checkout?: TapafCheckoutUi;
+  tapaf_proposal_id?: string;
 };
 
 type QuotaRow = {
@@ -95,7 +127,11 @@ const emptyForm = {
   property_registry: "",
   vehicle_plate: "",
   vehicle_renavam: "",
-  asset_full_address: "",
+  asset_street: "",
+  asset_number: "",
+  asset_city: "",
+  asset_state: "",
+  asset_zip: "",
 };
 
 function moneyPayload(value: string) {
@@ -106,6 +142,26 @@ function moneyPayload(value: string) {
 }
 
 type VehicleRow = { plate: string; renavam: string };
+
+function composePropertyAddress(form: typeof emptyForm): string {
+  const parts = [
+    [form.asset_street.trim(), form.asset_number.trim()].filter(Boolean).join(", "),
+    form.asset_city.trim(),
+    form.asset_state.trim(),
+    form.asset_zip.trim() ? `CEP ${form.asset_zip.trim()}` : "",
+  ].filter(Boolean);
+  return parts.join(" · ");
+}
+
+function chosenCreditFromEval(result: EvalResult, choice: "limite" | "solicitada" | null): string {
+  if (result.requested_exceeds_limit) {
+    return result.simulacao_limite?.credito || result.limite_maximo_credito || result.credito_estimado;
+  }
+  if (result.show_choice && choice === "solicitada" && result.simulacao_solicitada) {
+    return result.simulacao_solicitada.credito;
+  }
+  return result.simulacao_limite?.credito || result.limite_maximo_credito || result.credito_estimado;
+}
 
 export function SdcDeskModule() {
   const [tab, setTab] = useState<"nova" | "lista" | "venda">("nova");
@@ -125,6 +181,13 @@ export function SdcDeskModule() {
   const [socios, setSocios] = useState<SocioPartner[]>([]);
   const [matriculas, setMatriculas] = useState<string[]>([""]);
   const [vehicles, setVehicles] = useState<VehicleRow[]>([{ plate: "", renavam: "" }]);
+  const [creditChoice, setCreditChoice] = useState<"limite" | "solicitada" | null>(null);
+  const [tapafCheckout, setTapafCheckout] = useState<TapafCheckoutUi | null>(null);
+  const [tapafProposalId, setTapafProposalId] = useState("");
+  const [tapafScroll, setTapafScroll] = useState(false);
+  const [tapafCb1, setTapafCb1] = useState(false);
+  const [tapafCb2, setTapafCb2] = useState(false);
+  const [showTapafTip, setShowTapafTip] = useState(false);
 
   const isInternal = isInternalProductRole(user?.role);
   const needsYear = ["veiculo_leve", "veiculo_pesado", "maquina"].includes(form.asset_type);
@@ -160,9 +223,13 @@ export function SdcDeskModule() {
   function patchForm<K extends keyof typeof emptyForm>(key: K, value: (typeof emptyForm)[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
     setEvalResult(null);
+    setCreditChoice(null);
+    setTapafCheckout(null);
+    setTapafProposalId("");
   }
 
   function evaluatePayload() {
+    const requested = form.requested_leverage_amount ? moneyPayload(form.requested_leverage_amount) : null;
     return {
       asset_type: form.asset_type,
       asset_value: moneyPayload(form.asset_value),
@@ -170,18 +237,24 @@ export function SdcDeskModule() {
       asset_paid_off: form.asset_paid_off,
       asset_has_lien: form.asset_has_lien,
       docs_complete: form.docs_complete,
+      ...(requested && Number(requested) > 0 ? { requested_leverage_amount: requested } : {}),
     };
   }
 
   async function calculate() {
     setError("");
     setBusy(true);
+    setTapafCheckout(null);
+    setCreditChoice(null);
     try {
       const res = await api<{ result: EvalResult }>("/sdc/desk/evaluate", {
         method: "POST",
         body: JSON.stringify(evaluatePayload()),
       });
       setEvalResult(res.result);
+      if (res.result.requested_exceeds_limit || !res.result.show_choice) {
+        setCreditChoice("limite");
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Falha no cálculo");
     } finally {
@@ -189,7 +262,34 @@ export function SdcDeskModule() {
     }
   }
 
+  function validateBeforeStore(): string | null {
+    if (!form.contact_name.trim()) return "Informe o nome do cliente.";
+    if (!form.contact_email.trim()) return "Informe o e-mail.";
+    if (!form.contact_phone.trim()) return "Informe o telefone.";
+    if (!form.document.trim()) return "Informe CPF/CNPJ.";
+    if (!parseMoney(form.asset_value)) return "Informe o valor do bem.";
+    if (!evalResult?.viable) return "Calcule a viabilidade antes de avançar.";
+    if (evalResult.show_choice && !creditChoice) {
+      return "No resultado da análise, escolha o limite máximo ou o valor solicitado.";
+    }
+    if (isImovel && !form.asset_street.trim()) return "Informe o logradouro do imóvel.";
+    if (isImovel && !form.asset_city.trim()) return "Informe a cidade do imóvel.";
+    return null;
+  }
+
+  function parseMoney(value: string): number {
+    const n = Number(moneyPayload(value));
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  }
+
   async function store() {
+    const validation = validateBeforeStore();
+    if (validation) {
+      setError(validation);
+      return;
+    }
+    if (!evalResult) return;
+    const chosen = chosenCreditFromEval(evalResult, creditChoice);
     setError("");
     setBusy(true);
     try {
@@ -197,10 +297,11 @@ export function SdcDeskModule() {
         .map((v) => ({ plate: v.plate.trim(), renavam: v.renavam.trim() }))
         .filter((v) => v.plate || v.renavam);
       const registryLines = matriculas.map((m) => m.trim()).filter(Boolean);
-      const created = await api<SdcSolicitation>("/sdc/desk/solicitations", {
+      const created = await api<StoreResponse>("/sdc/desk/solicitations", {
         method: "POST",
         body: JSON.stringify({
           ...evaluatePayload(),
+          chosen_credit_amount: chosen,
           contact_name: form.contact_name.trim(),
           contact_email: form.contact_email.trim(),
           contact_phone: form.contact_phone.trim(),
@@ -214,21 +315,84 @@ export function SdcDeskModule() {
           vehicle_plate: isVeiculo && vehicleRows[0]?.plate ? vehicleRows[0].plate : null,
           vehicle_renavam: isVeiculo && vehicleRows[0]?.renavam ? vehicleRows[0].renavam : null,
           vehicles_json: isVeiculo ? vehicleRows : [],
-          asset_full_address: isImovel ? form.asset_full_address.trim() || null : null,
+          asset_full_address: isImovel ? composePropertyAddress(form) || null : null,
           partners_json: form.person_type === "PJ" ? sociosPayload(socios) : [],
         }),
       });
-      setNotice(`SDC gravado: ${created.contact_name} — ${created.status_label}`);
+      setNotice(`SDC gravado: ${created.contact_name} — ${created.status_label}. Conclua o TAPAF no painel ao lado.`);
+      if (created.tapaf_checkout) {
+        setTapafCheckout(created.tapaf_checkout);
+        setTapafProposalId(created.tapaf_proposal_id || "");
+        setTapafScroll(false);
+        setTapafCb1(false);
+        setTapafCb2(false);
+      }
+      setSelectedId(created.id);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Falha ao gravar solicitação");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function acceptTapaf() {
+    if (!tapafProposalId) return;
+    setError("");
+    setBusy(true);
+    try {
+      await api("/finops/pre-analysis/tapaf-checkout-accept", {
+        method: "POST",
+        body: JSON.stringify({
+          proposal_id: tapafProposalId,
+          scroll_completed: tapafScroll,
+          checkbox_1: tapafCb1,
+          checkbox_2: tapafCb2,
+          asset_type: isVeiculo ? "VEHICLE" : "REAL_ESTATE",
+        }),
+      });
+      const res = await api<{ interface_checkout_tapaf: TapafCheckoutUi }>("/finops/pre-analysis/generate-tapaf", {
+        method: "POST",
+        body: JSON.stringify({ proposal_id: tapafProposalId }),
+      });
+      setTapafCheckout(res.interface_checkout_tapaf);
+      setNotice("Aceite TAPAF registrado. Clique em confirmar pagamento para gerar boleto/Pix.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Falha no aceite TAPAF");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function payTapaf() {
+    if (!tapafProposalId) return;
+    setError("");
+    setBusy(true);
+    try {
+      if (tapafCheckout?.checkout_url && tapafCheckout.checkout_mode === "ASAAS") {
+        window.open(tapafCheckout.checkout_url, "_blank", "noopener,noreferrer");
+        setNotice("Cobrança aberta — aguarde confirmação do pagamento.");
+        return;
+      }
+      await api("/finops/pre-analysis/tapaf-payment-webhook", {
+        method: "POST",
+        body: JSON.stringify({
+          proposal_id: tapafProposalId,
+          event_id: `sdc-desk-tapaf-${Date.now()}`,
+          amount: tapafCheckout?.valor_nominal_taxa || "1500.00",
+        }),
+      });
+      setNotice("TAPAF confirmada. Acompanhe o status na aba Acompanhamento.");
       setForm(emptyForm);
       setSocios([]);
       setMatriculas([""]);
       setVehicles([{ plate: "", renavam: "" }]);
       setEvalResult(null);
-      setSelectedId(created.id);
+      setTapafCheckout(null);
       setTab("lista");
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Falha ao gravar solicitação");
+      setError(e instanceof Error ? e.message : "Falha ao gerar pagamento TAPAF");
     } finally {
       setBusy(false);
     }
@@ -402,9 +566,25 @@ export function SdcDeskModule() {
                 </label>
                 {isImovel && (
                   <>
-                    <label style={{ gridColumn: "1 / -1" }}>
-                      Endereço completo do bem
-                      <textarea rows={2} value={form.asset_full_address} onChange={(e) => patchForm("asset_full_address", e.target.value)} placeholder="Logradouro, número, cidade, UF" />
+                    <label>
+                      Logradouro
+                      <input value={form.asset_street} onChange={(e) => patchForm("asset_street", e.target.value)} placeholder="Rua / avenida" />
+                    </label>
+                    <label>
+                      Número
+                      <input value={form.asset_number} onChange={(e) => patchForm("asset_number", e.target.value)} placeholder="Nº" />
+                    </label>
+                    <label>
+                      CEP
+                      <input value={form.asset_zip} onChange={(e) => patchForm("asset_zip", e.target.value)} placeholder="00000-000" inputMode="numeric" />
+                    </label>
+                    <label>
+                      Cidade
+                      <input value={form.asset_city} onChange={(e) => patchForm("asset_city", e.target.value)} placeholder="Cidade" />
+                    </label>
+                    <label>
+                      UF
+                      <input value={form.asset_state} onChange={(e) => patchForm("asset_state", e.target.value)} placeholder="MG" maxLength={2} />
                     </label>
                     <div className="desk-repeat-block">
                       <b>Matrícula(s) do imóvel</b>
@@ -491,27 +671,119 @@ export function SdcDeskModule() {
               </div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <button type="button" className="admin-button" disabled={busy} onClick={() => void calculate()}>Calcular viabilidade</button>
-                {evalResult?.viable && (
-                  <button type="button" className="admin-button" disabled={busy} onClick={() => void store()}>Avançar (gravar SDC)</button>
-                )}
               </div>
             </div>
             <div style={{ border: "1px solid var(--line)", borderRadius: 12, padding: 16, background: "#f7fbf9" }}>
               <b>Resultado da análise</b>
-              {!evalResult && <p className="muted" style={{ marginTop: 10 }}>Preencha e clique em Calcular.</p>}
-              {evalResult?.viable && (
-                <div style={{ display: "grid", gap: 10, marginTop: 12, gridTemplateColumns: "1fr 1fr" }}>
-                  <div><small>Valor alavancado</small><div><b>{brl.format(Number(evalResult.credito_estimado))}</b></div></div>
-                  <div><small>Prazo</small><div><b>{evalResult.prazo_meses} meses</b></div></div>
-                  <div><small>Parcela</small><div><b>{brl.format(Number(evalResult.parcela_estimada))}</b></div></div>
-                  <div><small>Taxa</small><div><b>{evalResult.taxa_juros_mensal}% a.m.</b></div></div>
-                  <p style={{ gridColumn: "1 / -1", color: "#067647", fontWeight: 700 }}>{evalResult.message}</p>
+              {!evalResult && !tapafCheckout && <p className="muted" style={{ marginTop: 10 }}>Preencha e clique em Calcular viabilidade.</p>}
+              {evalResult?.viable && !tapafCheckout && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 12 }}>
+                  {evalResult.simulacao_limite && (
+                    <div
+                      style={{
+                        border: creditChoice === "limite" || !evalResult.show_choice ? "2px solid var(--green-dark)" : "1px solid var(--line)",
+                        borderRadius: 10,
+                        padding: 12,
+                        background: "#fff",
+                      }}
+                    >
+                      <b style={{ fontSize: 11 }}>Limite máximo com o bem</b>
+                      <div style={{ display: "grid", gap: 8, marginTop: 8, gridTemplateColumns: "1fr 1fr" }}>
+                        <div><small>Valor alavancável</small><div><b>{brl.format(Number(evalResult.simulacao_limite.credito))}</b></div></div>
+                        <div><small>Parcela estimada</small><div><b>{brl.format(Number(evalResult.simulacao_limite.parcela_estimada))}</b></div></div>
+                        <div><small>Prazo estimado</small><div><b>{evalResult.simulacao_limite.prazo_meses} meses</b></div></div>
+                        <div><small>Taxa estimada</small><div><b>{evalResult.simulacao_limite.taxa_juros_mensal}% a.m.</b></div></div>
+                      </div>
+                      {evalResult.show_choice && (
+                        <button type="button" className="table-action" style={{ marginTop: 10 }} onClick={() => setCreditChoice("limite")}>
+                          Escolher limite máximo
+                        </button>
+                      )}
+                      {!evalResult.show_choice && (
+                        <button type="button" className="admin-button" style={{ marginTop: 10, width: "100%" }} disabled={busy} onClick={() => void store()}>
+                          Avançar com este valor
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {evalResult.simulacao_solicitada && (
+                    <div
+                      style={{
+                        border: creditChoice === "solicitada" ? "2px solid var(--green-dark)" : "1px solid var(--line)",
+                        borderRadius: 10,
+                        padding: 12,
+                        background: "#fff",
+                      }}
+                    >
+                      <b style={{ fontSize: 11 }}>Valor solicitado na simulação</b>
+                      <div style={{ display: "grid", gap: 8, marginTop: 8, gridTemplateColumns: "1fr 1fr" }}>
+                        <div><small>Valor desejado</small><div><b>{brl.format(Number(evalResult.simulacao_solicitada.credito))}</b></div></div>
+                        <div><small>Parcela estimada</small><div><b>{brl.format(Number(evalResult.simulacao_solicitada.parcela_estimada))}</b></div></div>
+                        <div><small>Prazo estimado</small><div><b>{evalResult.simulacao_solicitada.prazo_meses} meses</b></div></div>
+                        <div><small>Taxa estimada</small><div><b>{evalResult.simulacao_solicitada.taxa_juros_mensal}% a.m.</b></div></div>
+                      </div>
+                      <button type="button" className="table-action" style={{ marginTop: 10 }} onClick={() => setCreditChoice("solicitada")}>
+                        Escolher valor solicitado
+                      </button>
+                    </div>
+                  )}
+                  {evalResult.requested_exceeds_limit && (
+                    <p style={{ color: "#b45309", fontSize: 11, lineHeight: 1.45, margin: 0 }}>{evalResult.message}</p>
+                  )}
+                  {!evalResult.requested_exceeds_limit && evalResult.message && (
+                    <p style={{ color: "#067647", fontWeight: 700, fontSize: 11, margin: 0 }}>{evalResult.message}</p>
+                  )}
+                  {evalResult.show_choice && creditChoice && (
+                    <button type="button" className="admin-button" disabled={busy} onClick={() => void store()}>
+                      Avançar com {creditChoice === "solicitada" ? "valor solicitado" : "limite máximo"}
+                    </button>
+                  )}
                 </div>
               )}
               {evalResult && !evalResult.viable && (
                 <div style={{ marginTop: 12 }}>
                   <p style={{ color: "#b42318", fontWeight: 700 }}>{evalResult.message}</p>
                   <ul>{evalResult.motivos.map((m) => <li key={m}>{m}</li>)}</ul>
+                </div>
+              )}
+              {tapafCheckout && (
+                <div className="tapaf-checkout" style={{ marginTop: 14 }}>
+                  <b>TAPAF — taxa de abertura</b>
+                  <div className="finops-summary tapaf-price" style={{ marginTop: 10 }}>
+                    <article>
+                      <small>Taxa nominal</small>
+                      <strong>{brl.format(Number(tapafCheckout.valor_nominal_taxa))}</strong>
+                      <button type="button" className="help-icon" onClick={() => setShowTapafTip((v) => !v)} aria-label="O que é TAPAF">
+                        <HelpCircle size={16} /> ?
+                      </button>
+                      {showTapafTip && (
+                        <div className="tooltip-pop">{tapafCheckout.texto_explicativo_tooltip_interrogacao}</div>
+                      )}
+                    </article>
+                  </div>
+                  <div className="manifest-scroll" style={{ maxHeight: 120 }} dangerouslySetInnerHTML={{ __html: tapafCheckout.manifesto_html }} />
+                  <label className="tapaf-check">
+                    <input type="checkbox" checked={tapafScroll} onChange={(e) => setTapafScroll(e.target.checked)} />
+                    <span>Li o manifesto TAPAF até o final.</span>
+                  </label>
+                  <label className="tapaf-check">
+                    <input type="checkbox" checked={tapafCb1} onChange={(e) => setTapafCb1(e.target.checked)} />
+                    <span>{tapafCheckout.checkbox_obrigatorio_01}</span>
+                  </label>
+                  <label className="tapaf-check">
+                    <input type="checkbox" checked={tapafCb2} onChange={(e) => setTapafCb2(e.target.checked)} />
+                    <span>{tapafCheckout.checkbox_obrigatorio_02}</span>
+                  </label>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    <button type="button" className="admin-button" disabled={busy || !tapafScroll || !tapafCb1 || !tapafCb2} onClick={() => void acceptTapaf()}>
+                      Aceitar TAPAF e gerar boleto/Pix
+                    </button>
+                    {(tapafCheckout.botao_habilitado || tapafCheckout.checkout_url) && (
+                      <button type="button" className="admin-button" disabled={busy} onClick={() => void payTapaf()}>
+                        {tapafCheckout.botao_label || "Gerar boleto / Pix TAPAF"}
+                      </button>
+                    )}
+                  </div>
                 </div>
               )}
             </div>

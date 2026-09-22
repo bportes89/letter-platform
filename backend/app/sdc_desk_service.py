@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 from json import dumps as json_dumps
+from json import loads as json_loads
 from math import pow as math_pow
 
 from fastapi import HTTPException, UploadFile
@@ -84,6 +85,23 @@ def _dec(value) -> Decimal:
     return Decimal(str(value or 0))
 
 
+def _installment_for(credito: Decimal, prazo: int, taxa: Decimal) -> Decimal:
+    if credito <= 0 or prazo <= 0:
+        return Decimal("0")
+    i = taxa / Decimal("100")
+    parcela = credito * i / (Decimal("1") - Decimal(str(math_pow(float(1 + i), -prazo))))
+    return money(parcela)
+
+
+def _simulation_row(credito: Decimal, prazo: int, taxa: Decimal) -> dict:
+    return {
+        "credito": str(money(credito)),
+        "parcela_estimada": str(_installment_for(credito, prazo, taxa)),
+        "prazo_meses": prazo,
+        "taxa_juros_mensal": str(taxa.quantize(Decimal("0.01"))),
+    }
+
+
 def evaluate_sdc_desk(data: dict) -> dict:
     motivos: list[str] = []
     tipo_bem = str(data.get("asset_type") or data.get("tipo_bem") or "").strip().lower()
@@ -132,20 +150,41 @@ def evaluate_sdc_desk(data: dict) -> dict:
         porc, prazo, taxa = PORC_CREDITO_IMOVEL, IMOVEL_PRAZO, IMOVEL_TAXA
         categoria = "imovel"
 
-    credito = money(valor * porc)
-    i = taxa / Decimal("100")
-    parcela = credito * i / (Decimal("1") - Decimal(str(math_pow(float(1 + i), -prazo))))
-    parcela = money(parcela)
+    credito_max = money(valor * porc)
+    sim_limite = _simulation_row(credito_max, prazo, taxa)
+
+    requested_raw = data.get("requested_leverage_amount")
+    requested = _dec(requested_raw) if requested_raw not in (None, "", 0) else Decimal("0")
+    if requested > 0:
+        requested = money(requested)
+    requested_exceeds = requested > credito_max if requested > 0 else False
+    sim_solicitada = None
+    if requested > 0 and not requested_exceeds:
+        sim_solicitada = _simulation_row(requested, prazo, taxa)
+
+    message = "Operação viável"
+    if requested_exceeds:
+        message = (
+            f"O valor solicitado ({money(requested)}) excede o limite máximo permitido "
+            f"({credito_max}). Você pode prosseguir com o limite máximo."
+        )
 
     return {
         "viable": True,
         "motivos": [],
-        "credito_estimado": str(credito),
-        "parcela_estimada": str(parcela),
+        "credito_estimado": str(credito_max),
+        "limite_maximo_credito": str(credito_max),
+        "credito_solicitado": str(requested) if requested > 0 else None,
+        "requested_exceeds_limit": requested_exceeds,
+        "excesso_sobre_limite": str(money(requested - credito_max)) if requested_exceeds else None,
+        "simulacao_limite": sim_limite,
+        "simulacao_solicitada": sim_solicitada,
+        "show_choice": sim_solicitada is not None,
+        "parcela_estimada": sim_limite["parcela_estimada"],
         "prazo_meses": prazo,
         "taxa_juros_mensal": str(taxa.quantize(Decimal("0.01"))),
         "tipo_categoria": categoria,
-        "message": "Operação viável",
+        "message": message,
     }
 
 
@@ -211,6 +250,111 @@ def get_solicitation(db: Session, user: User, solicitation_id: str) -> SdcSolici
     return item
 
 
+def _resolve_chosen_credit(payload: dict, result: dict) -> tuple[Decimal, dict]:
+    """Retorna crédito escolhido e linha de simulação (parcela/prazo/taxa)."""
+    limite = _dec(result.get("limite_maximo_credito") or result.get("credito_estimado"))
+    chosen_raw = payload.get("chosen_credit_amount")
+    if chosen_raw in (None, "", 0):
+        row = result.get("simulacao_limite") or {}
+        return limite, row
+    chosen = money(_dec(chosen_raw))
+    if chosen > limite:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Crédito escolhido ({chosen}) excede o limite máximo ({limite}).",
+        )
+    sim_sol = result.get("simulacao_solicitada")
+    sim_lim = result.get("simulacao_limite") or {}
+    if sim_sol and _dec(sim_sol.get("credito")) == chosen:
+        return chosen, sim_sol
+    if _dec(sim_lim.get("credito")) == chosen:
+        return chosen, sim_lim
+    prazo = int(result.get("prazo_meses") or sim_lim.get("prazo_meses") or 0)
+    taxa = _dec(result.get("taxa_juros_mensal") or sim_lim.get("taxa_juros_mensal"))
+    return chosen, _simulation_row(chosen, prazo, taxa)
+
+
+def open_tapaf_checkout_for_solicitation(db: Session, user: User, item: SdcSolicitation) -> dict:
+    """Cria proposta SD C + pauta pré-análise e retorna checkout TAPAF (R$ 1.500)."""
+    from app.pre_analysis_service import generate_tapaf_checkout, get_or_create_pauta
+
+    assert_desk_access(user)
+    try:
+        meta = json_loads(item.evaluation_json or "{}")
+    except (TypeError, ValueError):
+        meta = {}
+    if not isinstance(meta, dict):
+        meta = {}
+
+    tapaf_meta = meta.get("tapaf") if isinstance(meta.get("tapaf"), dict) else {}
+    proposal_id = tapaf_meta.get("proposal_id") or item.proposal_id
+
+    if not proposal_id:
+        lead = Lead(
+            organization_id=user.organization_id,
+            owner_id=item.partner_user_id or user.id,
+            name=item.contact_name,
+            phone=item.contact_phone or "00000000000",
+            document=item.document,
+            product_interest="SDC",
+            status="QUALIFIED",
+            source="SDC_DESK",
+        )
+        db.add(lead)
+        db.flush()
+        proposal = Proposal(
+            organization_id=user.organization_id,
+            lead_id=lead.id,
+            product="SDC",
+            requested_amount=item.credit_estimated,
+            status="SUBMITTED",
+            terms_json=json_dumps(
+                {
+                    "sdc_solicitation_id": item.id,
+                    "asset_type": item.asset_type,
+                    "asset_value": str(item.asset_value),
+                    "channel": "SDC_DESK",
+                    "tapaf_phase": True,
+                },
+                ensure_ascii=False,
+            ),
+            sale_channel="PARTNER_OFFICE",
+            served_by_user_id=user.id,
+            commission_originator_id=item.partner_user_id,
+            created_by_user_id=user.id,
+        )
+        db.add(proposal)
+        db.flush()
+        proposal_id = proposal.id
+        item.proposal_id = proposal_id
+        tapaf_meta["proposal_id"] = proposal_id
+        tapaf_meta["lead_id"] = lead.id
+        meta["tapaf"] = tapaf_meta
+        item.evaluation_json = json_dumps({**meta, "channel": meta.get("channel") or "SDC_DESK"}, ensure_ascii=False)
+
+    proposal = db.get(Proposal, proposal_id)
+    if not proposal:
+        raise HTTPException(status_code=500, detail="Proposta TAPAF não encontrada")
+
+    pauta = get_or_create_pauta(db, user, proposal)
+    if item.docs_complete and pauta.status == "PENDING_DOCUMENTS":
+        pauta.status = "DOCUMENTS_OK"
+    at = "VEHICLE" if item.asset_type in TIPOS_VEICULO else "REAL_ESTATE"
+    pauta.asset_type = at
+    db.flush()
+
+    checkout = generate_tapaf_checkout(pauta)
+    tapaf_meta["pauta_id"] = pauta.id
+    tapaf_meta["pauta_code"] = pauta.pauta_code
+    meta["tapaf"] = tapaf_meta
+    item.evaluation_json = json_dumps({**meta, "channel": meta.get("channel") or "SDC_DESK"}, ensure_ascii=False)
+    return {
+        "proposal_id": proposal_id,
+        "pauta_id": pauta.id,
+        **checkout,
+    }
+
+
 def store_solicitation(db: Session, user: User, payload: dict) -> SdcSolicitation:
     assert_desk_access(user)
     result = evaluate_sdc_desk(payload)
@@ -219,6 +363,7 @@ def store_solicitation(db: Session, user: User, payload: dict) -> SdcSolicitatio
             status_code=422,
             detail={"message": result["message"], "motivos": result["motivos"], "result": result},
         )
+    credit_chosen, sim_row = _resolve_chosen_credit(payload, result)
     partner_id = user.id if user.role in PARTNER_NETWORK_ROLES or user.role == Role.PARTNER else payload.get("partner_user_id") or user.id
     if _is_admin(user) and payload.get("partner_user_id"):
         partner_id = payload["partner_user_id"]
@@ -242,13 +387,14 @@ def store_solicitation(db: Session, user: User, payload: dict) -> SdcSolicitatio
         asset_paid_off=bool(payload.get("asset_paid_off", True)),
         asset_has_lien=bool(payload.get("asset_has_lien", False)),
         docs_complete=bool(payload.get("docs_complete", True)),
-        credit_estimated=money(_dec(result["credito_estimado"])),
-        installment_estimated=money(_dec(result["parcela_estimada"])),
-        term_months=int(result["prazo_meses"]),
-        interest_rate_monthly=money(_dec(result["taxa_juros_mensal"])),
+        credit_estimated=money(_dec(credit_chosen)),
+        installment_estimated=money(_dec(sim_row.get("parcela_estimada") or result["parcela_estimada"])),
+        term_months=int(sim_row.get("prazo_meses") or result["prazo_meses"]),
+        interest_rate_monthly=money(_dec(sim_row.get("taxa_juros_mensal") or result["taxa_juros_mensal"])),
         evaluation_json=evaluation_json_with_meta(
             {
                 **result,
+                "chosen_credit_amount": str(credit_chosen),
                 **desk_payload_extras(
                     payload,
                     (
@@ -363,7 +509,7 @@ def create_sale_from_sdc(
     assert_desk_access(user)
     if item.status != STATUS_APPROVED:
         raise HTTPException(status_code=422, detail="Só SDCs Aprovados podem gerar cadastro de venda")
-    if item.proposal_id:
+    if item.quota_id:
         raise HTTPException(status_code=409, detail="Este SDC já possui venda vinculada")
     quota = db.scalar(
         select(Quota).where(Quota.id == quota_id, Quota.organization_id == user.organization_id)
@@ -373,46 +519,54 @@ def create_sale_from_sdc(
     if quota.status not in {"AVAILABLE", "RESERVED"}:
         raise HTTPException(status_code=422, detail="Cota indisponível")
 
-    lead = Lead(
-        organization_id=user.organization_id,
-        owner_id=item.partner_user_id or user.id,
-        name=item.contact_name,
-        phone=item.contact_phone or "00000000000",
-        document=item.document,
-        product_interest="SDC",
-        status="QUALIFIED",
-        source="SDC_DESK",
-    )
-    db.add(lead)
-    db.flush()
-    proposal = Proposal(
-        organization_id=user.organization_id,
-        lead_id=lead.id,
-        product="SDC",
-        requested_amount=item.credit_estimated,
-        status="SUBMITTED",
-        terms_json=json_dumps(
-            {
-                "sdc_solicitation_id": item.id,
-                "quota_id": quota.id,
-                "asset_type": item.asset_type,
-                "asset_value": str(item.asset_value),
-                "channel": "SDC_DESK",
-            },
-            ensure_ascii=False,
-        ),
-        sale_channel="PARTNER_OFFICE",
-        served_by_user_id=user.id,
-        commission_originator_id=item.partner_user_id,
-        created_by_user_id=user.id,
-    )
-    db.add(proposal)
-    db.flush()
+    if item.proposal_id:
+        proposal = db.get(Proposal, item.proposal_id)
+        if not proposal:
+            raise HTTPException(status_code=404, detail="Proposta vinculada não encontrada")
+        proposal.requested_amount = item.credit_estimated
+        lead_id = proposal.lead_id
+    else:
+        lead = Lead(
+            organization_id=user.organization_id,
+            owner_id=item.partner_user_id or user.id,
+            name=item.contact_name,
+            phone=item.contact_phone or "00000000000",
+            document=item.document,
+            product_interest="SDC",
+            status="QUALIFIED",
+            source="SDC_DESK",
+        )
+        db.add(lead)
+        db.flush()
+        lead_id = lead.id
+        proposal = Proposal(
+            organization_id=user.organization_id,
+            lead_id=lead.id,
+            product="SDC",
+            requested_amount=item.credit_estimated,
+            status="SUBMITTED",
+            terms_json=json_dumps(
+                {
+                    "sdc_solicitation_id": item.id,
+                    "quota_id": quota.id,
+                    "asset_type": item.asset_type,
+                    "asset_value": str(item.asset_value),
+                    "channel": "SDC_DESK",
+                },
+                ensure_ascii=False,
+            ),
+            sale_channel="PARTNER_OFFICE",
+            served_by_user_id=user.id,
+            commission_originator_id=item.partner_user_id,
+            created_by_user_id=user.id,
+        )
+        db.add(proposal)
+        db.flush()
+        item.proposal_id = proposal.id
     quota.status = "RESERVED"
-    item.proposal_id = proposal.id
     item.quota_id = quota.id
     db.flush()
-    return {"proposal_id": proposal.id, "lead_id": lead.id, "quota_id": quota.id}
+    return {"proposal_id": proposal.id, "lead_id": lead_id, "quota_id": quota.id}
 
 
 def solicitation_view(
@@ -460,6 +614,6 @@ def solicitation_view(
             for d in (docs or [])
         ],
         "created_at": item.created_at.isoformat() if item.created_at else None,
-        "can_create_sale": item.status == STATUS_APPROVED and not item.proposal_id,
+        "can_create_sale": item.status == STATUS_APPROVED and not item.quota_id,
         **evaluation_meta(item.evaluation_json),
     }
