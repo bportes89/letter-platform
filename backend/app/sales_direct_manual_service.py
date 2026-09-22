@@ -55,37 +55,40 @@ def list_cotas_options(db: Session, user: User, *, category: str) -> list[dict]:
             .order_by(Quota.credit_value.asc())
         )
     )
+    from app.marketplace_partner_view import mask_quota_fields, user_sees_supplier_quota_identity
+
+    show_identity = user_sees_supplier_quota_identity(user)
     rows: list[dict] = []
     for q in quotas:
         admin = db.get(Administrator, q.administrator_id)
         pricing = pricing_for_quota(q, suppliers=suppliers)
         label = (
-            f"Valor: R$ {pricing['credit']} | Entrada: R$ {pricing['entrada_final']} | "
+            f"Crédito: R$ {pricing['credit']} | Entrada: R$ {pricing['entrada_final']} | "
             f"Parc.: R$ {pricing['installment']} | "
-            f"Adm.: {admin.name if admin else '—'} | "
-            f"Forn.: {q.supplier_source or '—'}"
+            f"Adm.: {admin.name if admin else '—'}"
         )
-        rows.append(
-            {
-                "quota_id": q.id,
-                "group_code": q.group_code,
-                "quota_code": q.quota_code,
-                "category": q.category,
-                "credit_value": str(pricing["credit"]),
-                "premium_value": str(pricing["entrada_base"]),
-                "entrada_final": str(pricing["entrada_final"]),
-                "installment_value": str(pricing["installment"]),
-                "remaining_installments": pricing["remaining_installments"],
-                "supplier_source": q.supplier_source,
-                "markup_percent": pricing["markup_percent"],
-                "markup_amount": pricing["markup_amount"],
-                "administrator_id": q.administrator_id,
-                "administrator_name": admin.name if admin else None,
-                "nina_scan_status": q.nina_scan_status,
-                "installment_due_date": q.installment_due_date.isoformat() if q.installment_due_date else None,
-                "label": label,
-            }
-        )
+        row = {
+            "quota_id": q.id,
+            "group_code": q.group_code,
+            "quota_code": q.quota_code,
+            "category": q.category,
+            "credit_value": str(pricing["credit"]),
+            "premium_value": str(pricing["entrada_base"]),
+            "entrada_final": str(pricing["entrada_final"]),
+            "installment_value": str(pricing["installment"]),
+            "remaining_installments": pricing["remaining_installments"],
+            "supplier_source": q.supplier_source if show_identity else None,
+            "markup_percent": pricing["markup_percent"] if show_identity else None,
+            "markup_amount": pricing["markup_amount"] if show_identity else None,
+            "administrator_id": q.administrator_id,
+            "administrator_name": admin.name if admin else None,
+            "nina_scan_status": q.nina_scan_status,
+            "installment_due_date": q.installment_due_date.isoformat() if q.installment_due_date else None,
+            "label": label,
+        }
+        if not show_identity:
+            row = mask_quota_fields(row, quota_id=q.id)
+        rows.append(row)
     return rows
 
 

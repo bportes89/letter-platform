@@ -1,8 +1,8 @@
 "use client";
 
-import { CheckCircle2, FilePenLine, RefreshCw } from "lucide-react";
+import { CheckCircle2, FilePenLine, RefreshCw, Search } from "lucide-react";
 import Link from "next/link";
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { CurrencyInput } from "@/components/currency-input";
 import { lookupCep } from "@/lib/cep-lookup";
@@ -13,6 +13,17 @@ const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" 
 function parseMoney(value: string): number {
   const n = Number(String(value || "").replace(",", "."));
   return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+const SEARCH_BAND = 0.05;
+
+function withinSearchBand(actual: number, target: number): boolean {
+  if (target <= 0) return true;
+  return Math.abs(actual - target) / target <= SEARCH_BAND;
+}
+
+function cotaListLabel(c: CotaOption): string {
+  return `${c.group_code} · ${c.quota_code} · crédito ${brl.format(Number(c.credit_value))} · entrada ${brl.format(Number(c.entrada_final))} · parc. ${brl.format(Number(c.installment_value || 0))} · ${c.administrator_name ?? "Adm."}`;
 }
 
 type CotaOption = {
@@ -51,6 +62,8 @@ type StoreResult = {
 
 export function VendaDiretaManualModule() {
   const [category, setCategory] = useState("REAL_ESTATE");
+  const [filterCredit, setFilterCredit] = useState("");
+  const [filterEntrada, setFilterEntrada] = useState("");
   const [cotas, setCotas] = useState<CotaOption[]>([]);
   const [cadastros, setCadastros] = useState<CadastroOption[]>([]);
   const [partners, setPartners] = useState<PartnerOption[]>([]);
@@ -182,6 +195,16 @@ export function VendaDiretaManualModule() {
     }
   }
 
+  const filteredCotas = useMemo(() => {
+    const creditTarget = parseMoney(filterCredit);
+    const entradaTarget = parseMoney(filterEntrada);
+    return cotas.filter((c) => {
+      const credit = Number(c.credit_value);
+      const entrada = Number(c.entrada_final);
+      return withinSearchBand(credit, creditTarget) && withinSearchBand(entrada, entradaTarget);
+    });
+  }, [cotas, filterCredit, filterEntrada]);
+
   const selectedList = cotas.filter((c) => quotaIds.includes(c.quota_id));
 
   async function onCepBlur() {
@@ -253,29 +276,50 @@ export function VendaDiretaManualModule() {
                 onChange={(e) => {
                   setCategory(e.target.value);
                   setQuotaIds([]);
+                  setFilterCredit("");
+                  setFilterEntrada("");
                 }}
               >
                 <option value="REAL_ESTATE">Imóvel</option>
                 <option value="VEHICLE">Veículo</option>
               </select>
             </label>
+            <label className="marketplace-field">
+              <span className="marketplace-field-label">
+                <Search size={14} />
+                Buscar por crédito (R$)
+              </span>
+              <CurrencyInput value={filterCredit} onChange={setFilterCredit} placeholder="Ex.: 250.000" />
+            </label>
+            <label className="marketplace-field">
+              <span className="marketplace-field-label">
+                <Search size={14} />
+                Buscar por entrada (R$)
+              </span>
+              <CurrencyInput value={filterEntrada} onChange={setFilterEntrada} placeholder="Ex.: 80.000" />
+            </label>
+            <small className="marketplace-hint">Filtro com tolerância de ±5% quando você informa um valor.</small>
             <div className="marketplace-field marketplace-field-wide">
-              <b>Cotas (multi-seleção)</b>
+              <b>Cotas (multi-seleção){filteredCotas.length ? ` — ${filteredCotas.length} opção(ões)` : ""}</b>
               <div style={{ maxHeight: 220, overflowY: "auto", marginTop: 8 }}>
-                {cotas.map((c) => (
-                  <label key={c.quota_id} style={{ display: "block", marginBottom: 6 }}>
-                    <input
-                      type="checkbox"
-                      checked={quotaIds.includes(c.quota_id)}
-                      onChange={(e) =>
-                        setQuotaIds((ids) =>
-                          e.target.checked ? [...ids, c.quota_id] : ids.filter((id) => id !== c.quota_id),
-                        )
-                      }
-                    />
-                    {c.label}
-                  </label>
-                ))}
+                {filteredCotas.length === 0 ? (
+                  <small className="muted">Nenhuma cota neste filtro. Ajuste crédito/entrada ou a categoria.</small>
+                ) : (
+                  filteredCotas.map((c) => (
+                    <label key={c.quota_id} style={{ display: "block", marginBottom: 6 }}>
+                      <input
+                        type="checkbox"
+                        checked={quotaIds.includes(c.quota_id)}
+                        onChange={(e) =>
+                          setQuotaIds((ids) =>
+                            e.target.checked ? [...ids, c.quota_id] : ids.filter((id) => id !== c.quota_id),
+                          )
+                        }
+                      />
+                      {cotaListLabel(c)}
+                    </label>
+                  ))
+                )}
               </div>
             </div>
             {selectedList.length > 0 && (
