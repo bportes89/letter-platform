@@ -131,7 +131,10 @@ export function FornecedoresModule() {
     try {
       const rows = await api<QuotaSupplier[]>("/marketplace/suppliers/ensure-defaults", { method: "POST" });
       setItems(rows);
-      setNotice("Fornecedores padrão (Fraga, Bittelo, Lance, Uni, Contemplado SP, Lume + veículos) garantidos.");
+      setNotice(
+        "Fornecedores padrão garantidos. Uni/Lume/Contemplado SP recebem scrape do site automaticamente. " +
+          "Fraga, Bittelo e Lance só entram no sync automático após configurar a URL da API JSON (Editar ou variáveis no Render).",
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : "Falha ao criar padrões");
     } finally {
@@ -267,8 +270,8 @@ export function FornecedoresModule() {
           <span className="eyebrow dark">CADASTRO</span>
           <h1>Fornecedores de cotas</h1>
           <p>
-            Empresas que alimentam o inventário e o robô Esteira 2. Markup na entrada (% do crédito) e sync JSON da
-            API do fornecedor.
+            Cadastre fornecedores, aponte a URL da API JSON ou da página HTML (scrape) e o inventário atualiza no cron
+            (~30 min) ou pelo botão Sincronizar.
           </p>
         </div>
         <div className="operational-icon">
@@ -279,18 +282,35 @@ export function FornecedoresModule() {
       <section className="panel operational-panel">
         <div className="notice">
           <Truck />
-          Use o mesmo <b>source_key</b> da cota no Inventário (ex.: FRAGA). Com <b>sync_mode=JSON</b> e{" "}
-          <b>api_url</b>, o botão Sincronizar importa/atualiza cotas e inativa as que sumiram (sem tocar em
-          RESERVED/SOLD). Markup continua no match — não é embutido no sync. Em produção, o cron Render{" "}
-          <code>letter-marketplace-quota-sync</code> repete o sync a cada 30 min.
+          <div>
+            <b>Sincronização automática</b> (cron Render ~30 min) só roda em fornecedores com{" "}
+            <b>Sync = API JSON</b> ou <b>Scrape HTML</b> e <b>URL preenchida</b>. Quem está em <b>Manual</b> (ex. Fraga,
+            Bittelo, Lance sem URL) não aparece em «Último sync» — edite e informe o site/endpoint, ou use «Garantir
+            padrão» após configurar as URLs no servidor.
+            <br />
+            <small style={{ display: "block", marginTop: "0.35rem" }}>
+              Use o mesmo <b>source_key</b> no Inventário. Markup não é alterado pelo sync.
+            </small>
+          </div>
         </div>
 
         <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", marginBottom: "1rem" }}>
+          <button
+            type="button"
+            className="marketplace-submit"
+            disabled={busy}
+            onClick={() => {
+              setEditing(null);
+              document.getElementById("fornecedor-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
+            }}
+          >
+            <Plus /> Adicionar fornecedor
+          </button>
           <button type="button" className="table-action" onClick={ensureDefaults} disabled={busy}>
-            <RefreshCw /> Garantir fornecedores API padrão
+            <RefreshCw /> Garantir fornecedores padrão
           </button>
           <button type="button" className="table-action" onClick={syncAll} disabled={busy}>
-            <RefreshCw /> Sincronizar todos (JSON)
+            <RefreshCw /> Sincronizar todos (JSON/SCRAPE)
           </button>
           {editing && (
             <button type="button" className="table-action" onClick={() => setEditing(null)}>
@@ -306,6 +326,14 @@ export function FornecedoresModule() {
           </div>
         )}
         {error && <div className="error">{error}</div>}
+
+        <h2 id="fornecedor-form" className="panel-inline-title" style={{ margin: "0 18px 0", fontSize: "1rem" }}>
+          {editing ? `Editar: ${editing.name}` : "Cadastrar fornecedor — aponte o site ou API"}
+        </h2>
+        <p style={{ margin: "0.35rem 18px 0", fontSize: "10px", color: "#6b7280", lineHeight: 1.45 }}>
+          Preencha os dados abaixo. Em <b>Sync</b>, escolha <b>API JSON</b> (link do feed JSON) ou <b>Scrape HTML</b> (URL
+          da página de cotas). Depois salve e use <b>Sincronizar</b> na tabela ou aguarde o cron.
+        </p>
 
         <form className="marketplace-form" onSubmit={submit} key={editing?.id || "new"}>
           <div className="marketplace-form-row">
@@ -372,8 +400,12 @@ export function FornecedoresModule() {
               </select>
             </label>
             <label className="marketplace-field marketplace-field-wide">
-              API URL / página HTML
-              <input name="api_url" placeholder="https://..." defaultValue={editing?.api_url || ""} />
+              URL do site ou API (obrigatório para sync automático)
+              <input
+                name="api_url"
+                placeholder="https://fornecedor.com.br/cotas.json ou https://site.com.br/cartas-contempladas/"
+                defaultValue={editing?.api_url || ""}
+              />
             </label>
             <label className="marketplace-field marketplace-field-compact">
               Layout (SCRAPE)
@@ -467,9 +499,15 @@ export function FornecedoresModule() {
                   <td>{x.markup_percent}%</td>
                   <td>R$ {x.balance_available ?? "0.00"}</td>
                   <td>
-                    {x.last_sync_status || "—"}
-                    {syncDetail ? <small title={x.last_sync_detail_json}>{syncDetail}</small> : null}
-                    <small>{x.last_sync_at ? new Date(x.last_sync_at).toLocaleString("pt-BR") : ""}</small>
+                    {(x.sync_mode || "NONE") === "NONE" && !(x.api_url || "").trim() ? (
+                      <small>Manual — configure URL + Sync</small>
+                    ) : (
+                      <>
+                        {x.last_sync_status || "—"}
+                        {syncDetail ? <small title={x.last_sync_detail_json}>{syncDetail}</small> : null}
+                        <small>{x.last_sync_at ? new Date(x.last_sync_at).toLocaleString("pt-BR") : "Ainda não sincronizado"}</small>
+                      </>
+                    )}
                   </td>
                   <td className="actions-cell">
                     <button type="button" className="table-action" onClick={() => setEditing(x)}>
