@@ -103,6 +103,37 @@ export type ChatHomeResponse = {
 };
 
 const CHAT_FETCH_TIMEOUT_MS = 45_000;
+/** Render cold start can exceed 2 minutes; home must wait longer than step calls. */
+const CHAT_HOME_TIMEOUT_MS = 180_000;
+
+/** Mirrors `home_native()` — lets the UI render before the API wakes up. */
+export const CHAT_HOME_FALLBACK: ChatItem[] = [
+  {
+    text:
+      "Olá! Eu sou o Letter. Ajudo você a financiar imóveis e veículos " +
+      "com cartas contempladas — menos burocracia que banco, mesmo com score baixo.",
+    button: "Continuar",
+    next: 10001,
+    mascote: 1,
+  },
+  {
+    text: "Quer vender uma cota que você já tem?",
+    options: [
+      { name: "Vender minha cota", link: "/vender-minha-cota", save: "open_page" },
+      { name: "Quero comprar / financiar", next: 10001 },
+    ],
+  },
+];
+
+export function warmChatApi(): void {
+  if (typeof window === "undefined") return;
+  const base = API_URL.replace(/\/$/, "");
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), 120_000);
+  void fetch(`${base}/health`, { method: "GET", signal: controller.signal }).finally(() => {
+    window.clearTimeout(timer);
+  });
+}
 
 async function chatFetch<T>(
   path: string,
@@ -135,10 +166,14 @@ async function chatFetch<T>(
   return response.json() as Promise<T>;
 }
 
-export async function fetchChatHome(body: Record<string, unknown> = {}): Promise<ChatHomeResponse> {
+export async function fetchChatHome(
+  body: Record<string, unknown> = {},
+  options?: { timeoutMs?: number },
+): Promise<ChatHomeResponse> {
   const data = await chatFetch<{ OBJ?: { chat_next?: ChatItem[]; info?: ChatSiteInfo; lead_id?: string } }>(
     "/public/site/chat/home",
     body,
+    { timeoutMs: options?.timeoutMs ?? CHAT_HOME_TIMEOUT_MS },
   );
   const chat_next = data.OBJ?.chat_next ?? [];
   if (!Array.isArray(chat_next) || chat_next.length === 0) {

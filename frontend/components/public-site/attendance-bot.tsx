@@ -7,9 +7,11 @@ import {
   ChatItem,
   ChatOption,
   ChatSiteInfo,
+  CHAT_HOME_FALLBACK,
   fetchChatHome,
   fetchChatStep,
   mapLegacyLink,
+  warmChatApi,
   venderCotaChatContactEmail,
   venderCotaChatContactName,
   venderCotaChatContactPhone,
@@ -96,8 +98,9 @@ export function AttendanceBotSection() {
   const [form, setForm] = useState<Record<string, unknown>>({});
   const [echoes, setEchoes] = useState<UserEcho[]>([]);
   const [siteInfo, setSiteInfo] = useState<ChatSiteInfo | undefined>();
-  const [booting, setBooting] = useState(true);
-  const [bootSlow, setBootSlow] = useState(false);
+  const [apiConnected, setApiConnected] = useState(false);
+  const [connecting, setConnecting] = useState(true);
+  const [connectSlow, setConnectSlow] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const blockRef = useRef<HTMLDivElement>(null);
@@ -141,29 +144,52 @@ export function AttendanceBotSection() {
   );
 
   const loadInitial = useCallback(async () => {
-    setBooting(true);
-    setBootSlow(false);
+    setConnecting(true);
+    setConnectSlow(false);
+    setApiConnected(false);
     setError("");
+    warmChatApi();
+    setFlows((prev) => (prev.length === 0 ? [CHAT_HOME_FALLBACK] : prev));
+    setMeta((prev) =>
+      prev.length === 0
+        ? [
+            {
+              visibleCount: CHAT_HOME_FALLBACK.length > 0 ? 1 : 0,
+              optionReveal: {},
+              loading: Boolean(CHAT_HOME_FALLBACK[0]?.load),
+            },
+          ]
+        : prev,
+    );
     try {
       const data = await fetchChatHome({});
-      pushFlow(data.chat_next, data.info);
+      if (data.info) setSiteInfo((prev) => ({ ...prev, ...data.info }));
+      if (data.lead_id) setForm((prev) => ({ ...prev, lead_id: data.lead_id }));
+      setApiConnected(true);
+      setError("");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Falha ao iniciar atendimento.");
+      setError(e instanceof Error ? e.message : "Falha ao conectar ao atendimento.");
     } finally {
-      setBooting(false);
-      setBootSlow(false);
+      setConnecting(false);
+      setConnectSlow(false);
     }
-  }, [pushFlow]);
+  }, []);
 
   useEffect(() => {
     void loadInitial();
   }, [loadInitial]);
 
   useEffect(() => {
-    if (!booting) return;
-    const slowTimer = window.setTimeout(() => setBootSlow(true), 4000);
+    if (!connecting) return;
+    const slowTimer = window.setTimeout(() => setConnectSlow(true), 5000);
     return () => window.clearTimeout(slowTimer);
-  }, [booting]);
+  }, [connecting]);
+
+  const requireApi = useCallback(() => {
+    if (apiConnected) return true;
+    setError("Ainda conectando ao servidor. Aguarde ou toque em «Tentar novamente».");
+    return false;
+  }, [apiConnected]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -284,12 +310,14 @@ export function AttendanceBotSection() {
     formOverride?: Record<string, unknown>,
   ) => {
     if (busy) return;
+    const numeric = typeof step === "number" ? step : Number(step);
+    const vmcLocal = Number.isFinite(numeric) && numeric <= -9101;
+    if (!vmcLocal && step !== 0 && !requireApi()) return;
     setBusy(true);
     setError("");
     if (echo) recordEcho(echo.flowIndex, echo.itemIndex, echo.value);
     const mergedForm = formOverride ?? form;
     try {
-      const numeric = typeof step === "number" ? step : Number(step);
       if (Number.isFinite(numeric) && numeric <= -9101) {
         await advanceVmc(numeric, mergedForm);
         return;
@@ -323,6 +351,8 @@ export function AttendanceBotSection() {
 
   const onOption = async (flowIndex: number, itemIndex: number, item: ChatItem, option: ChatOption) => {
     if (!isCurrent(flowIndex) || busy) return;
+    const needsServer = !option.link && option.next !== undefined;
+    if (needsServer && !requireApi()) return;
     if (option.link && isVenderCotaLink(option.link)) {
       if (option.save === "open_page") {
         window.location.href = mapLegacyLink(option.link);
@@ -366,6 +396,7 @@ export function AttendanceBotSection() {
 
   const onButton = async (flowIndex: number, itemIndex: number, item: ChatItem) => {
     if (!isCurrent(flowIndex) || busy) return;
+    if (!item.link && !requireApi()) return;
     if (item.link) {
       window.open(item.link, "_blank", "noopener,noreferrer");
       return;
@@ -376,6 +407,7 @@ export function AttendanceBotSection() {
   const onInput = async (flowIndex: number, itemIndex: number, item: ChatItem, e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!isCurrent(flowIndex) || busy || !item.input) return;
+    if (!requireApi()) return;
     const fd = new FormData(e.currentTarget);
     const value = String(fd.get(item.input.name) ?? "").trim();
     if (!value) return;
@@ -415,6 +447,7 @@ export function AttendanceBotSection() {
 
   const renderOptions = (flowIndex: number, itemIndex: number, item: ChatItem) => {
     const options = item.options ?? [];
+    const serverLocked = !apiConnected || connecting;
     return (
       <div className="attendance-options">
         {options.map((option, optionIndex) => (
@@ -422,7 +455,7 @@ export function AttendanceBotSection() {
             key={`${option.id ?? optionIndex}-${optionLabel(option)}`}
             type="button"
             className="attendance-option"
-            disabled={busy}
+            disabled={busy || (serverLocked && !option.link)}
             onClick={() => void onOption(flowIndex, itemIndex, item, option)}
           >
             {optionLabel(option)}
@@ -453,29 +486,24 @@ export function AttendanceBotSection() {
       </div>
 
       <div className="attendance-shell">
-        {booting ? (
+        {connecting ? (
           <p className="attendance-status">
-            Iniciando atendimento…
-            {bootSlow ? " A primeira conexão pode levar até meio minuto; aguarde um instante." : null}
+            Conectando ao servidor…
+            {connectSlow
+              ? " Na primeira visita do dia isso pode levar até 2 minutos; você já pode ler as mensagens abaixo."
+              : null}
           </p>
         ) : null}
         {error ? <p className="attendance-error">{error}</p> : null}
-        {error && flows.length === 0 ? (
+        {error && !apiConnected ? (
           <div className="attendance-actions attendance-retry-wrap">
-            <button type="button" className="attendance-primary" disabled={booting} onClick={() => void loadInitial()}>
+            <button type="button" className="attendance-primary" disabled={connecting} onClick={() => void loadInitial()}>
               Tentar novamente
             </button>
           </div>
         ) : null}
 
         <div className="attendance-chat" ref={blockRef}>
-          {booting && flows.length === 0 ? (
-            <div className="attendance-bot-row attendance-boot-placeholder" data-chat-item>
-              <div className="attendance-bot-bubble">
-                Olá! Sou o Letter. Estou conectando ao atendimento — em instantes você verá as opções aqui.
-              </div>
-            </div>
-          ) : null}
 
           <div className="attendance-mascot-wrap" style={flows.length > 0 ? { marginTop: mascotTop } : undefined}>
             <Image
@@ -517,7 +545,7 @@ export function AttendanceBotSection() {
                       <button
                         type="button"
                         className="attendance-primary"
-                        disabled={busy}
+                        disabled={busy || connecting || !apiConnected}
                         onClick={() => void onButton(flowIndex, itemIndex, item)}
                       >
                         {item.button}
