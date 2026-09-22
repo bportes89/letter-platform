@@ -256,6 +256,7 @@ def store_solicitation(db: Session, user: User, payload: dict) -> SdcSolicitatio
                         "property_registry",
                         "vehicle_plate",
                         "vehicle_renavam",
+                        "vehicles_json",
                         "asset_full_address",
                         "partners_json",
                     ),

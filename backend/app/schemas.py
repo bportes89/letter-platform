@@ -2829,6 +2829,7 @@ class SdcDeskStoreRequest(SdcDeskEvaluateRequest):
     property_registry: str | None = Field(default=None, max_length=4000)
     vehicle_plate: str | None = Field(default=None, max_length=20)
     vehicle_renavam: str | None = Field(default=None, max_length=20)
+    vehicles_json: list[dict] = Field(default_factory=list)
     asset_full_address: str | None = Field(default=None, max_length=4000)
     partners_json: list[dict] = Field(default_factory=list)
 

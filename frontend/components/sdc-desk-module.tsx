@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckCircle2, FileUp, RefreshCw, ShoppingCart, ClipboardList } from "lucide-react";
+import { CheckCircle2, FileUp, Plus, RefreshCw, ShoppingCart, ClipboardList, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AdminDocumentPanel } from "@/components/admin-document-panel";
 import { api, apiForm, deleteApi, downloadApi, User } from "@/lib/api";
@@ -99,8 +99,13 @@ const emptyForm = {
 };
 
 function moneyPayload(value: string) {
-  return value.replace(/\./g, "").replace(",", ".") || "0";
+  const raw = String(value || "").trim();
+  if (!raw) return "0";
+  if (raw.includes(",")) return raw.replace(/\./g, "").replace(",", ".");
+  return raw;
 }
+
+type VehicleRow = { plate: string; renavam: string };
 
 export function SdcDeskModule() {
   const [tab, setTab] = useState<"nova" | "lista" | "venda">("nova");
@@ -118,9 +123,14 @@ export function SdcDeskModule() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [socios, setSocios] = useState<SocioPartner[]>([]);
+  const [matriculas, setMatriculas] = useState<string[]>([""]);
+  const [vehicles, setVehicles] = useState<VehicleRow[]>([{ plate: "", renavam: "" }]);
 
   const isInternal = isInternalProductRole(user?.role);
   const needsYear = ["veiculo_leve", "veiculo_pesado", "maquina"].includes(form.asset_type);
+  const isImovel = form.asset_type === "imovel";
+  const isVeiculo = form.asset_type === "veiculo_leve" || form.asset_type === "veiculo_pesado";
+  const isMaquina = form.asset_type === "maquina";
 
   const load = useCallback(async () => {
     const [me, list, qs] = await Promise.all([
@@ -183,6 +193,10 @@ export function SdcDeskModule() {
     setError("");
     setBusy(true);
     try {
+      const vehicleRows = vehicles
+        .map((v) => ({ plate: v.plate.trim(), renavam: v.renavam.trim() }))
+        .filter((v) => v.plate || v.renavam);
+      const registryLines = matriculas.map((m) => m.trim()).filter(Boolean);
       const created = await api<SdcSolicitation>("/sdc/desk/solicitations", {
         method: "POST",
         body: JSON.stringify({
@@ -196,16 +210,19 @@ export function SdcDeskModule() {
           occupation: form.occupation.trim() || null,
           income_value: moneyPayload(form.income_value),
           requested_leverage_amount: form.requested_leverage_amount ? moneyPayload(form.requested_leverage_amount) : null,
-          property_registry: form.property_registry.trim() || null,
-          vehicle_plate: form.vehicle_plate.trim() || null,
-          vehicle_renavam: form.vehicle_renavam.trim() || null,
-          asset_full_address: form.asset_full_address.trim() || null,
-          partners_json: sociosPayload(socios),
+          property_registry: isImovel && registryLines.length ? registryLines.join("\n") : null,
+          vehicle_plate: isVeiculo && vehicleRows[0]?.plate ? vehicleRows[0].plate : null,
+          vehicle_renavam: isVeiculo && vehicleRows[0]?.renavam ? vehicleRows[0].renavam : null,
+          vehicles_json: isVeiculo ? vehicleRows : [],
+          asset_full_address: isImovel ? form.asset_full_address.trim() || null : null,
+          partners_json: form.person_type === "PJ" ? sociosPayload(socios) : [],
         }),
       });
       setNotice(`SDC gravado: ${created.contact_name} — ${created.status_label}`);
       setForm(emptyForm);
       setSocios([]);
+      setMatriculas([""]);
+      setVehicles([{ plate: "", renavam: "" }]);
       setEvalResult(null);
       setSelectedId(created.id);
       setTab("lista");
@@ -352,36 +369,121 @@ export function SdcDeskModule() {
                 <input placeholder="E-mail" value={form.contact_email} onChange={(e) => patchForm("contact_email", e.target.value)} />
                 <input placeholder="Telefone" value={form.contact_phone} onChange={(e) => patchForm("contact_phone", e.target.value)} />
                 <input placeholder="CPF/CNPJ" value={form.document} onChange={(e) => patchForm("document", e.target.value)} />
-                <select value={form.person_type} onChange={(e) => patchForm("person_type", e.target.value)}>
+                <select
+                  value={form.person_type}
+                  onChange={(e) => {
+                    const pt = e.target.value;
+                    patchForm("person_type", pt);
+                    if (pt === "PF") setSocios([]);
+                  }}
+                >
                   <option value="PF">PF</option>
                   <option value="PJ">PJ</option>
                 </select>
                 <input placeholder="Profissão / ramo" value={form.occupation} onChange={(e) => patchForm("occupation", e.target.value)} />
-                <input placeholder="Renda / faturamento" value={form.income_value} onChange={(e) => patchForm("income_value", e.target.value)} />
+                <label>
+                  Renda / faturamento (R$)
+                  <CurrencyInput value={form.income_value} onChange={(v) => patchForm("income_value", v)} placeholder="R$ 0,00" />
+                </label>
                 <select value={form.asset_type} onChange={(e) => patchForm("asset_type", e.target.value)}>
                   {ASSET_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
                 </select>
-                <input placeholder="Valor do bem (R$)" value={form.asset_value} onChange={(e) => patchForm("asset_value", e.target.value)} />
+                <label>
+                  Valor do bem (R$)
+                  <CurrencyInput value={form.asset_value} onChange={(v) => patchForm("asset_value", v)} placeholder="R$ 0,00" />
+                </label>
                 {needsYear && (
                   <input type="number" placeholder="Ano fabricação" value={form.asset_year} onChange={(e) => patchForm("asset_year", e.target.value)} />
                 )}
-                <input style={{ gridColumn: "1 / -1" }} placeholder="Endereço resumido" value={form.address} onChange={(e) => patchForm("address", e.target.value)} />
+                <input style={{ gridColumn: "1 / -1" }} placeholder="Endereço resumido do cliente" value={form.address} onChange={(e) => patchForm("address", e.target.value)} />
                 <label style={{ gridColumn: "1 / -1" }}>
-                  Endereço completo do bem
-                  <textarea rows={2} value={form.asset_full_address} onChange={(e) => patchForm("asset_full_address", e.target.value)} />
-                </label>
-                <label>
                   Valor alavancagem solicitado (R$)
-                  <CurrencyInput value={form.requested_leverage_amount} onChange={(v) => patchForm("requested_leverage_amount", v)} />
+                  <CurrencyInput value={form.requested_leverage_amount} onChange={(v) => patchForm("requested_leverage_amount", v)} placeholder="R$ 0,00" />
                 </label>
-                <label style={{ gridColumn: "1 / -1" }}>
-                  Matrícula(s) / registro
-                  <textarea rows={2} value={form.property_registry} onChange={(e) => patchForm("property_registry", e.target.value)} />
-                </label>
-                <input placeholder="Placa" value={form.vehicle_plate} onChange={(e) => patchForm("vehicle_plate", e.target.value)} />
-                <input placeholder="RENAVAM" value={form.vehicle_renavam} onChange={(e) => patchForm("vehicle_renavam", e.target.value)} />
+                {isImovel && (
+                  <>
+                    <label style={{ gridColumn: "1 / -1" }}>
+                      Endereço completo do bem
+                      <textarea rows={2} value={form.asset_full_address} onChange={(e) => patchForm("asset_full_address", e.target.value)} placeholder="Logradouro, número, cidade, UF" />
+                    </label>
+                    <div className="desk-repeat-block">
+                      <b>Matrícula(s) do imóvel</b>
+                      <small className="muted">Informe uma matrícula por linha. Use + para incluir outra.</small>
+                      {matriculas.map((line, idx) => (
+                        <div key={idx} className="desk-repeat-row single-col">
+                          <input
+                            placeholder={`Matrícula ${idx + 1}`}
+                            value={line}
+                            onChange={(e) => {
+                              const next = [...matriculas];
+                              next[idx] = e.target.value;
+                              setMatriculas(next);
+                            }}
+                          />
+                          {matriculas.length > 1 && (
+                            <button type="button" className="table-action" onClick={() => setMatriculas(matriculas.filter((_, i) => i !== idx))} aria-label="Remover matrícula">
+                              <Trash2 size={14} />
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                      <button type="button" className="table-action" onClick={() => setMatriculas([...matriculas, ""])}>
+                        <Plus size={14} />
+                        Adicionar matrícula
+                      </button>
+                    </div>
+                  </>
+                )}
+                {isVeiculo && (
+                  <div className="desk-repeat-block">
+                    <b>Veículo(s)</b>
+                    <small className="muted">Placa e RENAVAM de cada veículo. Use + para outro veículo.</small>
+                    {vehicles.map((row, idx) => (
+                      <div key={idx} className="desk-repeat-row">
+                        <label>
+                          Placa
+                          <input
+                            placeholder="ABC1D23"
+                            value={row.plate}
+                            onChange={(e) => {
+                              const next = [...vehicles];
+                              next[idx] = { ...next[idx], plate: e.target.value };
+                              setVehicles(next);
+                            }}
+                          />
+                        </label>
+                        <label>
+                          RENAVAM
+                          <input
+                            placeholder="RENAVAM"
+                            value={row.renavam}
+                            onChange={(e) => {
+                              const next = [...vehicles];
+                              next[idx] = { ...next[idx], renavam: e.target.value };
+                              setVehicles(next);
+                            }}
+                          />
+                        </label>
+                        {vehicles.length > 1 && (
+                          <button type="button" className="table-action" onClick={() => setVehicles(vehicles.filter((_, i) => i !== idx))} aria-label="Remover veículo">
+                            <Trash2 size={14} />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                    <button type="button" className="table-action" onClick={() => setVehicles([...vehicles, { plate: "", renavam: "" }])}>
+                      <Plus size={14} />
+                      Adicionar veículo
+                    </button>
+                  </div>
+                )}
+                {isMaquina && (
+                  <p className="muted" style={{ gridColumn: "1 / -1", fontSize: 11, margin: 0 }}>
+                    Máquina/equipamento: use ano de fabricação e valor do bem. Não exige matrícula de imóvel nem placa.
+                  </p>
+                )}
               </div>
-              <PartnerSociosFields value={socios} onChange={setSocios} />
+              {form.person_type === "PJ" && <PartnerSociosFields value={socios} onChange={setSocios} />}
               <div style={{ display: "flex", flexWrap: "wrap", gap: 14, fontSize: 12, fontWeight: 700 }}>
                 <label><input type="checkbox" checked={form.asset_paid_off} onChange={(e) => patchForm("asset_paid_off", e.target.checked)} /> Bem quitado</label>
                 <label><input type="checkbox" checked={form.asset_has_lien} onChange={(e) => patchForm("asset_has_lien", e.target.checked)} /> Bem com pendência</label>
