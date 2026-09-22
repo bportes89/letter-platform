@@ -1806,10 +1806,20 @@ def escrow_account_billing(
 
 @router.get("/quotas", response_model=list[QuotaView])
 def list_quotas(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.marketplace_partner_view import mask_quota_fields, user_sees_supplier_quota_identity
+    from app.marketplace_service import pricing_for_quota
     from app.supplier_portal_quota_service import quota_admin_view
 
     rows = list(db.scalars(select(Quota).where(Quota.organization_id == user.organization_id).order_by(Quota.created_at.desc())))
-    return [quota_admin_view(row) for row in rows]
+    show_identity = user_sees_supplier_quota_identity(user)
+    out: list[dict] = []
+    for row in rows:
+        payload = quota_admin_view(row)
+        payload["entrada_final"] = pricing_for_quota(row)["entrada_final"]
+        if not show_identity:
+            payload = mask_quota_fields(payload, quota_id=row.id)
+        out.append(payload)
+    return out
 
 
 @router.get("/marketplace/suppliers", response_model=list[QuotaSupplierView])
@@ -2283,7 +2293,9 @@ def marketplace_esteira1(payload: MarketplaceEsteira1Request, user: User = Depen
     )
     audit(db, user, "marketplace.esteira1", "quota", payload.quota_id, {"eligible": result["eligible"]})
     db.commit()
-    return result
+    from app.marketplace_partner_view import mask_esteira_result
+
+    return mask_esteira_result(result, user)
 
 
 @router.post("/marketplace/esteira-2/match", response_model=MarketplaceEsteira2Response)
@@ -2305,7 +2317,9 @@ def marketplace_esteira2(payload: MarketplaceEsteira2Request, user: User = Depen
     )
     audit(db, user, "marketplace.esteira2", "marketplace", "match", {"matches": len(result["matches"])})
     db.commit()
-    return result
+    from app.marketplace_partner_view import mask_esteira_result
+
+    return mask_esteira_result(result, user)
 
 
 @router.post("/marketplace/venda-direta-robo/search", response_model=VendaDiretaRoboSearchResponse)

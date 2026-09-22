@@ -986,6 +986,7 @@ class QuotaView(ORMModel):
     statement_document_id: str | None = None
     statement_filename: str | None = None
     compliance_rejection_reason: str | None = None
+    entrada_final: Decimal | None = None
 
 
 class QuotaComplianceRejectRequest(BaseModel):
