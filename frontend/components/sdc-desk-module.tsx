@@ -10,6 +10,8 @@ import { DeskSourceMetaRow } from "@/lib/desk-source-meta";
 import { PartnerSociosFields, SocioPartner, sociosPayload } from "@/components/partner-socios-fields";
 import { CurrencyInput } from "@/components/currency-input";
 
+type RequiredDoc = { code: string; label: string; uploaded?: boolean };
+
 type SdcSolicitation = {
   id: string;
   status: string;
@@ -36,6 +38,9 @@ type SdcSolicitation = {
   source_channel_label: string | null;
   lead_id: string | null;
   documents: Array<{ id: string; doc_type: string; document_id?: string | null; filename?: string | null; status?: string | null; created_at: string | null }>;
+  required_docs?: RequiredDoc[];
+  docs_checklist_complete?: boolean;
+  can_submit_documents?: boolean;
   can_create_sale: boolean;
 };
 
@@ -61,6 +66,7 @@ type EvalResult = {
   prazo_meses: number;
   taxa_juros_mensal: string;
   message: string;
+  required_docs?: RequiredDoc[];
 };
 
 type TapafCheckoutUi = {
@@ -219,6 +225,28 @@ export function SdcDeskModule() {
   );
   const selected = useMemo(() => items.find((i) => i.id === selectedId) ?? null, [items, selectedId]);
   const approvedForSale = useMemo(() => items.filter((i) => i.can_create_sale), [items]);
+  const sdcDocTypeOptions = useMemo(
+    () =>
+      (selected?.required_docs?.length
+        ? selected.required_docs
+        : [
+            { code: "RG_CPF", label: "RG e CPF (ou CNH)" },
+            { code: "COMPROVANTE_RENDA", label: "Comprovante de renda" },
+            { code: "MATRICULA_ENOTARIADO", label: "Matrícula (e-notariado)" },
+            { code: "LAUDO_AVALIACAO", label: "Laudo de avaliação" },
+            { code: "SERASA", label: "Consulta Serasa" },
+            { code: "BACEN", label: "Consulta Bacen" },
+          ]
+      ).map((d) => ({ value: d.code, label: d.label })),
+    [selected],
+  );
+
+  useEffect(() => {
+    if (!selected?.required_docs?.length) return;
+    const firstMissing = selected.required_docs.find((d) => !d.uploaded)?.code;
+    if (firstMissing) setDocType(firstMissing);
+    else if (selected.required_docs[0]) setDocType(selected.required_docs[0].code);
+  }, [selected?.id, selected?.required_docs]);
 
   function patchForm<K extends keyof typeof emptyForm>(key: K, value: (typeof emptyForm)[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -432,6 +460,21 @@ export function SdcDeskModule() {
     }
   }
 
+  async function submitDocuments(item: SdcSolicitation) {
+    setError("");
+    setBusy(true);
+    try {
+      const updated = await api<SdcSolicitation>(`/sdc/desk/solicitations/${item.id}/submit-documents`, { method: "POST" });
+      setNotice(`Documentação transmitida — ${updated.contact_name} em análise LETTER.`);
+      setSelectedId(updated.id);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Checklist incompleto ou transmissão indisponível.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function deleteDoc(item: SdcSolicitation, docId: string) {
     setError("");
     setBusy(true);
@@ -512,10 +555,10 @@ export function SdcDeskModule() {
               <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11, fontWeight: 700, color: "#52605a" }}>
                 Tipo doc
                 <select value={docType} onChange={(e) => setDocType(e.target.value)} style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid var(--line)" }}>
-                  <option value="RG_CPF">RG/CPF</option>
-                  <option value="COMPROVANTE_RENDA">Comprovante de renda</option>
-                  <option value="MATRICULA">Matrícula / CRLV</option>
-                  <option value="SDC_SUPPORT">Outro</option>
+                  {sdcDocTypeOptions.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                  <option value="SDC_SUPPORT">Apoio (opcional)</option>
                 </select>
               </label>
             </>
@@ -676,6 +719,11 @@ export function SdcDeskModule() {
             <div style={{ border: "1px solid var(--line)", borderRadius: 12, padding: 16, background: "#f7fbf9" }}>
               <b>Resultado da análise</b>
               {!evalResult && !tapafCheckout && <p className="muted" style={{ marginTop: 10 }}>Preencha e clique em Calcular viabilidade.</p>}
+              {evalResult?.required_docs?.length && !tapafCheckout && (
+                <p className="muted" style={{ fontSize: 10, marginTop: 8 }}>
+                  Após gravar, na aba Acompanhamento você anexará {evalResult.required_docs.length} documentos do checklist ({form.asset_type === "imovel" ? "imóvel" : "bem"}).
+                </p>
+              )}
               {evalResult?.viable && !tapafCheckout && (
                 <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 12 }}>
                   {evalResult.simulacao_limite && (
@@ -823,7 +871,10 @@ export function SdcDeskModule() {
                     </td>
                     <td>{brl.format(Number(item.credit_estimated))}</td>
                     <td>{item.status_label}</td>
-                    <td>{item.documents.length}</td>
+                    <td>
+                      {(item.required_docs?.filter((d) => d.uploaded).length ?? item.documents.length)}
+                      /{item.required_docs?.length ?? "—"}
+                    </td>
                     <td style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
                       {isInternal && (
                         <select
@@ -842,7 +893,7 @@ export function SdcDeskModule() {
                           hidden
                           onChange={(e) => {
                             const f = e.target.files?.[0];
-                            if (f) void uploadDoc(item, f);
+                            if (f) void uploadDoc(item, f, docType);
                             e.target.value = "";
                           }}
                         />
@@ -877,18 +928,42 @@ export function SdcDeskModule() {
                   label={selected.source_channel_label}
                   leadId={selected.lead_id}
                 />
+                <div style={{ marginTop: 12 }}>
+                  <b style={{ fontSize: 12 }}>Checklist documental ({selected.asset_type_label}{selected.person_type === "PJ" ? " · PJ" : ""})</b>
+                  <p className="muted" style={{ fontSize: 11, margin: "6px 0 8px" }}>
+                    Anexe cada item do checklist. O botão <em>Transmitir documentação</em> só libera quando todos estiverem marcados.
+                  </p>
+                  <ul style={{ margin: "0 0 12px", paddingLeft: 18, fontSize: 11, lineHeight: 1.5 }}>
+                    {(selected.required_docs ?? []).map((d) => (
+                      <li key={d.code} style={{ color: d.uploaded ? "#067647" : "#52605a" }}>
+                        {d.uploaded ? "✓" : "○"} {d.label}
+                      </li>
+                    ))}
+                  </ul>
+                  {!isInternal && selected.status === "AWAITING_DOCS" && (
+                    <button
+                      type="button"
+                      className="admin-button"
+                      style={{ marginBottom: 12 }}
+                      disabled={busy || !selected.can_submit_documents}
+                      onClick={() => void submitDocuments(selected)}
+                    >
+                      Transmitir documentação para análise
+                    </button>
+                  )}
+                  {selected.status === "AWAITING_DOCS" && !selected.can_submit_documents && (
+                    <p className="muted" style={{ fontSize: 10, margin: "0 0 10px" }}>
+                      Faltam itens do checklist — anexe todos os tipos obrigatórios antes de transmitir.
+                    </p>
+                  )}
+                </div>
                 <AdminDocumentPanel
-                  title={`Documentos (${selected.documents.length})`}
-                  hint="Anexe, baixe ou exclua arquivos desta solicitação."
+                  title={`Arquivos anexados (${selected.documents.length})`}
+                  hint="Escolha o tipo do checklist no seletor e anexe o arquivo correspondente."
                   documents={selected.documents}
                   busy={busy}
                   canDelete={isInternal}
-                  docTypeOptions={[
-                    { value: "SDC_SUPPORT", label: "Documento de apoio" },
-                    { value: "IDENTITY", label: "Identidade" },
-                    { value: "INCOME", label: "Renda" },
-                    { value: "ASSET", label: "Bem / garantia" },
-                  ]}
+                  docTypeOptions={[...sdcDocTypeOptions, { value: "SDC_SUPPORT", label: "Documento de apoio (opcional)" }]}
                   defaultDocType={docType}
                   onUpload={(file, type) => uploadDoc(selected, file, type || docType)}
                   onDownload={(doc) => downloadApi(`/documents/${doc.document_id}/download`, doc.filename || "documento")}

@@ -3538,6 +3538,22 @@ async def sdc_desk_upload_doc(
     return solicitation_view(item, list_documents(db, item.id), db)
 
 
+@router.post("/sdc/desk/solicitations/{solicitation_id}/submit-documents")
+def sdc_desk_submit_documents(
+    solicitation_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.sdc_desk_service import get_solicitation, list_documents, solicitation_view, submit_documents
+
+    item = get_solicitation(db, user, solicitation_id)
+    submit_documents(db, user, item)
+    audit(db, user, "sdc_desk.documents_submitted", "sdc_solicitation", item.id, {"status": item.status})
+    db.commit()
+    db.refresh(item)
+    return solicitation_view(item, list_documents(db, item.id), db)
+
+
 @router.delete("/sdc/desk/solicitations/{solicitation_id}/documents/{document_link_id}", status_code=204)
 def sdc_desk_delete_doc(
     solicitation_id: str,

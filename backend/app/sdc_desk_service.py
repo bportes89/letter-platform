@@ -60,6 +60,37 @@ STATUS_LABELS = {
     STATUS_CANCELLED: "Cancelado",
 }
 
+DOCS_CLIENT_BASE = [
+    {"code": "RG_CPF", "label": "RG e CPF (ou CNH) — proponente"},
+    {"code": "COMPROVANTE_RENDA", "label": "Comprovante de renda / faturamento (últimos 3 meses)"},
+    {"code": "COMPROVANTE_ENDERECO", "label": "Comprovante de endereço do proponente"},
+]
+DOCS_PJ = [
+    {"code": "CONTRATO_SOCIAL", "label": "Contrato social / alterações consolidadas (PJ)"},
+    {"code": "QSA_REPRESENTANTES", "label": "QSA / procuração dos representantes legais (PJ)"},
+]
+DOCS_SDC_IMOVEL = [
+    {"code": "MATRICULA_ENOTARIADO", "label": "Matrícula atualizada (e-notariado)"},
+    {"code": "LAUDO_AVALIACAO", "label": "Laudo de avaliação do imóvel em garantia"},
+    {"code": "IPTU_IPTUR", "label": "IPTU / carnê do imóvel (exercício vigente)"},
+    {"code": "SERASA", "label": "Consulta Serasa / restrições cadastrais"},
+    {"code": "BACEN", "label": "Consulta Bacen (SCR)"},
+]
+DOCS_SDC_VEHICLE = [
+    {"code": "CRLV", "label": "CRLV (DETRAN — consulta prevalece)"},
+    {"code": "FIPE_MOLICAR", "label": "Tabela FIPE ou Molicar"},
+    {"code": "LAUDO_AVALIACAO", "label": "Laudo de avaliação do veículo"},
+    {"code": "COMPROVANTE_QUITACAO", "label": "Comprovante de quitação / ausência de gravame"},
+    {"code": "SERASA", "label": "Consulta Serasa / restrições cadastrais"},
+    {"code": "BACEN", "label": "Consulta Bacen (SCR)"},
+]
+DOCS_SDC_MAQUINA = [
+    {"code": "NOTA_FISCAL_MAQUINA", "label": "Nota fiscal / registro da máquina ou equipamento"},
+    {"code": "LAUDO_AVALIACAO", "label": "Laudo de avaliação do equipamento"},
+    {"code": "SERASA", "label": "Consulta Serasa / restrições cadastrais"},
+    {"code": "BACEN", "label": "Consulta Bacen (SCR)"},
+]
+
 TIPOS_LABEL = {
     "imovel": "Imóvel",
     "casa": "Imóvel",
@@ -79,6 +110,63 @@ TIPOS_LABEL = {
 def assert_desk_access(user: User) -> None:
     if user.role not in DESK_ROLES:
         raise HTTPException(status_code=403, detail="Sem acesso à mesa comercial SDC")
+
+
+def sdc_required_docs(asset_type: str, person_type: str = "PF") -> list[dict]:
+    """Checklist documental SDC por tipo de bem e PF/PJ (mesa comercial)."""
+    tipo = (asset_type or "").strip().lower()
+    pt = (person_type or "PF").strip().upper()
+    rows: list[dict] = list(DOCS_CLIENT_BASE)
+    if pt == "PJ":
+        rows.extend(DOCS_PJ)
+    if tipo in TIPOS_IMOVEL:
+        rows.extend(DOCS_SDC_IMOVEL)
+    elif tipo == "maquina":
+        rows.extend(DOCS_SDC_MAQUINA)
+    elif tipo in TIPOS_VEICULO:
+        rows.extend(DOCS_SDC_VEHICLE)
+    return rows
+
+
+def _allowed_doc_types(asset_type: str, person_type: str) -> set[str]:
+    codes = {d["code"] for d in sdc_required_docs(asset_type, person_type)}
+    codes.add("SDC_SUPPORT")
+    return codes
+
+
+def _checklist_uploaded_codes(docs: list[SdcSolicitationDocument]) -> set[str]:
+    return {d.doc_type for d in docs if d.doc_type}
+
+
+def checklist_complete_for(item: SdcSolicitation, docs: list[SdcSolicitationDocument]) -> bool:
+    required = {d["code"] for d in sdc_required_docs(item.asset_type, item.person_type)}
+    uploaded = _checklist_uploaded_codes(docs)
+    return required.issubset(uploaded)
+
+
+def submit_documents(db: Session, user: User, item: SdcSolicitation) -> SdcSolicitation:
+    """Parceiro transmite o pacote após anexar todos os itens obrigatórios do checklist."""
+    assert_desk_access(user)
+    if _is_admin(user):
+        raise HTTPException(status_code=403, detail="Transmissão é ação do parceiro; admin altera status manualmente.")
+    if item.status in STATUS_TERMINAL:
+        raise HTTPException(status_code=422, detail="Solicitação encerrada — não é possível transmitir documentação.")
+    if item.status != STATUS_AWAITING_DOCS:
+        raise HTTPException(status_code=422, detail="Documentação já foi transmitida ou está em análise.")
+    docs = list_documents(db, item.id)
+    if not checklist_complete_for(item, docs):
+        uploaded = _checklist_uploaded_codes(docs)
+        missing = [d for d in sdc_required_docs(item.asset_type, item.person_type) if d["code"] not in uploaded]
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "Anexe todos os documentos do checklist antes de transmitir.",
+                "missing": missing,
+            },
+        )
+    item.status = STATUS_UNDER_REVIEW
+    db.flush()
+    return item
 
 
 def _dec(value) -> Decimal:
@@ -131,10 +219,15 @@ def evaluate_sdc_desk(data: dict) -> dict:
     if valor <= 0:
         motivos.append("Informe o valor total dos bens.")
 
+    asset_type_key = str(data.get("asset_type") or data.get("tipo_bem") or "").strip().lower()
+    person_type = str(data.get("person_type") or "PF").strip().upper()
+    required_docs = sdc_required_docs(asset_type_key, person_type)
+
     if motivos:
         return {
             "viable": False,
             "motivos": motivos,
+            "required_docs": required_docs,
             "credito_estimado": "0.00",
             "parcela_estimada": "0.00",
             "prazo_meses": 0,
@@ -172,6 +265,7 @@ def evaluate_sdc_desk(data: dict) -> dict:
     return {
         "viable": True,
         "motivos": [],
+        "required_docs": required_docs,
         "credito_estimado": str(credito_max),
         "limite_maximo_credito": str(credito_max),
         "credito_solicitado": str(requested) if requested > 0 else None,
@@ -446,7 +540,13 @@ async def add_document(
     assert_desk_access(user)
     if item.status in STATUS_TERMINAL and not _is_admin(user):
         raise HTTPException(status_code=422, detail="Esta solicitação já está encerrada e não aceita mais documentos.")
-    document = await persist_upload(upload, user, "sdc_solicitation", item.id, doc_type or "SDC_SUPPORT")
+    if item.status == STATUS_APPROVED and not _is_admin(user):
+        raise HTTPException(status_code=422, detail="SDC aprovado não aceita novos documentos do parceiro.")
+    dtype = (doc_type or "SDC_SUPPORT").strip().upper()[:80]
+    allowed = _allowed_doc_types(item.asset_type, item.person_type)
+    if dtype not in allowed:
+        raise HTTPException(status_code=422, detail=f"Tipo de documento inválido para este SDC. Use um item do checklist.")
+    document = await persist_upload(upload, user, "sdc_solicitation", item.id, dtype)
     document.status = "CLEAN"
     db.add(document)
     db.flush()
@@ -454,13 +554,11 @@ async def add_document(
         organization_id=user.organization_id,
         solicitation_id=item.id,
         document_id=document.id,
-        doc_type=(doc_type or "SDC_SUPPORT")[:80],
+        doc_type=dtype,
         comment=(comment or None),
         uploaded_by_id=user.id,
     )
     db.add(row)
-    if not _is_admin(user) and item.status == STATUS_AWAITING_DOCS:
-        item.status = STATUS_UNDER_REVIEW
     db.flush()
     return row
 
@@ -574,6 +672,10 @@ def solicitation_view(
     docs: list[SdcSolicitationDocument] | None = None,
     db: Session | None = None,
 ) -> dict:
+    doc_rows = docs or []
+    uploaded = _checklist_uploaded_codes(doc_rows)
+    required = sdc_required_docs(item.asset_type, item.person_type)
+    complete = checklist_complete_for(item, doc_rows)
     return {
         "id": item.id,
         "status": item.status,
@@ -601,6 +703,9 @@ def solicitation_view(
         "interest_rate_monthly": str(money(_dec(item.interest_rate_monthly))),
         "proposal_id": item.proposal_id,
         "quota_id": item.quota_id,
+        "required_docs": [{**d, "uploaded": d["code"] in uploaded} for d in required],
+        "docs_checklist_complete": complete,
+        "can_submit_documents": item.status == STATUS_AWAITING_DOCS and complete,
         "documents": [
             _document_link_view(db, d) if db else {
                 "id": d.id,
@@ -611,7 +716,7 @@ def solicitation_view(
                 "status": None,
                 "created_at": d.created_at.isoformat() if d.created_at else None,
             }
-            for d in (docs or [])
+            for d in doc_rows
         ],
         "created_at": item.created_at.isoformat() if item.created_at else None,
         "can_create_sale": item.status == STATUS_APPROVED and not item.quota_id,
