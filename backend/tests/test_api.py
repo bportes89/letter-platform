@@ -678,6 +678,48 @@ def test_venda_direta_manual_store(client, auth_headers):
     assert locked["status"] == "RESERVED"
 
 
+def test_venda_direta_cadastros_scoped_to_owner(client, auth_headers):
+    """Atalho de cadastro na venda direta: só leads do parceiro logado (não da org inteira)."""
+    foreign = client.post(
+        "/api/v1/leads",
+        headers=auth_headers,
+        json={
+            "name": "Lead Outro Parceiro",
+            "phone": "32911110001",
+            "product_interest": "MARKETPLACE",
+            "source": "DASHBOARD",
+        },
+    )
+    assert foreign.status_code == 201
+    foreign_id = foreign.json()["id"]
+
+    partner_login = client.post(
+        "/api/v1/auth/login",
+        json={"email": "parceiro@letter.com.br", "password": "Letter@123"},
+    )
+    assert partner_login.status_code == 200
+    partner_headers = {"Authorization": f"Bearer {partner_login.json()['access_token']}"}
+
+    mine = client.post(
+        "/api/v1/leads",
+        headers=partner_headers,
+        json={
+            "name": "Lead Meu Parceiro",
+            "phone": "32911110002",
+            "product_interest": "MARKETPLACE",
+            "source": "DASHBOARD",
+        },
+    )
+    assert mine.status_code == 201
+    mine_id = mine.json()["id"]
+
+    rows = client.get("/api/v1/marketplace/venda-direta-manual/cadastros", headers=partner_headers)
+    assert rows.status_code == 200
+    lead_ids = {row["lead_id"] for row in rows.json()}
+    assert foreign_id not in lead_ids
+    assert mine_id in lead_ids
+
+
 def test_marketplace_cadastros_pipeline(client, auth_headers):
     """Cadastro admin lista vendas Marketplace por etapa."""
     all_rows = client.get("/api/v1/marketplace/cadastros?pipeline=ALL", headers=auth_headers)

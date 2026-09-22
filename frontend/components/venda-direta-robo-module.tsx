@@ -10,6 +10,11 @@ import { validationMessageForPerson } from "@/lib/br-validation";
 
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
+function parseMoney(value: string): number {
+  const n = Number(String(value || "").replace(",", "."));
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
 type MatchQuota = {
   quota_id: string;
   group_code: string;
@@ -80,7 +85,6 @@ export function VendaDiretaRoboModule() {
   const [targetEntrada, setTargetEntrada] = useState("");
   const [category, setCategory] = useState("REAL_ESTATE");
   const [income, setIncome] = useState("");
-  const [commitment, setCommitment] = useState("");
   const [assetValue, setAssetValue] = useState("");
   const [assetYear, setAssetYear] = useState("");
   const [cadastros, setCadastros] = useState<Array<{ lead_id: string; label: string; name: string; email: string | null; phone: string; document: string | null; person_type: string; address: Record<string, string> }>>([]);
@@ -145,6 +149,31 @@ export function VendaDiretaRoboModule() {
         setBusy(false);
         return;
       }
+      if (!parseMoney(targetAmount)) {
+        setError("Informe o crédito desejado.");
+        setBusy(false);
+        return;
+      }
+      if (!parseMoney(targetEntrada)) {
+        setError("Informe a entrada desejada.");
+        setBusy(false);
+        return;
+      }
+      if (!parseMoney(income)) {
+        setError("Informe a renda mensal.");
+        setBusy(false);
+        return;
+      }
+      if (!parseMoney(assetValue)) {
+        setError("Informe o valor do bem.");
+        setBusy(false);
+        return;
+      }
+      if (category === "VEHICLE" && !String(assetYear || "").trim()) {
+        setError("Informe o ano do bem (veículo).");
+        setBusy(false);
+        return;
+      }
       const data = await api<SearchResult>("/marketplace/venda-direta-robo/search", {
         method: "POST",
         body: JSON.stringify({
@@ -153,13 +182,12 @@ export function VendaDiretaRoboModule() {
           phone,
           person_type: personType,
           document,
-          target_amount: targetAmount,
-          target_entrada: targetEntrada,
+          target_amount: String(parseMoney(targetAmount)),
+          target_entrada: String(parseMoney(targetEntrada)),
           category,
-          monthly_income: income,
-          monthly_commitment: commitment || "0",
-          asset_value: assetValue,
-          asset_year: category === "VEHICLE" && assetYear ? Number(assetYear) : undefined,
+          monthly_income: String(parseMoney(income)),
+          asset_value: String(parseMoney(assetValue)),
+          asset_year: category === "VEHICLE" && assetYear ? Number(assetYear) : new Date().getFullYear(),
           has_credit_restriction: dirty,
           asset_is_zero_km: zeroKm,
           zipcode: zipcode || null,
@@ -322,10 +350,6 @@ export function VendaDiretaRoboModule() {
                 <CurrencyInput value={income} onChange={setIncome} required />
               </label>
               <label className="marketplace-field">
-                Comprometimento (R$)
-                <CurrencyInput value={commitment} onChange={setCommitment} />
-              </label>
-              <label className="marketplace-field">
                 Valor do bem (R$)
                 <CurrencyInput value={assetValue} onChange={setAssetValue} required />
               </label>
@@ -457,11 +481,8 @@ function MatchCard({
         <div>
           {match.quotas.map((q) => (
             <div key={q.quota_id} style={{ marginTop: "0.35rem" }}>
-              {q.group_code}/{q.quota_code} · crédito {brl.format(Number(q.credit_value))} · entrada{" "}
-              {brl.format(Number(q.entrada_final ?? q.premium_value))}
-              {q.supplier_source ? ` · ${q.supplier_source}` : ""}
-              {q.markup_percent && Number(q.markup_percent) > 0 ? ` (+${q.markup_percent}%)` : ""} · Nina{" "}
-              {q.nina_scan_status ?? "PENDENTE"}
+              {q.group_code} · {q.quota_code} · crédito {brl.format(Number(q.credit_value))} · entrada{" "}
+              {brl.format(Number(q.entrada_final ?? q.premium_value))} · Nina {q.nina_scan_status ?? "PENDENTE"}
             </div>
           ))}
         </div>

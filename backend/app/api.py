@@ -2360,7 +2360,9 @@ def venda_direta_robo_search(payload: VendaDiretaRoboSearchRequest, user: User =
     )
     audit(db, user, "marketplace.venda_direta_robo.search", "lead", result["lead_id"], {"matches": len(result.get("matches") or [])})
     db.commit()
-    return result
+    from app.marketplace_partner_view import mask_esteira_result
+
+    return mask_esteira_result(result, user)
 
 
 @router.post("/marketplace/venda-direta-robo/confirm", response_model=VendaDiretaRoboConfirmResponse)
@@ -2846,6 +2848,7 @@ def commercial_clients(user: User = Depends(get_current_user), db: Session = Dep
                 User.organization_id == user.organization_id,
                 User.role == Role.CLIENT,
                 User.active.is_(True),
+                User.referred_by_user_id == user.id,
             ).order_by(User.name)
         )
     )

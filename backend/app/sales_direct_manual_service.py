@@ -90,9 +90,11 @@ def list_cotas_options(db: Session, user: User, *, category: str) -> list[dict]:
 
 
 def list_cadastros(db: Session, user: User, *, q: str | None = None) -> list[dict]:
-    """Atalho: leads recentes da org para auto-preencher."""
+    """Atalho: leads do parceiro logado para auto-preencher (sem dados de outras bases)."""
+    from app.network_visibility import ORG_WIDE_ROLES
+
     stmt = select(Lead).where(Lead.organization_id == user.organization_id)
-    if user.role == Role.PARTNER:
+    if user.role not in ORG_WIDE_ROLES:
         stmt = stmt.where(Lead.owner_id == user.id)
     stmt = stmt.order_by(Lead.created_at.desc()).limit(80)
     leads = list(db.scalars(stmt))

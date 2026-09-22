@@ -10,6 +10,11 @@ import { validationMessageForPerson } from "@/lib/br-validation";
 
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
+function parseMoney(value: string): number {
+  const n = Number(String(value || "").replace(",", "."));
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
 type CotaOption = {
   quota_id: string;
   label: string;
@@ -59,7 +64,6 @@ export function VendaDiretaManualModule() {
   const [document, setDocument] = useState("");
   const [occupation, setOccupation] = useState("");
   const [income, setIncome] = useState("");
-  const [commitment, setCommitment] = useState("");
   const [assetValue, setAssetValue] = useState("");
   const [assetYear, setAssetYear] = useState("");
   const [dirty, setDirty] = useState(false);
@@ -127,6 +131,21 @@ export function VendaDiretaManualModule() {
         setBusy(false);
         return;
       }
+      if (!quotaIds.length) {
+        setError("Selecione ao menos uma cota.");
+        setBusy(false);
+        return;
+      }
+      if (!parseMoney(income) || !parseMoney(assetValue)) {
+        setError("Informe renda e valor do bem.");
+        setBusy(false);
+        return;
+      }
+      if (category === "VEHICLE" && !String(assetYear || "").trim()) {
+        setError("Informe o ano do bem (veículo).");
+        setBusy(false);
+        return;
+      }
       const data = await api<StoreResult>("/marketplace/venda-direta-manual/store", {
         method: "POST",
         body: JSON.stringify({
@@ -145,10 +164,9 @@ export function VendaDiretaManualModule() {
           city,
           uf,
           occupation: occupation || null,
-          monthly_income: income,
-          monthly_commitment: commitment || "0",
-          asset_value: assetValue,
-          asset_year: category === "VEHICLE" && assetYear ? Number(assetYear) : null,
+          monthly_income: String(parseMoney(income)),
+          asset_value: String(parseMoney(assetValue)),
+          asset_year: category === "VEHICLE" && assetYear ? Number(assetYear) : new Date().getFullYear(),
           has_credit_restriction: dirty,
           asset_is_zero_km: zeroKm,
         }),
@@ -310,10 +328,6 @@ export function VendaDiretaManualModule() {
             <label className="marketplace-field">
               Renda / faturamento (R$)
               <CurrencyInput value={income} onChange={setIncome} required />
-            </label>
-            <label className="marketplace-field">
-              Comprometimento (R$)
-              <CurrencyInput value={commitment} onChange={setCommitment} />
             </label>
             <label className="marketplace-field">
               Valor do bem (R$)
