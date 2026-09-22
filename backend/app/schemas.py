@@ -2205,7 +2205,7 @@ class MarketplaceClientProfile(BaseModel):
     monthly_income: Decimal = Field(gt=0)
     monthly_commitment: Decimal = Field(ge=0, default=0)
     asset_value: Decimal = Field(gt=0)
-    asset_year: int = Field(ge=1980, le=2100)
+    asset_year: int = Field(default_factory=lambda: datetime.now().year, ge=1980, le=2100)
     has_credit_restriction: bool = False
     asset_is_zero_km: bool = False
 

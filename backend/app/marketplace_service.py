@@ -25,8 +25,8 @@ from app.services import money
 
 DEFAULT_INCOME_RATIO = Decimal("3")
 ESTEIRA2_BAND_PERCENT = Decimal("5")
-ESTEIRA2_CREDIT_LANE_LIMIT = 2
-ESTEIRA2_ENTRADA_LANE_LIMIT = 2
+ESTEIRA2_CREDIT_LANE_LIMIT = 1
+ESTEIRA2_ENTRADA_LANE_LIMIT = 1
 INSTALLMENT_ROLLOVER_DAYS = 7
 
 
@@ -622,6 +622,17 @@ def esteira2_nina_curated_match(
             "band_percent": str(ESTEIRA2_BAND_PERCENT),
             "message": "Perfil do cliente não permite matching automático. Ajuste renda, bem ou valor alvo.",
         }
+    if target_entrada is None or target_entrada <= 0:
+        return {
+            "esteira": "NINA_CURATED",
+            "eligible": False,
+            "blockers": ["Informe a entrada desejada do cliente (lane entrada com régua de 5%)."],
+            "matches": [],
+            "credit_matches": [],
+            "entrada_matches": [],
+            "band_percent": str(ESTEIRA2_BAND_PERCENT),
+            "message": "Perfil incompleto para matching.",
+        }
 
     pool = _rank_alternatives(
         db,
@@ -642,44 +653,26 @@ def esteira2_nina_curated_match(
 
     credit_lane: list[dict] = []
     for item in sorted(pool, key=lambda x: (Decimal(x["deviation_percent"]), -x["score"])):
-        row = {**item, "lane": "CREDIT"}
-        credit_lane.append(row)
+        if Decimal(item["deviation_percent"]) > ESTEIRA2_BAND_PERCENT:
+            continue
+        credit_lane.append({**item, "lane": "CREDIT"})
         if len(credit_lane) >= ESTEIRA2_CREDIT_LANE_LIMIT:
             break
 
     entrada_lane: list[dict] = []
-    if target_entrada is not None and target_entrada > 0:
-        ranked_entrada = sorted(
-            [
-                x
-                for x in pool
-                if x.get("entrada_deviation_percent") is not None
-                and Decimal(x["entrada_deviation_percent"]) <= ESTEIRA2_BAND_PERCENT
-            ],
-            key=lambda x: (Decimal(x["entrada_deviation_percent"]), -x["score"]),
-        )
-        seen = {tuple(x["quota_ids"]) for x in credit_lane}
-        for item in ranked_entrada:
-            key = tuple(item["quota_ids"])
-            if key in seen:
-                # ainda conta na lane entrada se couber na banda
-                pass
-            row = {**item, "lane": "ENTRADA"}
-            entrada_lane.append(row)
-            seen.add(key)
-            if len(entrada_lane) >= ESTEIRA2_ENTRADA_LANE_LIMIT:
-                break
-    else:
-        # Sem entrada alvo: completa com as próximas melhores por crédito (até 2 extras)
-        seen = {tuple(x["quota_ids"]) for x in credit_lane}
-        for item in pool:
-            key = tuple(item["quota_ids"])
-            if key in seen:
-                continue
-            entrada_lane.append({**item, "lane": "CREDIT_EXTRA"})
-            seen.add(key)
-            if len(entrada_lane) >= ESTEIRA2_ENTRADA_LANE_LIMIT:
-                break
+    ranked_entrada = sorted(
+        [
+            x
+            for x in pool
+            if x.get("entrada_deviation_percent") is not None
+            and Decimal(x["entrada_deviation_percent"]) <= ESTEIRA2_BAND_PERCENT
+        ],
+        key=lambda x: (Decimal(x["entrada_deviation_percent"]), -x["score"]),
+    )
+    for item in ranked_entrada:
+        entrada_lane.append({**item, "lane": "ENTRADA"})
+        if len(entrada_lane) >= ESTEIRA2_ENTRADA_LANE_LIMIT:
+            break
 
     # matches = união ordenada credit + entrada (dedupe preservando ordem)
     matches: list[dict] = []
@@ -694,9 +687,8 @@ def esteira2_nina_curated_match(
             break
 
     band_msg = (
-        f"régua {ESTEIRA2_BAND_PERCENT}% · até {ESTEIRA2_CREDIT_LANE_LIMIT} por crédito"
-        + (f" + {ESTEIRA2_ENTRADA_LANE_LIMIT} por entrada" if target_entrada else "")
-        + f" · rollover {INSTALLMENT_ROLLOVER_DAYS}d · markup fornecedor"
+        f"régua {ESTEIRA2_BAND_PERCENT}% · 1 opção por crédito + 1 por entrada"
+        f" · rollover {INSTALLMENT_ROLLOVER_DAYS}d · markup fornecedor"
     )
     return {
         "esteira": "NINA_CURATED",

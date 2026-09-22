@@ -101,7 +101,6 @@ function ClientProfileFields({prefix,values,flags,onChange,onFlag,category}:{pre
   const showYear=category==="VEHICLE";
   return <div className="marketplace-profile-fields">
     <label className="marketplace-field">Renda mensal comprovada (R$)<CurrencyInput value={values[`${prefix}_income`]} onChange={v=>onChange(`${prefix}_income`,v)} required/></label>
-    <label className="marketplace-field">Comprometimento atual (R$)<CurrencyInput value={values[`${prefix}_commitment`]} onChange={v=>onChange(`${prefix}_commitment`,v)}/></label>
     <label className="marketplace-field">Valor do bem (R$)<CurrencyInput value={values[`${prefix}_asset`]} onChange={v=>onChange(`${prefix}_asset`,v)} required/></label>
     {showYear&&<label className="marketplace-field marketplace-field-compact">Ano do bem<input type="number" min="1980" max="2100" value={values[`${prefix}_year`]} onChange={e=>onChange(`${prefix}_year`,e.target.value)} required/></label>}
     <label className="marketplace-field marketplace-field-compact" style={{display:"flex",alignItems:"center",gap:8}}><input type="checkbox" checked={!!flags[`${prefix}_dirty`]} onChange={e=>onFlag(`${prefix}_dirty`,e.target.checked)}/>Restrição SPC/Serasa</label>
@@ -114,7 +113,7 @@ export function MarketplaceModule() {
   const [error,setError]=useState("");
   const [notice,setNotice]=useState("");
   const [tab,setTab]=useState<"esteira1"|"esteira2">("esteira1");
-  const [profile,setProfile]=useState({e1_income:"",e1_commitment:"",e1_asset:"",e1_year:"",e2_income:"",e2_commitment:"",e2_asset:"",e2_year:""});
+  const [profile,setProfile]=useState({e1_income:"",e1_asset:"",e1_year:"",e2_income:"",e2_asset:"",e2_year:""});
   const [flags,setFlags]=useState({e1_dirty:false,e1_zero:false,e2_dirty:false,e2_zero:false});
   const [selectedQuota,setSelectedQuota]=useState("");
   const [targetAmount,setTargetAmount]=useState("");
@@ -126,21 +125,24 @@ export function MarketplaceModule() {
   useEffect(()=>{void load()},[]);
   const available=useMemo(()=>quotas.filter(q=>q.status==="AVAILABLE"||q.status==="RESERVED"),[quotas]);
   const e1Category=useMemo(()=>available.find(q=>q.id===selectedQuota)?.category??"REAL_ESTATE",[available,selectedQuota]);
-  const profilePayload=(prefix:"e1"|"e2",cat:string)=>({
-    monthly_income:profile[`${prefix}_income`],
-    monthly_commitment:profile[`${prefix}_commitment`]||"0",
-    asset_value:profile[`${prefix}_asset`],
-    asset_year:cat==="VEHICLE"&&profile[`${prefix}_year`]?Number(profile[`${prefix}_year`]):undefined,
-    has_credit_restriction:flags[`${prefix}_dirty`],
-    asset_is_zero_km:flags[`${prefix}_zero`],
-  });
+  const profilePayload=(prefix:"e1"|"e2",cat:string)=>{
+    const year=profile[`${prefix}_year`];
+    const assetYear=cat==="VEHICLE"&&year?Number(year):new Date().getFullYear();
+    return {
+      monthly_income:profile[`${prefix}_income`],
+      asset_value:profile[`${prefix}_asset`],
+      asset_year:assetYear,
+      has_credit_restriction:flags[`${prefix}_dirty`],
+      asset_is_zero_km:flags[`${prefix}_zero`],
+    };
+  };
   async function assessEsteira1(e:FormEvent){e.preventDefault();setError("");setNotice("");try{const data=await api<MarketplaceEsteira1Result>("/marketplace/esteira-1/assess",{method:"POST",body:JSON.stringify({quota_id:selectedQuota,...profilePayload("e1",e1Category)})});setResult1(data);setNotice(data.message)}catch(err){setError(err instanceof Error?err.message:"Falha na Esteira 1")}}
   async function matchEsteira2(e:FormEvent){e.preventDefault();setError("");setNotice("");try{const data=await api<MarketplaceEsteira2Result>("/marketplace/esteira-2/match",{method:"POST",body:JSON.stringify({target_amount:targetAmount,target_entrada:targetEntrada||undefined,category,...profilePayload("e2",category)})});setResult2(data);setNotice(data.message)}catch(err){setError(err instanceof Error?err.message:"Falha na Esteira 2")}}
   async function reserveQuota(quotaId:string){setError("");try{await api("/reservations",{method:"POST",body:JSON.stringify({quota_id:quotaId,ttl_minutes:60})});setNotice("Cota travada por 60 minutos. Prossiga em Propostas.");load()}catch(err){setError(err instanceof Error?err.message:"Falha na trava")}}
   function MatchCard({match,onReserve}:{match:MarketplaceMatch;onReserve:(id:string)=>void}) {
     return <article className="backlog-item"><div><strong>{match.administrator_name??"Administradora"} · crédito {brl.format(Number(match.total_credit))}{match.total_entrada?` · entrada ${brl.format(Number(match.total_entrada))}`:""}</strong><p>{match.explanation}{match.message?` — ${match.message}`:""}</p><small>Lane {match.lane??"—"} · Score {match.score} · Desvio crédito {match.deviation_percent}%{match.entrada_deviation_percent!=null?` · Desvio entrada ${match.entrada_deviation_percent}%`:""}{match.rollover_applied?" · Rollover 7d":""}{match.markup_amount?` · Markup ${brl.format(Number(match.markup_amount))}`:""}</small><div>{match.quotas.map(q=><label key={q.quota_id} style={{display:"block",marginTop:"0.5rem"}}><span>{q.group_code}/{q.quota_code} · crédito {brl.format(Number(q.credit_value))} · entrada {brl.format(Number(q.entrada_final??q.premium_value))} · parcela {brl.format(Number(q.installment_value||0))}{q.supplier_source?` · ${q.supplier_source}`:""}{q.markup_percent&&Number(q.markup_percent)>0?` (+${q.markup_percent}%)`:""}{q.rollover_applied?" · rollover":""} · Nina {q.nina_scan_status??"PENDENTE"}</span>{q.status==="AVAILABLE"&&q.nina_scan_status==="CLEARED"?<button type="button" className="table-action lock" style={{marginLeft:"0.75rem"}} onClick={()=>onReserve(q.quota_id)}><LockKeyhole/>Travar 60 min</button>:null}</label>)}</div></div></article>;
   }
-  return <OperationalLayout title="Marketplace — Cartas contempladas" subtitle="Esteira 2 (robô): régua 5%, lanes crédito/entrada, rollover 7 dias e markup do fornecedor. Regras Bacen via approval_rules sincronizadas." icon={<WalletCards/>}>
+  return <OperationalLayout title="Marketplace — Cartas contempladas" subtitle="Esteira 2 (robô): 1 opção na banda de 5% para crédito e 1 para entrada, rollover 7 dias e markup do fornecedor. Regras Bacen via approval_rules sincronizadas." icon={<WalletCards/>}>
     <div className="notice"><Clock3/>Admin cadastra cotas (fornecedor + prazo restante) em <b>Inventário</b>. Sync Bacen em <b>Administradoras</b> alimenta approval_rules usadas no matching. Finalize a venda em <b>Propostas</b>.</div>
     <div className="marketplace-tabs">
       <button type="button" className={`marketplace-tab${tab==="esteira1"?" active":""}`} onClick={()=>setTab("esteira1")}>Esteira 1 — Escolha do parceiro</button>
@@ -157,7 +159,7 @@ export function MarketplaceModule() {
     {tab==="esteira2"&&<form className="marketplace-form" onSubmit={matchEsteira2}>
       <div className="marketplace-form-row">
         <label className="marketplace-field">Crédito desejado (R$)<CurrencyInput value={targetAmount} onChange={setTargetAmount} required/></label>
-        <label className="marketplace-field">Entrada desejada (R$)<CurrencyInput value={targetEntrada} onChange={setTargetEntrada}/></label>
+        <label className="marketplace-field">Entrada desejada (R$)<CurrencyInput value={targetEntrada} onChange={setTargetEntrada} required/></label>
         <label className="marketplace-field marketplace-field-compact">Categoria<select value={category} onChange={e=>setCategory(e.target.value)}><option value="REAL_ESTATE">Imóvel</option><option value="VEHICLE">Veículo</option></select></label>
         <ClientProfileFields prefix="e2" category={category} values={profile} flags={flags} onChange={(k,v)=>setProfile(p=>({...p,[k]:v}))} onFlag={(k,v)=>setFlags(p=>({...p,[k]:v}))}/>
         <button type="submit" className="marketplace-submit"><RefreshCw/>Buscar opções robô</button>

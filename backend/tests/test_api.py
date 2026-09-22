@@ -455,6 +455,19 @@ def test_marketplace_esteira1_and_esteira2(client, auth_headers):
         headers=auth_headers,
         json={"quota_id": quota["id"], **profile},
     )
+    esteira1_no_year = client.post(
+        "/api/v1/marketplace/esteira-1/assess",
+        headers=auth_headers,
+        json={
+            "quota_id": quota["id"],
+            "monthly_income": profile["monthly_income"],
+            "asset_value": profile["asset_value"],
+            "has_credit_restriction": False,
+            "asset_is_zero_km": False,
+        },
+    )
+    assert esteira1_no_year.status_code == 200
+
     assert esteira1.status_code == 200
     body1 = esteira1.json()
     assert body1["esteira"] == "SELF_SELECT"
@@ -465,7 +478,12 @@ def test_marketplace_esteira1_and_esteira2(client, auth_headers):
     esteira2 = client.post(
         "/api/v1/marketplace/esteira-2/match",
         headers=auth_headers,
-        json={"target_amount": "800000", "category": "REAL_ESTATE", **profile},
+        json={
+            "target_amount": "800000",
+            "target_entrada": "80000",
+            "category": "REAL_ESTATE",
+            **profile,
+        },
     )
     assert esteira2.status_code == 200
     body2 = esteira2.json()
@@ -508,7 +526,8 @@ def test_marketplace_esteira2_robot_band_rollover_and_markup(client, auth_header
     body = res.json()
     assert body["band_percent"] == "5"
     assert body["eligible"] is True
-    assert len(body["credit_matches"]) <= 2
+    assert len(body["credit_matches"]) <= 1
+    assert len(body["entrada_matches"]) <= 1
     # Fraga: entrada base 80000 + parcela 2800 (rollover) + 3% de 400000 = 12000 → 94800
     fraga_match = next(
         (m for m in body["matches"] if fraga["id"] in m["quota_ids"] and len(m["quota_ids"]) == 1),
@@ -531,6 +550,7 @@ def test_marketplace_esteira2_robot_band_rollover_and_markup(client, auth_header
             "asset_value": "2000000",
             "asset_year": 2020,
             "target_amount": "1000000",
+            "target_entrada": "100000",
             "category": "REAL_ESTATE",
         },
     )
