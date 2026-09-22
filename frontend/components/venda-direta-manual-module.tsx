@@ -17,17 +17,10 @@ function parseMoney(value: string): number {
 
 const SEARCH_BAND = 0.05;
 
-function withinSearchBand(actual: number, target: number): boolean {
-  if (target <= 0) return true;
-  return Math.abs(actual - target) / target <= SEARCH_BAND;
-}
-
-function cotaListLabel(c: CotaOption): string {
-  return `${c.group_code} · ${c.quota_code} · crédito ${brl.format(Number(c.credit_value))} · entrada ${brl.format(Number(c.entrada_final))} · parc. ${brl.format(Number(c.installment_value || 0))} · ${c.administrator_name ?? "Adm."}`;
-}
-
 type CotaOption = {
   quota_id: string;
+  group_code: string;
+  quota_code: string;
   label: string;
   credit_value: string;
   entrada_final: string;
@@ -36,6 +29,15 @@ type CotaOption = {
   administrator_name: string | null;
   supplier_source: string | null;
 };
+
+function withinSearchBand(actual: number, target: number): boolean {
+  if (target <= 0) return true;
+  return Math.abs(actual - target) / target <= SEARCH_BAND;
+}
+
+function cotaListLabel(c: CotaOption): string {
+  return `${c.group_code} · ${c.quota_code} · crédito ${brl.format(Number(c.credit_value))} · entrada ${brl.format(Number(c.entrada_final))} · parc. ${brl.format(Number(c.installment_value || 0))} · ${c.administrator_name ?? "Adm."}`;
+}
 
 type CadastroOption = {
   lead_id: string;
