@@ -81,9 +81,11 @@ export function KycIdentityWizard({ documents, identityOnboardingUrl, onClose, o
   );
   const cameraDocs = useMemo(
     () =>
-      identityDocs.filter(
-        (d) => d.accepts_api_upload && (d.capture_mode || "camera") !== "link",
-      ),
+      identityDocs.filter((d) => {
+        if (d.onboarding_url) return false;
+        if (d.capture_mode === "link") return false;
+        return d.accepts_api_upload !== false;
+      }),
     [identityDocs],
   );
 
@@ -241,10 +243,22 @@ export function KycIdentityWizard({ documents, identityOnboardingUrl, onClose, o
           </div>
         )}
 
+        {mode === "waiting" && (
+          <div className="kyc-wizard-body">
+            <p className="muted" style={{ marginTop: 0 }}>
+              Ainda não há link de verificação do Asaas para esta conta. Toque em <strong>Atualizar dados bancários</strong> na
+              Carteira LETTER, aguarde cerca de 1 minuto e abra esta tela de novo.
+            </p>
+            <p className="muted">
+              Se o link não aparecer, contate o suporte LETTER — podemos ressincronizar a subconta com o Asaas.
+            </p>
+          </div>
+        )}
+
         {mode === "camera" && (
           <div className="kyc-wizard-body">
             {!cameraDocs.length ? (
-              <p className="muted">Nenhum documento de identidade pendente.</p>
+              <p className="muted">Nenhum documento de identidade pendente para envio por foto.</p>
             ) : (
               <>
                 <p className="muted" style={{ marginTop: 0 }}>

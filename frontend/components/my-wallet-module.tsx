@@ -740,7 +740,11 @@ export function MyWalletModule() {
                           }}
                         >
                           <Upload />
-                          {uploadingDocId === doc.id ? "Enviando…" : "Escolher PDF"}
+                          {uploadingDocId === doc.id
+                            ? "Enviando…"
+                            : doc.type === "IDENTIFICATION" || doc.type === "IDENTIFICATION_SELFIE"
+                              ? "Enviar foto"
+                              : "Escolher PDF"}
                         </button>
                         <input
                           id={`kyc-file-${doc.id}`}

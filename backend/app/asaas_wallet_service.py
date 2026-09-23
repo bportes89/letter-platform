@@ -435,22 +435,17 @@ def _identity_doc_types() -> frozenset[str]:
 
 def _document_capture_mode(doc_type: str, onboarding_url: str | None, account: EscrowAccount | None = None) -> str:
     doc_type = doc_type.upper()
-    if doc_type in _identity_doc_types():
-        if onboarding_url:
-            return "link"
-        if account is not None and not _is_mock_account(account):
-            return "link"
-        return "camera"
     if onboarding_url:
         return "link"
+    if doc_type in _identity_doc_types():
+        return "camera"
     return "file"
 
 
 def _document_accepts_api_upload(doc_type: str, onboarding_url: str | None, account: EscrowAccount | None = None) -> bool:
+    """Asaas: com onboardingUrl só link; sem URL, envio via API (foto ou PDF conforme tipo)."""
     doc_type = doc_type.upper()
     if onboarding_url:
-        return False
-    if doc_type in _identity_doc_types() and account is not None and not _is_mock_account(account):
         return False
     return True
 
