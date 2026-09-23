@@ -186,6 +186,7 @@ export function VendaDiretaRoboModule() {
           target_entrada: String(parseMoney(targetEntrada)),
           category,
           monthly_income: String(parseMoney(income)),
+          monthly_commitment: "0",
           asset_value: String(parseMoney(assetValue)),
           asset_year: category === "VEHICLE" && assetYear ? Number(assetYear) : new Date().getFullYear(),
           has_credit_restriction: dirty,
@@ -198,6 +199,12 @@ export function VendaDiretaRoboModule() {
           uf: uf || null,
         }),
       });
+      if (!data.eligible) {
+        setResult(null);
+        setError(data.blockers?.join(" ") || data.message || "Nenhuma cota encontrada para esses filtros.");
+        setNotice("");
+        return;
+      }
       setResult(data);
       setNotice(data.message);
       setStep(2);

@@ -465,10 +465,14 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
   }
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
+    const detail = formatApiErrorDetail(body.detail);
     if (response.status === 404) {
-      throw new Error("Endpoint não encontrado na API de produção. Faça redeploy do serviço letter-api no Render.");
+      throw new Error(
+        detail
+          || "Recurso não encontrado. Se o problema persistir, verifique se a API LETTER está atualizada no Render.",
+      );
     }
-    throw new Error(formatApiErrorDetail(body.detail));
+    throw new Error(detail);
   }
   if (response.status === 204) {
     return undefined as T;

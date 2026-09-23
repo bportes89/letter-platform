@@ -85,14 +85,28 @@ def search_cotas(
         target_entrada=target_entrada,
     )
 
-    if not match.get("eligible") or not (
+    has_options = bool(
         match.get("credit_matches") or match.get("entrada_matches") or match.get("matches")
-    ):
-        raise HTTPException(
-            status_code=404,
-            detail=match.get("message")
-            or "Desculpe, não encontramos nenhuma cota com esses filtros. Ajuste crédito/entrada e tente de novo.",
-        )
+    )
+    if not match.get("eligible") or not has_options:
+        blockers = list(match.get("blockers") or [])
+        if not blockers:
+            blockers = [
+                match.get("message")
+                or "Não encontramos cota na régua de 5% para esses filtros. Ajuste crédito, entrada ou cadastre cotas no Inventário.",
+            ]
+        return {
+            "lead_id": "",
+            "client_name": name.strip(),
+            "esteira": match.get("esteira") or "NINA_CURATED",
+            "eligible": False,
+            "blockers": blockers,
+            "matches": [],
+            "credit_matches": [],
+            "entrada_matches": [],
+            "band_percent": match.get("band_percent") or "5",
+            "message": blockers[0],
+        }
 
     profile_snapshot = {
         "email": email.strip(),

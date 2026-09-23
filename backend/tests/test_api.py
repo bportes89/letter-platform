@@ -621,7 +621,9 @@ def test_venda_direta_robo_search_and_confirm(client, auth_headers):
         headers=auth_headers,
         json={**payload, "target_amount": "9999999", "asset_value": "9999999", "document": "52998224725"},
     )
-    assert miss.status_code == 404
+    assert miss.status_code == 200
+    assert miss.json()["eligible"] is False
+    assert not miss.json().get("lead_id")
 
 
 def test_venda_direta_manual_store(client, auth_headers):
