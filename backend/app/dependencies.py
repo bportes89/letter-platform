@@ -55,6 +55,20 @@ def require_scope(required: str) -> Callable:
     return checker
 
 
+def require_any_scope(*required: str) -> Callable:
+    def checker(user: User = Depends(get_current_user)) -> User:
+        scopes = get_effective_scopes(user)
+        if "*" in scopes:
+            return user
+        if any(scope in scopes for scope in required):
+            return user
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Escopo obrigatório: um de {', '.join(required)}",
+        )
+    return checker
+
+
 def require_step_up(user: User = Depends(get_current_user), credentials: HTTPAuthorizationCredentials | None = Depends(bearer), db: Session = Depends(get_db)) -> User:
     payload = decode_token(credentials.credentials) if credentials else {}
     session = db.get(AuthSession, payload.get("sid"))

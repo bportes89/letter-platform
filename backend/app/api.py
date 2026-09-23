@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.security import create_token, verify_password
 from app.core.config import settings
 from app.db import get_db
-from app.dependencies import get_current_user, require_scope
+from app.dependencies import get_current_user, require_any_scope, require_scope
 from app.supplier_portal_auth import get_current_supplier
 from app.models import (
     Administrator, AuctionBid, AuctionLot, AuctionQualification, AuctionSettlement,
@@ -2382,7 +2382,7 @@ def venda_direta_robo_search(payload: VendaDiretaRoboSearchRequest, user: User =
 
 
 @router.post("/marketplace/venda-direta-robo/confirm", response_model=VendaDiretaRoboConfirmResponse)
-def venda_direta_robo_confirm(payload: VendaDiretaRoboConfirmRequest, user: User = Depends(require_scope("proposals:write")), db: Session = Depends(get_db)):
+def venda_direta_robo_confirm(payload: VendaDiretaRoboConfirmRequest, user: User = Depends(require_any_scope("proposals:write", "leads:write")), db: Session = Depends(get_db)):
     from app.sales_direct_robo_service import confirm_cota
 
     result = confirm_cota(
@@ -2424,7 +2424,7 @@ def venda_direta_manual_partners(user: User = Depends(get_current_user), db: Ses
 
 
 @router.post("/marketplace/venda-direta-manual/store", response_model=VendaDiretaManualStoreResponse)
-def venda_direta_manual_store(payload: VendaDiretaManualStoreRequest, user: User = Depends(require_scope("proposals:write")), db: Session = Depends(get_db)):
+def venda_direta_manual_store(payload: VendaDiretaManualStoreRequest, user: User = Depends(require_any_scope("proposals:write", "leads:write")), db: Session = Depends(get_db)):
     from app.br_validation import assert_valid_contact
     from app.sales_direct_manual_service import store_manual
 

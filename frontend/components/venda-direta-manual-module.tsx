@@ -7,6 +7,7 @@ import { api } from "@/lib/api";
 import { CurrencyInput } from "@/components/currency-input";
 import { lookupCep } from "@/lib/cep-lookup";
 import { validationMessageForPerson } from "@/lib/br-validation";
+import { commercialQuotaDisplay } from "@/lib/commercial-quota-label";
 
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
@@ -38,9 +39,7 @@ function withinSearchBand(actual: number, target: number): boolean {
 }
 
 function cotaListLabel(c: CotaOption): string {
-  if (c.label) return c.label;
-  const parc = c.remaining_installments != null ? ` · ${c.remaining_installments} parcelas` : "";
-  return `${c.group_code} · ${c.quota_code} · crédito ${brl.format(Number(c.credit_value))} · entrada ${brl.format(Number(c.entrada_final))} · parc. ${brl.format(Number(c.installment_value || 0))}${parc} · ${c.administrator_name ?? "Adm."}`;
+  return commercialQuotaDisplay(c);
 }
 
 type CadastroOption = {
@@ -184,6 +183,7 @@ export function VendaDiretaManualModule() {
           uf,
           occupation: occupation || null,
           monthly_income: String(parseMoney(income)),
+          monthly_commitment: "0",
           asset_value: String(parseMoney(assetValue)),
           asset_year: category === "VEHICLE" && assetYear ? Number(assetYear) : new Date().getFullYear(),
           has_credit_restriction: dirty,
@@ -212,6 +212,22 @@ export function VendaDiretaManualModule() {
   }, [cotas, filterCredit, filterEntrada]);
 
   const selectedList = cotas.filter((c) => quotaIds.includes(c.quota_id));
+
+  function toggleQuota(c: CotaOption, checked: boolean) {
+    if (!checked) {
+      setQuotaIds((ids) => ids.filter((id) => id !== c.quota_id));
+      return;
+    }
+    if (quotaIds.length > 0) {
+      const anchor = cotas.find((x) => x.quota_id === quotaIds[0]);
+      if (anchor && anchor.administrator_id !== c.administrator_id) {
+        setError("Junção manual só permite cotas da mesma administradora.");
+        return;
+      }
+    }
+    setError("");
+    setQuotaIds((ids) => [...ids, c.quota_id]);
+  }
 
   async function onCepBlur() {
     const addr = await lookupCep(zipcode);
@@ -316,11 +332,7 @@ export function VendaDiretaManualModule() {
                       <input
                         type="checkbox"
                         checked={quotaIds.includes(c.quota_id)}
-                        onChange={(e) =>
-                          setQuotaIds((ids) =>
-                            e.target.checked ? [...ids, c.quota_id] : ids.filter((id) => id !== c.quota_id),
-                          )
-                        }
+                        onChange={(e) => toggleQuota(c, e.target.checked)}
                       />
                       {cotaListLabel(c)}
                     </label>

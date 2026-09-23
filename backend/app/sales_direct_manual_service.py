@@ -298,7 +298,9 @@ def store_manual(
         pricing_rows.append(pricing)
         total_credit += Decimal(str(pricing["credit"]))
         total_entrada += Decimal(str(pricing["entrada_final"]))
-        if quota.nina_scan_status != "CLEARED":
+        from app.quota_inventory_service import _nina_scan_fresh
+
+        if quota.nina_scan_status != "CLEARED" or not _nina_scan_fresh(quota):
             result = run_nina_quota_scan(db, user, quota)
             if result.get("status") != "CLEARED":
                 raise HTTPException(

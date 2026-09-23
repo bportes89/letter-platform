@@ -7,6 +7,7 @@ import { Administrator, api, Calculation, CommercialClient, Contract, downloadAp
 import { FLASH_CAPITAL_SOURCES, productLabel, SDC_CAPITAL_SOURCES } from "@/lib/products";
 import { SdcQuitConProjectionTable } from "@/components/sdc-quitcon-card";
 import { CurrencyInput, CurrencyFormField } from "@/components/currency-input";
+import { commercialQuotaDisplay } from "@/lib/commercial-quota-label";
 
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
@@ -130,7 +131,7 @@ function quotaEntrada(q: Quota): number {
 }
 
 function marketplaceCotaLabel(c: MarketplaceCatalogCota): string {
-  return c.label;
+  return commercialQuotaDisplay(c);
 }
 
 /** Oculta fornecedor/sync na tela comercial de propostas (mesmo quando o usuário é admin). */
