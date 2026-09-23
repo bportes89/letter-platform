@@ -495,7 +495,9 @@ def esteira1_partner_select(
         raise HTTPException(status_code=409, detail="Cota indisponível para análise.")
 
     admin = db.get(Administrator, quota.administrator_id)
-    if quota.nina_scan_status != "CLEARED":
+    from app.quota_inventory_service import _nina_scan_fresh
+
+    if quota.nina_scan_status != "CLEARED" or not _nina_scan_fresh(quota):
         try:
             run_nina_quota_scan(db, user, quota)
         except HTTPException as exc:
@@ -611,9 +613,11 @@ def esteira1_partner_select_combo(
     suppliers = suppliers_index(db, user.organization_id)
     blockers: list[str] = []
     summaries: list[dict] = []
+    from app.quota_inventory_service import _nina_scan_fresh
+
     for quota in quotas:
         admin = db.get(Administrator, quota.administrator_id)
-        if quota.nina_scan_status != "CLEARED":
+        if quota.nina_scan_status != "CLEARED" or not _nina_scan_fresh(quota):
             try:
                 run_nina_quota_scan(db, user, quota)
             except HTTPException as exc:

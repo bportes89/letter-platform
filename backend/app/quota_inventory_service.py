@@ -100,7 +100,17 @@ def auto_nina_scan_on_ingest(db: Session, user: User, quota: Quota) -> None:
         pass
 
 
-def ensure_nina_scan_before_lock(quota: Quota) -> None:
+def ensure_nina_scan_before_lock(db: Session, user: User, quota: Quota) -> None:
+    """Exige varredura Nina válida (30 min); renova automaticamente se expirou."""
+    if _nina_scan_fresh(quota):
+        return
+    try:
+        run_nina_quota_scan(db, user, quota)
+    except HTTPException:
+        raise HTTPException(
+            status_code=422,
+            detail="Execute a varredura Nina antes de travar a cota (válida por 30 minutos).",
+        ) from None
     if not _nina_scan_fresh(quota):
         raise HTTPException(
             status_code=422,

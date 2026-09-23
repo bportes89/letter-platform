@@ -149,7 +149,7 @@ def reserve_quota(db: Session, user: User, quota: Quota, proposal_id: str | None
     ))
     if active or quota.status != "AVAILABLE":
         raise HTTPException(status_code=409, detail="Cota indisponível ou já reservada")
-    ensure_nina_scan_before_lock(quota)
+    ensure_nina_scan_before_lock(db, user, quota)
     if proposal_id:
         proposal = db.scalar(select(Proposal).where(
             Proposal.id == proposal_id, Proposal.organization_id == user.organization_id,

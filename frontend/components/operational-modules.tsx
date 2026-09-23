@@ -158,10 +158,14 @@ function proposalQuotaListLabel(q: Quota): string {
   return `${partnerSafeQuotaIdentity(q)} · ${cat} · ${brl.format(Number(q.credit_value))}${due}${parc} · ${q.status}`;
 }
 
+function marketplaceProfileValue(profile: Record<string, string>, prefix: "e1" | "e2", key: "income" | "asset" | "year"): string {
+  return String(profile[`${prefix}_${key}`] || profile[`e1_${key}`] || profile[`e2_${key}`] || "");
+}
+
 function profileValidationMessage(prefix: "e1" | "e2", cat: string, profile: Record<string, string>): string | null {
-  if (!parseMoney(profile[`${prefix}_income`])) return "Informe a renda mensal comprovada.";
-  if (!parseMoney(profile[`${prefix}_asset`])) return "Informe o valor do bem.";
-  if (cat === "VEHICLE" && !String(profile[`${prefix}_year`] || "").trim()) return "Informe o ano do bem (veículo).";
+  if (!parseMoney(marketplaceProfileValue(profile, prefix, "income"))) return "Informe a renda mensal comprovada.";
+  if (!parseMoney(marketplaceProfileValue(profile, prefix, "asset"))) return "Informe o valor do bem.";
+  if (cat === "VEHICLE" && !marketplaceProfileValue(profile, prefix, "year").trim()) return "Informe o ano do bem (veículo).";
   return null;
 }
 
@@ -224,18 +228,21 @@ export function MarketplaceModule() {
     setSelectedQuotaIds(ids=>[...ids,c.quota_id]);
   }
   const profilePayload=(prefix:"e1"|"e2",cat:string)=>{
-    const year=profile[`${prefix}_year`];
+    const year=marketplaceProfileValue(profile,prefix,"year");
     const assetYear=cat==="VEHICLE"&&year?Number(year):new Date().getFullYear();
+    const dirty=flags[`${prefix}_dirty`]||flags.e1_dirty||flags.e2_dirty;
+    const zero=flags[`${prefix}_zero`]||flags.e1_zero||flags.e2_zero;
     return {
-      monthly_income:String(parseMoney(profile[`${prefix}_income`])),
-      asset_value:String(parseMoney(profile[`${prefix}_asset`])),
+      monthly_income:String(parseMoney(marketplaceProfileValue(profile,prefix,"income"))),
+      monthly_commitment:"0",
+      asset_value:String(parseMoney(marketplaceProfileValue(profile,prefix,"asset"))),
       asset_year:assetYear,
-      has_credit_restriction:flags[`${prefix}_dirty`],
-      asset_is_zero_km:flags[`${prefix}_zero`],
+      has_credit_restriction:dirty,
+      asset_is_zero_km:zero,
     };
   };
   async function assessEsteira1(e:FormEvent){e.preventDefault();setError("");setNotice("");const validation=profileValidationMessage("e1",e1Category,profile);if(validation){setError(validation);return}if(!selectedQuotaIds.length){setError("Selecione ao menos uma carta na lista.");return}try{const data=await api<MarketplaceEsteira1Result>("/marketplace/esteira-1/assess",{method:"POST",body:JSON.stringify({quota_ids:selectedQuotaIds,...profilePayload("e1",e1Category)})});setResult1(data);setNotice(data.message)}catch(err){setError(err instanceof Error?err.message:"Falha na Esteira 1")}}
-  async function matchEsteira2(e:FormEvent){e.preventDefault();setError("");setNotice("");const validation=profileValidationMessage("e2",category,profile);if(validation){setError(validation);return}if(!parseMoney(targetAmount)){setError("Informe o crédito desejado.");return}if(!parseMoney(targetEntrada)){setError("Informe a entrada desejada.");return}try{const data=await api<MarketplaceEsteira2Result>("/marketplace/esteira-2/match",{method:"POST",body:JSON.stringify({target_amount:String(parseMoney(targetAmount)),target_entrada:String(parseMoney(targetEntrada)),category,...profilePayload("e2",category)})});setResult2(data);setNotice(data.message)}catch(err){setError(err instanceof Error?err.message:"Falha na Esteira 2")}}
+  async function matchEsteira2(e:FormEvent){e.preventDefault();setError("");setNotice("");setResult2(null);const validation=profileValidationMessage("e2",category,profile);if(validation){setError(validation);return}if(!parseMoney(targetAmount)){setError("Informe o crédito desejado.");return}if(!parseMoney(targetEntrada)){setError("Informe a entrada desejada.");return}try{const data=await api<MarketplaceEsteira2Result>("/marketplace/esteira-2/match",{method:"POST",body:JSON.stringify({target_amount:String(parseMoney(targetAmount)),target_entrada:String(parseMoney(targetEntrada)),category,...profilePayload("e2",category)})});setResult2(data);setNotice(data.message);if(!data.eligible&&data.blockers?.length)setError(data.blockers.join(" "))}catch(err){setError(err instanceof Error?err.message:"Falha na Esteira 2")}}
   async function reserveQuota(quotaId:string){setError("");try{await api("/reservations",{method:"POST",body:JSON.stringify({quota_id:quotaId,ttl_minutes:60})});setNotice("Cota travada por 60 minutos. Prossiga em Propostas.");void loadCatalog(e1Category)}catch(err){setError(err instanceof Error?err.message:"Falha na trava")}}
   async function reserveSelectedQuotas(ids: string[]) {
     setError("");
@@ -244,6 +251,7 @@ export function MarketplaceModule() {
         await api("/reservations", { method: "POST", body: JSON.stringify({ quota_id: quotaId, ttl_minutes: 60 }) });
       }
       setNotice(`${ids.length} cota(s) travada(s) por 60 minutos. Prossiga em Propostas.`);
+      setResult1(null);
       void loadCatalog(e1Category);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Falha na trava");
@@ -260,7 +268,7 @@ export function MarketplaceModule() {
     <div className="notice"><Clock3/>Admin cadastra cotas (fornecedor + prazo restante) em <b>Inventário</b>. Sync Bacen em <b>Administradoras</b> alimenta approval_rules usadas no matching. Finalize a venda em <b>Propostas</b>.</div>
     <div className="marketplace-tabs">
       <button type="button" className={`marketplace-tab${tab==="esteira1"?" active":""}`} onClick={()=>setTab("esteira1")}>Esteira 1 — Escolha do parceiro</button>
-      <button type="button" className={`marketplace-tab${tab==="esteira2"?" active":""}`} onClick={()=>setTab("esteira2")}>Esteira 2 — Robô Nina</button>
+      <button type="button" className={`marketplace-tab${tab==="esteira2"?" active":""}`} onClick={()=>{setTab("esteira2");setError("")}}>Esteira 2 — Robô Nina</button>
     </div>
     {notice&&<div className="notice"><CheckCircle2/>{notice}</div>}{error&&<div className="error">{error}</div>}
     {tab==="esteira1"&&<form className="marketplace-form" onSubmit={assessEsteira1}>
