@@ -43,6 +43,16 @@ function parseInputTags(tags?: string) {
   return { placeholder, type };
 }
 
+function fullNameOk(name: string): boolean {
+  const s = name.trim();
+  if (!s) return false;
+  const parts = s.split(/\s+/);
+  if (parts.length < 2) return false;
+  const primeiro = parts[0];
+  const sobrenome = s.slice(primeiro.length).trim();
+  return primeiro.length > 2 && sobrenome.length > 2;
+}
+
 function optionLabel(option: ChatOption) {
   return option.name ?? option.text ?? "Opção";
 }
@@ -411,6 +421,10 @@ export function AttendanceBotSection() {
     const fd = new FormData(e.currentTarget);
     const value = String(fd.get(item.input.name) ?? "").trim();
     if (!value) return;
+    if (item.input.name === "name" && !fullNameOk(value)) {
+      setError("Informe nome e sobrenome completos (ex.: Maria da Silva).");
+      return;
+    }
     const nextForm = { ...form, [item.input.name]: value };
     setForm(nextForm);
     const display =
@@ -565,13 +579,16 @@ export function AttendanceBotSection() {
                           name={item.input.name}
                           type={parseInputTags(item.input.tags).type}
                           placeholder={parseInputTags(item.input.tags).placeholder ?? item.input.label ?? "Digite aqui"}
+                          autoComplete={item.input.name === "name" ? "name" : undefined}
+                          enterKeyHint="go"
                           required
-                          disabled={busy}
+                          disabled={busy || connecting || !apiConnected}
                         />
-                        <button type="submit" disabled={busy}>
-                          Enviar
+                        <button type="submit" className="attendance-primary" disabled={busy || connecting || !apiConnected}>
+                          Prosseguir
                         </button>
                       </form>
+                      <p className="attendance-form-hint">Toque em Prosseguir ou use Enter no teclado.</p>
                     </div>
                   ) : null}
 

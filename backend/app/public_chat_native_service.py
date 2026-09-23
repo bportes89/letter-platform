@@ -419,10 +419,16 @@ def _find_lead(db: Session, org: Organization, payload: dict) -> Lead | None:
 
 
 def _full_name_ok(name: str) -> bool:
-    parts = [p for p in name.strip().split() if p]
+    """Primeiro nome + restante (sobrenome), como no chat legado — aceita 'Maria da Silva'."""
+    s = name.strip()
+    if not s:
+        return False
+    parts = s.split()
     if len(parts) < 2:
         return False
-    return all(len(p) > 2 for p in parts[:2])
+    primeiro = parts[0]
+    sobrenome = s[len(primeiro) :].strip()
+    return len(primeiro) > 2 and len(sobrenome) > 2
 
 
 def home_native() -> dict:
@@ -476,6 +482,23 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
 
     if step == STEP_NAME:
         name = str(data.get("name") or "").strip()
+        if not name:
+            return _wrap(
+                [
+                    {
+                        "text": "Me informe o seu nome completo, por favor:",
+                        "title": "Nome completo",
+                        "input": {
+                            "name": "name",
+                            "label": "Nome completo",
+                            "type": "text",
+                            "tags": 'placeholder="Ex.: Maria da Silva" type="text"',
+                        },
+                        "next": int(STEP_NAME),
+                    }
+                ],
+                lead_id=data.get("lead_id"),
+            )
         if not _full_name_ok(name):
             return _retry("Digite o seu nome completo!", STEP_NAME, input_name="name", label="Nome completo")
         first = name.split()[0]
