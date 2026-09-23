@@ -25,6 +25,8 @@ type CotaOption = {
   credit_value: string;
   entrada_final: string;
   installment_value: string;
+  remaining_installments?: number | null;
+  administrator_id: string;
   nina_scan_status: string | null;
   administrator_name: string | null;
   supplier_source: string | null;
@@ -36,7 +38,9 @@ function withinSearchBand(actual: number, target: number): boolean {
 }
 
 function cotaListLabel(c: CotaOption): string {
-  return `${c.group_code} · ${c.quota_code} · crédito ${brl.format(Number(c.credit_value))} · entrada ${brl.format(Number(c.entrada_final))} · parc. ${brl.format(Number(c.installment_value || 0))} · ${c.administrator_name ?? "Adm."}`;
+  if (c.label) return c.label;
+  const parc = c.remaining_installments != null ? ` · ${c.remaining_installments} parcelas` : "";
+  return `${c.group_code} · ${c.quota_code} · crédito ${brl.format(Number(c.credit_value))} · entrada ${brl.format(Number(c.entrada_final))} · parc. ${brl.format(Number(c.installment_value || 0))}${parc} · ${c.administrator_name ?? "Adm."}`;
 }
 
 type CadastroOption = {

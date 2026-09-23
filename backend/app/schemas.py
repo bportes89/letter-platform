@@ -2212,7 +2212,8 @@ class MarketplaceClientProfile(BaseModel):
 
 
 class MarketplaceEsteira1Request(MarketplaceClientProfile):
-    quota_id: str
+    quota_id: str | None = None
+    quota_ids: list[str] = Field(default_factory=list)
 
 
 class MarketplaceQuotaBrief(BaseModel):
@@ -2257,6 +2258,8 @@ class MarketplaceEsteira1Response(BaseModel):
     esteira: str
     eligible: bool
     quota: MarketplaceQuotaBrief
+    selected_quotas: list[MarketplaceQuotaBrief] = Field(default_factory=list)
+    combo: bool = False
     blockers: list[str] = Field(default_factory=list)
     alternatives: list[MarketplaceMatchView] = Field(default_factory=list)
     message: str

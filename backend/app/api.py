@@ -2278,20 +2278,36 @@ def update_quota(quota_id: str, payload: QuotaUpdate, user: User = Depends(requi
 
 @router.post("/marketplace/esteira-1/assess", response_model=MarketplaceEsteira1Response)
 def marketplace_esteira1(payload: MarketplaceEsteira1Request, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    from app.marketplace_service import esteira1_partner_select
+    from app.marketplace_service import esteira1_partner_select, esteira1_partner_select_combo
 
-    result = esteira1_partner_select(
+    resolved_ids = [str(x).strip() for x in (payload.quota_ids or []) if str(x).strip()]
+    if payload.quota_id and str(payload.quota_id).strip():
+        resolved_ids = [str(payload.quota_id).strip(), *resolved_ids]
+    resolved_ids = list(dict.fromkeys(resolved_ids))
+    if not resolved_ids:
+        raise HTTPException(status_code=422, detail="Selecione ao menos uma cota.")
+
+    common = {
+        "monthly_income": payload.monthly_income,
+        "monthly_commitment": payload.monthly_commitment,
+        "asset_value": payload.asset_value,
+        "asset_year": payload.asset_year,
+        "has_credit_restriction": payload.has_credit_restriction,
+        "asset_is_zero_km": payload.asset_is_zero_km,
+    }
+    if len(resolved_ids) == 1:
+        result = esteira1_partner_select(db, user, quota_id=resolved_ids[0], **common)
+    else:
+        result = esteira1_partner_select_combo(db, user, quota_ids=resolved_ids, **common)
+
+    audit(
         db,
         user,
-        quota_id=payload.quota_id,
-        monthly_income=payload.monthly_income,
-        monthly_commitment=payload.monthly_commitment,
-        asset_value=payload.asset_value,
-        asset_year=payload.asset_year,
-        has_credit_restriction=payload.has_credit_restriction,
-        asset_is_zero_km=payload.asset_is_zero_km,
+        "marketplace.esteira1",
+        "quota",
+        resolved_ids[0],
+        {"eligible": result["eligible"], "combo": result.get("combo"), "quota_count": len(resolved_ids)},
     )
-    audit(db, user, "marketplace.esteira1", "quota", payload.quota_id, {"eligible": result["eligible"]})
     db.commit()
     from app.marketplace_partner_view import mask_esteira_result
 
@@ -2382,10 +2398,15 @@ def venda_direta_robo_confirm(payload: VendaDiretaRoboConfirmRequest, user: User
 
 
 @router.get("/marketplace/venda-direta-manual/cotas", response_model=list[VendaDiretaManualCotaOption])
-def venda_direta_manual_cotas(category: str = "REAL_ESTATE", user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def venda_direta_manual_cotas(
+    category: str = "REAL_ESTATE",
+    include_reserved: bool = False,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     from app.sales_direct_manual_service import list_cotas_options
 
-    return list_cotas_options(db, user, category=category)
+    return list_cotas_options(db, user, category=category, include_reserved=include_reserved)
 
 
 @router.get("/marketplace/venda-direta-manual/cadastros", response_model=list[VendaDiretaManualCadastroOption])

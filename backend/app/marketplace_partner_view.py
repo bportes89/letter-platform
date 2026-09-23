@@ -50,11 +50,13 @@ def mask_marketplace_match_item(item: dict) -> dict:
 
 
 def mask_esteira_result(result: dict, user: User) -> dict:
-    if user_sees_supplier_quota_identity(user):
-        return result
+    """Consulta Marketplace (Esteiras / venda direta): nunca expor sync/fornecedor na UI."""
+    del user
     out = {**result}
     if "quota" in out and isinstance(out["quota"], dict):
         out["quota"] = mask_quota_brief(out["quota"])
+    if "selected_quotas" in out and isinstance(out["selected_quotas"], list):
+        out["selected_quotas"] = [mask_quota_brief(q) for q in out["selected_quotas"]]
     for key in ("alternatives", "matches", "credit_matches", "entrada_matches"):
         if key in out and isinstance(out[key], list):
             out[key] = [mask_marketplace_match_item(x) for x in out[key]]

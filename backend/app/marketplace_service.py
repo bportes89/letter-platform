@@ -499,10 +499,13 @@ def esteira1_partner_select(
         try:
             run_nina_quota_scan(db, user, quota)
         except HTTPException as exc:
+            failed_summary = _quota_summary(quota, admin)
             return {
                 "esteira": "SELF_SELECT",
                 "eligible": False,
-                "quota": _quota_summary(quota, admin),
+                "quota": failed_summary,
+                "selected_quotas": [failed_summary],
+                "combo": False,
                 "blockers": [str(exc.detail)],
                 "alternatives": _rank_alternatives(
                     db,
@@ -551,16 +554,117 @@ def esteira1_partner_select(
             band_percent=Decimal("100"),
         )
 
+    summary = _quota_summary(quota, admin)
     return {
         "esteira": "SELF_SELECT",
         "eligible": eligible,
-        "quota": _quota_summary(quota, admin),
+        "quota": summary,
+        "selected_quotas": [summary],
+        "combo": False,
         "blockers": blockers,
         "alternatives": alternatives,
         "message": (
             "Cliente apto para a carta escolhida (regras internas + Bacen/approval_rules). Prossiga com trava de 60 min e proposta."
             if eligible
             else "Cliente sem perfil para esta carta. Nina indicou alternativas compatíveis."
+        ),
+    }
+
+
+def esteira1_partner_select_combo(
+    db: Session,
+    user: User,
+    *,
+    quota_ids: list[str],
+    monthly_income: Decimal,
+    monthly_commitment: Decimal,
+    asset_value: Decimal,
+    asset_year: int,
+    has_credit_restriction: bool = False,
+    asset_is_zero_km: bool = False,
+) -> dict:
+    """Esteira 1 com junção manual — mesma administradora."""
+    del monthly_commitment
+    if len(quota_ids) < 2:
+        raise HTTPException(status_code=422, detail="Informe ao menos duas cotas para junção manual.")
+    quotas: list[Quota] = []
+    for qid in quota_ids:
+        quota = db.scalar(select(Quota).where(Quota.id == qid, Quota.organization_id == user.organization_id))
+        if not quota:
+            raise HTTPException(status_code=404, detail=f"Cota não encontrada: {qid}.")
+        if quota.status not in {"AVAILABLE", "RESERVED"}:
+            raise HTTPException(status_code=409, detail=f"Cota indisponível: {qid}.")
+        quotas.append(quota)
+
+    admin_ids = {q.administrator_id for q in quotas}
+    if len(admin_ids) > 1:
+        raise HTTPException(
+            status_code=422,
+            detail="Junção manual só permite cotas da mesma administradora.",
+        )
+    categories = {q.category for q in quotas}
+    if len(categories) > 1:
+        raise HTTPException(status_code=422, detail="Junção manual exige a mesma categoria (imóvel ou veículo).")
+
+    from app.quota_supplier_service import suppliers_index
+
+    suppliers = suppliers_index(db, user.organization_id)
+    blockers: list[str] = []
+    summaries: list[dict] = []
+    for quota in quotas:
+        admin = db.get(Administrator, quota.administrator_id)
+        if quota.nina_scan_status != "CLEARED":
+            try:
+                run_nina_quota_scan(db, user, quota)
+            except HTTPException as exc:
+                blockers.append(str(exc.detail))
+        summaries.append(_quota_summary(quota, admin, suppliers=suppliers))
+
+    combo_pricing = pricing_for_combo(quotas, suppliers=suppliers)
+    admin = db.get(Administrator, quotas[0].administrator_id)
+    profile_blockers = admin_profile_blockers(
+        admin,
+        category=quotas[0].category,
+        asset_year=asset_year,
+        asset_is_zero_km=asset_is_zero_km,
+        has_credit_restriction=has_credit_restriction,
+        credit_total=Decimal(str(combo_pricing["credit"])),
+        installment_total=Decimal(str(combo_pricing["installment"])),
+        monthly_income=monthly_income,
+        asset_value=asset_value,
+        combo_size=len(quotas),
+    )
+    blockers = list(dict.fromkeys([*blockers, *profile_blockers]))
+    eligible = len(blockers) == 0
+    target_credit = Decimal(str(combo_pricing["credit"]))
+    alternatives = []
+    if not eligible:
+        alternatives = _rank_alternatives(
+            db,
+            user,
+            target_amount=target_credit,
+            category=quotas[0].category,
+            asset_value=asset_value,
+            asset_year=asset_year,
+            monthly_income=monthly_income,
+            has_credit_restriction=has_credit_restriction,
+            asset_is_zero_km=asset_is_zero_km,
+            exclude_quota_id=quotas[0].id,
+            band_percent=Decimal("100"),
+        )
+
+    return {
+        "esteira": "SELF_SELECT",
+        "eligible": eligible,
+        "quota": summaries[0],
+        "selected_quotas": summaries,
+        "combo": True,
+        "blockers": blockers,
+        "alternatives": alternatives,
+        "message": (
+            f"Cliente apto para a junção de {len(quotas)} carta(s) (mesma administradora). Prossiga com trava e proposta."
+            if eligible
+            else "Cliente sem perfil para esta combinação. Nina indicou alternativas compatíveis."
         ),
     }
 

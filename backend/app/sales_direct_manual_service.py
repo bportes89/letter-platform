@@ -39,55 +39,66 @@ def _validate_document(person_type: str, document: str | None) -> str:
     return digits
 
 
-def list_cotas_options(db: Session, user: User, *, category: str) -> list[dict]:
-    """Cotas AVAILABLE da categoria, com entrada efetiva (markup + comissão embutida)."""
+def list_cotas_options(
+    db: Session,
+    user: User,
+    *,
+    category: str,
+    include_reserved: bool = False,
+) -> list[dict]:
+    """Cotas comerciais da categoria — identificação mascarada (sem fornecedor/sync)."""
     if category not in {"REAL_ESTATE", "VEHICLE"}:
         raise HTTPException(status_code=422, detail="Categoria deve ser REAL_ESTATE ou VEHICLE.")
     suppliers = suppliers_index(db, user.organization_id)
+    statuses = ["AVAILABLE", "RESERVED"] if include_reserved else ["AVAILABLE"]
     quotas = list(
         db.scalars(
             select(Quota)
             .where(
                 Quota.organization_id == user.organization_id,
-                Quota.status == "AVAILABLE",
+                Quota.status.in_(statuses),
                 Quota.category == category,
             )
             .order_by(Quota.credit_value.asc())
         )
     )
-    from app.marketplace_partner_view import mask_quota_fields, user_sees_supplier_quota_identity
+    from app.marketplace_partner_view import mask_quota_fields
 
-    show_identity = user_sees_supplier_quota_identity(user)
     rows: list[dict] = []
     for q in quotas:
         admin = db.get(Administrator, q.administrator_id)
         pricing = pricing_for_quota(q, suppliers=suppliers)
+        masked = mask_quota_fields(
+            {"group_code": q.group_code, "quota_code": q.quota_code},
+            quota_id=q.id,
+        )
+        parc_n = pricing["remaining_installments"]
+        parc_qty = f" · {parc_n} parcelas" if parc_n is not None else " · parcelas —"
+        admin_name = admin.name if admin else "—"
         label = (
-            f"Crédito: R$ {pricing['credit']} | Entrada: R$ {pricing['entrada_final']} | "
-            f"Parc.: R$ {pricing['installment']} | "
-            f"Adm.: {admin.name if admin else '—'}"
+            f"{masked['group_code']} · {masked['quota_code']} · {admin_name} · "
+            f"crédito R$ {pricing['credit']} · entrada R$ {pricing['entrada_final']} · "
+            f"parc. R$ {pricing['installment']}{parc_qty}"
         )
         row = {
             "quota_id": q.id,
-            "group_code": q.group_code,
-            "quota_code": q.quota_code,
+            "group_code": masked["group_code"],
+            "quota_code": masked["quota_code"],
             "category": q.category,
             "credit_value": str(pricing["credit"]),
             "premium_value": str(pricing["entrada_base"]),
             "entrada_final": str(pricing["entrada_final"]),
             "installment_value": str(pricing["installment"]),
             "remaining_installments": pricing["remaining_installments"],
-            "supplier_source": q.supplier_source if show_identity else None,
-            "markup_percent": pricing["markup_percent"] if show_identity else None,
-            "markup_amount": pricing["markup_amount"] if show_identity else None,
+            "supplier_source": None,
+            "markup_percent": None,
+            "markup_amount": None,
             "administrator_id": q.administrator_id,
-            "administrator_name": admin.name if admin else None,
+            "administrator_name": admin_name,
             "nina_scan_status": q.nina_scan_status,
             "installment_due_date": q.installment_due_date.isoformat() if q.installment_due_date else None,
             "label": label,
         }
-        if not show_identity:
-            row = mask_quota_fields(row, quota_id=q.id)
         rows.append(row)
     return rows
 
