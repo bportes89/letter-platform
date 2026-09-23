@@ -64,6 +64,16 @@ def referral_profile_for_user(db: Session, user: User, app_base_url: str) -> dic
         node = ensure_client_propagator_node(db, user)
         if not node:
             raise HTTPException(status_code=422, detail="Não foi possível gerar o código de indicação do cliente.")
+    elif user.role in {Role.PLATFORM_ADMIN, Role.INTERNAL_STAFF}:
+        from app.master_tree_service import MASTER_TREE_LETTER_BANK, ensure_master_root_node, get_master_root_user
+
+        master = get_master_root_user(db, user.organization_id, MASTER_TREE_LETTER_BANK)
+        if not master:
+            raise HTTPException(
+                status_code=422,
+                detail="Matriz Letter Bank não configurada para código de indicação.",
+            )
+        node = ensure_master_root_node(db, master, MASTER_TREE_LETTER_BANK)
     else:
         raise HTTPException(status_code=403, detail="Perfil sem permissão para código de indicação.")
     return {

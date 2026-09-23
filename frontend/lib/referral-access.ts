@@ -4,6 +4,9 @@ const REFERRAL_LINK_ROLES = new Set([
   "PARTNER",
   "QUOTA_SELLER",
   "CLIENT",
+  // Operação LETTER: link da matriz Letter Bank (API delega ao master raiz).
+  "PLATFORM_ADMIN",
+  "INTERNAL_STAFF",
 ]);
 
 export function canUseReferralLink(role?: string | null): boolean {

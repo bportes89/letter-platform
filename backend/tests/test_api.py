@@ -2024,6 +2024,17 @@ def test_network_me_referral_for_partner(client, monkeypatch):
     assert body["links"]["site"] == f"https://plataformaletter.com.br/?ref={body['referral_code']}"
 
 
+def test_network_me_referral_for_platform_admin_uses_letter_bank_master(client, monkeypatch):
+    monkeypatch.setattr("app.core.config.settings.public_app_url", "https://plataformaletter.com.br")
+    login = client.post("/api/v1/auth/login", json={"email": "admin@letter.com.br", "password": "Letter@123"}).json()
+    headers = {"Authorization": f"Bearer {login['access_token']}"}
+    referral = client.get("/api/v1/network/me/referral", headers=headers)
+    assert referral.status_code == 200
+    body = referral.json()
+    assert body["referral_code"].startswith("LTR-LET-")
+    assert f"?ref={body['referral_code']}" in body["links"]["site"]
+
+
 def test_network_me_referral_forbidden_for_investor(client):
     login = client.post("/api/v1/auth/login", json={"email": "investidor@letter.com.br", "password": "Letter@123"}).json()
     headers = {"Authorization": f"Bearer {login['access_token']}"}
