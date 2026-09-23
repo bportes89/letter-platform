@@ -259,8 +259,8 @@ export function CadastroMarketplaceModule() {
         <div className="notice">
           <ClipboardList />
           Novas vendas: <Link href="/modules/venda-direta-manual">Manual</Link> ·{" "}
-          <Link href="/modules/venda-direta-robo">Robô</Link> · Finalize contrato em{" "}
-          <Link href="/modules/proposals">Propostas</Link>.
+          <Link href="/modules/venda-direta-robo">Robô</Link> · SDC/Flash:{" "}
+          <Link href="/modules/proposals">Simulador de valores</Link>.
         </div>
 
         <div className="marketplace-tabs" style={{ marginBottom: "1rem" }}>
@@ -393,7 +393,10 @@ export function CadastroMarketplaceModule() {
               {selected.proposal_id ? (
                 <>
                   {" "}
-                  · <Link href="/modules/proposals">Proposta {selected.proposal_id.slice(0, 8)}…</Link>
+                  ·{" "}
+                  <Link href={`/modules/proposals?lead_id=${selected.lead_id}`}>
+                    Proposta {selected.proposal_id.slice(0, 8)}…
+                  </Link>
                 </>
               ) : null}
             </div>

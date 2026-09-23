@@ -31,8 +31,7 @@ SUPPLIER_ENTRADA_MARKUP_PERCENT: dict[str, Decimal] = {
 }
 
 DEFAULT_SUPPLIERS: tuple[dict, ...] = (
-    {"name": "Fraga Contemplados", "source_key": "FRAGA", "markup_percent": Decimal("3"), "document": "11111111000111"},
-    {"name": "Bittelo", "source_key": "BITTELO", "markup_percent": Decimal("3"), "document": "22222222000122"},
+    {"name": "Fraga e Bitello", "source_key": "FRAGA", "markup_percent": Decimal("3"), "document": "11111111000111"},
     {"name": "Lance Contemplados", "source_key": "LANCE", "markup_percent": Decimal("3"), "document": "33333333000133"},
     {"name": "Uni Contemplados", "source_key": "UNI_CONTEMPLADOS", "markup_percent": Decimal("10"), "document": "44444444000144"},
     {"name": "Contemplado SP", "source_key": "CONTEMPLADO_SP", "markup_percent": Decimal("10"), "document": "55555555000155"},
@@ -102,7 +101,7 @@ SUPPLIER_SYNC_PRESETS: dict[str, dict[str, str]] = {
             ensure_ascii=False,
         ),
     },
-    # API JSON — URLs do legado (suppliers.id 1 e 2 em letter_banco_new.sql). Fraga+Bitello eram um feed (id 1).
+    # API JSON — legado suppliers.id 1 (Cont. F&B = empresa Fraga e Bitello) e id 2 (Lance).
     "FRAGA": {
         "sync_mode": "JSON",
         "api_url": "https://fragaebitelloconsorcios.com.br/api/json/contemplados",

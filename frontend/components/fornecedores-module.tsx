@@ -132,8 +132,7 @@ export function FornecedoresModule() {
       const rows = await api<QuotaSupplier[]>("/marketplace/suppliers/ensure-defaults", { method: "POST" });
       setItems(rows);
       setNotice(
-        "Fornecedores padrão garantidos. Uni/Lume/Contemplado SP (scrape) e Fraga/Lance (API JSON do legado) já vêm com URL. " +
-          "Bittelo: informe URL própria em Editar se for feed separado do Fraga.",
+        "Fornecedores padrão garantidos. Uni/Lume/Contemplado SP (scrape) e Fraga e Bitello / Lance (API JSON do legado) já vêm com URL.",
       );
     } catch (e) {
       setError(e instanceof Error ? e.message : "Falha ao criar padrões");
@@ -284,8 +283,8 @@ export function FornecedoresModule() {
           <Truck />
           <div>
             <b>Sincronização automática</b> (cron Render ~30 min) só roda em fornecedores com{" "}
-            <b>Sync = API JSON</b> ou <b>Scrape HTML</b> e <b>URL preenchida</b>. Fraga e Lance já recebem URL do legado
-            em «Garantir padrões». Bittelo permanece manual até informar endpoint — edite ou use «Garantir
+            <b>Sync = API JSON</b> ou <b>Scrape HTML</b> e <b>URL preenchida</b>. Fraga e Bitello (uma empresa) e Lance
+            já recebem URL do legado em «Garantir padrões». Quem está manual não aparece em «Último sync» — use «Garantir
             padrão» após configurar as URLs no servidor.
             <br />
             <small style={{ display: "block", marginTop: "0.35rem" }}>

@@ -29,7 +29,7 @@ A análise lê `Administrator.rules_json` (painel), **incluindo** `approval_rule
 4. Combinação de cotas (junção) só na mesma administradora (até `max_combined_quotas`).
 5. **Rollover 7 dias:** se `installment_due_date` ≤ 7 dias, reduz 1 em `remaining_installments` e soma a parcela na entrada.
 6. **Markup na entrada** (% do crédito), conforme `supplier_source`:
-   - Fraga / Bittelo / Lance → **+3%**
+   - Fraga e Bitello (uma empresa) / Lance → **+3%**
    - Uni Contemplados / Contemplado SP / Lume → **+10%**
 7. Parceiro trava a opção e segue em Propostas.
 
@@ -67,7 +67,7 @@ CRUD em `GET/POST/PATCH /api/v1/marketplace/suppliers` (+ `POST .../ensure-defau
 - `source_key` único por org (FRAGA, BITTELO, LANCE, UNI_CONTEMPLADOS, CONTEMPLADO_SP, LUME…)
 - `markup_percent` — % do crédito somado na entrada (prevalece sobre o mapa hardcoded)
 - `quem_paga_comissao` — `0` fornecedor / `1` cliente embute `platform_fee_percent` na entrada
-- `POST .../ensure-defaults` cria os 9 fornecedores padrão (6 base + 3 veículos) e, se ainda sem `api_url`, aplica presets: **SCRAPE** (Uni / Contemplado SP / Lume + veículos) e **JSON** (**FRAGA** + **LANCE** — URLs do legado `suppliers.api`). No antigo, Fraga e Bitello compartilhavam o feed JSON do fornecedor 1; **BITTELO** só sincroniza se informar URL própria (admin ou `LETTER_MARKETPLACE_SUPPLIER_BITTELO_API_URL`). Não sobrescreve config manual.
+- `POST .../ensure-defaults` cria os 8 fornecedores padrão (Fraga e Bitello, Lance, Uni, Contemplado SP, Lume + 3 veículos) e, se ainda sem `api_url`, aplica presets: **SCRAPE** (Uni / Contemplado SP / Lume + veículos) e **JSON** (**FRAGA** = empresa Fraga e Bitello + **LANCE** — URLs do legado `suppliers.api`). `source_key` **BITTELO** permanece só em cotas legadas (+3% markup); não há fornecedor duplicado no cadastro. Não sobrescreve config manual.
 - Tabela admin mostra resumo do último sync (`+criadas ~atualizadas −inativadas`) via `last_sync_detail_json`.
 
 Menu: **Cartas contempladas → Fornecedores**.

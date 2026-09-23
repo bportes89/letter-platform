@@ -2,7 +2,7 @@
 
 import { Check, CheckCircle2, Clock3, Download, FileText, LockKeyhole, Plus, RefreshCw, Search, Unlock, Users, WalletCards, XCircle } from "lucide-react";
 import Link from "next/link";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Administrator, api, Calculation, CommercialClient, Contract, downloadApi, Lead, Proposal, Quota, Reservation, User } from "@/lib/api";
 import { FLASH_CAPITAL_SOURCES, productLabel, SDC_CAPITAL_SOURCES } from "@/lib/products";
 import { SdcQuitConProjectionTable } from "@/components/sdc-quitcon-card";
@@ -134,29 +134,19 @@ function marketplaceCotaLabel(c: MarketplaceCatalogCota): string {
   return commercialQuotaDisplay(c);
 }
 
-/** Oculta fornecedor/sync na tela comercial de propostas (mesmo quando o usuário é admin). */
-function partnerSafeQuotaIdentity(q: Quota): string {
-  const gc = (q.group_code || "").trim();
-  const qc = (q.quota_code || "").trim();
-  const looksSupplier =
-    /sync/i.test(gc) ||
-    /sync/i.test(qc) ||
-    gc.includes("/") ||
-    qc.includes("/") ||
-    /bradesco|porto|lume|fraga|bittelo|uni_contemplados/i.test(`${gc} ${qc}`);
-  if (!looksSupplier && gc === "Letter" && qc.startsWith("Ref ")) return `${gc} · ${qc}`;
-  if (!looksSupplier && gc.startsWith("Letter") && !gc.includes("_")) return `${gc} · ${qc}`;
-  const ref = q.id.replace(/-/g, "").slice(-6).toUpperCase();
-  return `Letter · Ref ${ref}`;
-}
-
-function proposalQuotaListLabel(q: Quota): string {
+function proposalQuotaListLabel(q: Quota, administratorName?: string | null): string {
   const cat = q.category === "REAL_ESTATE" ? "Imóvel" : "Veículo";
-  const due = q.installment_due_date
-    ? ` · venc. ${new Date(q.installment_due_date + "T12:00:00").toLocaleDateString("pt-BR")}`
-    : "";
-  const parc = q.remaining_installments != null ? ` · ${q.remaining_installments} parcelas` : "";
-  return `${partnerSafeQuotaIdentity(q)} · ${cat} · ${brl.format(Number(q.credit_value))}${due}${parc} · ${q.status}`;
+  const base = commercialQuotaDisplay({
+    quota_id: q.id,
+    group_code: q.group_code,
+    quota_code: q.quota_code,
+    credit_value: q.credit_value,
+    entrada_final: String(q.entrada_final ?? q.premium_value ?? 0),
+    installment_value: q.installment_value,
+    remaining_installments: q.remaining_installments,
+    administrator_name: administratorName,
+  });
+  return `${base} · ${cat} · ${q.status}`;
 }
 
 function marketplaceProfileValue(profile: Record<string, string>, prefix: "e1" | "e2", key: "income" | "asset" | "year"): string {
@@ -327,25 +317,458 @@ export function MarketplaceModule() {
 }
 
 export function ProposalsModule() {
-  const [items,setItems]=useState<Proposal[]>([]);const [leads,setLeads]=useState<Lead[]>([]);const [quotas,setQuotas]=useState<Quota[]>([]);const [contracts,setContracts]=useState<Contract[]>([]);const [clients,setClients]=useState<CommercialClient[]>([]);const [isCommercial,setIsCommercial]=useState(false);const [selected,setSelected]=useState<string[]>([]);const [notice,setNotice]=useState("");const [proposalError,setProposalError]=useState("");
-  const [newProduct,setNewProduct]=useState("MARKETPLACE");
-  const [requestedAmount,setRequestedAmount]=useState("");
-  const [duration,setDuration]=useState(12);const [sdcCapitalSource,setSdcCapitalSource]=useState("POOL");const [poolInvestmentAmount,setPoolInvestmentAmount]=useState("");const [sdcPoolInvestorRate,setSdcPoolInvestorRate]=useState("");const [assetValue,setAssetValue]=useState("");const [capitalSource,setCapitalSource]=useState("RETAIL");const [flashPoolInvestorRate,setFlashPoolInvestorRate]=useState("");const [term,setTerm]=useState(36);const [lastCalculation,setLastCalculation]=useState<Calculation|null>(null);const [flashIpcaAnnual,setFlashIpcaAnnual]=useState("4.5");
-  useEffect(()=>{api<{default_ipca_projected_percent?:string}>("/finops/flash-capital/simulation-params").then(p=>{if(p.default_ipca_projected_percent)setFlashIpcaAnnual(p.default_ipca_projected_percent)}).catch(()=>undefined)},[]);
-  const poolRatePreview=useMemo(()=>{const amount=Number(poolInvestmentAmount);if(!amount||amount<=0)return null;return {rate:"1,6"}},[poolInvestmentAmount]);
-  const load=()=>Promise.all([api<User>("/auth/me"),api<Proposal[]>("/proposals"),api<Lead[]>("/leads"),api<Quota[]>("/quotas"),api<Contract[]>("/contracts")]).then(async([me,p,l,q,c])=>{setItems(p);setLeads(l);setQuotas(q);setContracts(c);const commercial=["MASTER_FRANCHISEE","MANAGER","PARTNER","QUOTA_SELLER"].includes(me.role);setIsCommercial(commercial);if(commercial){try{setClients(await api<CommercialClient[]>("/commercial/clients"))}catch{setClients([])}}else{setClients([])}});useEffect(()=>{void load()},[]);
-  const available=useMemo(()=>quotas.filter(q=>q.status==="AVAILABLE"||q.status==="RESERVED"),[quotas]);
-  async function submit(e:FormEvent<HTMLFormElement>){e.preventDefault();setProposalError("");setNotice("");const form=e.currentTarget;const fd=new FormData(form);const amount=parseMoney(requestedAmount);if(!amount){setProposalError("Informe o valor solicitado (R$).");return}const leadId=String(fd.get("lead_id")||"").trim();if(!leadId){setProposalError(leads.length?"Selecione o cliente (lead) no campo acima.":"Cadastre um lead no CRM antes de criar a proposta.");return}const clientId=String(fd.get("client_user_id")||"");const product=String(fd.get("product")||"MARKETPLACE");try{await api("/proposals",{method:"POST",body:JSON.stringify({lead_id:leadId,product,requested_amount:String(amount),client_user_id:clientId||undefined,sale_channel:isCommercial?"PARTNER_OFFICE":undefined,terms:{channel:isCommercial?"PARTNER_OFFICE":"SELF_SERVICE"}})});form.reset();setRequestedAmount("");setNewProduct(product);setNotice("Proposta criada. Na tabela abaixo, ajuste os parâmetros se precisar e clique em Simular.");void load()}catch(err){setProposalError(err instanceof Error?err.message:"Não foi possível criar a proposta.")}}
-  async function calculate(p:Proposal){setNotice("");try{let path=`/proposals/${p.id}/calculate`;let payload:Record<string,unknown>={quota_ids:selected,fee_percent:"10",start_fee:"1500"};if(p.product==="SDC"){path=`/proposals/${p.id}/calculate-sdc`;payload={quota_ids:selected,duration_months:duration,capital_source:sdcCapitalSource};if(sdcCapitalSource==="POOL"){if(poolInvestmentAmount)payload.pool_investment_amount=poolInvestmentAmount;if(sdcPoolInvestorRate)payload.pool_investor_rate_percent=sdcPoolInvestorRate}}if(p.product==="FLASH_CREDIT"){path=`/proposals/${p.id}/calculate-flash-credit`;const fundSource=capitalSource==="INSTITUTIONAL";payload={asset_value:assetValue,capital_source:capitalSource,term_months:term,ipca_annual_percent:fundSource?flashIpcaAnnual:"0"};if(capitalSource==="RETAIL"){if(poolInvestmentAmount)payload.pool_investment_amount=poolInvestmentAmount;if(flashPoolInvestorRate)payload.pool_investor_rate_percent=flashPoolInvestorRate}}const calc=await api<Calculation>(path,{method:"POST",body:JSON.stringify(payload)});setLastCalculation(calc);setNotice(`Memória ${calc.formula_version} criada com sucesso.`);setSelected([]);load()}catch(e){setNotice(e instanceof Error?e.message:"Falha no cálculo")}}
-  async function contract(p:Proposal){const calcs=await api<{id:string}[]>(`/proposals/${p.id}/calculations`);if(!calcs.length){setNotice("Calcule a proposta antes de gerar o contrato.");return}await api(`/proposals/${p.id}/contracts`,{method:"POST",body:JSON.stringify({calculation_memory_id:calcs[0].id})});setNotice("Contrato gerado com hash de integridade.");load()}
-  return <OperationalLayout title="Propostas e simulações" subtitle="Cadastro comercial unificado para parceiros: Marketplace, SDC e Flash Capital. Simule, gere contrato e registre a venda." icon={<FileText/>}>
-    <div className="notice"><Clock3/><div><b>Compliance automático por produto</b><small style={{display:"block",marginTop:"0.35rem",lineHeight:1.5}}><b>Passo 1</b> — Selecione o cliente (lead), produto e valor; clique em <em>Nova proposta</em> (a linha aparece na tabela).<br/><b>Passo 2</b> — Ajuste parâmetros (cotas, pool, Flash/SDC) e clique <em>Simular</em> para memória versionada.<br/><b>Passo 3</b> — <em>Gerar contrato</em> registra a venda; Marketplace exige cotas travadas no inventário.<br/><b>SDC</b> — mesa em <Link href="/modules/sdc">SDC — Capital de Giro</Link>.<br/><b>Flash Capital</b> — mesa em <Link href="/modules/flash-capital">Flash Capital</Link> (fundo usa IPCA projetado na simulação).<br/><b>QuitCon</b> — mesa em <Link href="/modules/quitcon">QuitCon</Link>.</small></div></div>
-    <form className="quick-form" onSubmit={submit}>{isCommercial&&clients.length>0&&<select name="client_user_id"><option value="">Cliente no escritório (opcional)</option>{clients.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select>}<select name="lead_id" required aria-label="Cliente (lead)"><option value="">{leads.length?"Selecione o cliente (lead)":"Nenhum lead — cadastre no CRM"}</option>{leads.map(l=><option value={l.id} key={l.id}>{l.name}</option>)}</select><select name="product" value={newProduct} onChange={e=>setNewProduct(e.target.value)}><option value="MARKETPLACE">Marketplace</option><option value="SDC">SDC</option><option value="FLASH_CREDIT">Flash Capital</option></select><CurrencyInput value={requestedAmount} onChange={setRequestedAmount} placeholder="Valor solicitado (R$)" required/><button type="submit"><Plus/>Nova proposta</button></form>
-    {proposalError&&<div className="error">{proposalError}</div>}
-    <div className="product-parameters"><div><b>Parâmetros documentais</b><small>SDC: 4,5% total · Flash Capital: fruição fixa 2,5% a.m. (Tabela Price, sem 14% + IPCA) · Pool investidor: 1,6% a.m.</small></div><label>SDC — duração<input type="number" min="1" max="60" value={duration} onChange={e=>setDuration(Number(e.target.value))}/></label><label>SDC — origem<select value={sdcCapitalSource} onChange={e=>setSdcCapitalSource(e.target.value)}>{SDC_CAPITAL_SOURCES.map(x=><option key={x.value} value={x.value}>{x.label}</option>)}</select></label>{sdcCapitalSource==="POOL"&&<><label>Pool — valor aplicado (R$)<CurrencyInput value={poolInvestmentAmount} onChange={setPoolInvestmentAmount}/><small>Rentabilidade pool: 1,6% a.m. para qualquer valor aplicado.</small></label>{poolRatePreview&&<div className="notice"><RefreshCw/>Rentabilidade pool: {poolRatePreview.rate}% a.m. (livre de imposto)</div>}<label>SDC — override campanha (% a.m., opcional)<input type="number" min="0" max="4.5" step="0.1" value={sdcPoolInvestorRate} onChange={e=>setSdcPoolInvestorRate(e.target.value)} placeholder="Deixe vazio para 1,6% padrão"/></label></>}<label>Valor do bem<CurrencyInput value={assetValue} onChange={setAssetValue}/></label><label>Flash Capital — origem<select value={capitalSource} onChange={e=>setCapitalSource(e.target.value)}>{FLASH_CAPITAL_SOURCES.map(x=><option key={x.value} value={x.value}>{x.label}</option>)}</select></label>{capitalSource==="INSTITUTIONAL"&&<div className="notice"><small>Origem fundo: IPCA anual projetado {flashIpcaAnnual}% aplicado na memória de cálculo (fruição 2,5% a.m. inalterada).</small></div>}{capitalSource==="RETAIL"&&<><label>Pool — valor aplicado (R$)<CurrencyInput value={poolInvestmentAmount} onChange={setPoolInvestmentAmount}/><small>Rentabilidade pool: 1,6% a.m. para qualquer valor aplicado.</small></label>{poolRatePreview&&<div className="notice"><RefreshCw/>Rentabilidade pool: {poolRatePreview.rate}% a.m. (livre de imposto)</div>}<label>Flash — override campanha (% a.m., opcional)<input type="number" min="0" max="2.5" step="0.1" value={flashPoolInvestorRate} onChange={e=>setFlashPoolInvestorRate(e.target.value)} placeholder="Deixe vazio para 1,6% padrão"/></label></>}<label>Prazo<select value={term} onChange={e=>setTerm(Number(e.target.value))}><option value={36}>36 meses</option><option value={60}>60 meses + balão</option></select></label></div>
-    {newProduct!=="FLASH_CREDIT"&&<div className="selection-box"><div><b>Passo 2 — Cotas para simulação ({newProduct==="SDC"?"SDC":"Marketplace"})</b><small>Depois de criar a proposta, marque uma ou mais cotas <b>disponíveis ou travadas</b> para você. Na tabela, clique <em>Simular</em> na linha da proposta. Para Marketplace, trave a cota no inventário antes do contrato. Identificação das cotas é interna (sem nome de fornecedor).</small></div><div>{available.length?available.map(q=><label key={q.id}><input type="checkbox" checked={selected.includes(q.id)} onChange={e=>setSelected(v=>e.target.checked?[...v,q.id]:v.filter(id=>id!==q.id))}/>{proposalQuotaListLabel(q)}</label>):<p className="muted">Nenhuma cota disponível no inventário no momento.</p>}</div></div>}
-    {notice&&<div className="notice"><RefreshCw/>{notice}</div>}{lastCalculation&&<CalculationResult calculation={lastCalculation}/>}<DataTable headers={["Produto","Valor","Canal","Comissão","Parceiro","Status","Workflow"]}>{items.map(p=>{const hasContract=contracts.some(c=>c.proposal_id===p.id);const needsQuota=p.product!=="FLASH_CREDIT";return <tr key={p.id}><td><b>{productLabel(p.product)}</b><small>{p.lead_name??leads.find(l=>l.id===p.lead_id)?.name}</small></td><td>{brl.format(Number(p.requested_amount))}</td><td><small>{p.sale_channel??"—"}</small></td><td><b>{p.commission_originator_name??"—"}</b></td><td><b>{p.owner_name??"—"}</b><small>{p.served_by_name?`Atend.: ${p.served_by_name}`:p.owner_role??""}</small></td><td><Pill value={p.status}/></td><td className="actions-cell"><button className="table-action" disabled={needsQuota&&!selected.length} onClick={()=>calculate(p)}>Simular</button><button className="table-action" disabled={hasContract} onClick={()=>contract(p)}>{hasContract?"Contrato criado":"Gerar contrato"}</button></td></tr>})}</DataTable>
-  </OperationalLayout>
+  const [items, setItems] = useState<Proposal[]>([]);
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [quotas, setQuotas] = useState<Quota[]>([]);
+  const [admins, setAdmins] = useState<Administrator[]>([]);
+  const [contracts, setContracts] = useState<Contract[]>([]);
+  const [clients, setClients] = useState<CommercialClient[]>([]);
+  const [isCommercial, setIsCommercial] = useState(false);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [notice, setNotice] = useState("");
+  const [proposalError, setProposalError] = useState("");
+  const [selectedLeadId, setSelectedLeadId] = useState("");
+  const [highlightProposalId, setHighlightProposalId] = useState<string | null>(null);
+  const proposalsTableRef = useRef<HTMLDivElement>(null);
+  const [newProduct, setNewProduct] = useState("SDC");
+  const [requestedAmount, setRequestedAmount] = useState("");
+  const [duration, setDuration] = useState(12);
+  const [sdcCapitalSource, setSdcCapitalSource] = useState("POOL");
+  const [poolInvestmentAmount, setPoolInvestmentAmount] = useState("");
+  const [sdcPoolInvestorRate, setSdcPoolInvestorRate] = useState("");
+  const [assetValue, setAssetValue] = useState("");
+  const [capitalSource, setCapitalSource] = useState("RETAIL");
+  const [flashPoolInvestorRate, setFlashPoolInvestorRate] = useState("");
+  const [term, setTerm] = useState(36);
+  const [lastCalculation, setLastCalculation] = useState<Calculation | null>(null);
+  const [flashIpcaAnnual, setFlashIpcaAnnual] = useState("4.5");
+
+  useEffect(() => {
+    api<{ default_ipca_projected_percent?: string }>("/finops/flash-capital/simulation-params")
+      .then((p) => {
+        if (p.default_ipca_projected_percent) setFlashIpcaAnnual(p.default_ipca_projected_percent);
+      })
+      .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const id = new URLSearchParams(window.location.search).get("lead_id");
+    if (id) setSelectedLeadId(id);
+  }, []);
+
+  const poolRatePreview = useMemo(() => {
+    const amount = Number(poolInvestmentAmount);
+    if (!amount || amount <= 0) return null;
+    return { rate: "1,6" };
+  }, [poolInvestmentAmount]);
+
+  const adminById = useMemo(() => new Map(admins.map((a) => [a.id, a.name])), [admins]);
+
+  const load = () =>
+    Promise.all([
+      api<User>("/auth/me"),
+      api<Proposal[]>("/proposals"),
+      api<Lead[]>("/leads"),
+      api<Quota[]>("/quotas"),
+      api<Contract[]>("/contracts"),
+      api<Administrator[]>("/administrators").catch(() => [] as Administrator[]),
+    ]).then(async ([me, p, l, q, c, a]) => {
+      setItems(p);
+      setLeads(l);
+      setQuotas(q);
+      setContracts(c);
+      setAdmins(a);
+      const commercial = ["MASTER_FRANCHISEE", "MANAGER", "PARTNER", "QUOTA_SELLER"].includes(me.role);
+      setIsCommercial(commercial);
+      if (commercial) {
+        try {
+          setClients(await api<CommercialClient[]>("/commercial/clients"));
+        } catch {
+          setClients([]);
+        }
+      } else {
+        setClients([]);
+      }
+    });
+
+  useEffect(() => {
+    void load();
+  }, []);
+
+  const available = useMemo(() => quotas.filter((q) => q.status === "AVAILABLE" || q.status === "RESERVED"), [quotas]);
+  const showQuotaPicker = newProduct === "SDC" || (!isCommercial && newProduct === "MARKETPLACE");
+
+  async function submit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setProposalError("");
+    setNotice("");
+    const fd = new FormData(e.currentTarget);
+    const amount = parseMoney(requestedAmount);
+    if (!amount) {
+      setProposalError("Informe o valor solicitado (R$).");
+      return;
+    }
+    const leadId = selectedLeadId.trim();
+    if (!leadId) {
+      setProposalError(
+        leads.length
+          ? "Selecione o cadastro do cliente no campo acima."
+          : "Cadastre um lead no CRM ou use Cadastros / Venda Direta antes de simular.",
+      );
+      return;
+    }
+    const clientId = String(fd.get("client_user_id") || "");
+    const product = isCommercial && newProduct === "MARKETPLACE" ? "SDC" : newProduct;
+    try {
+      const created = await api<Proposal>("/proposals", {
+        method: "POST",
+        body: JSON.stringify({
+          lead_id: leadId,
+          product,
+          requested_amount: String(amount),
+          client_user_id: clientId || undefined,
+          sale_channel: isCommercial ? "PARTNER_OFFICE" : undefined,
+          terms: { channel: isCommercial ? "PARTNER_OFFICE" : "SELF_SERVICE" },
+        }),
+      });
+      setHighlightProposalId(created.id);
+      setRequestedAmount("");
+      setNotice(
+        "Simulação adicionada na tabela abaixo. Marque as cotas (SDC) ou ajuste os parâmetros e clique em Simular na linha correspondente.",
+      );
+      await load();
+      proposalsTableRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    } catch (err) {
+      setProposalError(err instanceof Error ? err.message : "Não foi possível criar a proposta.");
+    }
+  }
+
+  async function calculate(p: Proposal) {
+    setNotice("");
+    try {
+      let path = `/proposals/${p.id}/calculate`;
+      let payload: Record<string, unknown> = { quota_ids: selected, fee_percent: "10", start_fee: "1500" };
+      if (p.product === "SDC") {
+        path = `/proposals/${p.id}/calculate-sdc`;
+        payload = { quota_ids: selected, duration_months: duration, capital_source: sdcCapitalSource };
+        if (sdcCapitalSource === "POOL") {
+          if (poolInvestmentAmount) payload.pool_investment_amount = poolInvestmentAmount;
+          if (sdcPoolInvestorRate) payload.pool_investor_rate_percent = sdcPoolInvestorRate;
+        }
+      }
+      if (p.product === "FLASH_CREDIT") {
+        path = `/proposals/${p.id}/calculate-flash-credit`;
+        const fundSource = capitalSource === "INSTITUTIONAL";
+        payload = {
+          asset_value: assetValue,
+          capital_source: capitalSource,
+          term_months: term,
+          ipca_annual_percent: fundSource ? flashIpcaAnnual : "0",
+        };
+        if (capitalSource === "RETAIL") {
+          if (poolInvestmentAmount) payload.pool_investment_amount = poolInvestmentAmount;
+          if (flashPoolInvestorRate) payload.pool_investor_rate_percent = flashPoolInvestorRate;
+        }
+      }
+      const calc = await api<Calculation>(path, { method: "POST", body: JSON.stringify(payload) });
+      setLastCalculation(calc);
+      setHighlightProposalId(p.id);
+      setNotice(`Memória ${calc.formula_version} criada com sucesso.`);
+      setSelected([]);
+      void load();
+    } catch (e) {
+      setNotice(e instanceof Error ? e.message : "Falha no cálculo");
+    }
+  }
+
+  async function contract(p: Proposal) {
+    const calcs = await api<{ id: string }[]>(`/proposals/${p.id}/calculations`);
+    if (!calcs.length) {
+      setNotice("Calcule a proposta antes de gerar o contrato.");
+      return;
+    }
+    await api(`/proposals/${p.id}/contracts`, {
+      method: "POST",
+      body: JSON.stringify({ calculation_memory_id: calcs[0].id }),
+    });
+    setNotice("Contrato gerado com hash de integridade.");
+    void load();
+  }
+
+  const pageTitle = isCommercial ? "Simulador de valores" : "Propostas e simulações";
+  const pageSubtitle = isCommercial
+    ? "SDC e Flash Capital: selecione o cadastro do cliente, informe o valor e avance com Simular na tabela. Cartas contempladas ficam em Venda Direta e Cadastros."
+    : "Marketplace, SDC e Flash Capital. Simule, gere contrato e registre a venda.";
+
+  return (
+    <OperationalLayout title={pageTitle} subtitle={pageSubtitle} icon={<FileText />}>
+      <div className="notice">
+        <Clock3 />
+        <div>
+          <b>Como usar</b>
+          <small style={{ display: "block", marginTop: "0.35rem", lineHeight: 1.5 }}>
+            <b>Passo 1</b> — Selecione o <em>cadastro</em> do cliente, o produto (SDC ou Flash) e o valor; clique em{" "}
+            <em>Adicionar simulação</em> (a linha aparece na tabela — o formulário não apaga o cliente).
+            <br />
+            <b>Passo 2</b> — Ajuste os parâmetros do produto e, no SDC, marque as cotas na lista (entrada, parcela,
+            prazo e administradora). Clique <em>Simular</em> na linha da tabela.
+            <br />
+            <b>Passo 3</b> — <em>Gerar contrato</em> quando a memória estiver pronta.
+            {isCommercial ? (
+              <>
+                <br />
+                <b>Marketplace</b> — use{" "}
+                <Link href="/modules/venda-direta-manual">Venda Direta Manual</Link> ou{" "}
+                <Link href="/modules/cadastros">Cadastros</Link>.
+              </>
+            ) : (
+              <>
+                <br />
+                <b>Marketplace</b> — exige cotas travadas no inventário antes do contrato.
+              </>
+            )}
+            <br />
+            <b>SDC</b> — mesa em <Link href="/modules/sdc">SDC — Capital de Giro</Link>. · <b>Flash Capital</b> —{" "}
+            <Link href="/modules/flash-capital">Flash Capital</Link>.
+          </small>
+        </div>
+      </div>
+      <form className="quick-form" onSubmit={submit}>
+        {isCommercial && clients.length > 0 && (
+          <select name="client_user_id">
+            <option value="">Cliente no escritório (opcional)</option>
+            {clients.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        )}
+        <select
+          value={selectedLeadId}
+          onChange={(e) => setSelectedLeadId(e.target.value)}
+          required
+          aria-label="Cadastro do cliente"
+        >
+          <option value="">
+            {leads.length ? "Selecione o cadastro do cliente" : "Nenhum cadastro — use CRM ou Cadastros"}
+          </option>
+          {leads.map((l) => (
+            <option value={l.id} key={l.id}>
+              {l.name}
+            </option>
+          ))}
+        </select>
+        <select value={newProduct} onChange={(e) => setNewProduct(e.target.value)}>
+          {!isCommercial && <option value="MARKETPLACE">Marketplace</option>}
+          <option value="SDC">SDC</option>
+          <option value="FLASH_CREDIT">Flash Capital</option>
+        </select>
+        <CurrencyInput value={requestedAmount} onChange={setRequestedAmount} placeholder="Valor solicitado (R$)" />
+        <button type="submit">
+          <Plus />
+          Adicionar simulação
+        </button>
+      </form>
+      {proposalError && <div className="error">{proposalError}</div>}
+      {(newProduct === "SDC" || newProduct === "FLASH_CREDIT") && (
+        <div className="product-parameters">
+          <div>
+            <b>Parâmetros — {newProduct === "SDC" ? "SDC" : "Flash Capital"}</b>
+            <small>
+              {newProduct === "SDC"
+                ? "SDC: 4,5% total · Pool investidor: 1,6% a.m."
+                : "Flash: fruição 2,5% a.m. (Tabela Price) · Pool: 1,6% a.m."}
+            </small>
+          </div>
+          {newProduct === "SDC" && (
+            <>
+              <label>
+                SDC — duração
+                <input type="number" min="1" max="60" value={duration} onChange={(e) => setDuration(Number(e.target.value))} />
+              </label>
+              <label>
+                SDC — origem
+                <select value={sdcCapitalSource} onChange={(e) => setSdcCapitalSource(e.target.value)}>
+                  {SDC_CAPITAL_SOURCES.map((x) => (
+                    <option key={x.value} value={x.value}>
+                      {x.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {sdcCapitalSource === "POOL" && (
+                <>
+                  <label>
+                    Pool — valor aplicado (R$)
+                    <CurrencyInput value={poolInvestmentAmount} onChange={setPoolInvestmentAmount} />
+                    <small>Rentabilidade pool: 1,6% a.m.</small>
+                  </label>
+                  {poolRatePreview && (
+                    <div className="notice">
+                      <RefreshCw />
+                      Rentabilidade pool: {poolRatePreview.rate}% a.m. (livre de imposto)
+                    </div>
+                  )}
+                  <label>
+                    SDC — override campanha (% a.m., opcional)
+                    <input
+                      type="number"
+                      min="0"
+                      max="4.5"
+                      step="0.1"
+                      value={sdcPoolInvestorRate}
+                      onChange={(e) => setSdcPoolInvestorRate(e.target.value)}
+                      placeholder="Deixe vazio para 1,6% padrão"
+                    />
+                  </label>
+                </>
+              )}
+            </>
+          )}
+          {newProduct === "FLASH_CREDIT" && (
+            <>
+              <label>
+                Valor do bem
+                <CurrencyInput value={assetValue} onChange={setAssetValue} />
+              </label>
+              <label>
+                Flash Capital — origem
+                <select value={capitalSource} onChange={(e) => setCapitalSource(e.target.value)}>
+                  {FLASH_CAPITAL_SOURCES.map((x) => (
+                    <option key={x.value} value={x.value}>
+                      {x.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {capitalSource === "INSTITUTIONAL" && (
+                <div className="notice">
+                  <small>
+                    Origem fundo: IPCA anual projetado {flashIpcaAnnual}% na memória (fruição 2,5% a.m. inalterada).
+                  </small>
+                </div>
+              )}
+              {capitalSource === "RETAIL" && (
+                <>
+                  <label>
+                    Pool — valor aplicado (R$)
+                    <CurrencyInput value={poolInvestmentAmount} onChange={setPoolInvestmentAmount} />
+                    <small>Rentabilidade pool: 1,6% a.m.</small>
+                  </label>
+                  {poolRatePreview && (
+                    <div className="notice">
+                      <RefreshCw />
+                      Rentabilidade pool: {poolRatePreview.rate}% a.m. (livre de imposto)
+                    </div>
+                  )}
+                  <label>
+                    Flash — override campanha (% a.m., opcional)
+                    <input
+                      type="number"
+                      min="0"
+                      max="2.5"
+                      step="0.1"
+                      value={flashPoolInvestorRate}
+                      onChange={(e) => setFlashPoolInvestorRate(e.target.value)}
+                      placeholder="Deixe vazio para 1,6% padrão"
+                    />
+                  </label>
+                </>
+              )}
+              <label>
+                Prazo
+                <select value={term} onChange={(e) => setTerm(Number(e.target.value))}>
+                  <option value={36}>36 meses</option>
+                  <option value={60}>60 meses + balão</option>
+                </select>
+              </label>
+            </>
+          )}
+        </div>
+      )}
+      {showQuotaPicker && (
+        <div className="selection-box">
+          <div>
+            <b>Relação de cotas — {newProduct === "SDC" ? "SDC" : "Marketplace"}</b>
+            <small>
+              Marque uma ou mais cotas disponíveis ou travadas. Cada linha mostra administradora, crédito, entrada,
+              parcela e quantidade de parcelas. Depois clique <em>Simular</em> na proposta na tabela.
+            </small>
+          </div>
+          <div>
+            {available.length ? (
+              available.map((q) => (
+                <label key={q.id}>
+                  <input
+                    type="checkbox"
+                    checked={selected.includes(q.id)}
+                    onChange={(e) =>
+                      setSelected((v) => (e.target.checked ? [...v, q.id] : v.filter((id) => id !== q.id)))
+                    }
+                  />
+                  {proposalQuotaListLabel(q, adminById.get(q.administrator_id))}
+                </label>
+              ))
+            ) : (
+              <p className="muted">Nenhuma cota disponível no inventário no momento.</p>
+            )}
+          </div>
+        </div>
+      )}
+      {notice && (
+        <div className="notice">
+          <RefreshCw />
+          {notice}
+        </div>
+      )}
+      {lastCalculation && <CalculationResult calculation={lastCalculation} />}
+      <div ref={proposalsTableRef}>
+        <DataTable headers={["Produto", "Valor", "Canal", "Comissão", "Parceiro", "Status", "Workflow"]}>
+          {items.map((p) => {
+            const hasContract = contracts.some((c) => c.proposal_id === p.id);
+            const needsQuota = p.product !== "FLASH_CREDIT";
+            return (
+              <tr
+                key={p.id}
+                style={
+                  highlightProposalId === p.id ? { background: "rgba(34, 197, 94, 0.08)" } : undefined
+                }
+              >
+                <td>
+                  <b>{productLabel(p.product)}</b>
+                  <small>{p.lead_name ?? leads.find((l) => l.id === p.lead_id)?.name}</small>
+                </td>
+                <td>{brl.format(Number(p.requested_amount))}</td>
+                <td>
+                  <small>{p.sale_channel ?? "—"}</small>
+                </td>
+                <td>
+                  <b>{p.commission_originator_name ?? "—"}</b>
+                </td>
+                <td>
+                  <b>{p.owner_name ?? "—"}</b>
+                  <small>{p.served_by_name ? `Atend.: ${p.served_by_name}` : p.owner_role ?? ""}</small>
+                </td>
+                <td>
+                  <Pill value={p.status} />
+                </td>
+                <td className="actions-cell">
+                  <button className="table-action" disabled={needsQuota && !selected.length} onClick={() => calculate(p)}>
+                    Simular
+                  </button>
+                  <button className="table-action" disabled={hasContract} onClick={() => contract(p)}>
+                    {hasContract ? "Contrato criado" : "Gerar contrato"}
+                  </button>
+                </td>
+              </tr>
+            );
+          })}
+        </DataTable>
+      </div>
+    </OperationalLayout>
+  );
 }
 
 function CalculationResult({calculation}:{calculation:Calculation}){const labels:Record<string,string>={principal:"Principal (nominal)",total_interest:"Juros totais",investor_interest:"Investidores",platform_spread:"Spread LETTER",maturity_total:"Total no vencimento",start_fee_total:"Taxa de Start",start_fee_milestone_1:"Marco 1",start_fee_milestone_2:"Marco 2",intermediation_fee:"Fee 10%",capital_commission:"Captação 1%",asset_value:"Valor do bem",ltv_percent:"LTV (%)",monthly_payment:"Parcela",balloon_payment:"Parcela balão",management_fee_total:"Gestão 0,5%",itbi_provision:"Provisão ITBI",platform_fee:"Fee plataforma",structuring_fee:"Fee plataforma",partner_commission_base:"Base comissão rede",net_payout:"Payout líquido",total_contract:"Total do contrato",pool_investor_rate_percent:"Rentabilidade pool (% a.m.)",pool_investor_tier_label:"Faixa pool",pool_investor_tax_status:"Status fiscal pool",investor_rate_percent:"Rentabilidade investidor (% a.m.)",platform_spread_rate_percent:"Spread plataforma (% a.m.)"};const entries=Object.entries(calculation.output).filter(([key,value])=>labels[key]&&value!==null);const notes=[calculation.output.partner_commission_basis_note,calculation.output.interest_basis_note,calculation.output.pool_investor_tax_note].filter(x=>typeof x==="string");const quitconContext=calculation.formula_version.startsWith("sdc-")&&calculation.quitcon_sdc?{proposalId:calculation.proposal_id,calculationMemoryId:calculation.id,mesesRestantes:Number(calculation.output.duration_months??calculation.input.duration_months??0)||undefined}:undefined;return <div className="calculation-result"><div><span className="eyebrow dark">MEMÓRIA VERSIONADA</span><b>{calculation.formula_version}</b></div>{notes.map((note,i)=><small key={i}>{String(note)}</small>)}<div>{entries.map(([key,value])=><article key={key}><small>{labels[key]}</small><strong>{key.includes("percent")||key==="pool_investor_rate_percent"?`${value}%`:key==="pool_investor_tax_status"?"Livre de imposto (sem retenção)":key.includes("tier")?String(value):brl.format(Number(value))}</strong></article>)}</div>{calculation.quitcon_sdc&&<SdcQuitConProjectionTable data={calculation.quitcon_sdc} context={quitconContext}/>}</div>}

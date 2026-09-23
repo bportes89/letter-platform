@@ -1417,9 +1417,9 @@ def test_marketplace_suppliers_crud_and_markup_override(client, auth_headers):
 
     seeded = client.post("/api/v1/marketplace/suppliers/ensure-defaults", headers=auth_headers)
     assert seeded.status_code == 200
-    assert len(seeded.json()) >= 9
+    assert len(seeded.json()) >= 8
     by_key = {x["source_key"]: x for x in seeded.json()}
-    assert {"FRAGA", "LUME", "BITTELO"} <= set(by_key)
+    assert {"FRAGA", "LUME", "LANCE"} <= set(by_key)
     uni = by_key["UNI_CONTEMPLADOS"]
     assert uni["sync_mode"] == "SCRAPE"
     assert "unicontemplados.com.br" in (uni.get("api_url") or "")
@@ -1440,7 +1440,7 @@ def test_marketplace_suppliers_crud_and_markup_override(client, auth_headers):
     lance = by_key["LANCE"]
     assert lance["sync_mode"] == "JSON"
     assert "lanceconsorcio.com.br" in (lance.get("api_url") or "")
-    assert by_key["BITTELO"]["sync_mode"] == "NONE"
+    assert by_key["FRAGA"]["name"] == "Fraga e Bitello"
 
     created = client.post(
         "/api/v1/marketplace/suppliers",
