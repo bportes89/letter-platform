@@ -2817,6 +2817,8 @@ class SdcDeskEvaluateRequest(BaseModel):
     asset_has_lien: bool = False
     docs_complete: bool = True
     requested_leverage_amount: Decimal | None = Field(default=None, gt=0)
+    properties_json: list[dict] = Field(default_factory=list)
+    vehicles_json: list[dict] = Field(default_factory=list)
 
 
 class SdcDeskStoreRequest(SdcDeskEvaluateRequest):
@@ -2834,6 +2836,7 @@ class SdcDeskStoreRequest(SdcDeskEvaluateRequest):
     vehicle_plate: str | None = Field(default=None, max_length=20)
     vehicle_renavam: str | None = Field(default=None, max_length=20)
     vehicles_json: list[dict] = Field(default_factory=list)
+    properties_json: list[dict] = Field(default_factory=list)
     asset_full_address: str | None = Field(default=None, max_length=4000)
     partners_json: list[dict] = Field(default_factory=list)
     chosen_credit_amount: Decimal | None = Field(default=None, gt=0)

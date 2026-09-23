@@ -1,7 +1,8 @@
 "use client";
 
 import { CheckCircle2, FileUp, HelpCircle, Plus, RefreshCw, ShoppingCart, ClipboardList, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lookupCep } from "@/lib/cep-lookup";
 import { AdminDocumentPanel } from "@/components/admin-document-panel";
 import { api, apiForm, deleteApi, downloadApi, User } from "@/lib/api";
 import { isInternalProductRole } from "@/lib/product-nav";
@@ -148,14 +149,38 @@ function moneyPayload(value: string) {
   return raw;
 }
 
-type VehicleRow = { plate: string; renavam: string };
+type SdcPropertyRow = {
+  localKey: string;
+  street: string;
+  number: string;
+  city: string;
+  state: string;
+  zip: string;
+  matricula: string;
+  property_value: string;
+};
 
-function composePropertyAddress(form: typeof emptyForm): string {
+type VehicleRow = { plate: string; renavam: string; year: string; vehicle_value: string };
+
+function newSdcPropertyRow(): SdcPropertyRow {
+  return {
+    localKey: Math.random().toString(36).slice(2),
+    street: "",
+    number: "",
+    city: "",
+    state: "",
+    zip: "",
+    matricula: "",
+    property_value: "",
+  };
+}
+
+function composeSdcPropertyAddress(p: SdcPropertyRow): string {
   const parts = [
-    [form.asset_street.trim(), form.asset_number.trim()].filter(Boolean).join(", "),
-    form.asset_city.trim(),
-    form.asset_state.trim(),
-    form.asset_zip.trim() ? `CEP ${form.asset_zip.trim()}` : "",
+    [p.street.trim(), p.number.trim()].filter(Boolean).join(", "),
+    p.city.trim(),
+    p.state.trim(),
+    p.zip.trim() ? `CEP ${p.zip.trim()}` : "",
   ].filter(Boolean);
   return parts.join(" · ");
 }
@@ -186,8 +211,9 @@ export function SdcDeskModule() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [socios, setSocios] = useState<SocioPartner[]>([]);
-  const [matriculas, setMatriculas] = useState<string[]>([""]);
-  const [vehicles, setVehicles] = useState<VehicleRow[]>([{ plate: "", renavam: "" }]);
+  const [properties, setProperties] = useState<SdcPropertyRow[]>(() => [newSdcPropertyRow()]);
+  const [vehicles, setVehicles] = useState<VehicleRow[]>([{ plate: "", renavam: "", year: "", vehicle_value: "" }]);
+  const tapafPanelRef = useRef<HTMLDivElement>(null);
   const [creditChoice, setCreditChoice] = useState<"limite" | "solicitada" | null>(null);
   const [tapafCheckout, setTapafCheckout] = useState<TapafCheckoutUi | null>(null);
   const [tapafProposalId, setTapafProposalId] = useState("");
@@ -257,15 +283,89 @@ export function SdcDeskModule() {
     setTapafProposalId("");
   }
 
+  function totalPropertiesValue() {
+    return properties.reduce((sum, p) => sum + parseMoney(p.property_value), 0);
+  }
+
+  function totalVehiclesValue() {
+    return vehicles.reduce((sum, v) => sum + parseMoney(v.vehicle_value), 0);
+  }
+
+  function propertiesForPayload() {
+    return properties.map((p) => ({
+      street: p.street.trim(),
+      number: p.number.trim(),
+      city: p.city.trim(),
+      state: p.state.trim(),
+      zip: p.zip.trim(),
+      matricula: p.matricula.trim(),
+      property_value: moneyPayload(p.property_value),
+      full_address: composeSdcPropertyAddress(p),
+    }));
+  }
+
+  function vehiclesForPayload() {
+    return vehicles
+      .map((v) => ({
+        plate: v.plate.trim(),
+        renavam: v.renavam.trim(),
+        year: v.year ? Number(v.year) : null,
+        vehicle_value: moneyPayload(v.vehicle_value),
+      }))
+      .filter((v) => v.plate || v.renavam || Number(v.vehicle_value) > 0);
+  }
+
+  function resolvedAssetValue(): number {
+    if (isImovel) return totalPropertiesValue();
+    if (isVeiculo) return totalVehiclesValue();
+    return parseMoney(form.asset_value);
+  }
+
+  function resolvedAssetYear(): number | null {
+    if (isVeiculo) {
+      const years = vehicles.map((v) => Number(v.year)).filter((y) => y >= 1950 && y <= 2100);
+      if (years.length) return Math.min(...years);
+    }
+    if (needsYear && form.asset_year) return Number(form.asset_year);
+    return null;
+  }
+
+  function patchProperties(updater: (rows: SdcPropertyRow[]) => SdcPropertyRow[]) {
+    setProperties(updater);
+    setEvalResult(null);
+    setCreditChoice(null);
+    setTapafCheckout(null);
+    setTapafProposalId("");
+  }
+
+  async function fillCepForProperty(index: number, cep: string) {
+    const addr = await lookupCep(cep);
+    if (!addr) return;
+    patchProperties((rows) => {
+      const next = [...rows];
+      const row = { ...next[index] };
+      if (addr.street) row.street = addr.street;
+      row.city = addr.city;
+      row.state = addr.uf;
+      row.zip = addr.zipcode;
+      next[index] = row;
+      return next;
+    });
+  }
+
   function evaluatePayload() {
     const requested = form.requested_leverage_amount ? moneyPayload(form.requested_leverage_amount) : null;
+    const assetValue = resolvedAssetValue();
     return {
       asset_type: form.asset_type,
-      asset_value: moneyPayload(form.asset_value),
-      asset_year: needsYear && form.asset_year ? Number(form.asset_year) : null,
+      asset_value: moneyPayload(String(assetValue)),
+      asset_year: resolvedAssetYear(),
       asset_paid_off: form.asset_paid_off,
       asset_has_lien: form.asset_has_lien,
       docs_complete: form.docs_complete,
+      person_type: form.person_type,
+      properties_json: isImovel ? propertiesForPayload() : [],
+      vehicles_json: isVeiculo ? vehiclesForPayload() : [],
       ...(requested && Number(requested) > 0 ? { requested_leverage_amount: requested } : {}),
     };
   }
@@ -283,6 +383,10 @@ export function SdcDeskModule() {
       setEvalResult(res.result);
       if (res.result.requested_exceeds_limit || !res.result.show_choice) {
         setCreditChoice("limite");
+      } else if (res.result.simulacao_solicitada) {
+        setCreditChoice("solicitada");
+      } else {
+        setCreditChoice("limite");
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Falha no cálculo");
@@ -296,13 +400,27 @@ export function SdcDeskModule() {
     if (!form.contact_email.trim()) return "Informe o e-mail.";
     if (!form.contact_phone.trim()) return "Informe o telefone.";
     if (!form.document.trim()) return "Informe CPF/CNPJ.";
-    if (!parseMoney(form.asset_value)) return "Informe o valor do bem.";
+    if (!resolvedAssetValue()) return isImovel ? "Informe o valor de ao menos um imóvel." : isVeiculo ? "Informe o valor de ao menos um veículo." : "Informe o valor do bem.";
     if (!evalResult?.viable) return "Calcule a viabilidade antes de avançar.";
     if (evalResult.show_choice && !creditChoice) {
       return "No resultado da análise, escolha o limite máximo ou o valor solicitado.";
     }
-    if (isImovel && !form.asset_street.trim()) return "Informe o logradouro do imóvel.";
-    if (isImovel && !form.asset_city.trim()) return "Informe a cidade do imóvel.";
+    if (isImovel) {
+      for (let i = 0; i < properties.length; i += 1) {
+        const p = properties[i];
+        if (!p.matricula.trim()) return `Informe a matrícula do imóvel ${i + 1}.`;
+        if (!p.street.trim() || !p.city.trim()) return `Complete o endereço do imóvel ${i + 1} (logradouro e cidade).`;
+        if (!parseMoney(p.property_value)) return `Informe o valor do imóvel ${i + 1}.`;
+      }
+    }
+    if (isVeiculo) {
+      for (let i = 0; i < vehicles.length; i += 1) {
+        const v = vehicles[i];
+        if (!v.plate.trim()) return `Informe a placa do veículo ${i + 1}.`;
+        if (!v.year.trim()) return `Informe o ano do veículo ${i + 1}.`;
+        if (!parseMoney(v.vehicle_value)) return `Informe o valor do veículo ${i + 1}.`;
+      }
+    }
     return null;
   }
 
@@ -322,10 +440,9 @@ export function SdcDeskModule() {
     setError("");
     setBusy(true);
     try {
-      const vehicleRows = vehicles
-        .map((v) => ({ plate: v.plate.trim(), renavam: v.renavam.trim() }))
-        .filter((v) => v.plate || v.renavam);
-      const registryLines = matriculas.map((m) => m.trim()).filter(Boolean);
+      const propsPayload = isImovel ? propertiesForPayload() : [];
+      const vehicleRows = isVeiculo ? vehiclesForPayload() : [];
+      const registryLines = propsPayload.map((p) => p.matricula).filter(Boolean);
       const created = await api<StoreResponse>("/sdc/desk/solicitations", {
         method: "POST",
         body: JSON.stringify({
@@ -343,8 +460,11 @@ export function SdcDeskModule() {
           property_registry: isImovel && registryLines.length ? registryLines.join("\n") : null,
           vehicle_plate: isVeiculo && vehicleRows[0]?.plate ? vehicleRows[0].plate : null,
           vehicle_renavam: isVeiculo && vehicleRows[0]?.renavam ? vehicleRows[0].renavam : null,
-          vehicles_json: isVeiculo ? vehicleRows : [],
-          asset_full_address: isImovel ? composePropertyAddress(form) || null : null,
+          vehicles_json: vehicleRows,
+          properties_json: propsPayload,
+          asset_full_address: isImovel
+            ? propsPayload.map((p) => p.full_address).filter(Boolean).join("\n---\n") || null
+            : null,
           partners_json: form.person_type === "PJ" ? sociosPayload(socios) : [],
         }),
       });
@@ -355,6 +475,9 @@ export function SdcDeskModule() {
         setTapafScroll(false);
         setTapafCb1(false);
         setTapafCb2(false);
+        window.setTimeout(() => tapafPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 150);
+      } else {
+        setError("Solicitação gravada, mas o checkout TAPAF não foi gerado. Atualize a página ou contate o suporte.");
       }
       setSelectedId(created.id);
       await load();
@@ -593,77 +716,185 @@ export function SdcDeskModule() {
                   Renda / faturamento (R$)
                   <CurrencyInput value={form.income_value} onChange={(v) => patchForm("income_value", v)} placeholder="R$ 0,00" />
                 </label>
-                <select value={form.asset_type} onChange={(e) => patchForm("asset_type", e.target.value)}>
+                <select
+                  value={form.asset_type}
+                  onChange={(e) => {
+                    patchForm("asset_type", e.target.value);
+                    setProperties([newSdcPropertyRow()]);
+                    setVehicles([{ plate: "", renavam: "", year: "", vehicle_value: "" }]);
+                  }}
+                >
                   {ASSET_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
                 </select>
-                <label>
-                  Valor do bem (R$)
-                  <CurrencyInput value={form.asset_value} onChange={(v) => patchForm("asset_value", v)} placeholder="R$ 0,00" />
-                </label>
-                {needsYear && (
-                  <input type="number" placeholder="Ano fabricação" value={form.asset_year} onChange={(e) => patchForm("asset_year", e.target.value)} />
+                {isMaquina && (
+                  <>
+                    <label>
+                      Valor do bem (R$)
+                      <CurrencyInput value={form.asset_value} onChange={(v) => patchForm("asset_value", v)} placeholder="R$ 0,00" />
+                    </label>
+                    <input type="number" placeholder="Ano fabricação" value={form.asset_year} onChange={(e) => patchForm("asset_year", e.target.value)} />
+                  </>
                 )}
-                <input style={{ gridColumn: "1 / -1" }} placeholder="Endereço resumido do cliente" value={form.address} onChange={(e) => patchForm("address", e.target.value)} />
+                {(isImovel || isVeiculo) && (
+                  <div className="notice" style={{ gridColumn: "1 / -1", margin: 0 }}>
+                    Valor total dos bens: <b>{brl.format(resolvedAssetValue())}</b>
+                    <small style={{ display: "block", marginTop: 4 }}>
+                      Some o valor de cada {isImovel ? "imóvel" : "veículo"} abaixo. A viabilidade usa o total.
+                    </small>
+                  </div>
+                )}
+                <input
+                  style={{ gridColumn: "1 / -1" }}
+                  placeholder="Endereço resumido do cliente (residência / sede — não é o imóvel de garantia)"
+                  value={form.address}
+                  onChange={(e) => patchForm("address", e.target.value)}
+                />
                 <label style={{ gridColumn: "1 / -1" }}>
                   Valor alavancagem solicitado (R$)
                   <CurrencyInput value={form.requested_leverage_amount} onChange={(v) => patchForm("requested_leverage_amount", v)} placeholder="R$ 0,00" />
                 </label>
-                {isImovel && (
-                  <>
-                    <label>
-                      Logradouro
-                      <input value={form.asset_street} onChange={(e) => patchForm("asset_street", e.target.value)} placeholder="Rua / avenida" />
-                    </label>
-                    <label>
-                      Número
-                      <input value={form.asset_number} onChange={(e) => patchForm("asset_number", e.target.value)} placeholder="Nº" />
-                    </label>
-                    <label>
-                      CEP
-                      <input value={form.asset_zip} onChange={(e) => patchForm("asset_zip", e.target.value)} placeholder="00000-000" inputMode="numeric" />
-                    </label>
-                    <label>
-                      Cidade
-                      <input value={form.asset_city} onChange={(e) => patchForm("asset_city", e.target.value)} placeholder="Cidade" />
-                    </label>
-                    <label>
-                      UF
-                      <input value={form.asset_state} onChange={(e) => patchForm("asset_state", e.target.value)} placeholder="MG" maxLength={2} />
-                    </label>
-                    <div className="desk-repeat-block">
-                      <b>Matrícula(s) do imóvel</b>
-                      <small className="muted">Informe uma matrícula por linha. Use + para incluir outra.</small>
-                      {matriculas.map((line, idx) => (
-                        <div key={idx} className="desk-repeat-row single-col">
+                {isImovel &&
+                  properties.map((prop, pIdx) => (
+                    <div key={prop.localKey} className="desk-repeat-block" style={{ gridColumn: "1 / -1" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                        <b>Imóvel {pIdx + 1} — endereço do bem (garantia)</b>
+                        {properties.length > 1 && (
+                          <button
+                            type="button"
+                            className="table-action"
+                            onClick={() => patchProperties((rows) => rows.filter((_, i) => i !== pIdx))}
+                            aria-label="Remover imóvel"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        )}
+                      </div>
+                      <small className="muted">CEP preenche logradouro, cidade e UF automaticamente (ViaCEP).</small>
+                      <div style={{ display: "grid", gap: 9, gridTemplateColumns: "1fr 1fr", marginTop: 8 }}>
+                        <label>
+                          Matrícula do imóvel
                           <input
-                            placeholder={`Matrícula ${idx + 1}`}
-                            value={line}
-                            onChange={(e) => {
-                              const next = [...matriculas];
-                              next[idx] = e.target.value;
-                              setMatriculas(next);
-                            }}
+                            value={prop.matricula}
+                            onChange={(e) =>
+                              patchProperties((rows) => {
+                                const next = [...rows];
+                                next[pIdx] = { ...next[pIdx], matricula: e.target.value };
+                                return next;
+                              })
+                            }
+                            placeholder="Nº matrícula"
                           />
-                          {matriculas.length > 1 && (
-                            <button type="button" className="table-action" onClick={() => setMatriculas(matriculas.filter((_, i) => i !== idx))} aria-label="Remover matrícula">
-                              <Trash2 size={14} />
-                            </button>
-                          )}
-                        </div>
-                      ))}
-                      <button type="button" className="table-action" onClick={() => setMatriculas([...matriculas, ""])}>
-                        <Plus size={14} />
-                        Adicionar matrícula
-                      </button>
+                        </label>
+                        <label>
+                          Valor do imóvel (R$)
+                          <CurrencyInput
+                            value={prop.property_value}
+                            onChange={(v) =>
+                              patchProperties((rows) => {
+                                const next = [...rows];
+                                next[pIdx] = { ...next[pIdx], property_value: v };
+                                return next;
+                              })
+                            }
+                            placeholder="R$ 0,00"
+                          />
+                        </label>
+                        <label>
+                          CEP do imóvel
+                          <input
+                            value={prop.zip}
+                            onChange={(e) =>
+                              patchProperties((rows) => {
+                                const next = [...rows];
+                                next[pIdx] = { ...next[pIdx], zip: e.target.value };
+                                return next;
+                              })
+                            }
+                            onBlur={(e) => {
+                              const z = e.target.value;
+                              if (z.replace(/\D/g, "").length === 8) void fillCepForProperty(pIdx, z);
+                            }}
+                            placeholder="00000-000"
+                            inputMode="numeric"
+                          />
+                        </label>
+                        <label>
+                          Logradouro do imóvel
+                          <input
+                            value={prop.street}
+                            onChange={(e) =>
+                              patchProperties((rows) => {
+                                const next = [...rows];
+                                next[pIdx] = { ...next[pIdx], street: e.target.value };
+                                return next;
+                              })
+                            }
+                            placeholder="Rua / avenida"
+                          />
+                        </label>
+                        <label>
+                          Número
+                          <input
+                            value={prop.number}
+                            onChange={(e) =>
+                              patchProperties((rows) => {
+                                const next = [...rows];
+                                next[pIdx] = { ...next[pIdx], number: e.target.value };
+                                return next;
+                              })
+                            }
+                            placeholder="Nº"
+                          />
+                        </label>
+                        <label>
+                          Cidade do imóvel
+                          <input
+                            value={prop.city}
+                            onChange={(e) =>
+                              patchProperties((rows) => {
+                                const next = [...rows];
+                                next[pIdx] = { ...next[pIdx], city: e.target.value };
+                                return next;
+                              })
+                            }
+                            placeholder="Cidade"
+                          />
+                        </label>
+                        <label>
+                          UF do imóvel
+                          <input
+                            value={prop.state}
+                            onChange={(e) =>
+                              patchProperties((rows) => {
+                                const next = [...rows];
+                                next[pIdx] = { ...next[pIdx], state: e.target.value };
+                                return next;
+                              })
+                            }
+                            placeholder="MG"
+                            maxLength={2}
+                          />
+                        </label>
+                      </div>
                     </div>
-                  </>
+                  ))}
+                {isImovel && (
+                  <button
+                    type="button"
+                    className="table-action"
+                    style={{ gridColumn: "1 / -1" }}
+                    onClick={() => patchProperties((rows) => [...rows, newSdcPropertyRow()])}
+                  >
+                    <Plus size={14} />
+                    Adicionar outro imóvel
+                  </button>
                 )}
                 {isVeiculo && (
-                  <div className="desk-repeat-block">
-                    <b>Veículo(s)</b>
-                    <small className="muted">Placa e RENAVAM de cada veículo. Use + para outro veículo.</small>
+                  <div className="desk-repeat-block" style={{ gridColumn: "1 / -1" }}>
+                    <b>Veículo(s) — dados de cada bem</b>
+                    <small className="muted">Sem endereço. Informe placa, RENAVAM, ano e valor de cada veículo.</small>
                     {vehicles.map((row, idx) => (
-                      <div key={idx} className="desk-repeat-row">
+                      <div key={idx} className="desk-repeat-row" style={{ alignItems: "end" }}>
                         <label>
                           Placa
                           <input
@@ -673,6 +904,7 @@ export function SdcDeskModule() {
                               const next = [...vehicles];
                               next[idx] = { ...next[idx], plate: e.target.value };
                               setVehicles(next);
+                              setEvalResult(null);
                             }}
                           />
                         </label>
@@ -685,7 +917,35 @@ export function SdcDeskModule() {
                               const next = [...vehicles];
                               next[idx] = { ...next[idx], renavam: e.target.value };
                               setVehicles(next);
+                              setEvalResult(null);
                             }}
+                          />
+                        </label>
+                        <label>
+                          Ano
+                          <input
+                            type="number"
+                            placeholder="Ano"
+                            value={row.year}
+                            onChange={(e) => {
+                              const next = [...vehicles];
+                              next[idx] = { ...next[idx], year: e.target.value };
+                              setVehicles(next);
+                              setEvalResult(null);
+                            }}
+                          />
+                        </label>
+                        <label>
+                          Valor (R$)
+                          <CurrencyInput
+                            value={row.vehicle_value}
+                            onChange={(v) => {
+                              const next = [...vehicles];
+                              next[idx] = { ...next[idx], vehicle_value: v };
+                              setVehicles(next);
+                              setEvalResult(null);
+                            }}
+                            placeholder="R$ 0,00"
                           />
                         </label>
                         {vehicles.length > 1 && (
@@ -695,9 +955,13 @@ export function SdcDeskModule() {
                         )}
                       </div>
                     ))}
-                    <button type="button" className="table-action" onClick={() => setVehicles([...vehicles, { plate: "", renavam: "" }])}>
+                    <button
+                      type="button"
+                      className="table-action"
+                      onClick={() => setVehicles([...vehicles, { plate: "", renavam: "", year: "", vehicle_value: "" }])}
+                    >
                       <Plus size={14} />
-                      Adicionar veículo
+                      Adicionar outro veículo
                     </button>
                   </div>
                 )}
@@ -717,7 +981,7 @@ export function SdcDeskModule() {
                 <button type="button" className="admin-button" disabled={busy} onClick={() => void calculate()}>Calcular viabilidade</button>
               </div>
             </div>
-            <div style={{ border: "1px solid var(--line)", borderRadius: 12, padding: 16, background: "#f7fbf9" }}>
+            <div ref={tapafPanelRef} style={{ border: "1px solid var(--line)", borderRadius: 12, padding: 16, background: "#f7fbf9" }}>
               <b>Resultado da análise</b>
               {!evalResult && !tapafCheckout && <p className="muted" style={{ marginTop: 10 }}>Preencha e clique em Calcular viabilidade.</p>}
               {evalResult?.required_docs?.length && !tapafCheckout && (
@@ -746,11 +1010,6 @@ export function SdcDeskModule() {
                       {evalResult.show_choice && (
                         <button type="button" className="table-action" style={{ marginTop: 10 }} onClick={() => setCreditChoice("limite")}>
                           Escolher limite máximo
-                        </button>
-                      )}
-                      {!evalResult.show_choice && (
-                        <button type="button" className="admin-button" style={{ marginTop: 10, width: "100%" }} disabled={busy} onClick={() => void store()}>
-                          Avançar com este valor
                         </button>
                       )}
                     </div>
@@ -782,10 +1041,15 @@ export function SdcDeskModule() {
                   {!evalResult.requested_exceeds_limit && evalResult.message && (
                     <p style={{ color: "#067647", fontWeight: 700, fontSize: 11, margin: 0 }}>{evalResult.message}</p>
                   )}
-                  {evalResult.show_choice && creditChoice && (
+                  {evalResult.viable && creditChoice && (
                     <button type="button" className="admin-button" disabled={busy} onClick={() => void store()}>
-                      Avançar com {creditChoice === "solicitada" ? "valor solicitado" : "limite máximo"}
+                      Avançar com {creditChoice === "solicitada" ? "valor solicitado" : "limite máximo"} → TAPAF
                     </button>
+                  )}
+                  {evalResult.show_choice && !creditChoice && (
+                    <p className="muted" style={{ fontSize: 11, margin: 0 }}>
+                      Escolha uma das opções acima para habilitar o avanço até o TAPAF.
+                    </p>
                   )}
                 </div>
               )}

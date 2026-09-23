@@ -190,7 +190,32 @@ def _simulation_row(credito: Decimal, prazo: int, taxa: Decimal) -> dict:
     }
 
 
+def _apply_sdc_asset_totals(data: dict) -> dict:
+    """Soma valores de properties_json (imóveis) ou vehicles_json (veículos) no asset_value."""
+    merged = dict(data)
+    props = merged.get("properties_json") or []
+    if isinstance(props, list) and props:
+        total = Decimal("0")
+        for row in props:
+            if isinstance(row, dict):
+                total += _dec(row.get("property_value") or 0)
+        if total > 0:
+            merged["asset_value"] = str(money(total))
+            merged["asset_type"] = "imovel"
+    tipo = str(merged.get("asset_type") or "").strip().lower()
+    vehicles = merged.get("vehicles_json") or []
+    if isinstance(vehicles, list) and vehicles and tipo in TIPOS_VEICULO:
+        total = Decimal("0")
+        for row in vehicles:
+            if isinstance(row, dict):
+                total += _dec(row.get("vehicle_value") or row.get("asset_value") or 0)
+        if total > 0:
+            merged["asset_value"] = str(money(total))
+    return merged
+
+
 def evaluate_sdc_desk(data: dict) -> dict:
+    data = _apply_sdc_asset_totals(dict(data))
     motivos: list[str] = []
     tipo_bem = str(data.get("asset_type") or data.get("tipo_bem") or "").strip().lower()
     is_veiculo = tipo_bem in TIPOS_VEICULO
@@ -206,14 +231,28 @@ def evaluate_sdc_desk(data: dict) -> dict:
         motivos.append("Documentação incompleta.")
 
     if is_veiculo:
-        ano = int(data.get("asset_year") or data.get("ano_fabricacao") or 0)
-        if ano <= 0:
-            motivos.append("Informe o ano de fabricação do bem.")
+        vehicles = data.get("vehicles_json") or []
+        years: list[int] = []
+        if isinstance(vehicles, list) and vehicles:
+            for row in vehicles:
+                if not isinstance(row, dict):
+                    continue
+                ano = int(row.get("year") or row.get("asset_year") or 0)
+                if ano > 0:
+                    years.append(ano)
+        if not years:
+            ano = int(data.get("asset_year") or data.get("ano_fabricacao") or 0)
+            if ano > 0:
+                years.append(ano)
+        if not years:
+            motivos.append("Informe o ano de fabricação de cada veículo.")
         else:
-            idade = date.today().year - ano
             limite = IDADE_MAX.get(tipo_bem, 0)
-            if idade > limite:
-                motivos.append(f"O bem excede a idade máxima permitida ({limite} anos).")
+            for ano in years:
+                idade = date.today().year - ano
+                if idade > limite:
+                    motivos.append(f"Veículo (ano {ano}) excede a idade máxima permitida ({limite} anos).")
+                    break
 
     valor = _dec(data.get("asset_value") or data.get("valor_bens") or 0)
     if valor <= 0:
@@ -451,6 +490,7 @@ def open_tapaf_checkout_for_solicitation(db: Session, user: User, item: SdcSolic
 
 def store_solicitation(db: Session, user: User, payload: dict) -> SdcSolicitation:
     assert_desk_access(user)
+    payload = _apply_sdc_asset_totals(dict(payload))
     result = evaluate_sdc_desk(payload)
     if not result["viable"]:
         raise HTTPException(
@@ -497,6 +537,7 @@ def store_solicitation(db: Session, user: User, payload: dict) -> SdcSolicitatio
                         "vehicle_plate",
                         "vehicle_renavam",
                         "vehicles_json",
+                        "properties_json",
                         "asset_full_address",
                         "partners_json",
                     ),
