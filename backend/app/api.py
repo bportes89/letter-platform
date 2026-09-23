@@ -3609,14 +3609,25 @@ def flash_desk_store(payload: FlashDeskStoreRequest, user: User = Depends(get_cu
         phone=payload.contact_phone,
         person_type=payload.person_type,
     )
+    from app.flash_desk_service import open_tapaf_checkout_for_solicitation
+
     item = store_solicitation(db, user, payload.model_dump())
+    tapaf_bundle = None
+    try:
+        tapaf_bundle = open_tapaf_checkout_for_solicitation(db, user, item)
+    except HTTPException:
+        tapaf_bundle = None
     audit(db, user, "flash_desk.solicitation_created", "flash_solicitation", item.id, {
         "asset_type": item.asset_type,
         "principal": str(item.principal),
     })
     db.commit()
     db.refresh(item)
-    return solicitation_view(item, list_documents(db, item.id), db)
+    view = solicitation_view(item, list_documents(db, item.id), db)
+    if tapaf_bundle:
+        view["tapaf_proposal_id"] = tapaf_bundle.get("proposal_id")
+        view["tapaf_checkout"] = tapaf_bundle.get("interface_checkout_tapaf") or tapaf_bundle
+    return view
 
 
 @router.get("/flash/desk/solicitations")

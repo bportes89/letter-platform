@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckCircle2, FileUp, Plus, RefreshCw, ShoppingCart, Landmark, Trash2 } from "lucide-react";
+import { CheckCircle2, FileUp, HelpCircle, Plus, RefreshCw, ShoppingCart, Landmark, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AdminDocumentPanel } from "@/components/admin-document-panel";
 import { api, apiForm, deleteApi, downloadApi, User } from "@/lib/api";
@@ -11,6 +11,7 @@ import { DeskSourceMetaRow } from "@/lib/desk-source-meta";
 import { CurrencyInput } from "@/components/currency-input";
 import { PartnerSociosFields, SocioPartner, sociosPayload } from "@/components/partner-socios-fields";
 import { lookupCep, lookupMunicipalityPopulation } from "@/lib/cep-lookup";
+import { DESK_SIMULATION_NOTICE } from "@/lib/desk-simulation-notice";
 
 type RequiredDoc = { code: string; label: string; uploaded?: boolean };
 
@@ -59,6 +60,24 @@ type EvalResult = {
   interest_rate_monthly: string;
   capital_source: string;
   message: string;
+};
+
+type TapafCheckoutUi = {
+  valor_nominal_taxa: string;
+  texto_explicativo_tooltip_interrogacao: string;
+  checkbox_obrigatorio_01: string;
+  checkbox_obrigatorio_02: string;
+  manifesto_html: string;
+  botao_habilitado?: boolean;
+  botao_label?: string;
+  checkout_url?: string | null;
+  checkout_mode?: string;
+  pix_copy_paste?: string;
+};
+
+type StoreResponse = FlashSolicitation & {
+  tapaf_checkout?: TapafCheckoutUi;
+  tapaf_proposal_id?: string;
 };
 
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
@@ -179,6 +198,12 @@ export function FlashDeskModule() {
   const [busy, setBusy] = useState(false);
   const [socios, setSocios] = useState<SocioPartner[]>([]);
   const [properties, setProperties] = useState<FlashPropertyRow[]>(() => [newPropertyRow()]);
+  const [tapafCheckout, setTapafCheckout] = useState<TapafCheckoutUi | null>(null);
+  const [tapafProposalId, setTapafProposalId] = useState("");
+  const [tapafScroll, setTapafScroll] = useState(false);
+  const [tapafCb1, setTapafCb1] = useState(false);
+  const [tapafCb2, setTapafCb2] = useState(false);
+  const [showTapafTip, setShowTapafTip] = useState(false);
 
   const isInternal = isInternalProductRole(user?.role);
 
@@ -330,6 +355,8 @@ export function FlashDeskModule() {
   async function calculate() {
     setError("");
     setBusy(true);
+    setTapafCheckout(null);
+    setTapafProposalId("");
     try {
       const res = await api<{ result: EvalResult }>("/flash/desk/evaluate", {
         method: "POST",
@@ -353,7 +380,7 @@ export function FlashDeskModule() {
     setBusy(true);
     try {
       const fullAddress = properties.map(composePropertyAddress).filter(Boolean).join("\n---\n");
-      const created = await api<FlashSolicitation>("/flash/desk/solicitations", {
+      const created = await api<StoreResponse>("/flash/desk/solicitations", {
         method: "POST",
         body: JSON.stringify({
           ...evaluatePayload(),
@@ -369,16 +396,79 @@ export function FlashDeskModule() {
           partners_json: sociosPayload(socios),
         }),
       });
-      setNotice(`Flash gravado: ${created.contact_name} — ${created.status_label}`);
+      setNotice(`Flash gravado: ${created.contact_name} — ${created.status_label}. Conclua o TAPAF no painel ao lado.`);
+      if (created.tapaf_checkout) {
+        setTapafCheckout(created.tapaf_checkout);
+        setTapafProposalId(created.tapaf_proposal_id || "");
+        setTapafScroll(false);
+        setTapafCb1(false);
+        setTapafCb2(false);
+      }
+      setSelectedId(created.id);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Falha ao gravar solicitação");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function acceptTapaf() {
+    if (!tapafProposalId) return;
+    setError("");
+    setBusy(true);
+    try {
+      await api("/finops/pre-analysis/tapaf-checkout-accept", {
+        method: "POST",
+        body: JSON.stringify({
+          proposal_id: tapafProposalId,
+          scroll_completed: tapafScroll,
+          checkbox_1: tapafCb1,
+          checkbox_2: tapafCb2,
+          asset_type: "REAL_ESTATE",
+        }),
+      });
+      const res = await api<{ interface_checkout_tapaf: TapafCheckoutUi }>("/finops/pre-analysis/generate-tapaf", {
+        method: "POST",
+        body: JSON.stringify({ proposal_id: tapafProposalId }),
+      });
+      setTapafCheckout(res.interface_checkout_tapaf);
+      setNotice("Aceite TAPAF registrado. Clique em confirmar pagamento para gerar boleto/Pix.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Falha no aceite TAPAF");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function payTapaf() {
+    if (!tapafProposalId) return;
+    setError("");
+    setBusy(true);
+    try {
+      if (tapafCheckout?.checkout_url && tapafCheckout.checkout_mode === "ASAAS") {
+        window.open(tapafCheckout.checkout_url, "_blank", "noopener,noreferrer");
+        setNotice("Cobrança aberta — aguarde confirmação do pagamento.");
+        return;
+      }
+      await api("/finops/pre-analysis/tapaf-payment-webhook", {
+        method: "POST",
+        body: JSON.stringify({
+          proposal_id: tapafProposalId,
+          event_id: `flash-desk-tapaf-${Date.now()}`,
+          amount: tapafCheckout?.valor_nominal_taxa || "1500.00",
+        }),
+      });
+      setNotice("TAPAF confirmada. Acompanhe o status na aba Acompanhamento.");
       setForm(emptyForm);
       setSocios([]);
       setProperties([newPropertyRow()]);
       setEvalResult(null);
-      setSelectedId(created.id);
+      setTapafCheckout(null);
       setTab("lista");
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Falha ao gravar solicitação");
+      setError(e instanceof Error ? e.message : "Falha ao gerar pagamento TAPAF");
     } finally {
       setBusy(false);
     }
@@ -884,35 +974,81 @@ export function FlashDeskModule() {
               )}
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <button type="button" className="admin-button" disabled={busy} onClick={() => void calculate()}>Calcular viabilidade</button>
-                {evalResult?.viable && (
-                  <button type="button" className="admin-button" disabled={busy} onClick={() => void store()}>Avançar (gravar Flash)</button>
-                )}
               </div>
             </div>
             <div style={{ border: "1px solid var(--line)", borderRadius: 12, padding: 16, background: "#f7fbf9" }}>
               <b>Resultado Flash Capital</b>
-              {!evalResult && <p className="muted" style={{ marginTop: 10 }}>Preencha e clique em Calcular.</p>}
-              {evalResult?.viable && (
-                <div style={{ display: "grid", gap: 10, marginTop: 12, gridTemplateColumns: "1fr 1fr" }}>
-                  <div><small>Principal (LTV {evalResult.ltv_percent}%)</small><div><b>{brl.format(Number(evalResult.principal))}</b></div></div>
-                  <div><small>Líquido ao cliente</small><div><b>{brl.format(Number(evalResult.net_payout))}</b></div></div>
-                  <div><small>Fee 10%</small><div><b>{brl.format(Number(evalResult.platform_fee))}</b></div></div>
-                  <div><small>ITBI 3%</small><div><b>{brl.format(Number(evalResult.itbi_provision))}</b></div></div>
-                  <div><small>Parcela Price</small><div><b>{brl.format(Number(evalResult.monthly_payment))}</b></div></div>
-                  <div><small>Prazo / taxa</small><div><b>{evalResult.term_months}m @ {evalResult.interest_rate_monthly}%</b></div></div>
-                  <div style={{ gridColumn: "1 / -1" }}>
-                    <small>Lastros obrigatórios ({evalResult.category})</small>
-                    <ul style={{ margin: "6px 0 0", paddingLeft: 18, fontSize: 12 }}>
-                      {evalResult.required_docs.map((d) => <li key={d.code}>{d.label}</li>)}
-                    </ul>
+              {!evalResult && !tapafCheckout && <p className="muted" style={{ marginTop: 10 }}>Preencha e clique em Calcular.</p>}
+              {evalResult?.viable && !tapafCheckout && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 12 }}>
+                  <div style={{ display: "grid", gap: 10, gridTemplateColumns: "1fr 1fr" }}>
+                    <div><small>Principal (LTV {evalResult.ltv_percent}%)</small><div><b>{brl.format(Number(evalResult.principal))}</b></div></div>
+                    <div><small>Líquido ao cliente</small><div><b>{brl.format(Number(evalResult.net_payout))}</b></div></div>
+                    <div><small>ITBI 3%</small><div><b>{brl.format(Number(evalResult.itbi_provision))}</b></div></div>
+                    <div><small>Parcela Price</small><div><b>{brl.format(Number(evalResult.monthly_payment))}</b></div></div>
+                    <div><small>Prazo / taxa</small><div><b>{evalResult.term_months}m @ {evalResult.interest_rate_monthly}%</b></div></div>
+                    <div style={{ gridColumn: "1 / -1" }}>
+                      <small>Lastros obrigatórios ({evalResult.category})</small>
+                      <ul style={{ margin: "6px 0 0", paddingLeft: 18, fontSize: 12 }}>
+                        {evalResult.required_docs.map((d) => <li key={d.code}>{d.label}</li>)}
+                      </ul>
+                    </div>
+                    <p style={{ gridColumn: "1 / -1", color: "#067647", fontWeight: 700, margin: 0 }}>{evalResult.message}</p>
                   </div>
-                  <p style={{ gridColumn: "1 / -1", color: "#067647", fontWeight: 700 }}>{evalResult.message}</p>
+                  <button type="button" className="admin-button" style={{ width: "100%" }} disabled={busy} onClick={() => void store()}>
+                    Avançar e gerar TAPAF
+                  </button>
                 </div>
               )}
-              {evalResult && !evalResult.viable && (
+              {evalResult && !evalResult.viable && !tapafCheckout && (
                 <div style={{ marginTop: 12 }}>
                   <p style={{ color: "#b42318", fontWeight: 700 }}>{evalResult.message}</p>
                   <ul>{evalResult.motivos.map((m) => <li key={m}>{m}</li>)}</ul>
+                </div>
+              )}
+              {evalResult && !tapafCheckout && (
+                <p className="muted" style={{ fontSize: 10, lineHeight: 1.45, marginTop: 12, marginBottom: 0 }}>
+                  {DESK_SIMULATION_NOTICE}
+                </p>
+              )}
+              {tapafCheckout && (
+                <div className="tapaf-checkout" style={{ marginTop: 14 }}>
+                  <b>TAPAF — taxa de abertura</b>
+                  <div className="finops-summary tapaf-price" style={{ marginTop: 10 }}>
+                    <article>
+                      <small>Taxa nominal</small>
+                      <strong>{brl.format(Number(tapafCheckout.valor_nominal_taxa))}</strong>
+                      <button type="button" className="help-icon" onClick={() => setShowTapafTip((v) => !v)} aria-label="O que é TAPAF">
+                        <HelpCircle size={16} /> ?
+                      </button>
+                      {showTapafTip && (
+                        <div className="tooltip-pop">{tapafCheckout.texto_explicativo_tooltip_interrogacao}</div>
+                      )}
+                    </article>
+                  </div>
+                  <div className="manifest-scroll" style={{ maxHeight: 120 }} dangerouslySetInnerHTML={{ __html: tapafCheckout.manifesto_html }} />
+                  <label className="tapaf-check">
+                    <input type="checkbox" checked={tapafScroll} onChange={(e) => setTapafScroll(e.target.checked)} />
+                    <span>Li o manifesto TAPAF até o final.</span>
+                  </label>
+                  <label className="tapaf-check">
+                    <input type="checkbox" checked={tapafCb1} onChange={(e) => setTapafCb1(e.target.checked)} />
+                    <span>{tapafCheckout.checkbox_obrigatorio_01}</span>
+                  </label>
+                  <label className="tapaf-check">
+                    <input type="checkbox" checked={tapafCb2} onChange={(e) => setTapafCb2(e.target.checked)} />
+                    <span>{tapafCheckout.checkbox_obrigatorio_02}</span>
+                  </label>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    <button type="button" className="admin-button" disabled={busy || !tapafScroll || !tapafCb1 || !tapafCb2} onClick={() => void acceptTapaf()}>
+                      Aceitar TAPAF e gerar boleto/Pix
+                    </button>
+                    {(tapafCheckout.botao_habilitado || tapafCheckout.checkout_url) && (
+                      <button type="button" className="admin-button" disabled={busy} onClick={() => void payTapaf()}>
+                        {tapafCheckout.botao_label || "Gerar boleto / Pix TAPAF"}
+                      </button>
+                    )}
+                  </div>
                 </div>
               )}
             </div>

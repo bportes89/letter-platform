@@ -251,6 +251,88 @@ def list_documents(db: Session, solicitation_id: str) -> list[FlashSolicitationD
     )
 
 
+def open_tapaf_checkout_for_solicitation(db: Session, user: User, item: FlashSolicitation) -> dict:
+    """Cria proposta Flash + pauta pré-análise e retorna checkout TAPAF (R$ 1.500)."""
+    from app.pre_analysis_service import generate_tapaf_checkout, get_or_create_pauta
+
+    assert_desk_access(user)
+    try:
+        meta = json_loads(item.evaluation_json or "{}")
+    except (TypeError, ValueError):
+        meta = {}
+    if not isinstance(meta, dict):
+        meta = {}
+
+    tapaf_meta = meta.get("tapaf") if isinstance(meta.get("tapaf"), dict) else {}
+    proposal_id = tapaf_meta.get("proposal_id") or item.proposal_id
+
+    if not proposal_id:
+        lead = Lead(
+            organization_id=user.organization_id,
+            owner_id=item.partner_user_id or user.id,
+            name=item.contact_name,
+            phone=item.contact_phone or "00000000000",
+            document=item.document,
+            product_interest="FLASH_CREDIT",
+            status="QUALIFIED",
+            source="FLASH_DESK",
+        )
+        db.add(lead)
+        db.flush()
+        proposal = Proposal(
+            organization_id=user.organization_id,
+            lead_id=lead.id,
+            product=FLASH_CAPITAL_PRODUCT,
+            requested_amount=item.principal,
+            status="SUBMITTED",
+            terms_json=json_dumps(
+                {
+                    "flash_solicitation_id": item.id,
+                    "asset_type": item.asset_type,
+                    "asset_category": item.asset_category,
+                    "asset_value": str(item.asset_value),
+                    "capital_source": item.capital_source,
+                    "channel": "FLASH_DESK",
+                    "tapaf_phase": True,
+                },
+                ensure_ascii=False,
+            ),
+            sale_channel="PARTNER_OFFICE",
+            served_by_user_id=user.id,
+            commission_originator_id=item.partner_user_id,
+            created_by_user_id=user.id,
+        )
+        db.add(proposal)
+        db.flush()
+        proposal_id = proposal.id
+        item.proposal_id = proposal_id
+        tapaf_meta["proposal_id"] = proposal_id
+        tapaf_meta["lead_id"] = lead.id
+        meta["tapaf"] = tapaf_meta
+        item.evaluation_json = json_dumps({**meta, "channel": meta.get("channel") or "FLASH_DESK"}, ensure_ascii=False)
+
+    proposal = db.get(Proposal, proposal_id)
+    if not proposal:
+        raise HTTPException(status_code=500, detail="Proposta TAPAF não encontrada")
+
+    pauta = get_or_create_pauta(db, user, proposal)
+    if item.docs_complete and pauta.status == "PENDING_DOCUMENTS":
+        pauta.status = "DOCUMENTS_OK"
+    pauta.asset_type = "REAL_ESTATE" if item.asset_category == "REAL_ESTATE" else "VEHICLE"
+    db.flush()
+
+    checkout = generate_tapaf_checkout(pauta)
+    tapaf_meta["pauta_id"] = pauta.id
+    tapaf_meta["pauta_code"] = pauta.pauta_code
+    meta["tapaf"] = tapaf_meta
+    item.evaluation_json = json_dumps({**meta, "channel": meta.get("channel") or "FLASH_DESK"}, ensure_ascii=False)
+    return {
+        "proposal_id": proposal_id,
+        "pauta_id": pauta.id,
+        **checkout,
+    }
+
+
 def get_solicitation(db: Session, user: User, solicitation_id: str) -> FlashSolicitation:
     assert_desk_access(user)
     item = db.scalar(

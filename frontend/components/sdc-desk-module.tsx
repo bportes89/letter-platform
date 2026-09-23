@@ -9,6 +9,7 @@ import { PreAnalysisModule } from "@/components/pre-analysis-module";
 import { DeskSourceMetaRow } from "@/lib/desk-source-meta";
 import { PartnerSociosFields, SocioPartner, sociosPayload } from "@/components/partner-socios-fields";
 import { CurrencyInput } from "@/components/currency-input";
+import { DESK_SIMULATION_NOTICE } from "@/lib/desk-simulation-notice";
 
 type RequiredDoc = { code: string; label: string; uploaded?: boolean };
 
@@ -793,6 +794,11 @@ export function SdcDeskModule() {
                   <p style={{ color: "#b42318", fontWeight: 700 }}>{evalResult.message}</p>
                   <ul>{evalResult.motivos.map((m) => <li key={m}>{m}</li>)}</ul>
                 </div>
+              )}
+              {evalResult && !tapafCheckout && (
+                <p className="muted" style={{ fontSize: 10, lineHeight: 1.45, marginTop: 12, marginBottom: 0 }}>
+                  {DESK_SIMULATION_NOTICE}
+                </p>
               )}
               {tapafCheckout && (
                 <div className="tapaf-checkout" style={{ marginTop: 14 }}>
