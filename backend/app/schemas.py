@@ -2857,6 +2857,8 @@ class FlashDeskEvaluateRequest(BaseModel):
     docs_complete: bool = True
     term_months: int = Field(default=36)
     capital_source: str = "RETAIL"
+    person_type: str = "PJ"
+    properties_json: list[dict] = Field(default_factory=list)
 
 
 class FlashDeskStoreRequest(FlashDeskEvaluateRequest):
@@ -2864,13 +2866,14 @@ class FlashDeskStoreRequest(FlashDeskEvaluateRequest):
     contact_email: str = Field(min_length=5, max_length=180)
     contact_phone: str = Field(min_length=8, max_length=40)
     document: str | None = None
-    person_type: str = "PF"
+    person_type: str = "PJ"
     address: str | None = None
     occupation: str | None = None
     income_value: Decimal = Field(ge=0, default=0)
     partner_user_id: str | None = None
     asset_full_address: str | None = Field(default=None, max_length=4000)
     partners_json: list[dict] = Field(default_factory=list)
+    properties_json: list[dict] = Field(default_factory=list)
 
 
 class FlashDeskStatusUpdate(BaseModel):

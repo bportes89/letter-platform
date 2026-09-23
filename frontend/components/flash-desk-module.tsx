@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckCircle2, FileUp, RefreshCw, ShoppingCart, Landmark } from "lucide-react";
+import { CheckCircle2, FileUp, Plus, RefreshCw, ShoppingCart, Landmark, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AdminDocumentPanel } from "@/components/admin-document-panel";
 import { api, apiForm, deleteApi, downloadApi, User } from "@/lib/api";
@@ -10,6 +10,7 @@ import { PreAnalysisModule } from "@/components/pre-analysis-module";
 import { DeskSourceMetaRow } from "@/lib/desk-source-meta";
 import { CurrencyInput } from "@/components/currency-input";
 import { PartnerSociosFields, SocioPartner, sociosPayload } from "@/components/partner-socios-fields";
+import { lookupCep, lookupMunicipalityPopulation } from "@/lib/cep-lookup";
 
 type RequiredDoc = { code: string; label: string; uploaded?: boolean };
 
@@ -62,11 +63,6 @@ type EvalResult = {
 
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
-const ASSET_TYPES = [
-  { value: "imovel", label: "Imóvel" },
-  { value: "veiculo", label: "Veículo" },
-] as const;
-
 const STATUS_OPTIONS = [
   { value: "AWAITING_DOCS", label: "Aguardando Documentação" },
   { value: "UNDER_REVIEW", label: "Em Análise" },
@@ -81,7 +77,7 @@ const emptyForm = {
   contact_email: "",
   contact_phone: "",
   document: "",
-  person_type: "PF",
+  person_type: "PJ",
   address: "",
   occupation: "",
   income_value: "",
@@ -94,10 +90,61 @@ const emptyForm = {
   docs_complete: true,
   term_months: "36",
   capital_source: "RETAIL",
-  property_registry: "",
   lien_payoff_value: "",
-  asset_full_address: "",
 };
+
+type PropertyOwner = { name: string; document: string; share_percent: string };
+
+type FlashPropertyRow = {
+  localKey: string;
+  zone: "URBANO" | "RURAL";
+  street: string;
+  number: string;
+  city: string;
+  state: string;
+  zip: string;
+  population: string;
+  matricula: string;
+  property_value: string;
+  owner_same_as_borrower: boolean;
+  owners: PropertyOwner[];
+};
+
+function newPropertyRow(): FlashPropertyRow {
+  return {
+    localKey: Math.random().toString(36).slice(2),
+    zone: "URBANO",
+    street: "",
+    number: "",
+    city: "",
+    state: "",
+    zip: "",
+    population: "",
+    matricula: "",
+    property_value: "",
+    owner_same_as_borrower: false,
+    owners: [{ name: "", document: "", share_percent: "" }],
+  };
+}
+
+function composePropertyAddress(p: FlashPropertyRow): string {
+  const parts = [
+    [p.street.trim(), p.number.trim()].filter(Boolean).join(", "),
+    p.city.trim(),
+    p.state.trim(),
+    p.zip.trim() ? `CEP ${p.zip.trim()}` : "",
+    p.population.trim() ? `Pop. ${p.population.trim()}` : "",
+  ].filter(Boolean);
+  return parts.join(" · ");
+}
+
+function parseMoney(value: string): number {
+  const raw = String(value || "").trim();
+  if (!raw) return 0;
+  const normalized = raw.includes(",") ? raw.replace(/\./g, "").replace(",", ".") : raw;
+  const n = Number(normalized);
+  return Number.isFinite(n) ? n : 0;
+}
 
 const emptyParties = {
   borrower_cnpj: "",
@@ -110,7 +157,10 @@ const emptyParties = {
 };
 
 function moneyPayload(value: string) {
-  return value.replace(/\./g, "").replace(",", ".") || "0";
+  const raw = String(value || "").trim();
+  if (!raw) return "0";
+  if (raw.includes(",")) return raw.replace(/\./g, "").replace(",", ".");
+  return raw;
 }
 
 export function FlashDeskModule() {
@@ -128,8 +178,98 @@ export function FlashDeskModule() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [socios, setSocios] = useState<SocioPartner[]>([]);
+  const [properties, setProperties] = useState<FlashPropertyRow[]>(() => [newPropertyRow()]);
 
   const isInternal = isInternalProductRole(user?.role);
+
+  function patchProperties(updater: (rows: FlashPropertyRow[]) => FlashPropertyRow[]) {
+    setProperties(updater);
+    setEvalResult(null);
+  }
+
+  function propertiesForPayload() {
+    const borrowerName = form.contact_name.trim();
+    const borrowerDoc = form.document.trim();
+    return properties.map((p) => {
+      const owners = p.owner_same_as_borrower
+        ? [{ name: borrowerName, document: borrowerDoc, share_percent: "100" }]
+        : p.owners
+            .filter((o) => o.name.trim() || o.document.trim())
+            .map((o) => ({
+              name: o.name.trim(),
+              document: o.document.trim(),
+              share_percent: o.share_percent.trim() || "0",
+            }));
+      return {
+        zone: p.zone,
+        street: p.street.trim(),
+        number: p.number.trim(),
+        city: p.city.trim(),
+        state: p.state.trim(),
+        zip: p.zip.trim(),
+        population: p.population.trim(),
+        matricula: p.matricula.trim(),
+        property_value: moneyPayload(p.property_value),
+        owner_same_as_borrower: p.owner_same_as_borrower,
+        owners,
+        full_address: composePropertyAddress(p),
+      };
+    });
+  }
+
+  function totalPropertiesValue(): number {
+    return properties.reduce((sum, p) => sum + parseMoney(p.property_value), 0);
+  }
+
+  async function fillCepForProperty(index: number, cep: string) {
+    const addr = await lookupCep(cep);
+    if (!addr) return;
+    patchProperties((rows) => {
+      const next = [...rows];
+      const row = { ...next[index] };
+      if (addr.street) row.street = addr.street;
+      row.city = addr.city;
+      row.state = addr.uf;
+      row.zip = addr.zipcode;
+      next[index] = row;
+      return next;
+    });
+    if (addr.ibge) {
+      const pop = await lookupMunicipalityPopulation(addr.ibge);
+      if (pop) {
+        patchProperties((rows) => {
+          const next = [...rows];
+          next[index] = { ...next[index], population: String(pop) };
+          return next;
+        });
+      }
+    }
+  }
+
+  function validateBeforeStore(): string | null {
+    if (!form.contact_name.trim()) return "Informe a razão social do tomador (PJ).";
+    if (!form.contact_email.trim()) return "Informe o e-mail do tomador.";
+    if (!form.contact_phone.trim()) return "Informe o telefone do tomador.";
+    if (!form.document.trim()) return "Informe o CNPJ do tomador.";
+    if (!properties.length) return "Inclua ao menos um imóvel.";
+    for (let i = 0; i < properties.length; i += 1) {
+      const p = properties[i];
+      if (!p.matricula.trim()) return `Informe a matrícula do imóvel ${i + 1}.`;
+      if (!p.street.trim() || !p.city.trim()) return `Complete o endereço do imóvel ${i + 1}.`;
+      if (!parseMoney(p.property_value)) return `Informe o valor do imóvel ${i + 1}.`;
+      if (!p.owner_same_as_borrower) {
+        const active = p.owners.filter((o) => o.name.trim() || o.document.trim());
+        if (!active.length) return `Informe ao menos um titular do imóvel ${i + 1}.`;
+        const shareSum = active.reduce((s, o) => s + Number(o.share_percent.replace(",", ".") || 0), 0);
+        if (shareSum < 99.5 || shareSum > 100.5) {
+          return `A soma das participações dos titulares do imóvel ${i + 1} deve ser 100%.`;
+        }
+      }
+    }
+    if (!totalPropertiesValue()) return "Informe o valor de pelo menos um imóvel.";
+    if (!evalResult?.viable) return "Calcule a viabilidade antes de avançar.";
+    return null;
+  }
 
   const load = useCallback(async () => {
     const [me, list] = await Promise.all([
@@ -167,15 +307,20 @@ export function FlashDeskModule() {
   }
 
   function evaluatePayload() {
+    const props = propertiesForPayload();
+    const total = props.reduce((s, p) => s + Number(p.property_value || 0), 0);
+    const registry = properties.map((p) => p.matricula.trim()).filter(Boolean).join("\n");
     return {
-      asset_type: form.asset_type,
-      asset_value: moneyPayload(form.asset_value),
+      person_type: "PJ",
+      asset_type: "imovel",
+      asset_value: total > 0 ? String(total) : moneyPayload(form.asset_value),
       requested_amount: form.requested_amount.trim() ? moneyPayload(form.requested_amount) : null,
-      asset_year: form.asset_year ? Number(form.asset_year) : null,
+      asset_year: null,
       asset_paid_off: form.asset_paid_off,
       asset_has_lien: form.asset_has_lien,
       lien_payoff_value: form.asset_has_lien && form.lien_payoff_value ? moneyPayload(form.lien_payoff_value) : null,
-      property_registry: form.property_registry.trim() || null,
+      property_registry: registry || null,
+      properties_json: props,
       docs_complete: form.docs_complete,
       term_months: Number(form.term_months),
       capital_source: form.capital_source,
@@ -199,9 +344,15 @@ export function FlashDeskModule() {
   }
 
   async function store() {
+    const validation = validateBeforeStore();
+    if (validation) {
+      setError(validation);
+      return;
+    }
     setError("");
     setBusy(true);
     try {
+      const fullAddress = properties.map(composePropertyAddress).filter(Boolean).join("\n---\n");
       const created = await api<FlashSolicitation>("/flash/desk/solicitations", {
         method: "POST",
         body: JSON.stringify({
@@ -210,17 +361,18 @@ export function FlashDeskModule() {
           contact_email: form.contact_email.trim(),
           contact_phone: form.contact_phone.trim(),
           document: form.document.trim() || null,
-          person_type: form.person_type,
+          person_type: "PJ",
           address: form.address.trim() || null,
           occupation: form.occupation.trim() || null,
           income_value: moneyPayload(form.income_value),
-          asset_full_address: form.asset_full_address.trim() || null,
+          asset_full_address: fullAddress || null,
           partners_json: sociosPayload(socios),
         }),
       });
       setNotice(`Flash gravado: ${created.contact_name} — ${created.status_label}`);
       setForm(emptyForm);
       setSocios([]);
+      setProperties([newPropertyRow()]);
       setEvalResult(null);
       setSelectedId(created.id);
       setTab("lista");
@@ -396,20 +548,27 @@ export function FlashDeskModule() {
         {tab === "nova" && (
           <div style={{ padding: "0 18px 18px", display: "grid", gap: 16, gridTemplateColumns: "minmax(0,1.2fr) minmax(0,0.8fr)" }}>
             <div className="stack-form">
+              <p className="muted" style={{ margin: 0, fontSize: 11 }}>
+                Flash Capital é exclusivo para <b>Pessoa Jurídica (PJ)</b>. Informe o tomador do crédito e cada imóvel em garantia (operação em nome de terceiros titulares).
+              </p>
               <div style={{ display: "grid", gap: 9, gridTemplateColumns: "1fr 1fr" }}>
-                <input placeholder="Nome" value={form.contact_name} onChange={(e) => patchForm("contact_name", e.target.value)} />
+                <div style={{ gridColumn: "1 / -1" }}>
+                  <b style={{ fontSize: 12 }}>Tomador do crédito (PJ)</b>
+                </div>
+                <input placeholder="Razão social" value={form.contact_name} onChange={(e) => patchForm("contact_name", e.target.value)} />
+                <input placeholder="CNPJ" value={form.document} onChange={(e) => patchForm("document", e.target.value)} />
                 <input placeholder="E-mail" value={form.contact_email} onChange={(e) => patchForm("contact_email", e.target.value)} />
                 <input placeholder="Telefone" value={form.contact_phone} onChange={(e) => patchForm("contact_phone", e.target.value)} />
-                <input placeholder="CPF/CNPJ" value={form.document} onChange={(e) => patchForm("document", e.target.value)} />
-                <select value={form.person_type} onChange={(e) => patchForm("person_type", e.target.value)}>
-                  <option value="PF">PF</option>
-                  <option value="PJ">PJ</option>
-                </select>
-                <select value={form.asset_type} onChange={(e) => patchForm("asset_type", e.target.value)}>
-                  {ASSET_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
-                </select>
-                <label>Valor do bem (R$)<CurrencyInput value={form.asset_value} onChange={(v) => patchForm("asset_value", v)} /></label>
-                <label>Valor solicitado (R$)<CurrencyInput value={form.requested_amount} onChange={(v) => patchForm("requested_amount", v)} /></label>
+                <label>
+                  Faturamento (R$)
+                  <CurrencyInput value={form.income_value} onChange={(v) => patchForm("income_value", v)} placeholder="R$ 0,00" />
+                </label>
+                <input placeholder="Ramo de atividade" value={form.occupation} onChange={(e) => patchForm("occupation", e.target.value)} />
+                <input style={{ gridColumn: "1 / -1" }} placeholder="Endereço da sede (tomador)" value={form.address} onChange={(e) => patchForm("address", e.target.value)} />
+                <label>
+                  Valor solicitado (R$)
+                  <CurrencyInput value={form.requested_amount} onChange={(v) => patchForm("requested_amount", v)} placeholder="R$ 0,00" />
+                </label>
                 <select value={form.term_months} onChange={(e) => patchForm("term_months", e.target.value)}>
                   <option value="36">36 meses</option>
                   <option value="60">60 meses (balloon 36)</option>
@@ -418,27 +577,311 @@ export function FlashDeskModule() {
                   <option value="RETAIL">Pool (RETAIL)</option>
                   <option value="INSTITUTIONAL">Fundo (INSTITUTIONAL)</option>
                 </select>
-                <input placeholder="Renda / faturamento" value={form.income_value} onChange={(e) => patchForm("income_value", e.target.value)} />
-                <input placeholder="Profissão / ramo" value={form.occupation} onChange={(e) => patchForm("occupation", e.target.value)} />
-                <input style={{ gridColumn: "1 / -1" }} placeholder="Endereço" value={form.address} onChange={(e) => patchForm("address", e.target.value)} />
-                <label style={{ gridColumn: "1 / -1" }}>
-                  Matrícula(s)
-                  <textarea rows={2} value={form.property_registry} onChange={(e) => patchForm("property_registry", e.target.value)} />
-                </label>
-                <label style={{ gridColumn: "1 / -1" }}>
-                  Endereço completo do bem
-                  <textarea rows={2} value={form.asset_full_address} onChange={(e) => patchForm("asset_full_address", e.target.value)} />
-                </label>
                 {form.asset_has_lien && (
-                  <label>Valor quitação gravame (R$)<CurrencyInput value={form.lien_payoff_value} onChange={(v) => patchForm("lien_payoff_value", v)} /></label>
+                  <label style={{ gridColumn: "1 / -1" }}>
+                    Valor quitação gravame (R$)
+                    <CurrencyInput value={form.lien_payoff_value} onChange={(v) => patchForm("lien_payoff_value", v)} />
+                  </label>
                 )}
               </div>
               <PartnerSociosFields value={socios} onChange={setSocios} />
+
+              {properties.map((prop, pIdx) => (
+                <div key={prop.localKey} className="desk-repeat-block" style={{ borderTop: "1px solid var(--line)", paddingTop: 12 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <b style={{ fontSize: 12 }}>Imóvel {pIdx + 1}</b>
+                    {properties.length > 1 && (
+                      <button
+                        type="button"
+                        className="table-action"
+                        onClick={() => patchProperties((rows) => rows.filter((_, i) => i !== pIdx))}
+                        aria-label="Remover imóvel"
+                      >
+                        <Trash2 size={14} />
+                        Remover imóvel
+                      </button>
+                    )}
+                  </div>
+                  <div style={{ display: "grid", gap: 9, gridTemplateColumns: "1fr 1fr" }}>
+                    <label>
+                      Tipo
+                      <select
+                        value={prop.zone}
+                        onChange={(e) => {
+                          const zone = e.target.value as FlashPropertyRow["zone"];
+                          patchProperties((rows) => {
+                            const next = [...rows];
+                            next[pIdx] = { ...next[pIdx], zone };
+                            return next;
+                          });
+                        }}
+                      >
+                        <option value="URBANO">Urbano</option>
+                        <option value="RURAL">Rural</option>
+                      </select>
+                    </label>
+                    <label>
+                      Matrícula
+                      <input
+                        placeholder="Nº matrícula"
+                        value={prop.matricula}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          patchProperties((rows) => {
+                            const next = [...rows];
+                            next[pIdx] = { ...next[pIdx], matricula: v };
+                            return next;
+                          });
+                        }}
+                      />
+                    </label>
+                    <label>
+                      Valor do imóvel (R$)
+                      <CurrencyInput
+                        value={prop.property_value}
+                        onChange={(v) => {
+                          patchProperties((rows) => {
+                            const next = [...rows];
+                            next[pIdx] = { ...next[pIdx], property_value: v };
+                            return next;
+                          });
+                        }}
+                        placeholder="R$ 0,00"
+                      />
+                    </label>
+                    <label>
+                      CEP
+                      <input
+                        placeholder="00000-000"
+                        inputMode="numeric"
+                        value={prop.zip}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          patchProperties((rows) => {
+                            const next = [...rows];
+                            next[pIdx] = { ...next[pIdx], zip: v };
+                            return next;
+                          });
+                        }}
+                        onBlur={() => {
+                          if (prop.zip.replace(/\D/g, "").length === 8) void fillCepForProperty(pIdx, prop.zip);
+                        }}
+                      />
+                    </label>
+                    <label>
+                      População do município
+                      <input
+                        placeholder="Informe ou use CEP"
+                        inputMode="numeric"
+                        value={prop.population}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          patchProperties((rows) => {
+                            const next = [...rows];
+                            next[pIdx] = { ...next[pIdx], population: v };
+                            return next;
+                          });
+                        }}
+                      />
+                    </label>
+                    <label>
+                      Logradouro
+                      <input
+                        placeholder="Rua / avenida"
+                        value={prop.street}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          patchProperties((rows) => {
+                            const next = [...rows];
+                            next[pIdx] = { ...next[pIdx], street: v };
+                            return next;
+                          });
+                        }}
+                      />
+                    </label>
+                    <label>
+                      Número
+                      <input
+                        placeholder="Nº"
+                        value={prop.number}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          patchProperties((rows) => {
+                            const next = [...rows];
+                            next[pIdx] = { ...next[pIdx], number: v };
+                            return next;
+                          });
+                        }}
+                      />
+                    </label>
+                    <label>
+                      Cidade
+                      <input
+                        placeholder="Cidade"
+                        value={prop.city}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          patchProperties((rows) => {
+                            const next = [...rows];
+                            next[pIdx] = { ...next[pIdx], city: v };
+                            return next;
+                          });
+                        }}
+                      />
+                    </label>
+                    <label>
+                      UF
+                      <input
+                        placeholder="MG"
+                        maxLength={2}
+                        value={prop.state}
+                        onChange={(e) => {
+                          const v = e.target.value.toUpperCase();
+                          patchProperties((rows) => {
+                            const next = [...rows];
+                            next[pIdx] = { ...next[pIdx], state: v };
+                            return next;
+                          });
+                        }}
+                      />
+                    </label>
+                  </div>
+
+                  <label style={{ fontSize: 11, fontWeight: 700, display: "flex", alignItems: "flex-start", gap: 8, marginTop: 4 }}>
+                    <input
+                      type="checkbox"
+                      checked={prop.owner_same_as_borrower}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        patchProperties((rows) => {
+                          const next = [...rows];
+                          next[pIdx] = { ...next[pIdx], owner_same_as_borrower: checked };
+                          return next;
+                        });
+                      }}
+                    />
+                    O titular do imóvel é o mesmo tomador do crédito (espelhar dados do tomador PJ)
+                  </label>
+
+                  {!prop.owner_same_as_borrower && (
+                    <div className="desk-repeat-block" style={{ marginTop: 4 }}>
+                      <b style={{ fontSize: 11 }}>Titular(es) do imóvel</b>
+                      <small className="muted">Informe nome, CPF/CNPJ e % de participação (soma 100%).</small>
+                      {prop.owners.map((owner, oIdx) => (
+                        <div key={oIdx} className="desk-repeat-row">
+                          <label>
+                            Nome
+                            <input
+                              placeholder="Nome do titular"
+                              value={owner.name}
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                patchProperties((rows) => {
+                                  const next = [...rows];
+                                  const owners = [...next[pIdx].owners];
+                                  owners[oIdx] = { ...owners[oIdx], name: v };
+                                  next[pIdx] = { ...next[pIdx], owners };
+                                  return next;
+                                });
+                              }}
+                            />
+                          </label>
+                          <label>
+                            CPF/CNPJ · %
+                            <div style={{ display: "grid", gridTemplateColumns: "1fr 72px", gap: 6 }}>
+                              <input
+                                placeholder="Documento"
+                                value={owner.document}
+                                onChange={(e) => {
+                                  const v = e.target.value;
+                                  patchProperties((rows) => {
+                                    const next = [...rows];
+                                    const owners = [...next[pIdx].owners];
+                                    owners[oIdx] = { ...owners[oIdx], document: v };
+                                    next[pIdx] = { ...next[pIdx], owners };
+                                    return next;
+                                  });
+                                }}
+                              />
+                              <input
+                                placeholder="%"
+                                inputMode="decimal"
+                                value={owner.share_percent}
+                                onChange={(e) => {
+                                  const v = e.target.value;
+                                  patchProperties((rows) => {
+                                    const next = [...rows];
+                                    const owners = [...next[pIdx].owners];
+                                    owners[oIdx] = { ...owners[oIdx], share_percent: v };
+                                    next[pIdx] = { ...next[pIdx], owners };
+                                    return next;
+                                  });
+                                }}
+                              />
+                            </div>
+                          </label>
+                          {prop.owners.length > 1 && (
+                            <button
+                              type="button"
+                              className="table-action"
+                              onClick={() => {
+                                patchProperties((rows) => {
+                                  const next = [...rows];
+                                  next[pIdx] = {
+                                    ...next[pIdx],
+                                    owners: next[pIdx].owners.filter((_, i) => i !== oIdx),
+                                  };
+                                  return next;
+                                });
+                              }}
+                              aria-label="Remover titular"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                      <button
+                        type="button"
+                        className="table-action"
+                        onClick={() => {
+                          patchProperties((rows) => {
+                            const next = [...rows];
+                            next[pIdx] = {
+                              ...next[pIdx],
+                              owners: [...next[pIdx].owners, { name: "", document: "", share_percent: "" }],
+                            };
+                            return next;
+                          });
+                        }}
+                      >
+                        <Plus size={14} />
+                        Adicionar outro titular
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+
+              <button
+                type="button"
+                className="table-action"
+                onClick={() => patchProperties((rows) => [...rows, newPropertyRow()])}
+              >
+                <Plus size={14} />
+                Adicionar outro imóvel
+              </button>
+
               <div style={{ display: "flex", flexWrap: "wrap", gap: 14, fontSize: 12, fontWeight: 700 }}>
                 <label><input type="checkbox" checked={form.asset_paid_off} onChange={(e) => patchForm("asset_paid_off", e.target.checked)} /> Bem quitado</label>
                 <label><input type="checkbox" checked={form.asset_has_lien} onChange={(e) => patchForm("asset_has_lien", e.target.checked)} /> Bem com pendência</label>
                 <label><input type="checkbox" checked={form.docs_complete} onChange={(e) => patchForm("docs_complete", e.target.checked)} /> Checklist lastros ok</label>
               </div>
+              {totalPropertiesValue() > 0 && (
+                <p className="muted" style={{ margin: 0, fontSize: 11 }}>
+                  Valor total dos imóveis: <b>{brl.format(totalPropertiesValue())}</b>
+                </p>
+              )}
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <button type="button" className="admin-button" disabled={busy} onClick={() => void calculate()}>Calcular viabilidade</button>
                 {evalResult?.viable && (

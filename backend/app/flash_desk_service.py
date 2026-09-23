@@ -97,8 +97,28 @@ def _price_payment(principal: Decimal, rate_pct: Decimal, months: int) -> Decima
     return money(parcela)
 
 
+def _apply_properties_asset_total(data: dict) -> dict:
+    """Se houver imóveis no payload, usa a soma dos valores como valor do bem."""
+    props = data.get("properties_json") or []
+    if not isinstance(props, list) or not props:
+        return data
+    total = Decimal("0")
+    for row in props:
+        if not isinstance(row, dict):
+            continue
+        total += _dec(row.get("property_value") or 0)
+    if total > 0:
+        merged = {**data, "asset_value": str(money(total)), "asset_type": "imovel"}
+        return merged
+    return data
+
+
 def evaluate_flash_desk(data: dict) -> dict:
+    data = _apply_properties_asset_total(dict(data))
     motivos: list[str] = []
+    person_type = str(data.get("person_type") or "PJ").strip().upper()
+    if person_type != "PJ":
+        motivos.append("Flash Capital aceita apenas tomador Pessoa Jurídica (PJ).")
     asset_type = str(data.get("asset_type") or "").strip()
     category = _category(asset_type)
     if not category:
@@ -248,6 +268,8 @@ def get_solicitation(db: Session, user: User, solicitation_id: str) -> FlashSoli
 
 def store_solicitation(db: Session, user: User, payload: dict) -> FlashSolicitation:
     assert_desk_access(user)
+    payload = dict(payload)
+    payload["person_type"] = "PJ"
     result = evaluate_flash_desk(payload)
     if not result["viable"]:
         raise HTTPException(
@@ -267,7 +289,7 @@ def store_solicitation(db: Session, user: User, payload: dict) -> FlashSolicitat
         contact_email=str(payload["contact_email"]).strip().lower(),
         contact_phone=str(payload.get("contact_phone") or "").strip(),
         document=str(payload.get("document") or "").strip() or None,
-        person_type=str(payload.get("person_type") or "PF").upper()[:2],
+        person_type="PJ",
         address=str(payload.get("address") or "").strip() or None,
         occupation=str(payload.get("occupation") or "").strip() or None,
         income_value=money(_dec(payload.get("income_value") or 0)),
@@ -297,6 +319,7 @@ def store_solicitation(db: Session, user: User, payload: dict) -> FlashSolicitat
                         "lien_payoff_value",
                         "asset_full_address",
                         "partners_json",
+                        "properties_json",
                     ),
                 ),
             },
