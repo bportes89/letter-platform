@@ -1434,7 +1434,13 @@ def test_marketplace_suppliers_crud_and_markup_override(client, auth_headers):
     uni_veic = by_key["UNI_VEICULOS"]
     assert uni_veic["sync_mode"] == "SCRAPE"
     assert json.loads(uni_veic["scrape_config_json"])["category"] == "VEHICLE"
-    assert by_key["FRAGA"]["sync_mode"] == "NONE"
+    fraga = by_key["FRAGA"]
+    assert fraga["sync_mode"] == "JSON"
+    assert "fragaebitelloconsorcios.com.br" in (fraga.get("api_url") or "")
+    lance = by_key["LANCE"]
+    assert lance["sync_mode"] == "JSON"
+    assert "lanceconsorcio.com.br" in (lance.get("api_url") or "")
+    assert by_key["BITTELO"]["sync_mode"] == "NONE"
 
     created = client.post(
         "/api/v1/marketplace/suppliers",

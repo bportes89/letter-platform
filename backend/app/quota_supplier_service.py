@@ -102,6 +102,15 @@ SUPPLIER_SYNC_PRESETS: dict[str, dict[str, str]] = {
             ensure_ascii=False,
         ),
     },
+    # API JSON — URLs do legado (suppliers.id 1 e 2 em letter_banco_new.sql). Fraga+Bitello eram um feed (id 1).
+    "FRAGA": {
+        "sync_mode": "JSON",
+        "api_url": "https://fragaebitelloconsorcios.com.br/api/json/contemplados",
+    },
+    "LANCE": {
+        "sync_mode": "JSON",
+        "api_url": "https://contempladas.lanceconsorcio.com.br/",
+    },
 }
 
 

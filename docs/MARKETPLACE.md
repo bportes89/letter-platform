@@ -67,7 +67,7 @@ CRUD em `GET/POST/PATCH /api/v1/marketplace/suppliers` (+ `POST .../ensure-defau
 - `source_key` único por org (FRAGA, BITTELO, LANCE, UNI_CONTEMPLADOS, CONTEMPLADO_SP, LUME…)
 - `markup_percent` — % do crédito somado na entrada (prevalece sobre o mapa hardcoded)
 - `quem_paga_comissao` — `0` fornecedor / `1` cliente embute `platform_fee_percent` na entrada
-- `POST .../ensure-defaults` cria os 9 fornecedores padrão (6 base + 3 veículos) e, se ainda sem `api_url`, aplica presets SCRAPE em **UNI_CONTEMPLADOS**, **CONTEMPLADO_SP**, **LUME** e nas variantes **UNI_VEICULOS**, **CONTEMPLADO_SP_VEICULOS**, **LUME_VEICULOS** (não sobrescreve config manual). FRAGA/Bittelo/Lance exigem `api_url` JSON no admin ou env.
+- `POST .../ensure-defaults` cria os 9 fornecedores padrão (6 base + 3 veículos) e, se ainda sem `api_url`, aplica presets: **SCRAPE** (Uni / Contemplado SP / Lume + veículos) e **JSON** (**FRAGA** + **LANCE** — URLs do legado `suppliers.api`). No antigo, Fraga e Bitello compartilhavam o feed JSON do fornecedor 1; **BITTELO** só sincroniza se informar URL própria (admin ou `LETTER_MARKETPLACE_SUPPLIER_BITTELO_API_URL`). Não sobrescreve config manual.
 - Tabela admin mostra resumo do último sync (`+criadas ~atualizadas −inativadas`) via `last_sync_detail_json`.
 
 Menu: **Cartas contempladas → Fornecedores**.
