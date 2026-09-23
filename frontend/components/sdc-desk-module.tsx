@@ -537,8 +537,8 @@ export function SdcDeskModule() {
       setNotice("TAPAF confirmada. Acompanhe o status na aba Acompanhamento.");
       setForm(emptyForm);
       setSocios([]);
-      setMatriculas([""]);
-      setVehicles([{ plate: "", renavam: "" }]);
+      setProperties([newSdcPropertyRow()]);
+      setVehicles([{ plate: "", renavam: "", year: "", vehicle_value: "" }]);
       setEvalResult(null);
       setTapafCheckout(null);
       setTab("lista");
