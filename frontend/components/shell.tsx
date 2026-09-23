@@ -30,6 +30,7 @@ import {
   filterPlatformModulesForUser,
   filterProductNavForUser,
 } from "@/lib/permission-nav";
+import { ReferralStickyBar } from "@/components/referral-sticky-bar";
 import { personaLabel } from "@/lib/role-nav";
 import { isPortalHomePath } from "@/lib/portal-routes";
 
@@ -371,6 +372,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
             </div>
           </div>
         </header>
+        <ReferralStickyBar user={user} />
         <div className="content">{children}</div>
         <footer className="workspace-footer">
           <AsaasBaasSeal />
