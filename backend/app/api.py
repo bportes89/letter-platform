@@ -2901,6 +2901,12 @@ def create_proposal(payload: ProposalCreate, user: User = Depends(require_scope(
     assert_lead_access_for_sale(db, user, lead, payload.client_user_id)
 
     terms = dict(payload.terms or {})
+    if payload.product == "MARKETPLACE":
+        from app.cadastro_service import seed_marketplace_lifecycle
+
+        terms = seed_marketplace_lifecycle(terms)
+        if lead.product_interest != "MARKETPLACE":
+            lead.product_interest = "MARKETPLACE"
     proposal = Proposal(
         organization_id=user.organization_id,
         lead_id=lead.id,

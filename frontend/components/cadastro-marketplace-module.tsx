@@ -367,7 +367,12 @@ export function CadastroMarketplaceModule() {
         </div>
 
         {selected && (
-          <form className="marketplace-form" onSubmit={saveDetail} style={{ marginTop: "1.5rem" }} key={selected.lead_id}>
+          <form
+            className="marketplace-form"
+            onSubmit={saveDetail}
+            style={{ marginTop: "1.5rem" }}
+            key={`${selected.lead_id}-${selected.email || ""}-${JSON.stringify(selected.address || {})}-${selected.situation}`}
+          >
             <h3>
               {selected.name} · {selected.situation_label}
             </h3>

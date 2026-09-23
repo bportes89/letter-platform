@@ -753,6 +753,91 @@ def test_marketplace_cadastros_pipeline(client, auth_headers):
     assert patched.json()["address"].get("city") == "Barbacena"
 
 
+def test_cadastro_patch_visible_in_venda_direta_shortcut(client, auth_headers):
+    """Edição em Cadastros Marketplace deve refletir no atalho da Venda Direta (mesmo bloco scr_detail)."""
+    lead = client.post(
+        "/api/v1/leads",
+        headers=auth_headers,
+        json={
+            "name": "Cliente Atalho VD",
+            "phone": "32990001111",
+            "product_interest": "MARKETPLACE",
+            "source": "DASHBOARD",
+        },
+    )
+    assert lead.status_code == 201
+    lead_id = lead.json()["id"]
+
+    patched = client.patch(
+        f"/api/v1/marketplace/cadastros/{lead_id}",
+        headers=auth_headers,
+        json={
+            "email": "atalho.vd@letter.test",
+            "document": "39053344705",
+            "zipcode": "36010000",
+            "street": "Rua Atalho",
+            "number": "12",
+            "neighborhood": "Centro",
+            "city": "Juiz de Fora",
+            "uf": "MG",
+        },
+    )
+    assert patched.status_code == 200, patched.text
+
+    rows = client.get("/api/v1/marketplace/venda-direta-manual/cadastros", headers=auth_headers)
+    assert rows.status_code == 200
+    row = next((r for r in rows.json() if r["lead_id"] == lead_id), None)
+    assert row is not None
+    assert row["email"] == "atalho.vd@letter.test"
+    assert row["address"].get("city") == "Juiz de Fora"
+
+
+def test_marketplace_proposal_simulation_lists_in_cadastros(client, auth_headers):
+    """Simular proposta Marketplace preenche crédito/entrada no Cadastros (aba Novos)."""
+    lead = client.post(
+        "/api/v1/leads",
+        headers=auth_headers,
+        json={
+            "name": "Cliente Simulação",
+            "phone": "32990002222",
+            "product_interest": "MARKETPLACE",
+            "source": "DASHBOARD",
+        },
+    )
+    assert lead.status_code == 201
+    lead_id = lead.json()["id"]
+
+    quotas = client.get("/api/v1/quotas", headers=auth_headers).json()
+    available = next((q for q in quotas if q["status"] == "AVAILABLE"), None)
+    assert available, "precisa de cota AVAILABLE no seed"
+
+    proposal = client.post(
+        "/api/v1/proposals",
+        headers=auth_headers,
+        json={
+            "lead_id": lead_id,
+            "product": "MARKETPLACE",
+            "requested_amount": available["credit_value"],
+            "terms": {"channel": "PARTNER_OFFICE"},
+        },
+    )
+    assert proposal.status_code == 201, proposal.text
+
+    calc = client.post(
+        f"/api/v1/proposals/{proposal.json()['id']}/calculate",
+        headers=auth_headers,
+        json={"quota_ids": [available["id"]], "fee_percent": "10", "start_fee": "1500"},
+    )
+    assert calc.status_code == 201, calc.text
+
+    novos = client.get("/api/v1/marketplace/cadastros?pipeline=NOVOS", headers=auth_headers)
+    assert novos.status_code == 200
+    row = next((r for r in novos.json() if r["lead_id"] == lead_id), None)
+    assert row is not None, "proposta Marketplace simulada deve aparecer em Novos"
+    assert row["credit_value"] is not None
+    assert row["entrada_value"] is not None
+
+
 def test_marketplace_cadastro_situation_lifecycle(client, auth_headers):
     """Situação explícita: Pagou → Concluído libera comissão real + extrato."""
     # Garante uma venda Marketplace via venda direta manual

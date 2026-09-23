@@ -211,7 +211,18 @@ def calculate_marketplace(db: Session, user: User, proposal: Proposal, quotas: l
     )
     db.add(calculation)
     proposal.calculation_version = f"marketplace-v1.{current_version + 1}"
-    proposal.terms_json = json.dumps({**json.loads(proposal.terms_json or "{}"), "calculation": output_data}, ensure_ascii=False)
+    from app.cadastro_service import seed_marketplace_lifecycle
+
+    terms = seed_marketplace_lifecycle(json.loads(proposal.terms_json or "{}"))
+    terms["calculation"] = output_data
+    terms["quota_ids"] = [q.id for q in quotas]
+    terms["total_credit"] = str(credit_total)
+    terms["total_entrada"] = str(premium_total)
+    terms["channel"] = terms.get("channel") or "PROPOSALS_OFFICE"
+    proposal.terms_json = json.dumps(terms, ensure_ascii=False)
+    lead = db.get(Lead, proposal.lead_id)
+    if lead and lead.product_interest != "MARKETPLACE":
+        lead.product_interest = "MARKETPLACE"
     return calculation
 
 

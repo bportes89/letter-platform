@@ -11,7 +11,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.cadastro_service import seed_marketplace_lifecycle
+from app.cadastro_service import _snapshot_from_lead, seed_marketplace_lifecycle
 from app.commission_attribution import apply_proposal_attribution
 from app.marketplace_service import admin_profile_blockers, pricing_for_combo, pricing_for_quota
 from app.models import Administrator, Lead, Proposal, Quota, Role, User
@@ -115,20 +115,10 @@ def list_cadastros(db: Session, user: User, *, q: str | None = None) -> list[dic
     needle = (q or "").strip().lower()
     rows = []
     for lead in leads:
-        email = None
-        person_type = "PF"
-        address = {}
-        try:
-            detail = json.loads(lead.scr_detail_json or "{}")
-            for key in ("venda_direta_manual", "venda_direta_robo"):
-                snap = detail.get(key) or {}
-                if snap.get("email"):
-                    email = snap.get("email")
-                    person_type = snap.get("person_type") or "PF"
-                    address = snap.get("address") or {}
-                    break
-        except json.JSONDecodeError:
-            pass
+        snap = _snapshot_from_lead(lead)
+        email = snap.get("email")
+        person_type = snap.get("person_type") or "PF"
+        address = snap.get("address") if isinstance(snap.get("address"), dict) else {}
         label = f"(#{lead.id[:8]}) {lead.name}"
         if lead.document:
             label += f" ({lead.document})"

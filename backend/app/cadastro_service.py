@@ -111,12 +111,24 @@ def _write_lifecycle(proposal: Proposal, **fields) -> dict:
     return life
 
 
-def _snapshot_from_lead(lead: Lead) -> dict:
-    detail = _parse_json(lead.scr_detail_json)
-    for key in ("venda_direta_manual", "venda_direta_robo", "chat", "cadastro"):
+MARKETPLACE_SNAPSHOT_KEYS = ("venda_direta_manual", "venda_direta_robo", "chat", "cadastro")
+
+
+def marketplace_snapshot_key(detail: dict) -> str:
+    """Chave canônica do perfil comercial — ignora dict vazio (evita gravar em chat:{} e ler de outro bloco)."""
+    for key in MARKETPLACE_SNAPSHOT_KEYS:
         snap = detail.get(key)
         if isinstance(snap, dict) and snap:
-            return snap
+            return key
+    return "cadastro"
+
+
+def _snapshot_from_lead(lead: Lead) -> dict:
+    detail = _parse_json(lead.scr_detail_json)
+    key = marketplace_snapshot_key(detail)
+    snap = detail.get(key)
+    if isinstance(snap, dict) and snap:
+        return snap
     return {}
 
 
@@ -339,8 +351,13 @@ def list_cadastros(db: Session, user: User, *, pipeline: str = PIPELINE_ALL, q: 
             continue
 
         email = snap.get("email") or terms.get("client_email")
-        credit = terms.get("total_credit") or (str(proposal.requested_amount) if proposal else None)
-        entrada = terms.get("total_entrada") or terms.get("total_entrada_base")
+        calc = terms.get("calculation") if isinstance(terms.get("calculation"), dict) else {}
+        credit = (
+            terms.get("total_credit")
+            or calc.get("credit_total")
+            or (str(proposal.requested_amount) if proposal else None)
+        )
+        entrada = terms.get("total_entrada") or terms.get("total_entrada_base") or calc.get("premium_total")
         if not entrada and snap.get("pricing"):
             entrada = (snap.get("pricing") or {}).get("entrada_final")
         suppliers = sorted(
@@ -545,10 +562,7 @@ def update_cadastro(
         lead.status = lead_status
 
     detail = _parse_json(lead.scr_detail_json)
-    key = next(
-        (k for k in ("venda_direta_manual", "venda_direta_robo", "chat", "cadastro") if isinstance(detail.get(k), dict)),
-        "cadastro",
-    )
+    key = marketplace_snapshot_key(detail)
     snap = detail.get(key) if isinstance(detail.get(key), dict) else {}
     if email is not None:
         snap["email"] = email.strip()
