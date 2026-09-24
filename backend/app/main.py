@@ -17,7 +17,10 @@ from fastapi.responses import JSONResponse
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     configure_logging(settings.log_level)
-    Base.metadata.create_all(engine)
+    # Em cloud o schema vem do Alembic (start_cloud.sh). create_all aqui bloqueava o
+    # "application startup" e o Render não detectava porta aberta.
+    if settings.env == "development":
+        Base.metadata.create_all(engine)
     yield
 
 
