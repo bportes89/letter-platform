@@ -434,7 +434,14 @@ function formatApiErrorDetail(detail: unknown): string {
       .filter(Boolean)
       .join("; ");
   }
-  if (detail && typeof detail === "object" && "message" in detail) return String((detail as { message?: string }).message ?? "");
+  if (detail && typeof detail === "object") {
+    const obj = detail as { message?: string; motivos?: string[] };
+    if (Array.isArray(obj.motivos) && obj.motivos.length) {
+      const head = obj.message ? `${obj.message} ` : "";
+      return `${head}${obj.motivos.join(" ")}`.trim();
+    }
+    if (obj.message) return String(obj.message);
+  }
   return "Não foi possível concluir a solicitação";
 }
 

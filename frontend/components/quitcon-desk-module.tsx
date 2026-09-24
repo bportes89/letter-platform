@@ -281,21 +281,52 @@ export function QuitConDeskModule() {
     });
   }
 
-  function validateAddresses() {
-    const check = (addr: AddressFields, label: string) => {
-      if (!addr.zip.trim()) throw new Error(`${label}: informe o CEP.`);
-      if (!addr.street.trim()) throw new Error(`${label}: informe o logradouro.`);
-      if (!addr.number.trim()) throw new Error(`${label}: informe o número.`);
-      if (!addr.city.trim()) throw new Error(`${label}: informe a cidade.`);
-      if (!addr.state.trim()) throw new Error(`${label}: informe a UF.`);
-    };
-    check(clientAddress, "Endereço do cliente");
-    check(assetAddress, "Endereço do bem alienado");
+  function addressValidationMessage(addr: AddressFields, label: string): string | null {
+    if (!addr.zip.trim()) return `${label}: informe o CEP.`;
+    if (!addr.street.trim()) return `${label}: informe o logradouro.`;
+    if (!addr.number.trim()) return `${label}: informe o número.`;
+    if (!addr.city.trim()) return `${label}: informe a cidade.`;
+    if (!addr.state.trim()) return `${label}: informe a UF.`;
+    return null;
+  }
+
+  function validateBeforeStore(): string | null {
+    if (!form.contact_name.trim()) return "Informe o nome do cliente.";
+    if (!form.contact_email.trim()) return "Informe o e-mail do cliente.";
+    if (!form.contact_phone.trim()) return "Informe o telefone do cliente.";
+    if (!form.registry_office.trim()) return "Informe a administradora.";
+    try {
+      buildQuotaLinesPayload();
+    } catch (e) {
+      return e instanceof Error ? e.message : "Revise os dados das cotas.";
+    }
+    const clientAddrMsg = addressValidationMessage(clientAddress, "Endereço do cliente");
+    if (clientAddrMsg) return clientAddrMsg;
+    const assetAddrMsg = addressValidationMessage(assetAddress, "Endereço do bem alienado");
+    if (assetAddrMsg) return assetAddrMsg;
+    if (isImovel && !alienatedRegistry.trim()) return "Informe a matrícula do imóvel alienado.";
+    if (!isImovel && !alienatedPlate.trim() && !alienatedChassi.trim()) {
+      return "Informe placa ou chassi do veículo alienado.";
+    }
+    if (form.operational_service && !form.operational_service_accepted) {
+      return "Marque o aceite da taxa de serviço LETTER (2%) para gravar a solicitação.";
+    }
+    if (!evalResult?.viable) return "Calcule a viabilidade antes de avançar.";
+    return null;
   }
 
   function evaluatePayload() {
     const quota_lines = buildQuotaLinesPayload();
-    const { totalSaldo, maxMeses, registry } = quotaPreview;
+    let totalSaldo = 0;
+    let maxMeses = 0;
+    for (const q of quota_lines) {
+      totalSaldo += Number(q.installment_value) * q.meses_restantes;
+      maxMeses = Math.max(maxMeses, q.meses_restantes);
+    }
+    const registry =
+      quota_lines.length === 1
+        ? `${quota_lines[0].group_code}/${quota_lines[0].quota_code}`
+        : `${quota_lines[0].group_code}/${quota_lines[0].quota_code} (+${quota_lines.length - 1} cotas)`;
     if (!registry || totalSaldo <= 0 || maxMeses < 1) {
       throw new Error("Revise as cotas: parcela, prazo e valores para calcular o saldo.");
     }
@@ -352,7 +383,6 @@ export function QuitConDeskModule() {
     setError("");
     setBusy(true);
     try {
-      await validateContactFields();
       const payload = evaluatePayload();
       const res = await api<{ result: EvalResult }>("/quitcon/desk/evaluate", {
         method: "POST",
@@ -367,14 +397,15 @@ export function QuitConDeskModule() {
   }
 
   async function store() {
+    const validation = validateBeforeStore();
+    if (validation) {
+      setError(validation);
+      return;
+    }
     setError("");
     setBusy(true);
     try {
       await validateContactFields();
-      validateAddresses();
-      if (form.operational_service && !form.operational_service_accepted) {
-        throw new Error("Marque o aceite da taxa de serviço LETTER (2%) para gravar a solicitação.");
-      }
       const payload = evaluatePayload();
       const assetFormatted = composeAddress(assetAddress);
       const created = await api<QuitConSolicitation>("/quitcon/desk/solicitations", {
@@ -893,16 +924,19 @@ export function QuitConDeskModule() {
               )}
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <button type="button" className="admin-button" disabled={busy} onClick={() => void calculate()}>Calcular viabilidade</button>
-                {evalResult?.viable && (
-                  <button type="button" className="admin-button" disabled={busy} onClick={() => void store()}>Avançar (gravar QuitCon)</button>
-                )}
               </div>
             </div>
             <div style={{ border: "1px solid var(--line)", borderRadius: 12, padding: 16, background: "#f7fbf9" }}>
               <b>Resultado doc253</b>
-              {!evalResult && <p className="muted" style={{ marginTop: 10 }}>Preencha e clique em Calcular.</p>}
+              {!evalResult && <p className="muted" style={{ marginTop: 10 }}>Preencha as cotas e clique em Calcular viabilidade.</p>}
+              {evalResult?.required_docs?.length && (
+                <p className="muted" style={{ fontSize: 11, marginTop: 10, marginBottom: 0, lineHeight: 1.45 }}>
+                  Após gravar, na aba Acompanhamento você anexará {evalResult.required_docs.length} documentos do checklist.
+                </p>
+              )}
               {evalResult?.viable && (
-                <div style={{ display: "grid", gap: 10, marginTop: 12 }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 12 }}>
+                <div style={{ display: "grid", gap: 10 }}>
                   {evalResult.totais && (
                     <>
                       <div><small>Saldo devedor total</small><div><b>{brl.format(Number(evalResult.totais.saldo_devedor_total))}</b></div></div>
@@ -941,7 +975,17 @@ export function QuitConDeskModule() {
                       </div>
                     </div>
                   )}
-                  <p style={{ color: "#067647", fontWeight: 700 }}>{evalResult.message}</p>
+                  <p style={{ color: "#067647", fontWeight: 700, margin: 0 }}>{evalResult.message}</p>
+                </div>
+                  <button
+                    type="button"
+                    className="admin-button"
+                    style={{ width: "100%" }}
+                    disabled={busy}
+                    onClick={() => void store()}
+                  >
+                    Avançar e gravar QuitCon
+                  </button>
                 </div>
               )}
               {evalResult && !evalResult.viable && (
