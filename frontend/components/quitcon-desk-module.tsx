@@ -321,7 +321,7 @@ export function QuitConDeskModule() {
       ...prev,
       zip: addr.zipcode || prev.zip,
       street: addr.street || prev.street,
-      district: addr.district || prev.district,
+      district: addr.neighborhood || prev.district,
       city: addr.city || prev.city,
       state: addr.uf || prev.state,
     }));
@@ -335,7 +335,7 @@ export function QuitConDeskModule() {
       ...prev,
       zip: addr.zipcode || prev.zip,
       street: addr.street || prev.street,
-      district: addr.district || prev.district,
+      district: addr.neighborhood || prev.district,
       city: addr.city || prev.city,
       state: addr.uf || prev.state,
     }));
