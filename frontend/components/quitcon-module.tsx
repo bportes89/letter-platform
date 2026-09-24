@@ -1,12 +1,77 @@
 "use client";
 
 import { Building2, Camera, CheckCircle2, Coins, Lock, ScrollText, Timer, Unlock } from "lucide-react";
-import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, Proposal, QuitConOperacao } from "@/lib/api";
 import { QuitConCustosEntradaPanel, QuitConCustosEntrada } from "@/components/quitcon-custos-entrada";
-import { CurrencyFormField } from "@/components/currency-input";
+import { CurrencyInput } from "@/components/currency-input";
 
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
+
+const ADMINS = ["Embracon", "Ademicon", "Ancora", "HS", "Tradicao", "Recon", "Groscon", "Roma", "Reserva"];
+
+type QuotaFormFields = {
+  group_code: string;
+  quota_code: string;
+  credit_at_billing: string;
+  installment_value: string;
+  meses_restantes: string;
+  registry_office: string;
+  operational_service: boolean;
+  contemplada: boolean;
+  bem_faturado: boolean;
+  parcelas_em_dia: boolean;
+};
+
+const emptyQuotaForm = (): QuotaFormFields => ({
+  group_code: "",
+  quota_code: "",
+  credit_at_billing: "",
+  installment_value: "",
+  meses_restantes: "",
+  registry_office: "",
+  operational_service: false,
+  contemplada: true,
+  bem_faturado: true,
+  parcelas_em_dia: true,
+});
+
+function parseMoney(value: string): number {
+  const raw = String(value || "").trim();
+  if (!raw) return 0;
+  if (raw.includes(",")) return Number(raw.replace(/\./g, "").replace(",", ".")) || 0;
+  return Number(raw) || 0;
+}
+
+function quotaSaldo(fields: QuotaFormFields): number {
+  const parcela = parseMoney(fields.installment_value);
+  const meses = Number(fields.meses_restantes);
+  if (!parcela || !Number.isFinite(meses) || meses < 1) return 0;
+  return parcela * meses;
+}
+
+function quotaVp(saldo: number, meses: number): number {
+  if (!saldo || meses < 1) return 0;
+  return saldo / (1 + 0.01 * meses);
+}
+
+function registryFromQuota(fields: QuotaFormFields): string {
+  const g = fields.group_code.trim();
+  const c = fields.quota_code.trim();
+  if (!g || !c) return "";
+  return `${g}/${c}`;
+}
+
+function validateQuotaFields(fields: QuotaFormFields): string | null {
+  if (!fields.group_code.trim() || !fields.quota_code.trim()) return "Informe grupo e cota.";
+  if (!fields.registry_office.trim()) return "Informe a administradora.";
+  const meses = Number(fields.meses_restantes);
+  if (!Number.isFinite(meses) || meses < 1 || meses > 240) return "Informe o prazo restante (1–240 meses).";
+  if (parseMoney(fields.installment_value) <= 0) return "Informe o valor da parcela atual.";
+  if (parseMoney(fields.credit_at_billing) <= 0) return "Informe o valor do crédito quando faturou o bem.";
+  if (quotaSaldo(fields) <= 0) return "Não foi possível calcular o saldo devedor (parcela × prazo).";
+  return null;
+}
 
 const STATUSES = [
   "AGUARDANDO_TAPAF", "TAPAF_CHECKOUT_ACCEPTED", "TAPAF_LIQUIDADA", "EM_AUDITORIA_RISCO", "REPROVADO_COMPLIANCE",
@@ -40,6 +105,24 @@ export function QuitConModule() {
   const [cb2, setCb2] = useState(false);
   const manifestRef = useRef<HTMLDivElement>(null);
   const manifestEndRef = useRef<HTMLDivElement>(null);
+  const [operacaoForm, setOperacaoForm] = useState({
+    proposal_id: "",
+    appraisal_value: "",
+    ...emptyQuotaForm(),
+  });
+  const [simForm, setSimForm] = useState(emptyQuotaForm());
+
+  const operacaoPreview = useMemo(() => {
+    const saldo = quotaSaldo(operacaoForm);
+    const meses = Number(operacaoForm.meses_restantes);
+    return { saldo, vp: quotaVp(saldo, meses), economia: saldo - quotaVp(saldo, meses) };
+  }, [operacaoForm]);
+
+  const simPreview = useMemo(() => {
+    const saldo = quotaSaldo(simForm);
+    const meses = Number(simForm.meses_restantes);
+    return { saldo, vp: quotaVp(saldo, meses), economia: saldo - quotaVp(saldo, meses) };
+  }, [simForm]);
 
   const evaluateManifestScroll = useCallback(() => {
     const el = manifestRef.current;
@@ -97,24 +180,35 @@ export function QuitConModule() {
 
   async function createOperacao(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    const f = new FormData(e.currentTarget);
+    const err = validateQuotaFields(operacaoForm);
+    if (err) {
+      setMessage(err);
+      return;
+    }
+    if (!operacaoForm.proposal_id) {
+      setMessage("Selecione a proposta vinculada.");
+      return;
+    }
+    const meses = Number(operacaoForm.meses_restantes);
+    const saldo = quotaSaldo(operacaoForm);
     try {
       const item = await api<QuitConOperacao>("/finops/quitcon/operacoes", {
         method: "POST",
         body: JSON.stringify({
-          proposal_id: f.get("proposal_id"),
-          outstanding_balance: f.get("outstanding_balance"),
-          registry_number: f.get("registry_number"),
-          registry_office: f.get("registry_office"),
-          appraisal_value: f.get("appraisal_value") || undefined,
-          meses_restantes: Number(f.get("meses_restantes") || 48),
-          operational_service: f.get("operational_service") === "on",
-          contemplada: f.get("contemplada") === "on",
-          bem_faturado: f.get("bem_faturado") === "on",
-          parcelas_em_dia: f.get("parcelas_em_dia") === "on",
+          proposal_id: operacaoForm.proposal_id,
+          outstanding_balance: String(saldo),
+          registry_number: registryFromQuota(operacaoForm),
+          registry_office: operacaoForm.registry_office.trim(),
+          appraisal_value: parseMoney(operacaoForm.appraisal_value) || undefined,
+          meses_restantes: meses,
+          operational_service: operacaoForm.operational_service,
+          contemplada: operacaoForm.contemplada,
+          bem_faturado: operacaoForm.bem_faturado,
+          parcelas_em_dia: operacaoForm.parcelas_em_dia,
         }),
       });
       setMessage(`Operação ${item.operacao_code} criada — AGUARDANDO_TAPAF.`);
+      setOperacaoForm({ proposal_id: "", appraisal_value: "", ...emptyQuotaForm() });
       await load();
       setSelected(item);
     } catch (x) {
@@ -215,23 +309,98 @@ export function QuitConModule() {
 
   async function simulateFinance(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    const f = new FormData(e.currentTarget);
+    const err = validateQuotaFields(simForm);
+    if (err) {
+      setMessage(err);
+      return;
+    }
+    const meses = Number(simForm.meses_restantes);
+    const saldo = quotaSaldo(simForm);
     try {
       setFinancePreview(await api<Record<string, unknown>>("/finops/quitcon/simulate", {
         method: "POST",
         body: JSON.stringify({
-          outstanding_balance: f.get("outstanding_balance"),
-          meses_restantes: Number(f.get("meses_restantes") || 48),
-          administrator_name: f.get("administrator_name"),
-          operational_service: f.get("operational_service") === "on",
-          contemplada: f.get("contemplada") === "on",
-          bem_faturado: f.get("bem_faturado") === "on",
-          parcelas_em_dia: f.get("parcelas_em_dia") === "on",
+          outstanding_balance: String(saldo),
+          meses_restantes: meses,
+          administrator_name: simForm.registry_office.trim(),
+          operational_service: simForm.operational_service,
+          contemplada: simForm.contemplada,
+          bem_faturado: simForm.bem_faturado,
+          parcelas_em_dia: simForm.parcelas_em_dia,
         }),
       }));
     } catch (x) {
       setMessage(x instanceof Error ? x.message : "Falha simulação");
     }
+  }
+
+  function quotaFieldsBlock(
+    fields: QuotaFormFields,
+    onChange: (next: QuotaFormFields) => void,
+    preview: { saldo: number; vp: number; economia: number },
+  ) {
+    return (
+      <>
+        <p className="muted" style={{ fontSize: 12, margin: 0, lineHeight: 1.45 }}>
+          Informe grupo, cota, crédito no faturamento, parcela atual e prazo. O saldo devedor é calculado como parcela × meses
+          (deflação VP 1% a.m. no doc253).
+        </p>
+        <div style={{ display: "grid", gap: 8, gridTemplateColumns: "1fr 1fr" }}>
+          <input
+            placeholder="Grupo"
+            value={fields.group_code}
+            onChange={(e) => onChange({ ...fields, group_code: e.target.value })}
+          />
+          <input
+            placeholder="Cota"
+            value={fields.quota_code}
+            onChange={(e) => onChange({ ...fields, quota_code: e.target.value })}
+          />
+          <CurrencyInput
+            placeholder="Crédito quando faturou o bem"
+            value={fields.credit_at_billing}
+            onChange={(v) => onChange({ ...fields, credit_at_billing: v })}
+          />
+          <CurrencyInput
+            placeholder="Parcela atual"
+            value={fields.installment_value}
+            onChange={(v) => onChange({ ...fields, installment_value: v })}
+          />
+          <input
+            type="number"
+            min={1}
+            max={240}
+            placeholder="Prazo restante (meses)"
+            value={fields.meses_restantes}
+            onChange={(e) => onChange({ ...fields, meses_restantes: e.target.value })}
+          />
+          <select
+            value={fields.registry_office}
+            onChange={(e) => onChange({ ...fields, registry_office: e.target.value })}
+          >
+            <option value="">Administradora</option>
+            {ADMINS.map((a) => <option key={a} value={a}>{a}</option>)}
+          </select>
+        </div>
+        {preview.saldo > 0 && (
+          <div style={{ fontSize: 12, fontWeight: 700, padding: "8px 10px", background: "#eef8f3", borderRadius: 8 }}>
+            Saldo devedor: {brl.format(preview.saldo)} · VP quitação: {brl.format(preview.vp)} · Economia:{" "}
+            {brl.format(preview.economia)}
+          </div>
+        )}
+        <label><input type="checkbox" checked={fields.contemplada} onChange={(e) => onChange({ ...fields, contemplada: e.target.checked })} /> Contemplada</label>
+        <label><input type="checkbox" checked={fields.bem_faturado} onChange={(e) => onChange({ ...fields, bem_faturado: e.target.checked })} /> Bem faturado</label>
+        <label><input type="checkbox" checked={fields.parcelas_em_dia} onChange={(e) => onChange({ ...fields, parcelas_em_dia: e.target.checked })} /> Parcelas em dia</label>
+        <label>
+          <input
+            type="checkbox"
+            checked={fields.operational_service}
+            onChange={(e) => onChange({ ...fields, operational_service: e.target.checked })}
+          />
+          Serviço operacional LETTER (+2% na abertura)
+        </label>
+      </>
+    );
   }
 
   async function tokenize() {
@@ -322,19 +491,20 @@ export function QuitConModule() {
         <section className="panel">
           <h2>Nova operação QuitCon</h2>
           <form className="stack-form" onSubmit={createOperacao}>
-            <select name="proposal_id" required>
+            <select
+              value={operacaoForm.proposal_id}
+              required
+              onChange={(e) => setOperacaoForm((prev) => ({ ...prev, proposal_id: e.target.value }))}
+            >
               <option value="">Proposta vinculada</option>
               {proposals.map((p) => <option key={p.id} value={p.id}>{p.product} · {p.id.slice(0, 8)}</option>)}
             </select>
-            <CurrencyFormField name="outstanding_balance" defaultValue="250000" placeholder="Saldo devedor bruto da cota (R$)" required />
-            <input name="meses_restantes" type="number" defaultValue="12" min="1" placeholder="Meses restantes" required />
-            <CurrencyFormField name="appraisal_value" placeholder="Avaliação referência (R$, opcional)" />
-            <input name="registry_number" placeholder="Matrícula / ref. garantia" defaultValue="44901" required />
-            <input name="registry_office" placeholder="Administradora whitelist" defaultValue="Embracon" required />
-            <label><input type="checkbox" name="contemplada" defaultChecked /> Contemplada + bem faturado</label>
-            <label><input type="checkbox" name="bem_faturado" defaultChecked /> Bem faturado</label>
-            <label><input type="checkbox" name="parcelas_em_dia" defaultChecked /> Parcelas em dia</label>
-            <label><input type="checkbox" name="operational_service" /> Serviço operacional LETTER (+2% na abertura, se não conduzir junto à ADM)</label>
+            {quotaFieldsBlock(operacaoForm, (next) => setOperacaoForm((prev) => ({ ...prev, ...next })), operacaoPreview)}
+            <CurrencyInput
+              placeholder="Avaliação referência (R$, opcional)"
+              value={operacaoForm.appraisal_value}
+              onChange={(v) => setOperacaoForm((prev) => ({ ...prev, appraisal_value: v }))}
+            />
             <button type="submit">Abrir operação AGUARDANDO_TAPAF</button>
           </form>
         </section>
@@ -342,10 +512,7 @@ export function QuitConModule() {
         <section className="panel">
           <h2>Simulador QuitCon</h2>
           <form className="stack-form" onSubmit={simulateFinance}>
-            <CurrencyFormField name="outstanding_balance" defaultValue="250000" placeholder="Saldo devedor bruto (R$)" required />
-            <input name="meses_restantes" type="number" defaultValue="12" min="1" placeholder="Meses restantes" required />
-            <input name="administrator_name" placeholder="Administradora" defaultValue="Embracon" />
-            <label><input type="checkbox" name="operational_service" /> Serviço operacional (+2% na abertura)</label>
+            {quotaFieldsBlock(simForm, setSimForm, simPreview)}
             <button type="submit">Simular doc253</button>
           </form>
           {financePreview && (
