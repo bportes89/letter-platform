@@ -3,6 +3,7 @@
 import { AlertCircle, CheckCircle2, FileSearch, HelpCircle, ScrollText } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { api, Proposal } from "@/lib/api";
+import { ValidStamp } from "@/components/valid-stamp";
 
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
@@ -469,7 +470,22 @@ export function PreAnalysisModule({ variant = "sdc" }: { variant?: "sdc" | "flas
         <section className="panel">
           <h2>Resultado para o cliente</h2>
           <pre className="code-block">{JSON.stringify(pauta.client_result, null, 2)}</pre>
-          {pauta.valid_stamp_hash && <p className="form-help">Valid-Stamp: {pauta.valid_stamp_hash}</p>}
+          {pauta.valid_stamp_hash && (
+            <div style={{ marginTop: 12 }}>
+              <ValidStamp
+                code={
+                  String(
+                    (pauta.client_result as { stamp_code?: string } | null)?.stamp_code
+                      || (pauta.client_result as { Selo_LETTER_Valid_Stamp?: { stamp_code?: string } } | null)
+                          ?.Selo_LETTER_Valid_Stamp?.stamp_code
+                      || "LETTER-VALID-STAMP",
+                  )
+                }
+                hash={pauta.valid_stamp_hash}
+              />
+              <p className="form-help" style={{ marginTop: 8 }}>Hash: {pauta.valid_stamp_hash}</p>
+            </div>
+          )}
         </section>
       )}
     </>

@@ -4818,6 +4818,19 @@ def nina_routing_assessment_approve(assessment_id:str,user:User=Depends(require_
 def nina_routing_source_policy(_:User=Depends(get_current_user)):return nina_source_policy()
 
 
+@router.get("/valid-stamps/prismafy/config")
+def valid_stamp_prismafy_config(_: User = Depends(get_current_user)):
+    from app.prismafy_templates import PRISMAFY_API_BASE_DEFAULT, TEMPLATE_BY_SLUG
+    from app.valid_stamp_consult_client import valid_stamp_consult_configured, _api_base
+
+    return {
+        "configured": valid_stamp_consult_configured(),
+        "api_base_url": _api_base() if valid_stamp_consult_configured() else PRISMAFY_API_BASE_DEFAULT,
+        "integration_doc": "docs/source/integracao-letter.html",
+        "templates": TEMPLATE_BY_SLUG,
+    }
+
+
 @router.get("/valid-stamps/requirements")
 def valid_stamp_requirements_list(asset_type: str, product: str = "FLASH_CAPITAL", _: User = Depends(get_current_user)):
     return valid_stamp_requirements(asset_type, product)

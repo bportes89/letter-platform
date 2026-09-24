@@ -1,27 +1,44 @@
-# Valid-Stamp — API de consultas (homologação)
+# Valid-Stamp — API Prismafy (consultas)
 
-## Segurança
+Documentação completa do fornecedor: **`docs/source/integracao-letter.html`** (export Prisma Studio / Prismafy para LETTER FRANQUEADORA).
 
-- A **API Key** (`psk_live_…`) fica **apenas** em variáveis de ambiente do Render (serviço `letter-api`).
-- **Não** commitar no Git, WhatsApp público, Vercel, nem no frontend (`NEXT_PUBLIC_*`).
-- Se a chave vazar, pedir **revogação/rotação** imediata ao Paulo.
+## API
 
-## Variáveis (backend)
+| Item | Valor |
+|------|--------|
+| Base URL padrão | `https://api.prismafy.com.br` |
+| Autenticação | `Authorization: Bearer psk_live_…` |
+| Execução | `POST /api/v1/executions/<template_id>/run/` |
+| Resultado (async) | `GET /api/v1/executions/<id>/result/` |
+| PDF | `GET /api/v1/executions/<id>/pdf/` |
+
+Templates liberados para LETTER (IDs no HTML e em `backend/app/prismafy_templates.py`):
+
+- Gravame, RENAJUD, FIPE, roubo/furto, histórico proprietários  
+- CND federais, CNDT, PGFN, FGTS  
+- CPR CPF/CNPJ, Pefin, ações judiciais PF, TJSP  
+
+## Variáveis (Render — `letter-api`)
 
 | Variável | Descrição |
 |----------|-----------|
-| `LETTER_VALID_STAMP_API_KEY` | Chave `psk_live_…` |
-| `LETTER_VALID_STAMP_API_BASE_URL` | URL base da API (confirmar com Paulo — Postman/Swagger) |
+| `LETTER_VALID_STAMP_API_KEY` | Chave `psk_live_…` (painel Prismafy) |
+| `LETTER_VALID_STAMP_API_BASE_URL` | Opcional; default `https://api.prismafy.com.br` |
 
-Código: `backend/app/valid_stamp_consult_client.py` (`consult()`).
+**Nunca** expor a chave no frontend nem no Git.
 
-## Pendências
+## Código
 
-1. **Base URL** e paths de cada consulta (Bacen, Serasa, CND, DETRAN, etc.).
-2. Formato JSON de request/response por tipo de consulta.
-3. Encaixe na esteira TAPAF / `pre_analysis_service` antes de `issue_stamp`.
-4. **e-notariado**: sem API ainda — manter upload manual `MATRICULA_ENOTARIADO`.
+- `backend/app/valid_stamp_consult_client.py` — `run_template()`, `consult("gravame", {"placa": "…"})`
+- `backend/app/prismafy_templates.py` — mapa slug → `template_id`
 
-## e-notariado
+## Selo visual na plataforma
 
-Até a API sair, matrícula continua como documento manual no Flash Capital / SDC.
+- **Gráfico:** componente `ValidStamp` (anel VALID STAMP) — módulo **LSS** e **Pré-análise** após emissão.
+- **Rodapé público:** selo **Asaas BaaS** (pagamentos), não Prismafy.
+
+## Pendências de produto
+
+1. Ligar consultas obrigatórias (ex.: gravame SDC veículo) na esteira TAPAF antes de `issue_stamp`.
+2. Webhook Prismafy `execution.finished` (opcional) para evitar polling.
+3. e-notariado: upload manual até API do fornecedor.
