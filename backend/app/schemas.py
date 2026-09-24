@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
 
 from app.models import Role
 
@@ -2898,9 +2898,9 @@ class FlashDeskSaleCreate(BaseModel):
 
 
 class QuitConDeskEvaluateRequest(BaseModel):
-    outstanding_balance: Decimal = Field(gt=0)
-    meses_restantes: int = Field(ge=1, le=240)
-    registry_number: str = Field(min_length=1, max_length=80)
+    outstanding_balance: Decimal | None = Field(default=None, gt=0)
+    meses_restantes: int | None = Field(default=None, ge=1, le=240)
+    registry_number: str | None = Field(default=None, min_length=1, max_length=120)
     registry_office: str = Field(min_length=2, max_length=180)
     property_type: str = Field(default="VEICULO", min_length=1, max_length=40)
     appraisal_value: Decimal | None = Field(default=None, gt=0)
@@ -2909,6 +2909,15 @@ class QuitConDeskEvaluateRequest(BaseModel):
     bem_faturado: bool = True
     parcelas_em_dia: bool = True
     docs_complete: bool = True
+    quota_lines: list[dict] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def require_legacy_or_quota_lines(self):
+        if self.quota_lines:
+            return self
+        if self.outstanding_balance is None or self.meses_restantes is None or not self.registry_number:
+            raise ValueError("Informe quota_lines ou saldo/meses/grupo-cota.")
+        return self
 
 
 class QuitConDeskStoreRequest(QuitConDeskEvaluateRequest):
@@ -2921,7 +2930,9 @@ class QuitConDeskStoreRequest(QuitConDeskEvaluateRequest):
     occupation: str | None = None
     income_value: Decimal = Field(ge=0, default=0)
     partner_user_id: str | None = None
-    quota_lines: list[dict] = Field(default_factory=list)
+    client_address_json: dict | None = None
+    asset_address_json: dict | None = None
+    operational_service_accepted: bool = False
     alienated_property_registry: str | None = None
     alienated_asset_address: str | None = None
     alienated_vehicle_plate: str | None = None

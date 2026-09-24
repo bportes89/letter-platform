@@ -394,6 +394,15 @@ def test_quitcon_desk_evaluate_store_approve_and_sale(client, auth_headers):
     assert Decimal(result["valor_presente_quitacao"]) > 0
     assert result["custos_entrada"]["itens"]
 
+    _quitcon_addr = {
+        "zip": "30130000",
+        "street": "Rua Teste",
+        "number": "100",
+        "complement": "",
+        "district": "Centro",
+        "city": "Belo Horizonte",
+        "state": "MG",
+    }
     stored = client.post("/api/v1/quitcon/desk/solicitations", headers=auth_headers, json={
         "outstanding_balance": "100000",
         "meses_restantes": 48,
@@ -407,8 +416,10 @@ def test_quitcon_desk_evaluate_store_approve_and_sale(client, auth_headers):
         "contact_name": "Cliente QuitCon Desk",
         "contact_email": "cliente.quitcon.desk@example.com",
         "contact_phone": "31966554433",
-        "document": "12345678901",
+        "document": "52998224725",
         "person_type": "PF",
+        "client_address_json": _quitcon_addr,
+        "asset_address_json": _quitcon_addr,
     })
     assert stored.status_code == 201, stored.text
     item = stored.json()
@@ -433,6 +444,38 @@ def test_quitcon_desk_evaluate_store_approve_and_sale(client, auth_headers):
 
     again = client.post(f"/api/v1/quitcon/desk/solicitations/{sid}/sale", headers=auth_headers)
     assert again.status_code == 409
+
+
+def test_quitcon_desk_evaluate_quota_lines(client, auth_headers):
+    res = client.post("/api/v1/quitcon/desk/evaluate", headers=auth_headers, json={
+        "registry_office": "Embracon",
+        "quota_lines": [
+            {
+                "group_code": "23001",
+                "quota_code": "123",
+                "installment_value": "1500",
+                "meses_restantes": 40,
+                "credit_at_billing": "100000",
+            },
+            {
+                "group_code": "23001",
+                "quota_code": "124",
+                "installment_value": "800",
+                "meses_restantes": 36,
+                "credit_at_billing": "50000",
+            },
+        ],
+        "contemplada": True,
+        "bem_faturado": True,
+        "parcelas_em_dia": True,
+        "docs_complete": True,
+    })
+    assert res.status_code == 200
+    result = res.json()["result"]
+    assert result["viable"] is True
+    assert len(result["quota_breakdown"]) == 2
+    assert Decimal(result["totais"]["saldo_devedor_total"]) == Decimal("88800")
+    assert Decimal(result["valor_presente_quitacao"]) > 0
 
 
 def test_marketplace_esteira1_and_esteira2(client, auth_headers):

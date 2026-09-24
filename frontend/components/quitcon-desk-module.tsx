@@ -8,6 +8,8 @@ import { isInternalProductRole } from "@/lib/product-nav";
 import { QuitConModule } from "@/components/quitcon-module";
 import { DeskSourceMetaRow } from "@/lib/desk-source-meta";
 import { PartnerSociosFields, SocioPartner, sociosPayload } from "@/components/partner-socios-fields";
+import { CurrencyInput } from "@/components/currency-input";
+import { lookupCep } from "@/lib/cep-lookup";
 
 type RequiredDoc = { code: string; label: string; uploaded?: boolean };
 
@@ -33,6 +35,13 @@ type QuitConSolicitation = {
   can_create_sale: boolean;
 };
 
+type QuotaBreakdownRow = {
+  registry_number: string;
+  saldo_devedor_calculado: string;
+  valor_quitacao_vp: string;
+  economia_linha: string;
+};
+
 type EvalResult = {
   viable: boolean;
   motivos: string[];
@@ -45,8 +54,33 @@ type EvalResult = {
   } | null;
   cedente?: { pagamento_total_quitacao_mais_intermediacao: string };
   cessionario?: { capital_giro_liquido_na_liberacao: string };
+  quota_breakdown?: QuotaBreakdownRow[];
+  totais?: { saldo_devedor_total: string; quitacao_vp_total: string; economia_total: string };
   message: string;
 };
+
+type AddressFields = {
+  zip: string;
+  street: string;
+  number: string;
+  complement: string;
+  district: string;
+  city: string;
+  state: string;
+};
+
+type QuotaLine = {
+  group_code: string;
+  quota_code: string;
+  credit_at_billing: string;
+  installment_value: string;
+  meses_restantes: string;
+};
+
+const OPERATIONAL_SERVICE_DISCLAIMER =
+  "Declaro estar de acordo com a taxa de serviço LETTER (2% sobre a quitação VP): valor não reembolsável, " +
+  "referente exclusivamente à intermediação/representação junto à administradora, e que não se confunde com o " +
+  "fee de sucesso cobrado após a conclusão da operação.";
 
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
@@ -70,20 +104,75 @@ const emptyForm = {
   address: "",
   occupation: "",
   income_value: "",
-  outstanding_balance: "",
-  meses_restantes: "",
-  registry_number: "",
   registry_office: "Embracon",
   property_type: "VEICULO",
   operational_service: false,
+  operational_service_accepted: false,
   contemplada: true,
   bem_faturado: true,
   parcelas_em_dia: true,
   docs_complete: true,
 };
 
+const emptyAddress = (): AddressFields => ({
+  zip: "",
+  street: "",
+  number: "",
+  complement: "",
+  district: "",
+  city: "",
+  state: "",
+});
+
+const emptyQuotaLine = (): QuotaLine => ({
+  group_code: "",
+  quota_code: "",
+  credit_at_billing: "",
+  installment_value: "",
+  meses_restantes: "",
+});
+
+function parseMoney(value: string): number {
+  const raw = String(value || "").trim();
+  if (!raw) return 0;
+  if (raw.includes(",")) return Number(raw.replace(/\./g, "").replace(",", ".")) || 0;
+  return Number(raw) || 0;
+}
+
 function moneyPayload(value: string) {
-  return value.replace(/\./g, "").replace(",", ".") || "0";
+  const n = parseMoney(value);
+  return n ? String(n) : "0";
+}
+
+function quotaSaldo(line: QuotaLine): number {
+  const parcela = parseMoney(line.installment_value);
+  const meses = Number(line.meses_restantes);
+  if (!parcela || !Number.isFinite(meses) || meses < 1) return 0;
+  return parcela * meses;
+}
+
+function quotaVp(saldo: number, meses: number): number {
+  if (!saldo || meses < 1) return 0;
+  return saldo / (1 + 0.01 * meses);
+}
+
+function composeAddress(addr: AddressFields): string {
+  return [addr.street, addr.number, addr.complement, addr.district, addr.city, addr.state, addr.zip]
+    .map((p) => p.trim())
+    .filter(Boolean)
+    .join(", ");
+}
+
+function addressPayload(addr: AddressFields) {
+  return {
+    zip: addr.zip.trim(),
+    street: addr.street.trim(),
+    number: addr.number.trim(),
+    complement: addr.complement.trim(),
+    district: addr.district.trim(),
+    city: addr.city.trim(),
+    state: addr.state.trim(),
+  };
 }
 
 export function QuitConDeskModule() {
@@ -100,11 +189,10 @@ export function QuitConDeskModule() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [lastCheckout, setLastCheckout] = useState<Record<string, unknown> | null>(null);
-  const [quotaLines, setQuotaLines] = useState([
-    { registry_number: "", outstanding_balance: "", credit_at_billing: "" },
-  ]);
+  const [quotaLines, setQuotaLines] = useState<QuotaLine[]>([emptyQuotaLine()]);
+  const [clientAddress, setClientAddress] = useState<AddressFields>(emptyAddress());
+  const [assetAddress, setAssetAddress] = useState<AddressFields>(emptyAddress());
   const [alienatedRegistry, setAlienatedRegistry] = useState("");
-  const [alienatedAddress, setAlienatedAddress] = useState("");
   const [alienatedPlate, setAlienatedPlate] = useState("");
   const [alienatedChassi, setAlienatedChassi] = useState("");
   const [alienatedRenavam, setAlienatedRenavam] = useState("");
@@ -142,15 +230,80 @@ export function QuitConDeskModule() {
     setEvalResult(null);
   }
 
+  const quotaPreview = useMemo(() => {
+    const lines = quotaLines.filter((q) => q.group_code.trim() && q.quota_code.trim());
+    let totalSaldo = 0;
+    let totalVp = 0;
+    let maxMeses = 0;
+    const rows = lines.map((q) => {
+      const meses = Number(q.meses_restantes);
+      const saldo = quotaSaldo(q);
+      const vp = quotaVp(saldo, meses);
+      totalSaldo += saldo;
+      totalVp += vp;
+      if (Number.isFinite(meses)) maxMeses = Math.max(maxMeses, meses);
+      return { line: q, saldo, vp, meses };
+    });
+    const registry =
+      lines.length === 0
+        ? ""
+        : lines.length === 1
+          ? `${lines[0].group_code.trim()}/${lines[0].quota_code.trim()}`
+          : `${lines[0].group_code.trim()}/${lines[0].quota_code.trim()} (+${lines.length - 1} cotas)`;
+    return { rows, totalSaldo, totalVp, maxMeses, registry, economia: totalSaldo - totalVp };
+  }, [quotaLines]);
+
+  function buildQuotaLinesPayload() {
+    const active = quotaLines.filter((q) => q.group_code.trim() || q.quota_code.trim());
+    if (!active.length) throw new Error("Informe ao menos uma cota (grupo e cota).");
+    return active.map((q) => {
+      const label = `${q.group_code.trim() || "?"}/${q.quota_code.trim() || "?"}`;
+      const meses = Number(q.meses_restantes);
+      if (!q.group_code.trim() || !q.quota_code.trim()) {
+        throw new Error("Preencha grupo e cota em todas as linhas.");
+      }
+      if (!Number.isFinite(meses) || meses < 1 || meses > 240) {
+        throw new Error(`Prazo restante inválido na cota ${label}.`);
+      }
+      if (parseMoney(q.installment_value) <= 0) {
+        throw new Error(`Informe a parcela atual na cota ${label}.`);
+      }
+      if (parseMoney(q.credit_at_billing) <= 0) {
+        throw new Error(`Informe o crédito no faturamento na cota ${label}.`);
+      }
+      return {
+        group_code: q.group_code.trim(),
+        quota_code: q.quota_code.trim(),
+        installment_value: moneyPayload(q.installment_value),
+        meses_restantes: meses,
+        credit_at_billing: moneyPayload(q.credit_at_billing),
+      };
+    });
+  }
+
+  function validateAddresses() {
+    const check = (addr: AddressFields, label: string) => {
+      if (!addr.zip.trim()) throw new Error(`${label}: informe o CEP.`);
+      if (!addr.street.trim()) throw new Error(`${label}: informe o logradouro.`);
+      if (!addr.number.trim()) throw new Error(`${label}: informe o número.`);
+      if (!addr.city.trim()) throw new Error(`${label}: informe a cidade.`);
+      if (!addr.state.trim()) throw new Error(`${label}: informe a UF.`);
+    };
+    check(clientAddress, "Endereço do cliente");
+    check(assetAddress, "Endereço do bem alienado");
+  }
+
   function evaluatePayload() {
-    const meses = Number(form.meses_restantes);
-    if (!form.meses_restantes.trim() || !Number.isFinite(meses) || meses < 1) {
-      throw new Error("Informe os meses restantes (número válido).");
+    const quota_lines = buildQuotaLinesPayload();
+    const { totalSaldo, maxMeses, registry } = quotaPreview;
+    if (!registry || totalSaldo <= 0 || maxMeses < 1) {
+      throw new Error("Revise as cotas: parcela, prazo e valores para calcular o saldo.");
     }
     return {
-      outstanding_balance: moneyPayload(form.outstanding_balance),
-      meses_restantes: meses,
-      registry_number: form.registry_number.trim(),
+      quota_lines,
+      outstanding_balance: String(totalSaldo),
+      meses_restantes: maxMeses,
+      registry_number: registry,
       registry_office: form.registry_office.trim(),
       property_type: form.property_type,
       operational_service: form.operational_service,
@@ -159,6 +312,34 @@ export function QuitConDeskModule() {
       parcelas_em_dia: form.parcelas_em_dia,
       docs_complete: form.docs_complete,
     };
+  }
+
+  async function fillClientCep(cep: string) {
+    const addr = await lookupCep(cep);
+    if (!addr) return;
+    setClientAddress((prev) => ({
+      ...prev,
+      zip: addr.zipcode || prev.zip,
+      street: addr.street || prev.street,
+      district: addr.district || prev.district,
+      city: addr.city || prev.city,
+      state: addr.uf || prev.state,
+    }));
+    setEvalResult(null);
+  }
+
+  async function fillAssetCep(cep: string) {
+    const addr = await lookupCep(cep);
+    if (!addr) return;
+    setAssetAddress((prev) => ({
+      ...prev,
+      zip: addr.zipcode || prev.zip,
+      street: addr.street || prev.street,
+      district: addr.district || prev.district,
+      city: addr.city || prev.city,
+      state: addr.uf || prev.state,
+    }));
+    setEvalResult(null);
   }
 
   async function validateContactFields() {
@@ -190,7 +371,12 @@ export function QuitConDeskModule() {
     setBusy(true);
     try {
       await validateContactFields();
+      validateAddresses();
+      if (form.operational_service && !form.operational_service_accepted) {
+        throw new Error("Marque o aceite da taxa de serviço LETTER (2%) para gravar a solicitação.");
+      }
       const payload = evaluatePayload();
+      const assetFormatted = composeAddress(assetAddress);
       const created = await api<QuitConSolicitation>("/quitcon/desk/solicitations", {
         method: "POST",
         body: JSON.stringify({
@@ -200,18 +386,14 @@ export function QuitConDeskModule() {
           contact_phone: form.contact_phone.trim(),
           document: form.document.trim() || null,
           person_type: form.person_type,
-          address: form.address.trim() || null,
+          address: composeAddress(clientAddress) || null,
           occupation: form.occupation.trim() || null,
           income_value: moneyPayload(form.income_value),
-          quota_lines: quotaLines
-            .filter((q) => q.registry_number.trim() || q.outstanding_balance.trim())
-            .map((q) => ({
-              registry_number: q.registry_number.trim(),
-              outstanding_balance: moneyPayload(q.outstanding_balance),
-              credit_at_billing: moneyPayload(q.credit_at_billing || "0"),
-            })),
+          client_address_json: addressPayload(clientAddress),
+          asset_address_json: addressPayload(assetAddress),
+          operational_service_accepted: form.operational_service_accepted,
           alienated_property_registry: isImovel ? alienatedRegistry.trim() || null : null,
-          alienated_asset_address: isImovel ? alienatedAddress.trim() || null : null,
+          alienated_asset_address: assetFormatted || null,
           alienated_vehicle_plate: !isImovel ? alienatedPlate.trim() || null : null,
           alienated_vehicle_chassi: !isImovel ? alienatedChassi.trim() || null : null,
           alienated_vehicle_renavam: !isImovel ? alienatedRenavam.trim() || null : null,
@@ -220,9 +402,10 @@ export function QuitConDeskModule() {
       });
       setNotice(`QuitCon gravado: ${created.contact_name} — ${created.status_label}`);
       setForm(emptyForm);
-      setQuotaLines([{ registry_number: "", outstanding_balance: "", credit_at_billing: "" }]);
+      setQuotaLines([emptyQuotaLine()]);
+      setClientAddress(emptyAddress());
+      setAssetAddress(emptyAddress());
       setAlienatedRegistry("");
-      setAlienatedAddress("");
       setAlienatedPlate("");
       setAlienatedChassi("");
       setAlienatedRenavam("");
@@ -394,90 +577,220 @@ export function QuitConDeskModule() {
                 <input placeholder="E-mail" value={form.contact_email} onChange={(e) => patchForm("contact_email", e.target.value)} />
                 <input placeholder="Telefone" value={form.contact_phone} onChange={(e) => patchForm("contact_phone", e.target.value)} />
                 <input placeholder="CPF/CNPJ" value={form.document} onChange={(e) => patchForm("document", e.target.value)} />
-                <input placeholder="Saldo devedor bruto (R$)" value={form.outstanding_balance} onChange={(e) => patchForm("outstanding_balance", e.target.value)} />
-                <input type="number" placeholder="Meses restantes" value={form.meses_restantes} onChange={(e) => patchForm("meses_restantes", e.target.value)} />
-                <input placeholder="Grupo/cota (registry)" value={form.registry_number} onChange={(e) => patchForm("registry_number", e.target.value)} />
-                <select value={form.registry_office} onChange={(e) => patchForm("registry_office", e.target.value)}>
-                  {ADMINS.map((a) => <option key={a} value={a}>{a}</option>)}
-                </select>
-                <select value={form.property_type} onChange={(e) => patchForm("property_type", e.target.value)}>
+                <select value={form.property_type} onChange={(e) => patchForm("property_type", e.target.value)} style={{ gridColumn: "1 / -1" }}>
                   <option value="VEICULO">Veículo</option>
                   <option value="PESADOS">Pesados</option>
                   <option value="IMOVEL_URBANO">Imóvel urbano</option>
                   <option value="IMOVEL_RURAL">Imóvel rural</option>
                 </select>
-                <input placeholder="Endereço" value={form.address} onChange={(e) => patchForm("address", e.target.value)} style={{ gridColumn: "1 / -1" }} />
               </div>
+
               <div style={{ display: "grid", gap: 8 }}>
-                <b>Cotas adicionais (grupo/cota, saldo e crédito no faturamento)</b>
-                {quotaLines.map((line, idx) => (
-                  <div key={idx} style={{ display: "grid", gap: 8, gridTemplateColumns: "1fr 1fr 1fr auto" }}>
-                    <input
-                      placeholder="Grupo/cota"
-                      value={line.registry_number}
-                      onChange={(e) => {
-                        const next = [...quotaLines];
-                        next[idx] = { ...next[idx], registry_number: e.target.value };
-                        setQuotaLines(next);
+                <b>Endereço do cliente (contrato)</b>
+                <div style={{ display: "grid", gap: 8, gridTemplateColumns: "120px 1fr 1fr" }}>
+                  <input
+                    placeholder="CEP"
+                    value={clientAddress.zip}
+                    onChange={(e) => {
+                      setClientAddress({ ...clientAddress, zip: e.target.value });
+                      setEvalResult(null);
+                    }}
+                    onBlur={(e) => void fillClientCep(e.target.value)}
+                  />
+                  <input
+                    placeholder="Logradouro"
+                    value={clientAddress.street}
+                    onChange={(e) => {
+                      setClientAddress({ ...clientAddress, street: e.target.value });
+                      setEvalResult(null);
+                    }}
+                    style={{ gridColumn: "span 2" }}
+                  />
+                  <input
+                    placeholder="Número"
+                    value={clientAddress.number}
+                    onChange={(e) => {
+                      setClientAddress({ ...clientAddress, number: e.target.value });
+                      setEvalResult(null);
+                    }}
+                  />
+                  <input
+                    placeholder="Complemento"
+                    value={clientAddress.complement}
+                    onChange={(e) => {
+                      setClientAddress({ ...clientAddress, complement: e.target.value });
+                      setEvalResult(null);
+                    }}
+                  />
+                  <input
+                    placeholder="Bairro"
+                    value={clientAddress.district}
+                    onChange={(e) => {
+                      setClientAddress({ ...clientAddress, district: e.target.value });
+                      setEvalResult(null);
+                    }}
+                  />
+                  <input
+                    placeholder="Cidade"
+                    value={clientAddress.city}
+                    onChange={(e) => {
+                      setClientAddress({ ...clientAddress, city: e.target.value });
+                      setEvalResult(null);
+                    }}
+                  />
+                  <input
+                    placeholder="UF"
+                    value={clientAddress.state}
+                    maxLength={2}
+                    onChange={(e) => {
+                      setClientAddress({ ...clientAddress, state: e.target.value.toUpperCase() });
+                      setEvalResult(null);
+                    }}
+                  />
+                </div>
+              </div>
+
+              <p className="muted" style={{ fontSize: 12, lineHeight: 1.5, margin: 0 }}>
+                A quitação QuitCon é permitida apenas para cotas com o <b>bem já faturado</b>. Informe somente as cotas
+                <b> alienadas ao mesmo bem</b> (junção de cotas). Use o botão abaixo para incluir cada cota do conjunto.
+              </p>
+
+              <div style={{ display: "grid", gap: 8 }}>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center" }}>
+                  <b>Cotas do bem</b>
+                  <label style={{ fontSize: 12, fontWeight: 700 }}>
+                    Administradora
+                    <select
+                      value={form.registry_office}
+                      onChange={(e) => patchForm("registry_office", e.target.value)}
+                      style={{ marginLeft: 8, padding: "8px 10px", borderRadius: 8, border: "1px solid var(--line)" }}
+                    >
+                      {ADMINS.map((a) => <option key={a} value={a}>{a}</option>)}
+                    </select>
+                  </label>
+                </div>
+                {quotaLines.map((line, idx) => {
+                  const saldo = quotaSaldo(line);
+                  const meses = Number(line.meses_restantes);
+                  const vp = quotaVp(saldo, meses);
+                  return (
+                    <div
+                      key={idx}
+                      style={{
+                        display: "grid",
+                        gap: 8,
+                        padding: 10,
+                        border: "1px solid var(--line)",
+                        borderRadius: 10,
+                        background: "#fafcfb",
                       }}
-                    />
-                    <input
-                      placeholder="Saldo devedor (R$)"
-                      value={line.outstanding_balance}
-                      onChange={(e) => {
-                        const next = [...quotaLines];
-                        next[idx] = { ...next[idx], outstanding_balance: e.target.value };
-                        setQuotaLines(next);
-                      }}
-                    />
-                    <input
-                      placeholder="Crédito no faturamento (R$)"
-                      value={line.credit_at_billing}
-                      onChange={(e) => {
-                        const next = [...quotaLines];
-                        next[idx] = { ...next[idx], credit_at_billing: e.target.value };
-                        setQuotaLines(next);
-                      }}
-                    />
-                    {quotaLines.length > 1 && (
-                      <button
-                        type="button"
-                        className="table-action"
-                        onClick={() => setQuotaLines(quotaLines.filter((_, i) => i !== idx))}
-                      >
-                        Remover
-                      </button>
-                    )}
-                  </div>
-                ))}
+                    >
+                      <div style={{ display: "grid", gap: 8, gridTemplateColumns: "1fr 1fr 1fr 1fr 100px auto" }}>
+                        <input
+                          placeholder="Grupo"
+                          value={line.group_code}
+                          onChange={(e) => {
+                            const next = [...quotaLines];
+                            next[idx] = { ...next[idx], group_code: e.target.value };
+                            setQuotaLines(next);
+                            setEvalResult(null);
+                          }}
+                        />
+                        <input
+                          placeholder="Cota"
+                          value={line.quota_code}
+                          onChange={(e) => {
+                            const next = [...quotaLines];
+                            next[idx] = { ...next[idx], quota_code: e.target.value };
+                            setQuotaLines(next);
+                            setEvalResult(null);
+                          }}
+                        />
+                        <CurrencyInput
+                          placeholder="Crédito no faturamento"
+                          value={line.credit_at_billing}
+                          onChange={(v) => {
+                            const next = [...quotaLines];
+                            next[idx] = { ...next[idx], credit_at_billing: v };
+                            setQuotaLines(next);
+                            setEvalResult(null);
+                          }}
+                        />
+                        <CurrencyInput
+                          placeholder="Parcela atual"
+                          value={line.installment_value}
+                          onChange={(v) => {
+                            const next = [...quotaLines];
+                            next[idx] = { ...next[idx], installment_value: v };
+                            setQuotaLines(next);
+                            setEvalResult(null);
+                          }}
+                        />
+                        <input
+                          type="number"
+                          min={1}
+                          max={240}
+                          placeholder="Meses"
+                          value={line.meses_restantes}
+                          onChange={(e) => {
+                            const next = [...quotaLines];
+                            next[idx] = { ...next[idx], meses_restantes: e.target.value };
+                            setQuotaLines(next);
+                            setEvalResult(null);
+                          }}
+                        />
+                        {quotaLines.length > 1 && (
+                          <button
+                            type="button"
+                            className="table-action"
+                            onClick={() => {
+                              setQuotaLines(quotaLines.filter((_, i) => i !== idx));
+                              setEvalResult(null);
+                            }}
+                          >
+                            Remover
+                          </button>
+                        )}
+                      </div>
+                      {saldo > 0 && meses >= 1 && (
+                        <div style={{ fontSize: 11, color: "#52605a", display: "flex", flexWrap: "wrap", gap: 14 }}>
+                          <span>Saldo devedor: <b>{brl.format(saldo)}</b></span>
+                          <span>Quitação VP (1% a.m.): <b>{brl.format(vp)}</b></span>
+                          <span>Economia: <b>{brl.format(saldo - vp)}</b></span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
                 <button
                   type="button"
                   className="table-action"
-                  onClick={() =>
-                    setQuotaLines([...quotaLines, { registry_number: "", outstanding_balance: "", credit_at_billing: "" }])
-                  }
+                  onClick={() => {
+                    setQuotaLines([...quotaLines, emptyQuotaLine()]);
+                    setEvalResult(null);
+                  }}
                 >
-                  + Cota
+                  + Adicionar cota
                 </button>
+                {quotaPreview.totalSaldo > 0 && (
+                  <div style={{ fontSize: 12, fontWeight: 700, padding: "8px 10px", background: "#eef8f3", borderRadius: 8 }}>
+                    Total saldo devedor: {brl.format(quotaPreview.totalSaldo)} · Total quitação VP:{" "}
+                    {brl.format(quotaPreview.totalVp)} · Economia: {brl.format(quotaPreview.economia)}
+                  </div>
+                )}
               </div>
-              <div style={{ display: "grid", gap: 8, gridTemplateColumns: "1fr 1fr" }}>
-                <b style={{ gridColumn: "1 / -1" }}>Bem alienado</b>
-                {isImovel ? (
-                  <>
-                    <input
-                      placeholder="Matrícula do imóvel"
-                      value={alienatedRegistry}
-                      onChange={(e) => setAlienatedRegistry(e.target.value)}
-                    />
-                    <input
-                      placeholder="Endereço completo do imóvel"
-                      value={alienatedAddress}
-                      onChange={(e) => setAlienatedAddress(e.target.value)}
-                      style={{ gridColumn: "1 / -1" }}
-                    />
-                  </>
-                ) : (
-                  <>
+
+              <div style={{ display: "grid", gap: 8 }}>
+                <b>Endereço do bem alienado (contrato)</b>
+                {isImovel && (
+                  <input
+                    placeholder="Matrícula do imóvel"
+                    value={alienatedRegistry}
+                    onChange={(e) => setAlienatedRegistry(e.target.value)}
+                  />
+                )}
+                {!isImovel && (
+                  <div style={{ display: "grid", gap: 8, gridTemplateColumns: "1fr 1fr" }}>
                     <input placeholder="Placa" value={alienatedPlate} onChange={(e) => setAlienatedPlate(e.target.value)} />
                     <input placeholder="Renavam" value={alienatedRenavam} onChange={(e) => setAlienatedRenavam(e.target.value)} />
                     <input
@@ -486,17 +799,98 @@ export function QuitConDeskModule() {
                       onChange={(e) => setAlienatedChassi(e.target.value)}
                       style={{ gridColumn: "1 / -1" }}
                     />
-                  </>
+                  </div>
                 )}
+                <div style={{ display: "grid", gap: 8, gridTemplateColumns: "120px 1fr 1fr" }}>
+                  <input
+                    placeholder="CEP do bem"
+                    value={assetAddress.zip}
+                    onChange={(e) => {
+                      setAssetAddress({ ...assetAddress, zip: e.target.value });
+                      setEvalResult(null);
+                    }}
+                    onBlur={(e) => void fillAssetCep(e.target.value)}
+                  />
+                  <input
+                    placeholder="Logradouro"
+                    value={assetAddress.street}
+                    onChange={(e) => {
+                      setAssetAddress({ ...assetAddress, street: e.target.value });
+                      setEvalResult(null);
+                    }}
+                    style={{ gridColumn: "span 2" }}
+                  />
+                  <input
+                    placeholder="Número"
+                    value={assetAddress.number}
+                    onChange={(e) => {
+                      setAssetAddress({ ...assetAddress, number: e.target.value });
+                      setEvalResult(null);
+                    }}
+                  />
+                  <input
+                    placeholder="Complemento"
+                    value={assetAddress.complement}
+                    onChange={(e) => {
+                      setAssetAddress({ ...assetAddress, complement: e.target.value });
+                      setEvalResult(null);
+                    }}
+                  />
+                  <input
+                    placeholder="Bairro"
+                    value={assetAddress.district}
+                    onChange={(e) => {
+                      setAssetAddress({ ...assetAddress, district: e.target.value });
+                      setEvalResult(null);
+                    }}
+                  />
+                  <input
+                    placeholder="Cidade"
+                    value={assetAddress.city}
+                    onChange={(e) => {
+                      setAssetAddress({ ...assetAddress, city: e.target.value });
+                      setEvalResult(null);
+                    }}
+                  />
+                  <input
+                    placeholder="UF"
+                    value={assetAddress.state}
+                    maxLength={2}
+                    onChange={(e) => {
+                      setAssetAddress({ ...assetAddress, state: e.target.value.toUpperCase() });
+                      setEvalResult(null);
+                    }}
+                  />
+                </div>
               </div>
               <PartnerSociosFields value={socios} onChange={setSocios} />
               <div style={{ display: "flex", flexWrap: "wrap", gap: 14, fontSize: 12, fontWeight: 700 }}>
                 <label><input type="checkbox" checked={form.contemplada} onChange={(e) => patchForm("contemplada", e.target.checked)} /> Contemplada</label>
                 <label><input type="checkbox" checked={form.bem_faturado} onChange={(e) => patchForm("bem_faturado", e.target.checked)} /> Bem faturado</label>
                 <label><input type="checkbox" checked={form.parcelas_em_dia} onChange={(e) => patchForm("parcelas_em_dia", e.target.checked)} /> Parcelas em dia</label>
-                <label><input type="checkbox" checked={form.operational_service} onChange={(e) => patchForm("operational_service", e.target.checked)} /> Serviço LETTER 2%</label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={form.operational_service}
+                    onChange={(e) => {
+                      patchForm("operational_service", e.target.checked);
+                      if (!e.target.checked) patchForm("operational_service_accepted", false);
+                    }}
+                  />
+                  Serviço LETTER 2%
+                </label>
                 <label><input type="checkbox" checked={form.docs_complete} onChange={(e) => patchForm("docs_complete", e.target.checked)} /> Docs ok</label>
               </div>
+              {form.operational_service && (
+                <label style={{ fontSize: 11, lineHeight: 1.45, display: "flex", gap: 8, alignItems: "flex-start" }}>
+                  <input
+                    type="checkbox"
+                    checked={form.operational_service_accepted}
+                    onChange={(e) => patchForm("operational_service_accepted", e.target.checked)}
+                  />
+                  <span>{OPERATIONAL_SERVICE_DISCLAIMER}</span>
+                </label>
+              )}
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <button type="button" className="admin-button" disabled={busy} onClick={() => void calculate()}>Calcular viabilidade</button>
                 {evalResult?.viable && (
@@ -509,7 +903,23 @@ export function QuitConDeskModule() {
               {!evalResult && <p className="muted" style={{ marginTop: 10 }}>Preencha e clique em Calcular.</p>}
               {evalResult?.viable && (
                 <div style={{ display: "grid", gap: 10, marginTop: 12 }}>
-                  <div><small>VP quitação</small><div><b>{brl.format(Number(evalResult.valor_presente_quitacao))}</b></div></div>
+                  {evalResult.totais && (
+                    <>
+                      <div><small>Saldo devedor total</small><div><b>{brl.format(Number(evalResult.totais.saldo_devedor_total))}</b></div></div>
+                      <div><small>Economia estimada</small><div><b>{brl.format(Number(evalResult.totais.economia_total))}</b></div></div>
+                    </>
+                  )}
+                  {evalResult.quota_breakdown && evalResult.quota_breakdown.length > 0 && (
+                    <ul style={{ margin: 0, paddingLeft: 18, fontSize: 11 }}>
+                      {evalResult.quota_breakdown.map((row) => (
+                        <li key={row.registry_number}>
+                          {row.registry_number}: saldo {brl.format(Number(row.saldo_devedor_calculado))} → VP{" "}
+                          {brl.format(Number(row.valor_quitacao_vp))}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <div><small>VP quitação total</small><div><b>{brl.format(Number(evalResult.valor_presente_quitacao))}</b></div></div>
                   {evalResult.cedente && (
                     <div><small>Cedente (VP+3%)</small><div><b>{brl.format(Number(evalResult.cedente.pagamento_total_quitacao_mais_intermediacao))}</b></div></div>
                   )}

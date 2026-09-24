@@ -71,31 +71,204 @@ def _dec(value) -> Decimal:
     return Decimal(str(value or 0))
 
 
+def _split_group_quota(raw: dict) -> tuple[str, str]:
+    group_code = str(raw.get("group_code") or "").strip()
+    quota_code = str(raw.get("quota_code") or "").strip()
+    if group_code and quota_code:
+        return group_code, quota_code
+    registry_number = str(raw.get("registry_number") or "").strip()
+    if "/" in registry_number:
+        left, right = registry_number.split("/", 1)
+        return left.strip(), right.strip()
+    return registry_number, ""
+
+
+def _compute_quota_breakdown(
+    lines: list,
+    engine: EngineQuitConLetter | None = None,
+) -> tuple[list[dict], Decimal, Decimal, int, str]:
+    engine = engine or EngineQuitConLetter()
+    rows: list[dict] = []
+    total_saldo = Decimal(0)
+    total_vp = Decimal(0)
+    max_meses = 0
+    reg_parts: list[str] = []
+    for raw in lines:
+        if not isinstance(raw, dict):
+            continue
+        group_code, quota_code = _split_group_quota(raw)
+        if not group_code or not quota_code:
+            continue
+        parcela = _dec(raw.get("installment_value") or 0)
+        meses = int(raw.get("meses_restantes") or 0)
+        if meses <= 0 or meses > 240:
+            continue
+        saldo_manual = _dec(raw.get("outstanding_balance") or 0)
+        if parcela > 0:
+            saldo = money(parcela * meses)
+        elif saldo_manual > 0:
+            saldo = money(saldo_manual)
+        else:
+            continue
+        vp = engine.calcular_valor_quitcon_vp(saldo, meses)
+        credit = money(_dec(raw.get("credit_at_billing") or 0))
+        total_saldo += saldo
+        total_vp += vp
+        max_meses = max(max_meses, meses)
+        reg_parts.append(f"{group_code}/{quota_code}")
+        rows.append(
+            {
+                "group_code": group_code,
+                "quota_code": quota_code,
+                "registry_number": f"{group_code}/{quota_code}",
+                "credit_at_billing": str(credit),
+                "installment_value": str(money(parcela)),
+                "meses_restantes": meses,
+                "saldo_devedor_calculado": str(saldo),
+                "valor_quitacao_vp": str(vp),
+                "economia_linha": str(money(saldo - vp)),
+            }
+        )
+    if not rows:
+        return [], Decimal(0), Decimal(0), 0, ""
+    if len(reg_parts) == 1:
+        registry_number = reg_parts[0]
+    else:
+        registry_number = f"{reg_parts[0]} (+{len(reg_parts) - 1} cotas)"
+    return rows, total_saldo, total_vp, max_meses, registry_number
+
+
+def _apply_total_vp_to_snapshot(
+    engine: EngineQuitConLetter,
+    snapshot: dict,
+    *,
+    total_vp: Decimal,
+    total_saldo: Decimal,
+    max_meses: int,
+    operational_service: bool,
+) -> dict:
+    vp = money(total_vp)
+    sb = money(total_saldo)
+    snapshot["saldo_devedor_bruto"] = str(sb)
+    snapshot["meses_restantes"] = max_meses
+    snapshot["valor_presente_quitacao"] = str(vp)
+    taxa_intermediacao = engine.calcular_taxa_intermediacao_sobre_quitacao(vp)
+    pagamento_total_cedente = engine.calcular_pagamento_total_cedente(vp)
+    taxa_servico_inicio = (
+        engine.calcular_taxa_servico_operacional_inicio(vp) if operational_service else money(Decimal("0"))
+    )
+    liberacao = engine.calcular_liberacao_cessionario(vp)
+    taxa_sucesso_escrow = engine.calcular_taxa_sucesso_escrow(vp)
+    snapshot["custos_entrada"] = engine.montar_custos_entrada(vp, operational_service=operational_service)
+    snapshot["cedente"] = {
+        **(snapshot.get("cedente") or {}),
+        "quitacao_vista_vp": str(vp),
+        "taxa_intermediacao_3_porcento_sobre_quitacao": str(taxa_intermediacao),
+        "pagamento_total_quitacao_mais_intermediacao": str(pagamento_total_cedente),
+        "taxa_servico_operacional_2_porcento_inicio": str(taxa_servico_inicio),
+        "servico_operacional_contratado": operational_service,
+    }
+    snapshot["cessionario"] = {
+        **(snapshot.get("cessionario") or {}),
+        "valor_base_quitacao": liberacao["valor_base_quitacao"],
+        "taxa_plataforma_5_porcento_na_liberacao": liberacao["taxa_plataforma_5_porcento"],
+        "capital_giro_liquido_na_liberacao": liberacao["capital_giro_liquido_na_liberacao"],
+        "taxa_sucesso_escrow_10_porcento": str(taxa_sucesso_escrow),
+    }
+    return snapshot
+
+
+def _format_address(addr: dict | None) -> str | None:
+    if not addr or not isinstance(addr, dict):
+        return None
+    parts = [
+        addr.get("street"),
+        addr.get("number"),
+        addr.get("complement"),
+        addr.get("district"),
+        addr.get("city"),
+        addr.get("state"),
+        addr.get("zip"),
+    ]
+    text = ", ".join(str(p).strip() for p in parts if p and str(p).strip())
+    return text or None
+
+
+def _address_errors(addr: dict | None, label: str) -> list[str]:
+    if not addr or not isinstance(addr, dict):
+        return [f"{label}: informe o endereço completo (CEP, logradouro, número, cidade e UF)."]
+    errs: list[str] = []
+    if not str(addr.get("zip") or "").strip():
+        errs.append(f"{label}: informe o CEP.")
+    if not str(addr.get("street") or "").strip():
+        errs.append(f"{label}: informe o logradouro.")
+    if not str(addr.get("number") or "").strip():
+        errs.append(f"{label}: informe o número.")
+    if not str(addr.get("city") or "").strip():
+        errs.append(f"{label}: informe a cidade.")
+    if not str(addr.get("state") or "").strip():
+        errs.append(f"{label}: informe a UF.")
+    return errs
+
+
 def _is_admin(user: User) -> bool:
     return user.role in {Role.PLATFORM_ADMIN, Role.INTERNAL_STAFF, Role.MASTER_FRANCHISEE}
 
 
 def evaluate_quitcon_desk(data: dict) -> dict:
     motivos: list[str] = []
-    saldo = _dec(data.get("outstanding_balance") or 0)
-    if saldo <= 0:
-        motivos.append("Informe o saldo devedor bruto da cota.")
+    engine = EngineQuitConLetter()
+    quota_lines = data.get("quota_lines") or []
+    breakdown: list[dict] = []
+    total_vp_override: Decimal | None = None
 
-    raw_meses = data.get("meses_restantes")
-    if raw_meses is None or str(raw_meses).strip() == "":
-        meses = 0
+    saldo = Decimal(0)
+    meses = 0
+    registry_number = ""
+
+    if quota_lines:
+        breakdown, saldo, total_vp, meses, registry_number = _compute_quota_breakdown(quota_lines, engine)
+        if not breakdown:
+            motivos.append("Informe ao menos uma cota válida (grupo, cota, parcela atual e prazo restante).")
+        else:
+            data = {
+                **data,
+                "outstanding_balance": str(saldo),
+                "meses_restantes": meses,
+                "registry_number": registry_number,
+            }
+            total_vp_override = total_vp
+            for row in breakdown:
+                if _dec(row.get("credit_at_billing")) <= 0:
+                    motivos.append(
+                        f"Cota {row['registry_number']}: informe o valor do crédito quando faturou o bem."
+                    )
     else:
-        meses = int(raw_meses)
+        saldo = _dec(data.get("outstanding_balance") or 0)
+        if saldo <= 0:
+            motivos.append("Informe o saldo devedor bruto da cota.")
+        raw_meses = data.get("meses_restantes")
+        if raw_meses is None or str(raw_meses).strip() == "":
+            meses = 0
+        else:
+            meses = int(raw_meses)
+        if meses <= 0 or meses > 240:
+            motivos.append("Meses restantes inválidos.")
+        registry_number = str(data.get("registry_number") or "").strip()
+        if not registry_number:
+            motivos.append("Informe grupo e cota.")
+
+    if saldo <= 0 and not motivos:
+        motivos.append("Informe o saldo devedor (parcela × prazo ou cotas válidas).")
     if meses <= 0 or meses > 240:
-        motivos.append("Meses restantes inválidos.")
+        if "Meses restantes inválidos." not in motivos:
+            motivos.append("Meses restantes inválidos.")
+    if not registry_number and not motivos:
+        motivos.append("Informe grupo e cota.")
 
     registry_office = str(data.get("registry_office") or data.get("administrator_name") or "").strip()
     if not registry_office:
         motivos.append("Informe a administradora (whitelist doc253).")
-
-    registry_number = str(data.get("registry_number") or "").strip()
-    if not registry_number:
-        motivos.append("Informe o número/grupo da cota (registry_number).")
 
     if not bool(data.get("docs_complete", True)):
         motivos.append("Documentação incompleta.")
@@ -105,7 +278,14 @@ def evaluate_quitcon_desk(data: dict) -> dict:
     parcelas_em_dia = bool(data.get("parcelas_em_dia", True))
     operational_service = bool(data.get("operational_service", False))
 
-    engine = EngineQuitConLetter()
+    totais = None
+    if breakdown:
+        totais = {
+            "saldo_devedor_total": str(money(saldo)),
+            "quitacao_vp_total": str(money(total_vp_override or 0)),
+            "economia_total": str(money(saldo - (total_vp_override or 0))),
+        }
+
     if motivos and saldo <= 0:
         return {
             "viable": False,
@@ -114,6 +294,8 @@ def evaluate_quitcon_desk(data: dict) -> dict:
             "snapshot": None,
             "valor_presente_quitacao": "0.00",
             "custos_entrada": None,
+            "quota_breakdown": breakdown,
+            "totais": totais,
             "message": "NÃO FOI POSSÍVEL SEGUIR COM A SUA OPERAÇÃO",
         }
 
@@ -126,6 +308,19 @@ def evaluate_quitcon_desk(data: dict) -> dict:
         bem_faturado=bem_faturado,
         parcelas_em_dia=parcelas_em_dia,
     )
+    if total_vp_override is not None:
+        snapshot = _apply_total_vp_to_snapshot(
+            engine,
+            snapshot,
+            total_vp=total_vp_override,
+            total_saldo=saldo,
+            max_meses=meses,
+            operational_service=operational_service,
+        )
+        if breakdown:
+            snapshot["quota_breakdown"] = breakdown
+            snapshot["totais"] = totais
+
     eleg = snapshot["elegibilidade"]
     if not eleg["elegivel"]:
         for b in eleg["blockers"]:
@@ -139,6 +334,8 @@ def evaluate_quitcon_desk(data: dict) -> dict:
             "snapshot": snapshot,
             "valor_presente_quitacao": snapshot.get("valor_presente_quitacao", "0.00"),
             "custos_entrada": snapshot.get("custos_entrada"),
+            "quota_breakdown": breakdown,
+            "totais": totais,
             "message": "NÃO FOI POSSÍVEL SEGUIR COM A SUA OPERAÇÃO",
         }
 
@@ -151,6 +348,8 @@ def evaluate_quitcon_desk(data: dict) -> dict:
         "custos_entrada": snapshot["custos_entrada"],
         "cedente": snapshot["cedente"],
         "cessionario": snapshot["cessionario"],
+        "quota_breakdown": breakdown,
+        "totais": totais,
         "message": "Operação viável — QuitCon doc253",
     }
 
@@ -214,6 +413,25 @@ def get_solicitation(db: Session, user: User, solicitation_id: str) -> QuitConSo
 
 def store_solicitation(db: Session, user: User, payload: dict) -> QuitConSolicitation:
     assert_desk_access(user)
+    addr_errors = _address_errors(payload.get("client_address_json"), "Endereço do cliente")
+    addr_errors.extend(_address_errors(payload.get("asset_address_json"), "Endereço do bem alienado"))
+    if addr_errors:
+        raise HTTPException(status_code=422, detail={"message": "Endereço incompleto", "motivos": addr_errors})
+    if bool(payload.get("operational_service")) and not bool(payload.get("operational_service_accepted")):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "Aceite a taxa de serviço LETTER (2%) para continuar.",
+                "motivos": [
+                    "A taxa de serviço não é reembolsável, refere-se à intermediação/representação junto à "
+                    "administradora e não é o fee de sucesso após a conclusão da operação."
+                ],
+            },
+        )
+    client_address = payload.get("client_address_json")
+    formatted_client = _format_address(client_address if isinstance(client_address, dict) else None)
+    if formatted_client:
+        payload = {**payload, "address": formatted_client}
     result = evaluate_quitcon_desk(payload)
     if not result["viable"]:
         raise HTTPException(
@@ -256,6 +474,9 @@ def store_solicitation(db: Session, user: User, payload: dict) -> QuitConSolicit
                     payload,
                     (
                         "quota_lines",
+                        "client_address_json",
+                        "asset_address_json",
+                        "operational_service_accepted",
                         "alienated_property_registry",
                         "alienated_asset_address",
                         "alienated_vehicle_plate",
