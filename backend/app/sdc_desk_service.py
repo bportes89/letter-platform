@@ -470,7 +470,7 @@ def open_tapaf_checkout_for_solicitation(db: Session, user: User, item: SdcSolic
         raise HTTPException(status_code=500, detail="Proposta TAPAF não encontrada")
 
     pauta = get_or_create_pauta(db, user, proposal)
-    if item.docs_complete and pauta.status == "PENDING_DOCUMENTS":
+    if pauta.status == "PENDING_DOCUMENTS":
         pauta.status = "DOCUMENTS_OK"
     at = "VEHICLE" if item.asset_type in TIPOS_VEICULO else "REAL_ESTATE"
     pauta.asset_type = at

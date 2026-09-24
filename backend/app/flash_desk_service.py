@@ -316,7 +316,8 @@ def open_tapaf_checkout_for_solicitation(db: Session, user: User, item: FlashSol
         raise HTTPException(status_code=500, detail="Proposta TAPAF não encontrada")
 
     pauta = get_or_create_pauta(db, user, proposal)
-    if item.docs_complete and pauta.status == "PENDING_DOCUMENTS":
+    # Mesa comercial: documentos vão para Acompanhamento — TAPAF após gravar a solicitação.
+    if pauta.status == "PENDING_DOCUMENTS":
         pauta.status = "DOCUMENTS_OK"
     pauta.asset_type = "REAL_ESTATE" if item.asset_category == "REAL_ESTATE" else "VEHICLE"
     db.flush()

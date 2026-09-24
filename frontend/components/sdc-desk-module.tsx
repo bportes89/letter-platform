@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckCircle2, FileUp, HelpCircle, Plus, RefreshCw, ShoppingCart, ClipboardList, Trash2 } from "lucide-react";
+import { CheckCircle2, FileUp, Plus, RefreshCw, ShoppingCart, ClipboardList, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { lookupCep } from "@/lib/cep-lookup";
 import { AdminDocumentPanel } from "@/components/admin-document-panel";
@@ -220,7 +220,6 @@ export function SdcDeskModule() {
   const [tapafScroll, setTapafScroll] = useState(false);
   const [tapafCb1, setTapafCb1] = useState(false);
   const [tapafCb2, setTapafCb2] = useState(false);
-  const [showTapafTip, setShowTapafTip] = useState(false);
 
   const isInternal = isInternalProductRole(user?.role);
   const needsYear = ["veiculo_leve", "veiculo_pesado", "maquina"].includes(form.asset_type);
@@ -488,6 +487,14 @@ export function SdcDeskModule() {
     }
   }
 
+  async function refreshTapafCheckout() {
+    const res = await api<{ interface_checkout_tapaf: TapafCheckoutUi }>("/finops/pre-analysis/generate-tapaf", {
+      method: "POST",
+      body: JSON.stringify({ proposal_id: tapafProposalId }),
+    });
+    setTapafCheckout(res.interface_checkout_tapaf);
+  }
+
   async function acceptTapaf() {
     if (!tapafProposalId) return;
     setError("");
@@ -503,12 +510,9 @@ export function SdcDeskModule() {
           asset_type: isVeiculo ? "VEHICLE" : "REAL_ESTATE",
         }),
       });
-      const res = await api<{ interface_checkout_tapaf: TapafCheckoutUi }>("/finops/pre-analysis/generate-tapaf", {
-        method: "POST",
-        body: JSON.stringify({ proposal_id: tapafProposalId }),
-      });
-      setTapafCheckout(res.interface_checkout_tapaf);
-      setNotice("Aceite TAPAF registrado. Clique em confirmar pagamento para gerar boleto/Pix.");
+      await refreshTapafCheckout();
+      setNotice("Aceite TAPAF registrado. Use o botão abaixo para gerar boleto/Pix.");
+      tapafPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Falha no aceite TAPAF");
     } finally {
@@ -1069,14 +1073,8 @@ export function SdcDeskModule() {
                   <b>TAPAF — taxa de abertura</b>
                   <div className="finops-summary tapaf-price" style={{ marginTop: 10 }}>
                     <article>
-                      <small>Taxa nominal</small>
+                      <small>Taxa nominal TAPAF</small>
                       <strong>{brl.format(Number(tapafCheckout.valor_nominal_taxa))}</strong>
-                      <button type="button" className="help-icon" onClick={() => setShowTapafTip((v) => !v)} aria-label="O que é TAPAF">
-                        <HelpCircle size={16} /> ?
-                      </button>
-                      {showTapafTip && (
-                        <div className="tooltip-pop">{tapafCheckout.texto_explicativo_tooltip_interrogacao}</div>
-                      )}
                     </article>
                   </div>
                   <div className="manifest-scroll" style={{ maxHeight: 120 }} dangerouslySetInnerHTML={{ __html: tapafCheckout.manifesto_html }} />

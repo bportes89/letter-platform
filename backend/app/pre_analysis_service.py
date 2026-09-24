@@ -357,6 +357,8 @@ def accept_tapaf_checkout(
     scroll_completed: bool, checkbox_1: bool, checkbox_2: bool,
     asset_type: str | None = None,
 ) -> PreAnalysisPauta:
+    if pauta.status == "TAPAF_CHECKOUT_ACCEPTED":
+        return pauta
     if pauta.status != "DOCUMENTS_OK":
         raise HTTPException(status_code=409, detail="Checkout TAPAF indisponível neste status")
     if not all([scroll_completed, checkbox_1, checkbox_2]):

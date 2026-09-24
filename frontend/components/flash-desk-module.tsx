@@ -1,7 +1,7 @@
 "use client";
 
-import { CheckCircle2, FileUp, HelpCircle, Plus, RefreshCw, ShoppingCart, Landmark, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { CheckCircle2, FileUp, Plus, RefreshCw, ShoppingCart, Landmark, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AdminDocumentPanel } from "@/components/admin-document-panel";
 import { api, apiForm, deleteApi, downloadApi, User } from "@/lib/api";
 import { isInternalProductRole } from "@/lib/product-nav";
@@ -203,7 +203,8 @@ export function FlashDeskModule() {
   const [tapafScroll, setTapafScroll] = useState(false);
   const [tapafCb1, setTapafCb1] = useState(false);
   const [tapafCb2, setTapafCb2] = useState(false);
-  const [showTapafTip, setShowTapafTip] = useState(false);
+  const [hqZip, setHqZip] = useState("");
+  const tapafPanelRef = useRef<HTMLDivElement>(null);
 
   const isInternal = isInternalProductRole(user?.role);
 
@@ -403,6 +404,9 @@ export function FlashDeskModule() {
         setTapafScroll(false);
         setTapafCb1(false);
         setTapafCb2(false);
+        window.setTimeout(() => tapafPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 150);
+      } else {
+        setError("Solicitação gravada, mas o checkout TAPAF não foi gerado. Atualize a página ou contate o suporte.");
       }
       setSelectedId(created.id);
       await load();
@@ -411,6 +415,23 @@ export function FlashDeskModule() {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function refreshTapafCheckout() {
+    const res = await api<{ interface_checkout_tapaf: TapafCheckoutUi }>("/finops/pre-analysis/generate-tapaf", {
+      method: "POST",
+      body: JSON.stringify({ proposal_id: tapafProposalId }),
+    });
+    setTapafCheckout(res.interface_checkout_tapaf);
+  }
+
+  async function fillHqCep(cep: string) {
+    const addr = await lookupCep(cep);
+    if (!addr) return;
+    const line = [addr.street, addr.neighborhood, addr.city, addr.uf, addr.zipcode ? `CEP ${addr.zipcode}` : ""]
+      .filter(Boolean)
+      .join(", ");
+    patchForm("address", line);
   }
 
   async function acceptTapaf() {
@@ -428,12 +449,9 @@ export function FlashDeskModule() {
           asset_type: "REAL_ESTATE",
         }),
       });
-      const res = await api<{ interface_checkout_tapaf: TapafCheckoutUi }>("/finops/pre-analysis/generate-tapaf", {
-        method: "POST",
-        body: JSON.stringify({ proposal_id: tapafProposalId }),
-      });
-      setTapafCheckout(res.interface_checkout_tapaf);
-      setNotice("Aceite TAPAF registrado. Clique em confirmar pagamento para gerar boleto/Pix.");
+      await refreshTapafCheckout();
+      setNotice("Aceite TAPAF registrado. Use o botão abaixo para gerar boleto/Pix.");
+      tapafPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Falha no aceite TAPAF");
     } finally {
@@ -650,11 +668,30 @@ export function FlashDeskModule() {
                 <input placeholder="E-mail" value={form.contact_email} onChange={(e) => patchForm("contact_email", e.target.value)} />
                 <input placeholder="Telefone" value={form.contact_phone} onChange={(e) => patchForm("contact_phone", e.target.value)} />
                 <label>
-                  Faturamento (R$)
+                  Faturamento mensal (R$)
                   <CurrencyInput value={form.income_value} onChange={(v) => patchForm("income_value", v)} placeholder="R$ 0,00" />
+                  <small className="muted">Receita bruta média por mês da empresa.</small>
                 </label>
                 <input placeholder="Ramo de atividade" value={form.occupation} onChange={(e) => patchForm("occupation", e.target.value)} />
-                <input style={{ gridColumn: "1 / -1" }} placeholder="Endereço da sede (tomador)" value={form.address} onChange={(e) => patchForm("address", e.target.value)} />
+                <label>
+                  CEP da sede (tomador)
+                  <input
+                    value={hqZip}
+                    onChange={(e) => setHqZip(e.target.value)}
+                    onBlur={(e) => {
+                      const z = e.target.value;
+                      if (z.replace(/\D/g, "").length === 8) void fillHqCep(z);
+                    }}
+                    placeholder="00000-000"
+                    inputMode="numeric"
+                  />
+                </label>
+                <input
+                  style={{ gridColumn: "1 / -1" }}
+                  placeholder="Endereço da sede (tomador) — preenchido pelo CEP ou digite manualmente"
+                  value={form.address}
+                  onChange={(e) => patchForm("address", e.target.value)}
+                />
                 <label>
                   Valor solicitado (R$)
                   <CurrencyInput value={form.requested_amount} onChange={(v) => patchForm("requested_amount", v)} placeholder="R$ 0,00" />
@@ -662,10 +699,6 @@ export function FlashDeskModule() {
                 <select value={form.term_months} onChange={(e) => patchForm("term_months", e.target.value)}>
                   <option value="36">36 meses</option>
                   <option value="60">60 meses (balloon 36)</option>
-                </select>
-                <select value={form.capital_source} onChange={(e) => patchForm("capital_source", e.target.value)}>
-                  <option value="RETAIL">Pool (RETAIL)</option>
-                  <option value="INSTITUTIONAL">Fundo (INSTITUTIONAL)</option>
                 </select>
                 {form.asset_has_lien && (
                   <label style={{ gridColumn: "1 / -1" }}>
@@ -976,7 +1009,7 @@ export function FlashDeskModule() {
                 <button type="button" className="admin-button" disabled={busy} onClick={() => void calculate()}>Calcular viabilidade</button>
               </div>
             </div>
-            <div style={{ border: "1px solid var(--line)", borderRadius: 12, padding: 16, background: "#f7fbf9" }}>
+            <div ref={tapafPanelRef} style={{ border: "1px solid var(--line)", borderRadius: 12, padding: 16, background: "#f7fbf9" }}>
               <b>Resultado Flash Capital</b>
               {!evalResult && !tapafCheckout && <p className="muted" style={{ marginTop: 10 }}>Preencha e clique em Calcular.</p>}
               {evalResult?.viable && !tapafCheckout && (
@@ -1016,14 +1049,8 @@ export function FlashDeskModule() {
                   <b>TAPAF — taxa de abertura</b>
                   <div className="finops-summary tapaf-price" style={{ marginTop: 10 }}>
                     <article>
-                      <small>Taxa nominal</small>
+                      <small>Taxa nominal TAPAF</small>
                       <strong>{brl.format(Number(tapafCheckout.valor_nominal_taxa))}</strong>
-                      <button type="button" className="help-icon" onClick={() => setShowTapafTip((v) => !v)} aria-label="O que é TAPAF">
-                        <HelpCircle size={16} /> ?
-                      </button>
-                      {showTapafTip && (
-                        <div className="tooltip-pop">{tapafCheckout.texto_explicativo_tooltip_interrogacao}</div>
-                      )}
                     </article>
                   </div>
                   <div className="manifest-scroll" style={{ maxHeight: 120 }} dangerouslySetInnerHTML={{ __html: tapafCheckout.manifesto_html }} />
