@@ -9,6 +9,8 @@ from typing import Any
 
 from fastapi import HTTPException
 
+from app.valid_stamp_consult_client import valid_stamp_consult_configured
+
 VEHICLE_CLASSES = {"LIGHT", "HEAVY", "MACHINE"}
 BLOCKING_RESTRICTION_TYPES = {
     "JUDICIAL_BLOCK",
@@ -33,7 +35,7 @@ def query_vehicle_registry(
     uf: str,
     vehicle_class: str,
     renavam: str | None = None,
-    mode: str = "sandbox",
+    mode: str = "auto",
 ) -> dict[str, Any]:
     plate_norm = normalize_plate(plate)
     uf_norm = uf.upper().strip()
@@ -49,13 +51,27 @@ def query_vehicle_registry(
         )
 
     queried_at = datetime.now(UTC).isoformat()
-    if mode == "sandbox":
+    use_prismafy = mode in {"prismafy", "auto", "production"} and valid_stamp_consult_configured()
+    if use_prismafy:
+        from app.prismafy_vehicle_registry import query_vehicle_registry_prismafy
+
+        result = query_vehicle_registry_prismafy(
+            plate=plate_norm,
+            uf=uf_norm,
+            vehicle_class=vclass,
+            renavam=renavam,
+        )
+        if not result.get("queried_at"):
+            result["queried_at"] = queried_at
+        return result
+
+    if mode == "sandbox" or mode == "auto":
         restrictions = _sandbox_restrictions(plate_norm, vclass)
         source = "DETRAN_SANDBOX"
     else:
         raise HTTPException(
             status_code=501,
-            detail="Integração DETRAN produtiva pendente de homologação; use modo sandbox",
+            detail="Integração DETRAN produtiva pendente de homologação; use modo sandbox ou configure Prismafy",
         )
 
     blocking = [r for r in restrictions if r["type"] in BLOCKING_RESTRICTION_TYPES]

@@ -37,8 +37,12 @@ Templates liberados para LETTER (IDs no HTML e em `backend/app/prismafy_template
 - **Gráfico:** componente `ValidStamp` (anel VALID STAMP) — módulo **LSS** e **Pré-análise** após emissão.
 - **Rodapé público:** selo **Asaas BaaS** (pagamentos), não Prismafy.
 
+## Esteira SDC / Flash veículo
+
+Com `LETTER_VALID_STAMP_API_KEY` configurada, `POST /vehicles/registry-check` e a emissão do Valid-Stamp (`SDC_VEHICLE_COLLATERAL` / veículo Flash) consultam automaticamente **Gravame** e **RENAJUD** na Prismafy antes do selo. Sem chave, permanece o **sandbox DETRAN** (placas terminadas em A/B/T para simular bloqueios).
+
 ## Pendências de produto
 
-1. Ligar consultas obrigatórias (ex.: gravame SDC veículo) na esteira TAPAF antes de `issue_stamp`.
+1. Ajustar mapeamento de campos se o schema canônico Prismafy mudar (ver `prismafy_vehicle_registry.py`).
 2. Webhook Prismafy `execution.finished` (opcional) para evitar polling.
 3. e-notariado: upload manual até API do fornecedor.
