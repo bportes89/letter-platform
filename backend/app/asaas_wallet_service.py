@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import uuid4
@@ -150,6 +151,9 @@ def sync_account_from_asaas(db: Session, account: EscrowAccount) -> EscrowAccoun
         db.flush()
         return account
 
+    if _requires_subaccount_key(account):
+        ensure_subaccount_api_key(db, account)
+
     with subaccount_client(account, db=db) as client:
         balance_payload = client.get_balance()
         commercial = client.get_commercial_info()
@@ -163,13 +167,7 @@ def sync_account_from_asaas(db: Session, account: EscrowAccount) -> EscrowAccoun
         account.asaas_kyc_status = str(commercial.get("documentationStatus") or account.asaas_kyc_status or "PENDING")
         apply_banking_fields(account, payload=account_number_payload)
 
-        docs = client.list_documents()
-        data = docs.get("data") if isinstance(docs.get("data"), list) else docs if isinstance(docs, list) else []
-        for item in data:
-            url = _extract_onboarding_url(item if isinstance(item, dict) else {})
-            if url:
-                account.asaas_onboarding_url = url
-                break
+        _refresh_onboarding_url_from_asaas(client, account, commercial=commercial)
 
         if not account.pix_key:
             keys = client.list_pix_keys()
@@ -429,6 +427,67 @@ def _extract_onboarding_url(row: dict) -> str | None:
     return None
 
 
+def _deep_find_onboarding_url(value: object) -> str | None:
+    """Busca onboardingUrl em qualquer nível do JSON retornado pelo Asaas."""
+    if isinstance(value, dict):
+        for key in ("onboardingUrl", "onboarding_url", "onboardingLink"):
+            raw = value.get(key)
+            if isinstance(raw, str) and raw.strip().startswith("http"):
+                return raw.strip()
+        for nested in value.values():
+            found = _deep_find_onboarding_url(nested)
+            if found:
+                return found
+    elif isinstance(value, list):
+        for item in value:
+            found = _deep_find_onboarding_url(item)
+            if found:
+                return found
+    return None
+
+
+def _document_rows_from_asaas_payload(payload: dict | list) -> list:
+    if isinstance(payload, list):
+        return [row for row in payload if isinstance(row, dict)]
+    if isinstance(payload, dict):
+        data = payload.get("data")
+        if isinstance(data, list):
+            return [row for row in data if isinstance(row, dict)]
+    return []
+
+
+def _refresh_onboarding_url_from_asaas(client: AsaasClient, account: EscrowAccount, *, commercial: dict | None = None) -> None:
+    """Atualiza asaas_onboarding_url a partir de /myAccount/documents e dados comerciais."""
+    if commercial:
+        url = _deep_find_onboarding_url(commercial)
+        if url:
+            account.asaas_onboarding_url = url
+            return
+
+    payloads: list[dict | list] = []
+    docs = client.list_documents()
+    payloads.append(docs)
+    rows = _document_rows_from_asaas_payload(docs)
+    if not rows:
+        # Asaas recomenda aguardar após criar subconta antes de listar documentos.
+        time.sleep(2.0)
+        docs_retry = client.list_documents()
+        payloads.append(docs_retry)
+        rows = _document_rows_from_asaas_payload(docs_retry)
+
+    for item in rows:
+        url = _extract_onboarding_url(item)
+        if url:
+            account.asaas_onboarding_url = url
+            return
+
+    for payload in payloads:
+        url = _deep_find_onboarding_url(payload)
+        if url:
+            account.asaas_onboarding_url = url
+            return
+
+
 def _identity_doc_types() -> frozenset[str]:
     return frozenset({"IDENTIFICATION", "IDENTIFICATION_SELFIE"})
 
@@ -554,14 +613,16 @@ def list_kyc_documents(db: Session, account: EscrowAccount) -> dict:
             )
         else:
             hint = (
-                "Nenhum documento listado pelo Asaas ainda. "
-                "Aguarde cerca de 1 minuto após abrir a conta e toque em «Atualizar dados bancários»."
+                "O Asaas ainda não liberou o link de RG/selfie para esta conta. "
+                "Aguarde 1–2 minutos após a abertura, toque em «Atualizar dados bancários» e abra «Verificar identidade» de novo. "
+                "Se o link não aparecer, contate o suporte LETTER para ressincronizar a subconta."
             )
+    stored_identity_url = (account.asaas_onboarding_url or "").strip() or None
     return {
         "source": "ASAAS",
         "items": items,
         "hint": hint,
-        "identity_onboarding_url": _identity_onboarding_url(items),
+        "identity_onboarding_url": _identity_onboarding_url(items) or stored_identity_url,
     }
 
 

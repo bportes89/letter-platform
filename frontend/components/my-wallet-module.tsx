@@ -190,7 +190,7 @@ export function MyWalletModule() {
         );
         docsItems = docs.items ?? [];
         docsHint = docs.hint?.trim() ?? "";
-        setIdentityOnboardingUrl(docs.identity_onboarding_url ?? null);
+        setIdentityOnboardingUrl(docs.identity_onboarding_url ?? w.account?.asaas_onboarding_url ?? null);
       } catch (e) {
         docsError = e instanceof Error ? e.message : "Não foi possível carregar os documentos de verificação.";
         setIdentityOnboardingUrl(null);
@@ -1097,6 +1097,7 @@ export function MyWalletModule() {
             setNotice(message);
             void load();
           }}
+          onSyncAndRefresh={syncWallet}
         />
       )}
     </>

@@ -19,6 +19,7 @@ type Props = {
   identityOnboardingUrl?: string | null;
   onClose: () => void;
   onComplete: (message: string) => void;
+  onSyncAndRefresh?: () => Promise<void>;
 };
 
 type WizardMode = "choose" | "link" | "camera" | "waiting";
@@ -73,7 +74,7 @@ async function uploadIdentityFile(docId: string, file: File): Promise<string> {
   return body.message || "Documento enviado para análise.";
 }
 
-export function KycIdentityWizard({ documents, identityOnboardingUrl, onClose, onComplete }: Props) {
+export function KycIdentityWizard({ documents, identityOnboardingUrl, onClose, onComplete, onSyncAndRefresh }: Props) {
   const identityDocs = useMemo(() => pendingIdentityDocs(documents), [documents]);
   const linkUrl = useMemo(
     () => identityOnboardingUrl || identityDocs.map((d) => d.onboarding_url).find(Boolean) || null,
@@ -100,6 +101,7 @@ export function KycIdentityWizard({ documents, identityOnboardingUrl, onClose, o
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState("");
   const inputRef = useRef<HTMLInputElement | null>(null);
 
@@ -163,6 +165,22 @@ export function KycIdentityWizard({ documents, identityOnboardingUrl, onClose, o
     onClose();
   }
 
+  async function syncAndRefresh() {
+    if (!onSyncAndRefresh) {
+      closeWizard();
+      return;
+    }
+    setSyncing(true);
+    setError("");
+    try {
+      await onSyncAndRefresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Não foi possível sincronizar com o Asaas.");
+    } finally {
+      setSyncing(false);
+    }
+  }
+
   return (
     <div className="kyc-wizard-overlay" role="dialog" aria-modal="true" aria-labelledby="kyc-wizard-title">
       <div className="kyc-wizard-panel">
@@ -212,9 +230,16 @@ export function KycIdentityWizard({ documents, identityOnboardingUrl, onClose, o
                 Abrir verificação oficial
               </button>
             ) : (
-              <button type="button" className="kyc-wizard-secondary" onClick={closeWizard}>
-                Fechar e atualizar dados bancários
+              <button type="button" className="kyc-wizard-primary" disabled={syncing} onClick={() => void syncAndRefresh()}>
+                <RefreshCw className={syncing ? "spin" : undefined} />
+                {syncing ? "Sincronizando com o Asaas…" : "Atualizar dados e buscar link"}
               </button>
+            )}
+            {error && <div className="error">{error}</div>}
+            {!linkUrl && !syncing && (
+              <p className="muted" style={{ marginBottom: 0 }}>
+                Se o link não aparecer após sincronizar, aguarde 1–2 minutos e tente de novo ou contate o suporte LETTER.
+              </p>
             )}
           </div>
         )}
