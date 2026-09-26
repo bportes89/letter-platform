@@ -98,7 +98,7 @@ export default function ModulePage() {
     );
   }
 
-  if (routeKey === "marketplace") return <MarketplaceModule />;
+  if (routeKey === "marketplace" || routeKey === "marketplace-group") return <MarketplaceModule />;
   if (routeKey === "venda-direta-robo") return <VendaDiretaRoboModule />;
   if (routeKey === "venda-direta-manual") return <VendaDiretaManualModule />;
   if (routeKey === "cadastros") return <CadastroMarketplaceModule />;

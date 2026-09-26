@@ -210,6 +210,10 @@ html,body{-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
 .kyc-wizard-primary svg,.kyc-wizard-secondary svg{width:14px}
 .spin{animation:kyc-spin 1s linear infinite}
 @keyframes kyc-spin{to{transform:rotate(360deg)}}
+a.backlog-item.quick-access-item{position:relative;z-index:1;cursor:pointer;transition:box-shadow .15s ease,border-color .15s ease}
+a.backlog-item.quick-access-item:hover{border-color:var(--green-dark);box-shadow:0 6px 18px #06130f12}
+a.backlog-item.quick-access-item:active{transform:translateY(1px)}
+.quick-access-panel{position:relative;z-index:2}
 .kyc-upload-trigger{position:relative;display:inline-flex;align-items:center;gap:6px;overflow:hidden}
 .kyc-file-input{position:absolute;inset:0;opacity:0;width:100%;height:100%;cursor:pointer;font-size:16px}
 @media(max-width:700px){.kyc-identity-cta{flex-direction:column;align-items:stretch}.kyc-wizard-actions{flex-direction:column}.kyc-wizard-primary,.kyc-wizard-secondary{width:100%;justify-content:center}}

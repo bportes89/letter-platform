@@ -115,3 +115,37 @@ export function filterProductNavItem(
   if (allowedKeys !== "*" && !allowedKeys.includes(item.key)) return null;
   return item;
 }
+
+export type QuickAccessTarget = {
+  id: string;
+  name: string;
+  routeKey: string;
+  badge: string;
+};
+
+/** Rotas clicáveis do Acesso Rápido (grupos como Cartas → marketplace). */
+export function quickAccessTargets(items: ProductNavItem[]): QuickAccessTarget[] {
+  const targets: QuickAccessTarget[] = [];
+  for (const item of items) {
+    if (item.children?.length) {
+      const routeKey =
+        item.children.find((c) => c.key === "marketplace")?.key ??
+        item.children.find((c) => !c.internalOnly)?.key ??
+        item.children[0].key;
+      targets.push({
+        id: item.key,
+        name: item.name,
+        routeKey,
+        badge: routeKey.slice(0, 2).toUpperCase(),
+      });
+      continue;
+    }
+    targets.push({
+      id: item.key,
+      name: item.name,
+      routeKey: item.key,
+      badge: item.key.slice(0, 2).toUpperCase(),
+    });
+  }
+  return targets;
+}

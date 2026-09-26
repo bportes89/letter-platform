@@ -97,6 +97,7 @@ export function canAccessPlatformModule(role: string | undefined, moduleKey: str
 
 /** Rotas de produto incluem aliases legados usados em /modules/[key]. */
 const PRODUCT_ROUTE_ALIASES: Record<string, string> = {
+  "marketplace-group": "marketplace",
   marketplace: "marketplace",
   "venda-direta-robo": "venda-direta-robo",
   "venda-direta-manual": "venda-direta-manual",

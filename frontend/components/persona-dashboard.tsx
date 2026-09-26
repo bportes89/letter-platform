@@ -13,7 +13,9 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { api, logout, Summary, User } from "@/lib/api";
 import { BANK_INVESTMENT_KEYS } from "@/lib/main-nav";
-import { filterProductNav, personaLabel } from "@/lib/role-nav";
+import { quickAccessTargets } from "@/lib/product-nav";
+import { canAccessModuleRouteForUser, filterProductNavForUser } from "@/lib/permission-nav";
+import { personaLabel } from "@/lib/role-nav";
 import { getDashboardLayout } from "@/lib/role-dashboard";
 
 const money = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
@@ -42,10 +44,12 @@ export function PersonaDashboard() {
   }
 
   const layout = getDashboardLayout(user.role);
-  const products = filterProductNav(user.role);
+  const products = filterProductNavForUser(user);
   const bankInvestments = products.filter((p) => (BANK_INVESTMENT_KEYS as readonly string[]).includes(p.key));
   const platformProducts = products.filter((p) => !(BANK_INVESTMENT_KEYS as readonly string[]).includes(p.key));
-  const quickAccessProducts = [...platformProducts, ...bankInvestments];
+  const quickAccessProducts = quickAccessTargets([...platformProducts, ...bankInvestments]).filter((target) =>
+    canAccessModuleRouteForUser(user, target.routeKey),
+  );
   const persona = personaLabel(user.role);
 
   return (
@@ -137,9 +141,9 @@ function PipelinePanel() {
   );
 }
 
-function QuickAccessPanel({ products }: { products: { key: string; name: string }[] }) {
+function QuickAccessPanel({ products }: { products: { id: string; name: string; routeKey: string; badge: string }[] }) {
   return (
-    <section className="panel panel-float">
+    <section className="panel panel-float quick-access-panel">
       <div className="panel-title">
         <div>
           <span className="eyebrow dark">ACESSO RÁPIDO</span>
@@ -148,13 +152,13 @@ function QuickAccessPanel({ products }: { products: { key: string; name: string 
       </div>
       <div className="backlog-grid">
         {products.map((product) => (
-          <Link className="backlog-item" href={`/modules/${product.key}`} key={product.key}>
-            <span>{product.key.slice(0, 2).toUpperCase()}</span>
+          <Link className="backlog-item quick-access-item" href={`/modules/${product.routeKey}`} key={product.id}>
+            <span>{product.badge}</span>
             <div>
               <strong>{product.name}</strong>
               <p>Abrir módulo liberado para o seu perfil</p>
             </div>
-            <ArrowUpRight />
+            <ArrowUpRight aria-hidden />
           </Link>
         ))}
       </div>
