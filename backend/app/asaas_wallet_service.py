@@ -435,7 +435,7 @@ def _identity_doc_types() -> frozenset[str]:
 
 def _document_capture_mode(doc_type: str, onboarding_url: str | None, account: EscrowAccount | None = None) -> str:
     doc_type = doc_type.upper()
-    if onboarding_url:
+    if doc_type in _identity_doc_types() and onboarding_url:
         return "link"
     if doc_type in _identity_doc_types():
         return "camera"
@@ -443,10 +443,10 @@ def _document_capture_mode(doc_type: str, onboarding_url: str | None, account: E
 
 
 def _document_accepts_api_upload(doc_type: str, onboarding_url: str | None, account: EscrowAccount | None = None) -> bool:
-    """Asaas: com onboardingUrl só link; sem URL, envio via API (foto ou PDF conforme tipo)."""
+    """Asaas: identidade com onboardingUrl exige link; contrato social e demais PDFs via API."""
     doc_type = doc_type.upper()
-    if onboarding_url:
-        return False
+    if doc_type in _identity_doc_types():
+        return not bool(onboarding_url)
     return True
 
 
@@ -594,9 +594,11 @@ async def upload_kyc_document(db: Session, account: EscrowAccount, document_id: 
     target = next((item for item in docs["items"] if item["id"] == document_id), None)
     if not target:
         raise HTTPException(status_code=404, detail="Grupo documental não encontrado")
-    if target.get("onboarding_url") or not target.get("accepts_api_upload", True):
-        raise HTTPException(status_code=422, detail=_kyc_api_upload_blocked_message(account))
     document_type = str(target.get("type") or "CUSTOM").upper()
+    if not target.get("accepts_api_upload", True):
+        raise HTTPException(status_code=422, detail=_kyc_api_upload_blocked_message(account))
+    if document_type in _identity_doc_types() and target.get("onboarding_url"):
+        raise HTTPException(status_code=422, detail=_kyc_api_upload_blocked_message(account))
     if document_type in {"IDENTIFICATION", "IDENTIFICATION_SELFIE"} and not str(content_type).startswith("image/"):
         raise HTTPException(status_code=422, detail="Para RG e selfie, envie uma foto em JPG ou PNG (use a câmera ou galeria).")
     # Contrato social e atas usam type do grupo; fallback sensato por título

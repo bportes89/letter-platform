@@ -147,6 +147,8 @@ export function MyWalletModule() {
   const [loading, setLoading] = useState(true);
   const [openingAccount, setOpeningAccount] = useState(false);
   const [uploadingDocId, setUploadingDocId] = useState<string | null>(null);
+  const [syncingWallet, setSyncingWallet] = useState(false);
+  const [kycFeedback, setKycFeedback] = useState("");
   const [transferAmount, setTransferAmount] = useState("");
   const [billAmount, setBillAmount] = useState("");
   const [boletoAmount, setBoletoAmount] = useState("");
@@ -235,11 +237,25 @@ export function MyWalletModule() {
   }, [onboarding, hasPendingIdentity]);
 
   async function syncWallet() {
+    if (syncingWallet) return;
+    setSyncingWallet(true);
     setNotice("");
     setDocumentsError("");
-    await api<WalletView>("/wallet/me/sync", { method: "POST" });
-    await load();
-    setNotice("Dados da conta LETTER e documentos de verificação atualizados.");
+    setKycFeedback("");
+    try {
+      await api<WalletView>("/wallet/me/sync", { method: "POST" });
+      await load();
+      const ok = "Dados da conta LETTER e documentos de verificação atualizados.";
+      setNotice(ok);
+      setKycFeedback(ok);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Não foi possível sincronizar com o Asaas. Tente de novo em instantes.";
+      setNotice(msg);
+      setDocumentsError(msg);
+      setKycFeedback(msg);
+    } finally {
+      setSyncingWallet(false);
+    }
   }
 
   async function openWalletAccount() {
@@ -411,7 +427,11 @@ export function MyWalletModule() {
 
   async function uploadDoc(docId: string, file: File, input?: HTMLInputElement | null) {
     setUploadingDocId(docId);
-    setNotice(`Enviando "${file.name}"…`);
+    setKycFeedback("");
+    setDocumentsError("");
+    const sending = `Enviando "${file.name}"…`;
+    setNotice(sending);
+    setKycFeedback(sending);
     try {
       if (file.size > 10 * 1024 * 1024) {
         throw new Error("Arquivo muito grande. Envie um PDF de até 10 MB.");
@@ -453,8 +473,16 @@ export function MyWalletModule() {
               : `Falha no upload (${response.status})`;
         throw new Error(message);
       }
-      setNotice(body.message || `Documento "${file.name}" enviado para análise.`);
+      const done = body.message || `Documento "${file.name}" enviado para análise.`;
+      setNotice(done);
+      setKycFeedback(done);
       await load();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Falha no upload";
+      setNotice(msg);
+      setDocumentsError(msg);
+      setKycFeedback(msg);
+      throw e;
     } finally {
       setUploadingDocId(null);
       if (input) input.value = "";
@@ -469,13 +497,18 @@ export function MyWalletModule() {
   if (loading) return <div className="loading">Carregando BANK...</div>;
 
   const bankReady = wallet ? walletAccountReady(wallet) : false;
+  const walletVerificationApproved =
+    (wallet?.account?.asaas_kyc_status || "").toUpperCase() === "APPROVED" &&
+    (wallet?.account?.asaas_commercial_status || "").toUpperCase() === "APPROVED";
   const showKycDocs =
     Boolean(wallet?.has_subaccount) &&
-    (!wallet?.onboarding_complete ||
-      wallet.account?.asaas_onboarding_url ||
+    (!walletVerificationApproved ||
+      !wallet?.onboarding_complete ||
+      Boolean(wallet.account?.asaas_onboarding_url) ||
       documents.length > 0 ||
-      documentsError ||
-      documentsHint);
+      hasPendingIdentity ||
+      Boolean(documentsError) ||
+      Boolean(documentsHint));
 
   return (
     <>
@@ -507,7 +540,10 @@ export function MyWalletModule() {
 
       <section className="panel operational-panel financial-panel">
         <div className="toolbar">
-          <button onClick={() => void syncWallet()}><RefreshCw />Atualizar dados da conta</button>
+          <button type="button" disabled={syncingWallet} onClick={() => void syncWallet()}>
+            <RefreshCw className={syncingWallet ? "spin" : undefined} />
+            {syncingWallet ? "Atualizando…" : "Atualizar dados da conta"}
+          </button>
           {!wallet?.has_subaccount && (
             <button
               disabled={openingAccount}
@@ -670,8 +706,9 @@ export function MyWalletModule() {
                     <QrCode />Ver QR Code Pix
                   </button>
                 )}
-                <button onClick={() => void syncWallet()}>
-                  <RefreshCw />Atualizar dados bancários
+                <button type="button" disabled={syncingWallet} onClick={() => void syncWallet()}>
+                  <RefreshCw className={syncingWallet ? "spin" : undefined} />
+                  {syncingWallet ? "Atualizando…" : "Atualizar dados bancários"}
                 </button>
               </div>
               {pixQr?.payload && (
@@ -692,8 +729,17 @@ export function MyWalletModule() {
                   Envie o contrato social e demais documentos em PDF (até 10 MB). Documentos com link externo devem ser
                   enviados pela verificação oficial LETTER.
                 </p>
-                {documentsError && <div className="error">{documentsError}</div>}
-                {documentsHint && !documentsError && <div className="notice">{documentsHint}</div>}
+                {kycFeedback && (
+                  <div
+                    className={documentsError && kycFeedback === documentsError ? "error" : "notice"}
+                    role="status"
+                  >
+                    {documentsError && kycFeedback === documentsError ? null : <CheckCircle2 />}
+                    {kycFeedback}
+                  </div>
+                )}
+                {documentsError && !kycFeedback && <div className="error">{documentsError}</div>}
+                {documentsHint && !documentsError && !kycFeedback && <div className="notice">{documentsHint}</div>}
                 {wallet.account?.asaas_onboarding_url && (
                   <div className="notice">
                     Alguns documentos exigem o link oficial de verificação LETTER:{" "}
@@ -729,39 +775,43 @@ export function MyWalletModule() {
                     {doc.onboarding_url ? (
                       <a className="table-action" href={doc.onboarding_url} target="_blank" rel="noreferrer">Enviar pelo link</a>
                     ) : doc.accepts_api_upload ? (
-                      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
-                        <button
-                          type="button"
-                          className="table-action"
-                          disabled={uploadingDocId === doc.id}
-                          onClick={() => {
-                            const input = document.getElementById(`kyc-file-${doc.id}`) as HTMLInputElement | null;
-                            input?.click();
-                          }}
-                        >
-                          <Upload />
-                          {uploadingDocId === doc.id
-                            ? "Enviando…"
-                            : doc.type === "IDENTIFICATION" || doc.type === "IDENTIFICATION_SELFIE"
-                              ? "Enviar foto"
-                              : "Escolher PDF"}
-                        </button>
+                      <label
+                        className="table-action kyc-upload-trigger"
+                        style={{
+                          cursor: uploadingDocId === doc.id ? "wait" : "pointer",
+                          opacity: uploadingDocId === doc.id ? 0.7 : 1,
+                        }}
+                      >
+                        <Upload />
+                        {uploadingDocId === doc.id
+                          ? "Enviando…"
+                          : doc.type === "IDENTIFICATION" || doc.type === "IDENTIFICATION_SELFIE"
+                            ? "Enviar foto"
+                            : "Escolher PDF"}
                         <input
-                          id={`kyc-file-${doc.id}`}
+                          className="kyc-file-input"
                           type="file"
-                          accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg"
-                          style={{ display: "none" }}
+                          accept={
+                            doc.type === "IDENTIFICATION" || doc.type === "IDENTIFICATION_SELFIE"
+                              ? "image/*"
+                              : "application/pdf,.pdf"
+                          }
+                          capture={
+                            doc.type === "IDENTIFICATION_SELFIE"
+                              ? "user"
+                              : doc.type === "IDENTIFICATION"
+                                ? "environment"
+                                : undefined
+                          }
                           disabled={uploadingDocId === doc.id}
                           onChange={(e) => {
                             const input = e.currentTarget;
                             const file = input.files?.[0];
                             if (!file) return;
-                            void uploadDoc(doc.id, file, input).catch((err) =>
-                              setNotice(err instanceof Error ? err.message : "Falha no upload"),
-                            );
+                            void uploadDoc(doc.id, file, input).catch(() => undefined);
                           }}
                         />
-                      </div>
+                      </label>
                     ) : doc.type === "IDENTIFICATION" || doc.type === "IDENTIFICATION_SELFIE" ? (
                       <button type="button" className="table-action" onClick={() => setShowIdentityWizard(true)}>
                         <Camera />

@@ -222,8 +222,13 @@ export function KycIdentityWizard({ documents, identityOnboardingUrl, onClose, o
         {mode === "link" && linkUrl && (
           <div className="kyc-wizard-body kyc-wizard-link-body">
             <p className="muted" style={{ marginTop: 0 }}>
-              Conclua RG e selfie no ambiente seguro LETTER. Permita o uso da câmera quando solicitado.
+              Conclua RG e selfie no ambiente seguro LETTER. No celular, prefira <strong>Abrir em nova aba</strong> e permita
+              câmera e microfone.
             </p>
+            <a className="kyc-wizard-primary" href={linkUrl} target="_blank" rel="noreferrer">
+              <ExternalLink />
+              Abrir verificação em nova aba (recomendado no iPhone)
+            </a>
             <iframe
               className="kyc-wizard-iframe"
               src={linkUrl}
@@ -240,18 +245,6 @@ export function KycIdentityWizard({ documents, identityOnboardingUrl, onClose, o
                 Abrir em nova aba
               </a>
             </div>
-          </div>
-        )}
-
-        {mode === "waiting" && (
-          <div className="kyc-wizard-body">
-            <p className="muted" style={{ marginTop: 0 }}>
-              Ainda não há link de verificação do Asaas para esta conta. Toque em <strong>Atualizar dados bancários</strong> na
-              Carteira LETTER, aguarde cerca de 1 minuto e abra esta tela de novo.
-            </p>
-            <p className="muted">
-              Se o link não aparecer, contate o suporte LETTER — podemos ressincronizar a subconta com o Asaas.
-            </p>
           </div>
         )}
 
