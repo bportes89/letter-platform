@@ -1454,6 +1454,22 @@
   border-color: #00d084;
 }
 
+.site-login-card select {
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0.7rem 0.85rem;
+  background: var(--panel-deep);
+  color: #fff;
+  font: inherit;
+  outline: none;
+  width: 100%;
+  cursor: pointer;
+}
+
+.site-login-card select:focus {
+  border-color: #00d084;
+}
+
 .site-login-card small {
   font-weight: 400;
   color: #c8d5cf;

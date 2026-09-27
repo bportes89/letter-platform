@@ -1,17 +1,18 @@
 "use client";
 
 import { Suspense } from "react";
-import "../site.css";
+import "../../site.css";
 import { SiteNav } from "@/components/public-site/simulator-section";
 import { LoginForm } from "@/components/login-form";
 
-export default function LoginPage() {
+/** Login dedicado da operação LETTER (equipe interna / admin), como na plataforma legada. */
+export default function OperacaoLoginPage() {
   return (
     <div className="site-root">
       <SiteNav />
       <main className="site-login-main">
         <Suspense fallback={<div className="site-login-card">Carregando…</div>}>
-          <LoginForm />
+          <LoginForm operacaoOnly />
         </Suspense>
       </main>
     </div>
