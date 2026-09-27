@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { getToken, login, api, User, LoginChallengeError } from "@/lib/api";
+import { portalHomeForRole } from "@/lib/portal-routes";
 import {
   contractOnboardingPath,
   fetchContractStatus,
