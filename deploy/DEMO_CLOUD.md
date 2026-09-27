@@ -126,6 +126,14 @@ LETTER_CORS_ORIGINS=https://letter-platform.vercel.app,https://letter.app.br,htt
 
 Salve e faça **Manual Deploy** da API (para recarregar env).
 
+### Deploy mais rápido (monorepo)
+
+- **Login e telas novas** vão na **Vercel** (`frontend/`). Não é necessário redeploy manual da API no Render só por mudança de interface.
+- No Render, use **build filter** (`backend/**`) para auto-deploy da API só quando o backend mudar — ver `deploy/render.yaml`. Após alterar o blueprint, sincronize no painel Render (Blueprint sync).
+- **`LETTER_RUN_STARTUP_SEED=0`** (padrão no blueprint): pula o seed no boot e encurta o start. Use `1` só para reset de dados demo.
+- Commits só de front: mensagem com **`[skip render]`** evita auto-deploy da API.
+- Plano **Free** do Render: build + migrações podem levar vários minutos; instância dorme com inatividade.
+
 ---
 
 ## 4b) Masters comerciais (Letter Bank + RMK/Bevi)
