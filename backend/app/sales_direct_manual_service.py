@@ -49,8 +49,12 @@ def list_cotas_options(
     """Cotas comerciais da categoria — identificação mascarada (sem fornecedor/sync)."""
     if category not in {"REAL_ESTATE", "VEHICLE"}:
         raise HTTPException(status_code=422, detail="Categoria deve ser REAL_ESTATE ou VEHICLE.")
+    from app.marketplace_partner_view import user_sees_supplier_quota_identity
+
     suppliers = suppliers_index(db, user.organization_id)
     statuses = ["AVAILABLE", "RESERVED"] if include_reserved else ["AVAILABLE"]
+    if user_sees_supplier_quota_identity(user):
+        statuses = list(dict.fromkeys([*statuses, "PENDING_REVIEW"]))
     quotas = list(
         db.scalars(
             select(Quota)
@@ -98,6 +102,7 @@ def list_cotas_options(
             "nina_scan_status": q.nina_scan_status,
             "installment_due_date": q.installment_due_date.isoformat() if q.installment_due_date else None,
             "label": label,
+            "status": q.status,
         }
         rows.append(row)
     return rows

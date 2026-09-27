@@ -90,6 +90,7 @@ type MarketplaceCatalogCota = {
   administrator_name: string | null;
   nina_scan_status: string | null;
   label: string;
+  status?: string;
 };
 
 type MarketplaceEsteira1Result = {
@@ -191,6 +192,7 @@ export function MarketplaceModule() {
     `/marketplace/venda-direta-manual/cotas?category=${encodeURIComponent(cat)}&include_reserved=true`,
   ).then(setCatalog).catch(e=>setError(e.message));
   useEffect(()=>{void loadCatalog(e1Category)},[e1Category]);
+  const e1FilterActive = parseMoney(e1FilterCredit) > 0 || parseMoney(e1FilterEntrada) > 0;
   const e1Catalog=useMemo(()=>{
     const creditTarget=parseMoney(e1FilterCredit);
     const entradaTarget=parseMoney(e1FilterEntrada);
@@ -202,8 +204,14 @@ export function MarketplaceModule() {
       })
       .sort((a,b)=>Number(a.credit_value)-Number(b.credit_value));
   },[catalog,e1FilterCredit,e1FilterEntrada]);
+  const e1SelectableCatalog = e1Catalog.filter((c) => (c.status ?? "AVAILABLE") === "AVAILABLE");
+  const e1PendingInCatalog = catalog.filter((c) => c.status === "PENDING_REVIEW");
   const selectedCatalog=e1Catalog.filter(c=>selectedQuotaIds.includes(c.quota_id));
   function toggleEsteira1Quota(c: MarketplaceCatalogCota, checked: boolean) {
+    if (checked && (c.status ?? "AVAILABLE") !== "AVAILABLE") {
+      setError("Esta cota ainda não está liberada no estoque. Aprove no Inventário (compliance).");
+      return;
+    }
     if (!checked) {
       setSelectedQuotaIds(ids=>ids.filter(id=>id!==c.quota_id));
       return;
@@ -270,25 +278,49 @@ export function MarketplaceModule() {
       <div className="marketplace-form-row">
         <label className="marketplace-field"><span className="marketplace-field-label"><Search size={14}/> Buscar por crédito (R$)</span><CurrencyInput value={e1FilterCredit} onChange={setE1FilterCredit} placeholder="Ex.: 250.000"/></label>
         <label className="marketplace-field"><span className="marketplace-field-label"><Search size={14}/> Buscar por entrada (R$)</span><CurrencyInput value={e1FilterEntrada} onChange={setE1FilterEntrada} placeholder="Ex.: 80.000"/></label>
-        <small className="marketplace-hint">Filtro com tolerância de ±5% quando você informa um valor.</small>
+        <small className="marketplace-hint">Filtro com tolerância de ±5% quando você informa um valor. Deixe crédito e entrada em branco para listar todo o estoque.</small>
+        {e1FilterActive ? (
+          <button type="button" className="table-action" style={{ marginTop: 6 }} onClick={() => { setE1FilterCredit(""); setE1FilterEntrada(""); }}>
+            Limpar filtros de busca
+          </button>
+        ) : null}
       </div>
       <div className="marketplace-form-row">
         <div className="marketplace-field marketplace-field-wide">
-          <b>Cartas disponíveis (marque uma ou mais — junção só na mesma administradora){e1Catalog.length ? ` · ${e1Catalog.length} opção(ões)` : ""}</b>
+          <b>
+            Cartas disponíveis (marque uma ou mais — junção só na mesma administradora)
+            {e1SelectableCatalog.length ? ` · ${e1SelectableCatalog.length} liberada(s)` : ""}
+            {e1Catalog.length > e1SelectableCatalog.length ? ` · ${e1Catalog.length - e1SelectableCatalog.length} aguardando aprovação` : ""}
+          </b>
           <div style={{ maxHeight: 240, overflowY: "auto", marginTop: 8 }}>
             {e1Catalog.length === 0 ? (
-              <small className="muted">Nenhuma carta neste filtro. Ajuste crédito/entrada ou cadastre no Inventário.</small>
+              <small className="muted">
+                {catalog.length === 0
+                  ? `Nenhuma carta de ${e1Category === "REAL_ESTATE" ? "imóvel" : "veículo"} no estoque. Cadastre em Inventário ou sincronize Fornecedores e aprove a cota (compliance).`
+                  : e1FilterActive
+                    ? `Há ${catalog.length} carta(s) no estoque, mas nenhuma com crédito/entrada na faixa de ±5% dos valores informados. Limpe os filtros ou ajuste crédito e entrada.`
+                    : "Nenhuma carta nesta categoria. Cadastre no Inventário."}
+                {catalog.length > 0 && catalog.every((c) => c.status === "PENDING_REVIEW") ? (
+                  <> {e1PendingInCatalog.length} cota(s) aguardam aprovação no Inventário antes de liberar para venda.</>
+                ) : null}
+              </small>
             ) : (
-              e1Catalog.map((c) => (
-                <label key={c.quota_id} style={{ display: "block", marginBottom: 6 }}>
-                  <input
-                    type="checkbox"
-                    checked={selectedQuotaIds.includes(c.quota_id)}
-                    onChange={(e) => toggleEsteira1Quota(c, e.target.checked)}
-                  />
-                  {marketplaceCotaLabel(c)}
-                </label>
-              ))
+              e1Catalog.map((c) => {
+                const selectable = (c.status ?? "AVAILABLE") === "AVAILABLE";
+                return (
+                  <label key={c.quota_id} style={{ display: "block", marginBottom: 6, opacity: selectable ? 1 : 0.75 }}>
+                    <input
+                      type="checkbox"
+                      disabled={!selectable}
+                      checked={selectedQuotaIds.includes(c.quota_id)}
+                      onChange={(e) => toggleEsteira1Quota(c, e.target.checked)}
+                    />
+                    {marketplaceCotaLabel(c)}
+                    {!selectable ? <small className="muted"> — aguardando aprovação (Inventário)</small> : null}
+                    {c.status === "RESERVED" ? <small className="muted"> — reservada</small> : null}
+                  </label>
+                );
+              })
             )}
           </div>
           {selectedCatalog.length > 0 && (

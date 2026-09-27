@@ -2597,6 +2597,7 @@ class VendaDiretaManualCotaOption(BaseModel):
     nina_scan_status: str | None = None
     installment_due_date: str | None = None
     label: str
+    status: str = "AVAILABLE"
 
 
 class VendaDiretaManualCadastroOption(BaseModel):
