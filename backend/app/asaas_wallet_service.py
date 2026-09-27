@@ -502,10 +502,12 @@ def _document_capture_mode(doc_type: str, onboarding_url: str | None, account: E
 
 
 def _document_accepts_api_upload(doc_type: str, onboarding_url: str | None, account: EscrowAccount | None = None) -> bool:
-    """Asaas: identidade com onboardingUrl exige link; contrato social e demais PDFs via API."""
+    """Asaas: RG/selfie só pelo link oficial (PF); contrato social e demais PDFs via API."""
     doc_type = doc_type.upper()
     if doc_type in _identity_doc_types():
-        return not bool(onboarding_url)
+        if account and _is_mock_account(account):
+            return not bool(onboarding_url)
+        return False
     return True
 
 
