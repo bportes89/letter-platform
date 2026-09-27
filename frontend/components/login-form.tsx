@@ -1,10 +1,11 @@
 "use client";
 
-import { LockKeyhole } from "lucide-react";
+import { Eye, EyeOff, User as UserIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { FormEvent, useEffect, useMemo, useState } from "react";
-import { getToken, login, api, User, LoginChallengeError } from "@/lib/api";
+import { FormEvent, useEffect, useState } from "react";
+import { LetterLogo } from "@/components/brand/letter-logo";
+import { getToken, login, api, type User, LoginChallengeError } from "@/lib/api";
 import { portalHomeForRole } from "@/lib/portal-routes";
 import {
   contractOnboardingPath,
@@ -19,7 +20,6 @@ import {
 import {
   type LoginPortalKey,
   LOGIN_PORTAL_PUBLIC_OPTIONS,
-  loginHeadingForPortal,
   loginPortalMismatchMessage,
   loginPortalOption,
   parseLoginPortalKey,
@@ -27,12 +27,17 @@ import {
   roleMatchesLoginPortal,
 } from "@/lib/login-portals";
 
+const REMEMBER_EMAIL_KEY = "letter_login_remember_email";
+
 async function redirectAfterLogin(
   user: User,
   nextPath: string | null,
   chatLeadId: string | null,
   portalKey: LoginPortalKey,
 ) {
+  if (loginPortalOption(portalKey).externalHref) {
+    throw new Error("Fornecedores acessam pelo portal dedicado.");
+  }
   if (!roleMatchesLoginPortal(user.role, portalKey)) {
     throw new Error(loginPortalMismatchMessage(user.role, portalKey));
   }
@@ -74,7 +79,6 @@ async function redirectAfterLogin(
 }
 
 type Props = {
-  /** Tela dedicada /login/operacao */
   operacaoOnly?: boolean;
 };
 
@@ -88,6 +92,8 @@ export function LoginForm({ operacaoOnly = false }: Props) {
   const [portalKey, setPortalKey] = useState<LoginPortalKey>(operacaoOnly ? "operacao" : portalFromUrl);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [remember, setRemember] = useState(false);
   const [emailOtp, setEmailOtp] = useState("");
   const [mfaOtp, setMfaOtp] = useState("");
   const [step, setStep] = useState<"password" | "email_otp" | "mfa">("password");
@@ -95,13 +101,24 @@ export function LoginForm({ operacaoOnly = false }: Props) {
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const heading = useMemo(() => loginHeadingForPortal(portalKey), [portalKey]);
   const portalOptions = operacaoOnly ? [loginPortalOption("operacao")] : LOGIN_PORTAL_PUBLIC_OPTIONS;
 
   useEffect(() => {
     if (operacaoOnly) return;
     setPortalKey(portalFromUrl);
   }, [portalFromUrl, operacaoOnly]);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(REMEMBER_EMAIL_KEY);
+      if (saved) {
+        setEmail(saved);
+        setRemember(true);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   useEffect(() => {
     if (leadIdFromUrl) {
@@ -126,7 +143,7 @@ export function LoginForm({ operacaoOnly = false }: Props) {
         return redirectAfterLogin(user, nextPath, stored, key);
       })
       .catch((e) => {
-        if (e instanceof Error && e.message.includes("cadastrado como")) {
+        if (e instanceof Error && e.message.includes("Área")) {
           setError(e.message);
           return;
         }
@@ -142,16 +159,40 @@ export function LoginForm({ operacaoOnly = false }: Props) {
     router.replace(`/login?${params.toString()}`, { scroll: false });
   }
 
+  function handlePortalChange(nextKey: LoginPortalKey) {
+    const option = loginPortalOption(nextKey);
+    if (option.externalHref) {
+      window.location.href = option.externalHref;
+      return;
+    }
+    setPortalKey(nextKey);
+    syncPortalInUrl(nextKey);
+  }
+
+  function persistRememberEmail() {
+    try {
+      if (remember && email.trim()) {
+        localStorage.setItem(REMEMBER_EMAIL_KEY, email.trim());
+      } else {
+        localStorage.removeItem(REMEMBER_EMAIL_KEY);
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
   async function completeLogin() {
     const user = await api<User>("/auth/me");
     const stored =
       leadIdFromUrl ||
       (typeof window !== "undefined" ? sessionStorage.getItem("letter_chat_lead_id") : null);
+    persistRememberEmail();
     await redirectAfterLogin(user, nextPath, stored, portalKey);
   }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if (loginPortalOption(portalKey).externalHref) return;
     setError("");
     setNotice("");
     setLoading(true);
@@ -184,26 +225,23 @@ export function LoginForm({ operacaoOnly = false }: Props) {
   }
 
   const passwordLocked = step !== "password";
+  const operacaoTitle = operacaoOnly ? "Operação LETTER" : null;
 
   return (
-    <form className="site-login-card" onSubmit={submit}>
-      <p className="site-kicker">Acesso restrito</p>
-      <h1>{heading.title}</h1>
-      <p>{heading.subtitle}</p>
-      {nextPath && (
-        <p className="site-login-note">Após o login você será direcionado para a página solicitada.</p>
-      )}
+    <form className="site-login-card site-login-card--portal" onSubmit={submit}>
+      <div className="site-login-logo">
+        <LetterLogo variant="official" theme="light" className="site-login-logo-img" priority />
+      </div>
 
-      <label>
-        Como você acessa a LETTER?
+      {operacaoTitle && <h1 className="site-login-portal-title">{operacaoTitle}</h1>}
+
+      <label className="site-login-area-label">
+        Área: <span className="site-login-required">*</span>
         <select
           value={portalKey}
           disabled={operacaoOnly || passwordLocked}
-          onChange={(e) => {
-            const key = parseLoginPortalKey(e.target.value);
-            setPortalKey(key);
-            syncPortalInUrl(key);
-          }}
+          onChange={(e) => handlePortalChange(parseLoginPortalKey(e.target.value))}
+          required
         >
           {portalOptions.map((opt) => (
             <option key={opt.key} value={opt.key}>
@@ -211,39 +249,55 @@ export function LoginForm({ operacaoOnly = false }: Props) {
             </option>
           ))}
         </select>
-        <small>{loginPortalOption(portalKey).description}</small>
       </label>
 
-      <label>
-        E-mail
-        <input
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          type="email"
-          name="email"
-          autoComplete="username"
-          required
-          readOnly={passwordLocked}
-        />
+      <label className="site-login-field-label">
+        <span className="sr-only">E-mail</span>
+        <div className="site-login-field-wrap">
+          <input
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            type="email"
+            name="email"
+            placeholder="E-mail"
+            autoComplete="username"
+            required
+            readOnly={passwordLocked}
+          />
+          <UserIcon className="site-login-field-icon" size={18} aria-hidden />
+        </div>
       </label>
-      <label>
-        Senha
-        <input
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          type="password"
-          name="password"
-          autoComplete="current-password"
-          minLength={8}
-          required
-          readOnly={passwordLocked}
-        />
+
+      <label className="site-login-field-label">
+        <span className="sr-only">Senha</span>
+        <div className="site-login-field-wrap">
+          <input
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            type={showPassword ? "text" : "password"}
+            name="password"
+            placeholder="Senha"
+            autoComplete="current-password"
+            minLength={8}
+            required
+            readOnly={passwordLocked}
+          />
+          <button
+            type="button"
+            className="site-login-field-toggle"
+            onClick={() => setShowPassword((v) => !v)}
+            aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}
+            tabIndex={-1}
+          >
+            {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+          </button>
+        </div>
       </label>
 
       {step === "email_otp" && (
-        <label>
+        <label className="site-login-area-label">
           Código enviado por e-mail
-          <small>Digite os 6 dígitos que enviamos para {email}</small>
+          <small>Digite os 6 dígitos enviados para {email}</small>
           <input
             value={emailOtp}
             onChange={(e) => setEmailOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
@@ -257,9 +311,9 @@ export function LoginForm({ operacaoOnly = false }: Props) {
       )}
 
       {step === "mfa" && (
-        <label>
+        <label className="site-login-area-label">
           Código do autenticador
-          <small>Use o app Google Authenticator, Microsoft Authenticator ou similar</small>
+          <small>App autenticador (6 dígitos)</small>
           <input
             value={mfaOtp}
             onChange={(e) => setMfaOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
@@ -272,10 +326,25 @@ export function LoginForm({ operacaoOnly = false }: Props) {
         </label>
       )}
 
-      {notice && <p className="site-login-note">{notice}</p>}
-      {error && <p className="site-error">{error}</p>}
+      {step === "password" && (
+        <div className="site-login-row">
+          <label className="site-login-remember">
+            <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
+            Lembrar meus dados
+          </label>
+          <Link href="/recuperar-senha" className="site-login-recover">
+            Recuperar senha
+          </Link>
+        </div>
+      )}
 
-      <button className="site-submit" type="submit" disabled={loading} style={{ width: "100%" }}>
+      {notice && <p className="site-login-inline-note">{notice}</p>}
+      {error && <p className="site-error">{error}</p>}
+      {nextPath && step === "password" && (
+        <p className="site-login-inline-note">Após entrar, você será direcionado à página solicitada.</p>
+      )}
+
+      <button className="site-submit site-submit--portal" type="submit" disabled={loading || !portalKey}>
         {loading
           ? "Autenticando…"
           : step === "password"
@@ -288,8 +357,8 @@ export function LoginForm({ operacaoOnly = false }: Props) {
       {passwordLocked && (
         <button
           type="button"
-          className="site-login-back"
-          style={{ border: 0, background: "none", cursor: "pointer", padding: 0 }}
+          className="site-login-back site-login-back--portal"
+          style={{ border: 0, background: "none", cursor: "pointer", width: "100%" }}
           onClick={() => {
             setStep("password");
             setEmailOtp("");
@@ -302,33 +371,23 @@ export function LoginForm({ operacaoOnly = false }: Props) {
         </button>
       )}
 
-      <p className="site-login-note">
-        <LockKeyhole size={14} aria-hidden />
-        Ambiente protegido e monitorado
-      </p>
-
       {!operacaoOnly && (
-        <Link href="/login/operacao" className="site-login-back">
-          Sou da operação LETTER (admin / equipe interna) →
-        </Link>
+        <>
+          <p className="site-login-signup">
+            <Link href="/cadastro">Cadastre-se aqui</Link>
+          </p>
+          <Link href="/login/operacao" className="site-login-back site-login-back--portal">
+            Acesso operação LETTER (admin) →
+          </Link>
+        </>
       )}
       {operacaoOnly && (
-        <Link href="/login?portal=cliente" className="site-login-back">
-          ← Voltar ao login de clientes e parceiros
+        <Link href="/login?portal=cliente" className="site-login-back site-login-back--portal">
+          ← Voltar ao login geral
         </Link>
       )}
-
-      <Link href="/" className="site-login-back">
-        ← Voltar ao site institucional
-      </Link>
-      <Link href="/cadastro" className="site-login-back">
-        Ainda não tem conta? Abra sua conta →
-      </Link>
-      <Link href="/recuperar-senha" className="site-login-back">
-        Esqueci minha senha / Redefinir senha →
-      </Link>
-      <Link href="/recuperar-email" className="site-login-back">
-        Não lembro meu e-mail →
+      <Link href="/" className="site-login-back site-login-back--portal">
+        Voltar ao site institucional
       </Link>
     </form>
   );

@@ -10,7 +10,7 @@ export default function OperacaoLoginPage() {
   return (
     <div className="site-root">
       <SiteNav />
-      <main className="site-login-main">
+      <main className="site-login-main site-login-main--portal">
         <Suspense fallback={<div className="site-login-card">Carregando…</div>}>
           <LoginForm operacaoOnly />
         </Suspense>
