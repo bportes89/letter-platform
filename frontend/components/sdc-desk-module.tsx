@@ -11,6 +11,7 @@ import { DeskSourceMetaRow } from "@/lib/desk-source-meta";
 import { PartnerSociosFields, SocioPartner, sociosPayload } from "@/components/partner-socios-fields";
 import { CurrencyInput } from "@/components/currency-input";
 import { DESK_SIMULATION_NOTICE } from "@/lib/desk-simulation-notice";
+import { commercialQuotaDisplay } from "@/lib/commercial-quota-label";
 
 type RequiredDoc = { code: string; label: string; uploaded?: boolean };
 
@@ -121,6 +122,10 @@ type QuotaRow = {
   quota_code: string;
   category: string;
   credit_value: string;
+  entrada_final?: string | null;
+  installment_value?: string;
+  remaining_installments?: number | null;
+  administrator_name?: string | null;
   status: string;
 };
 
@@ -1555,7 +1560,16 @@ export function SdcDeskModule() {
               <option value="">Cota disponível…</option>
               {quotas.map((q) => (
                 <option key={q.id} value={q.id}>
-                  {q.group_code}/{q.quota_code} · {q.category} · {brl.format(Number(q.credit_value))}
+                  {commercialQuotaDisplay({
+                    quota_id: q.id,
+                    group_code: q.group_code,
+                    quota_code: q.quota_code,
+                    credit_value: q.credit_value,
+                    entrada_final: q.entrada_final ?? q.credit_value,
+                    installment_value: q.installment_value,
+                    remaining_installments: q.remaining_installments,
+                    administrator_name: q.administrator_name,
+                  })}
                 </option>
               ))}
             </select>
