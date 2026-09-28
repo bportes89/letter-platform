@@ -93,6 +93,7 @@ export function FornecedoresModule() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [editing, setEditing] = useState<QuotaSupplier | null>(null);
+  const [formKey, setFormKey] = useState(0);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
@@ -238,6 +239,7 @@ export function FornecedoresModule() {
       } else {
         await api("/marketplace/suppliers", { method: "POST", body: JSON.stringify(body) });
         setNotice(`Fornecedor ${body.name} cadastrado.`);
+        setFormKey((k) => k + 1);
       }
       form.reset();
       await load();
@@ -300,6 +302,7 @@ export function FornecedoresModule() {
             disabled={busy}
             onClick={() => {
               setEditing(null);
+              setFormKey((k) => k + 1);
               document.getElementById("fornecedor-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
             }}
           >
@@ -330,11 +333,13 @@ export function FornecedoresModule() {
           {editing ? `Editar: ${editing.name}` : "Cadastrar fornecedor — aponte o site ou API"}
         </h2>
         <p style={{ margin: "0.35rem 18px 0", fontSize: "10px", color: "#6b7280", lineHeight: 1.45 }}>
-          Preencha os dados abaixo. Em <b>Sync</b>, escolha <b>API JSON</b> (link do feed JSON) ou <b>Scrape HTML</b> (URL
-          da página de cotas). Depois salve e use <b>Sincronizar</b> na tabela ou aguarde o cron.
+          Preencha os dados abaixo. <b>Source key</b> é obrigatório — invente um código único (não use FRAGA/LANCE se não for
+          esses fornecedores; eles já vêm em «Garantir padrões»). Em <b>Sync</b>: <b>API JSON</b> se o fornecedor tem link
+          de arquivo/API em JSON; <b>Scrape HTML</b> se as cotas estão numa página com tabela. <b>Manual</b> = sem sync
+          automático (cotas pelo Inventário ou portal). Depois salve e use <b>Sincronizar</b> ou aguarde o cron.
         </p>
 
-        <form className="marketplace-form" onSubmit={submit} key={editing?.id || "new"}>
+        <form className="marketplace-form" onSubmit={submit} key={editing?.id || `new-${formKey}`}>
           <div className="marketplace-form-row">
             <label className="marketplace-field">
               Nome / Razão social
@@ -357,7 +362,15 @@ export function FornecedoresModule() {
             </label>
             <label className="marketplace-field marketplace-field-compact">
               Source key
-              <input name="source_key" required placeholder="FRAGA" defaultValue={editing?.source_key || ""} />
+              <input
+                name="source_key"
+                required
+                minLength={2}
+                autoComplete="off"
+                placeholder="Ex.: ACME_COTAS"
+                defaultValue={editing?.source_key || ""}
+                title="Código único do fornecedor (maiúsculas, sem espaço). Usado no Inventário."
+              />
             </label>
             <label className="marketplace-field">
               E-mail
