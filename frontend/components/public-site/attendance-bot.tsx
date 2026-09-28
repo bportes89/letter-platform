@@ -10,6 +10,8 @@ import {
   CHAT_HOME_FALLBACK,
   fetchChatHome,
   fetchChatStep,
+  formatChatBrlDisplay,
+  isChatMoneyField,
   mapLegacyLink,
   warmChatApi,
   venderCotaChatContactEmail,
@@ -22,6 +24,7 @@ import {
   venderCotaChatTipo,
   whatsappHref,
 } from "@/lib/public-chat-api";
+import { CurrencyFormField } from "@/components/currency-input";
 import { calculateVenderCota, fetchVenderCotaBootstrap, storeVenderCota } from "@/lib/public-site-api";
 import { getStoredReferralCode, isVenderCotaLink, rememberReferralCode } from "@/lib/referral";
 
@@ -80,12 +83,12 @@ function QuotaCard({ quota }: { quota: ChatOption }) {
       ) : null}
       {quota.price ? (
         <p>
-          <span>Valor do crédito:</span> {quota.price}
+          <span>Valor do crédito:</span> {formatChatBrlDisplay(quota.price)}
         </p>
       ) : null}
       {quota.price_entrada ? (
         <p>
-          <span>Valor da entrada:</span> {quota.price_entrada}
+          <span>Valor da entrada:</span> {formatChatBrlDisplay(quota.price_entrada)}
         </p>
       ) : null}
       {quota.parcelas ? (
@@ -95,7 +98,7 @@ function QuotaCard({ quota }: { quota: ChatOption }) {
       ) : null}
       {quota.price_parcela ? (
         <p>
-          <span>Valor da parcela:</span> {quota.price_parcela}
+          <span>Valor da parcela:</span> {formatChatBrlDisplay(quota.price_parcela)}
         </p>
       ) : null}
     </div>
@@ -153,7 +156,7 @@ export function AttendanceBotSection() {
     [scrollToBottom],
   );
 
-  const loadInitial = useCallback(async () => {
+  const loadInitial = useCallback(async (): Promise<boolean> => {
     setConnecting(true);
     setConnectSlow(false);
     setApiConnected(false);
@@ -177,8 +180,10 @@ export function AttendanceBotSection() {
       if (data.lead_id) setForm((prev) => ({ ...prev, lead_id: data.lead_id }));
       setApiConnected(true);
       setError("");
+      return true;
     } catch (e) {
       setError(e instanceof Error ? e.message : "Falha ao conectar ao atendimento.");
+      return false;
     } finally {
       setConnecting(false);
       setConnectSlow(false);
@@ -195,11 +200,16 @@ export function AttendanceBotSection() {
     return () => window.clearTimeout(slowTimer);
   }, [connecting]);
 
-  const requireApi = useCallback(() => {
+  const requireApi = useCallback(async () => {
     if (apiConnected) return true;
-    setError("Ainda conectando ao servidor. Aguarde ou toque em «Tentar novamente».");
-    return false;
-  }, [apiConnected]);
+    if (connecting) {
+      setError("Ainda conectando ao servidor. Aguarde alguns segundos.");
+      return false;
+    }
+    const ok = await loadInitial();
+    if (!ok) setError("Não foi possível conectar. Toque em «Tentar novamente».");
+    return ok;
+  }, [apiConnected, connecting, loadInitial]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -322,7 +332,7 @@ export function AttendanceBotSection() {
     if (busy) return;
     const numeric = typeof step === "number" ? step : Number(step);
     const vmcLocal = Number.isFinite(numeric) && numeric <= -9101;
-    if (!vmcLocal && step !== 0 && !requireApi()) return;
+    if (!vmcLocal && step !== 0 && !(await requireApi())) return;
     setBusy(true);
     setError("");
     if (echo) recordEcho(echo.flowIndex, echo.itemIndex, echo.value);
@@ -343,6 +353,10 @@ export function AttendanceBotSection() {
       if (data.lead_id) {
         setForm({ ...mergedForm, lead_id: data.lead_id });
       }
+      if (!Array.isArray(data.chat_next) || data.chat_next.length === 0) {
+        setError("O atendimento não retornou a próxima etapa. Toque em «Reiniciar conversa» e tente de novo.");
+        return;
+      }
       pushFlow(data.chat_next, data.info);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Não foi possível avançar no atendimento.");
@@ -362,7 +376,7 @@ export function AttendanceBotSection() {
   const onOption = async (flowIndex: number, itemIndex: number, item: ChatItem, option: ChatOption) => {
     if (!isCurrent(flowIndex) || busy) return;
     const needsServer = !option.link && option.next !== undefined;
-    if (needsServer && !requireApi()) return;
+    if (needsServer && !(await requireApi())) return;
     if (option.link && isVenderCotaLink(option.link)) {
       if (option.save === "open_page") {
         window.location.href = mapLegacyLink(option.link);
@@ -406,7 +420,7 @@ export function AttendanceBotSection() {
 
   const onButton = async (flowIndex: number, itemIndex: number, item: ChatItem) => {
     if (!isCurrent(flowIndex) || busy) return;
-    if (!item.link && !requireApi()) return;
+    if (!item.link && !(await requireApi())) return;
     if (item.link) {
       window.open(item.link, "_blank", "noopener,noreferrer");
       return;
@@ -417,7 +431,7 @@ export function AttendanceBotSection() {
   const onInput = async (flowIndex: number, itemIndex: number, item: ChatItem, e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!isCurrent(flowIndex) || busy || !item.input) return;
-    if (!requireApi()) return;
+    if (!(await requireApi())) return;
     const fd = new FormData(e.currentTarget);
     const value = String(fd.get(item.input.name) ?? "").trim();
     if (!value) return;
@@ -427,12 +441,13 @@ export function AttendanceBotSection() {
     }
     const nextForm = { ...form, [item.input.name]: value };
     setForm(nextForm);
+    const displayValue = isChatMoneyField(item.input.name) ? formatChatBrlDisplay(value) : value;
     const display =
       item.input.type === "password"
         ? "Senha cadastrada"
         : item.input.label
-          ? `${item.input.label}: ${value}`
-          : value;
+          ? `${item.input.label}: ${displayValue}`
+          : displayValue;
     await advance(item.next ?? 0, 0, { flowIndex, itemIndex, value: display }, nextForm);
   };
 
@@ -575,16 +590,25 @@ export function AttendanceBotSection() {
                     <div className="attendance-form-wrap" data-chat-item>
                       {(item.title || item.tile) && <p className="attendance-form-title">{item.title || item.tile}</p>}
                       <form className="attendance-form" onSubmit={(e) => void onInput(flowIndex, itemIndex, item, e)}>
-                        <input
-                          name={item.input.name}
-                          type={parseInputTags(item.input.tags).type}
-                          placeholder={parseInputTags(item.input.tags).placeholder ?? item.input.label ?? "Digite aqui"}
-                          autoComplete={item.input.name === "name" ? "name" : undefined}
-                          enterKeyHint="go"
-                          required
-                          disabled={busy || connecting || !apiConnected}
-                        />
-                        <button type="submit" className="attendance-primary" disabled={busy || connecting || !apiConnected}>
+                        {isChatMoneyField(item.input.name) ? (
+                          <CurrencyFormField
+                            name={item.input.name}
+                            placeholder={parseInputTags(item.input.tags).placeholder ?? "R$ 0,00"}
+                            disabled={busy || connecting}
+                            required
+                          />
+                        ) : (
+                          <input
+                            name={item.input.name}
+                            type={parseInputTags(item.input.tags).type}
+                            placeholder={parseInputTags(item.input.tags).placeholder ?? item.input.label ?? "Digite aqui"}
+                            autoComplete={item.input.name === "name" ? "name" : undefined}
+                            enterKeyHint="go"
+                            required
+                            disabled={busy || connecting}
+                          />
+                        )}
+                        <button type="submit" className="attendance-primary" disabled={busy || connecting}>
                           Prosseguir
                         </button>
                       </form>

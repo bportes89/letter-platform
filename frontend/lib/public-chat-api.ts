@@ -103,6 +103,61 @@ export type ChatHomeResponse = {
 };
 
 const CHAT_FETCH_TIMEOUT_MS = 45_000;
+
+const chatBrl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
+
+/** Campos monetários do robô — exibir e digitar em R$. */
+export const CHAT_MONEY_INPUT_NAMES = new Set([
+  "target_amount",
+  "target_entrada",
+  "monthly_income",
+  "asset_value",
+  "declared_income",
+  "vmc_credit",
+  "vmc_paid",
+  "outstanding_balance",
+  "requested_amount",
+  "income_value",
+]);
+
+export function isChatMoneyField(name: string): boolean {
+  return CHAT_MONEY_INPUT_NAMES.has(name);
+}
+
+/** Formata valor digitado ou vindo da API para exibição em R$. */
+export function formatChatBrlDisplay(value: string | number | undefined | null): string {
+  if (value === undefined || value === null) return "";
+  if (typeof value === "number" && Number.isFinite(value)) return chatBrl.format(value);
+  const raw = String(value).trim();
+  if (!raw) return "";
+  if (/R\$\s*/i.test(raw)) return raw;
+  let cleaned = raw.replace(/R\$\s*/gi, "").trim();
+  if (cleaned.includes(",") && cleaned.includes(".")) {
+    cleaned = cleaned.replace(/\./g, "").replace(",", ".");
+  } else if (cleaned.includes(",")) {
+    cleaned = cleaned.replace(",", ".");
+  }
+  cleaned = cleaned.replace(/[^\d.-]/g, "");
+  const n = Number(cleaned);
+  if (!Number.isFinite(n)) return raw;
+  return chatBrl.format(n);
+}
+
+function parseChatErrorDetail(payload: unknown): string {
+  if (!payload || typeof payload !== "object") return "Atendimento indisponível.";
+  const p = payload as { detail?: unknown; message?: string };
+  if (typeof p.message === "string" && p.message.trim()) return p.message;
+  const d = p.detail;
+  if (typeof d === "string" && d.trim()) return d;
+  if (d && typeof d === "object") {
+    const obj = d as { message?: string; motivos?: string[] };
+    if (typeof obj.message === "string" && obj.message.trim()) {
+      const extra = Array.isArray(obj.motivos) && obj.motivos.length ? ` ${obj.motivos.join(" ")}` : "";
+      return obj.message + extra;
+    }
+  }
+  return "Atendimento indisponível.";
+}
 /** Render cold start can exceed 2 minutes; home must wait longer than step calls. */
 const CHAT_HOME_TIMEOUT_MS = 180_000;
 
@@ -160,8 +215,8 @@ async function chatFetch<T>(
     window.clearTimeout(timer);
   }
   if (!response.ok) {
-    const payload = (await response.json().catch(() => ({}))) as { detail?: string };
-    throw new Error(typeof payload.detail === "string" ? payload.detail : "Atendimento indisponível.");
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(parseChatErrorDetail(payload));
   }
   return response.json() as Promise<T>;
 }
@@ -258,7 +313,7 @@ export function venderCotaChatCredit(): ChatItem[] {
   return [
     {
       title: "Valor atual do crédito (R$)",
-      input: { name: "vmc_credit", type: "text", tags: 'placeholder="Ex.: 100000"' },
+      input: { name: "vmc_credit", type: "text", tags: 'placeholder="R$ 0,00"' },
       next: -9103,
     },
   ];
@@ -268,7 +323,7 @@ export function venderCotaChatPaid(): ChatItem[] {
   return [
     {
       title: "Total já pago em parcelas (R$)",
-      input: { name: "vmc_paid", type: "text", tags: 'placeholder="Ex.: 10000"' },
+      input: { name: "vmc_paid", type: "text", tags: 'placeholder="R$ 0,00"' },
       next: -9104,
     },
   ];

@@ -9,6 +9,7 @@
   --line: #94a3b82e;
   --blue: #00d084;
   --green: #00d084;
+  --accent: #00d084;
   --muted: #c8d5cf;
   --white: #fff;
   min-height: 100vh;
@@ -2001,10 +2002,21 @@
   padding: 0.85rem 1rem;
   border-radius: 10px;
   border: 0;
-  background: var(--accent);
+  background: #00d084;
   color: #04140e;
-  font-weight: 600;
+  font-weight: 700;
   white-space: nowrap;
+  box-shadow: 0 4px 14px rgba(0, 208, 132, 0.25);
+}
+
+.attendance-form button:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.attendance-form button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
 }
 
 .attendance-form-hint {
