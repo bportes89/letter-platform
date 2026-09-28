@@ -551,14 +551,15 @@ export function ProposalsModule() {
       }
       if (p.product === "FLASH_CREDIT") {
         path = `/proposals/${p.id}/calculate-flash-credit`;
-        const fundSource = capitalSource === "INSTITUTIONAL";
+        const flashSource = isCommercial ? "RETAIL" : capitalSource;
+        const fundSource = flashSource === "INSTITUTIONAL";
         payload = {
           asset_value: assetValue,
-          capital_source: capitalSource,
+          capital_source: flashSource,
           term_months: term,
           ipca_annual_percent: fundSource ? flashIpcaAnnual : "0",
         };
-        if (capitalSource === "RETAIL") {
+        if (flashSource === "RETAIL" && !isCommercial) {
           if (poolInvestmentAmount) payload.pool_investment_amount = poolInvestmentAmount;
           if (flashPoolInvestorRate) payload.pool_investor_rate_percent = flashPoolInvestorRate;
         }
@@ -676,7 +677,9 @@ export function ProposalsModule() {
             <small>
               {newProduct === "SDC"
                 ? "SDC: 4,5% a.m. juros simples (bullet) · Pool investidor: 2,5% a.m."
-                : "Flash: fruição 2,5% a.m. (Tabela Price) · Pool: 1,6% a.m."}
+                : isCommercial
+                  ? "Flash Capital: fruição 2,5% a.m. (Tabela Price). Origem do capital é definida pela matriz."
+                  : "Flash: fruição 2,5% a.m. (Tabela Price) · Pool: 1,6% a.m."}
             </small>
           </div>
           {newProduct === "SDC" && (
@@ -755,24 +758,26 @@ export function ProposalsModule() {
                 Valor do bem
                 <CurrencyInput value={assetValue} onChange={setAssetValue} />
               </label>
-              <label>
-                Flash Capital — origem
-                <select value={capitalSource} onChange={(e) => setCapitalSource(e.target.value)}>
-                  {FLASH_CAPITAL_SOURCES.map((x) => (
-                    <option key={x.value} value={x.value}>
-                      {x.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {capitalSource === "INSTITUTIONAL" && (
+              {!isCommercial && (
+                <label>
+                  Flash Capital — origem
+                  <select value={capitalSource} onChange={(e) => setCapitalSource(e.target.value)}>
+                    {FLASH_CAPITAL_SOURCES.map((x) => (
+                      <option key={x.value} value={x.value}>
+                        {x.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              {!isCommercial && capitalSource === "INSTITUTIONAL" && (
                 <div className="notice">
                   <small>
                     Origem fundo: IPCA anual projetado {flashIpcaAnnual}% na memória (fruição 2,5% a.m. inalterada).
                   </small>
                 </div>
               )}
-              {capitalSource === "RETAIL" && (
+              {!isCommercial && capitalSource === "RETAIL" && (
                 <>
                   <label>
                     Pool — valor aplicado (R$)
