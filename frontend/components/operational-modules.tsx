@@ -4,7 +4,7 @@ import { Check, CheckCircle2, Clock3, Download, FileText, LockKeyhole, Plus, Ref
 import Link from "next/link";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Administrator, api, Calculation, CommercialClient, Contract, downloadApi, Lead, Proposal, Quota, Reservation, User } from "@/lib/api";
-import { FLASH_CAPITAL_SOURCES, productLabel, SDC_CAPITAL_SOURCES } from "@/lib/products";
+import { FLASH_CAPITAL_SOURCES, productLabel } from "@/lib/products";
 import { SdcQuitConProjectionTable } from "@/components/sdc-quitcon-card";
 import { CurrencyInput, CurrencyFormField } from "@/components/currency-input";
 import { commercialQuotaDisplay } from "@/lib/commercial-quota-label";
@@ -135,36 +135,12 @@ function marketplaceCotaLabel(c: MarketplaceCatalogCota): string {
   return commercialQuotaDisplay(c);
 }
 
-function noticeAfterProposalCreated(product: string): string {
-  if (product === "FLASH_CREDIT") {
-    return "Linha Flash Capital criada na tabela. Confira valor do bem e prazo nos parâmetros e clique «Calcular memória» na mesma linha.";
-  }
-  if (product === "SDC") {
-    return "Linha SDC criada. Marque as cotas acima (imóvel ou veículo) e clique «Calcular memória» na mesma linha.";
-  }
-  return "Linha criada na tabela. Marque as cotas e clique «Calcular memória» na mesma linha.";
+function noticeAfterProposalCreated(): string {
+  return "Linha Flash Capital criada na tabela. Confira valor do bem e prazo nos parâmetros e clique «Calcular memória» na mesma linha.";
 }
 
-function noticeBeforeCalculate(product: string): string {
-  if (product === "FLASH_CREDIT") {
-    return "Informe o valor do bem nos parâmetros Flash e clique novamente em «Calcular memória».";
-  }
-  return "Marque ao menos uma cota na lista acima e clique novamente em «Calcular memória».";
-}
-
-function proposalQuotaListLabel(q: Quota, administratorName?: string | null): string {
-  const cat = q.category === "REAL_ESTATE" ? "Imóvel" : "Veículo";
-  const base = commercialQuotaDisplay({
-    quota_id: q.id,
-    group_code: q.group_code,
-    quota_code: q.quota_code,
-    credit_value: q.credit_value,
-    entrada_final: String(q.entrada_final ?? q.premium_value ?? 0),
-    installment_value: q.installment_value,
-    remaining_installments: q.remaining_installments,
-    administrator_name: administratorName,
-  });
-  return `${base} · ${cat} · ${q.status}`;
+function noticeBeforeCalculate(): string {
+  return "Informe o valor do bem nos parâmetros Flash e clique novamente em «Calcular memória».";
 }
 
 function marketplaceProfileValue(profile: Record<string, string>, prefix: "e1" | "e2", key: "income" | "asset" | "year"): string {
@@ -380,16 +356,14 @@ export function MarketplaceModule() {
   </OperationalLayout>
 }
 
+const PROPOSALS_SIM_PRODUCT = "FLASH_CREDIT";
+
 export function ProposalsModule() {
   const [items, setItems] = useState<Proposal[]>([]);
   const [leads, setLeads] = useState<Lead[]>([]);
-  const [quotas, setQuotas] = useState<Quota[]>([]);
-  const [admins, setAdmins] = useState<Administrator[]>([]);
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [clients, setClients] = useState<CommercialClient[]>([]);
   const [isCommercial, setIsCommercial] = useState(false);
-  const [selected, setSelected] = useState<string[]>([]);
-  const [sdcQuotaCategory, setSdcQuotaCategory] = useState<"REAL_ESTATE" | "VEHICLE">("REAL_ESTATE");
   const [activeProposalId, setActiveProposalId] = useState<string | null>(null);
   const [calculatedProposalIds, setCalculatedProposalIds] = useState<Set<string>>(() => new Set());
   const [notice, setNotice] = useState("");
@@ -397,12 +371,8 @@ export function ProposalsModule() {
   const [selectedLeadId, setSelectedLeadId] = useState("");
   const [highlightProposalId, setHighlightProposalId] = useState<string | null>(null);
   const proposalsTableRef = useRef<HTMLDivElement>(null);
-  const [newProduct, setNewProduct] = useState("SDC");
   const [requestedAmount, setRequestedAmount] = useState("");
-  const [duration, setDuration] = useState(12);
-  const [sdcCapitalSource, setSdcCapitalSource] = useState("POOL");
   const [poolInvestmentAmount, setPoolInvestmentAmount] = useState("");
-  const [sdcPoolInvestorRate, setSdcPoolInvestorRate] = useState("");
   const [assetValue, setAssetValue] = useState("");
   const [capitalSource, setCapitalSource] = useState("RETAIL");
   const [flashPoolInvestorRate, setFlashPoolInvestorRate] = useState("");
@@ -427,11 +397,13 @@ export function ProposalsModule() {
   const poolRatePreview = useMemo(() => {
     const amount = Number(poolInvestmentAmount);
     if (!amount || amount <= 0) return null;
-    const rate = newProduct === "SDC" ? "2,5" : "1,6";
-    return { rate };
-  }, [poolInvestmentAmount, newProduct]);
+    return { rate: "1,6" };
+  }, [poolInvestmentAmount]);
 
-  const adminById = useMemo(() => new Map(admins.map((a) => [a.id, a.name])), [admins]);
+  const flashProposals = useMemo(
+    () => items.filter((p) => p.product === PROPOSALS_SIM_PRODUCT),
+    [items],
+  );
 
   const refreshCalculatedFlags = async (proposals: Proposal[]) => {
     const ids = new Set<string>();
@@ -453,16 +425,13 @@ export function ProposalsModule() {
       api<User>("/auth/me"),
       api<Proposal[]>("/proposals"),
       api<Lead[]>("/leads"),
-      api<Quota[]>("/quotas"),
       api<Contract[]>("/contracts"),
-      api<Administrator[]>("/administrators").catch(() => [] as Administrator[]),
-    ]).then(async ([me, p, l, q, c, a]) => {
+    ]).then(async ([me, p, l, c]) => {
       setItems(p);
       setLeads(l);
-      setQuotas(q);
       setContracts(c);
-      setAdmins(a);
-      void refreshCalculatedFlags(p);
+      const flashOnly = p.filter((row) => row.product === PROPOSALS_SIM_PRODUCT);
+      void refreshCalculatedFlags(flashOnly);
       const commercial = ["MASTER_FRANCHISEE", "MANAGER", "PARTNER", "QUOTA_SELLER"].includes(me.role);
       setIsCommercial(commercial);
       if (commercial) {
@@ -479,25 +448,6 @@ export function ProposalsModule() {
   useEffect(() => {
     void load();
   }, []);
-
-  const available = useMemo(() => quotas.filter((q) => q.status === "AVAILABLE" || q.status === "RESERVED"), [quotas]);
-  const availableForPicker = useMemo(() => {
-    if (newProduct !== "SDC") return available;
-    return available.filter((q) => q.category === sdcQuotaCategory);
-  }, [available, newProduct, sdcQuotaCategory]);
-  const selectedQuotaRows = useMemo(
-    () => available.filter((q) => selected.includes(q.id)),
-    [available, selected],
-  );
-  const selectedCreditTotal = useMemo(
-    () => selectedQuotaRows.reduce((sum, q) => sum + Number(q.credit_value || 0), 0),
-    [selectedQuotaRows],
-  );
-  const activeProposal = useMemo(
-    () => (activeProposalId ? items.find((p) => p.id === activeProposalId) : null),
-    [activeProposalId, items],
-  );
-  const showQuotaPicker = newProduct === "SDC" || (!isCommercial && newProduct === "MARKETPLACE");
 
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -519,13 +469,12 @@ export function ProposalsModule() {
       return;
     }
     const clientId = String(fd.get("client_user_id") || "");
-    const product = isCommercial && newProduct === "MARKETPLACE" ? "SDC" : newProduct;
     try {
       const created = await api<Proposal>("/proposals", {
         method: "POST",
         body: JSON.stringify({
           lead_id: leadId,
-          product,
+          product: PROPOSALS_SIM_PRODUCT,
           requested_amount: String(amount),
           client_user_id: clientId || undefined,
           sale_channel: isCommercial ? "PARTNER_OFFICE" : undefined,
@@ -535,7 +484,7 @@ export function ProposalsModule() {
       setHighlightProposalId(created.id);
       setActiveProposalId(created.id);
       setRequestedAmount("");
-      setNotice(noticeAfterProposalCreated(product));
+      setNotice(noticeAfterProposalCreated());
       await load();
       proposalsTableRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     } catch (err) {
@@ -547,44 +496,32 @@ export function ProposalsModule() {
     setNotice("");
     setProposalError("");
     setActiveProposalId(p.id);
-    const needsQuotas = p.product === "SDC" || p.product === "MARKETPLACE";
-    if (needsQuotas && !selected.length) {
-      setNotice(noticeBeforeCalculate(p.product));
-      document.getElementById("quota-picker")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (p.product !== PROPOSALS_SIM_PRODUCT) {
+      setNotice("Esta tela simula apenas Flash Capital. Use as mesas SDC e Marketplace nos módulos dedicados.");
       return;
     }
-    if (p.product === "FLASH_CREDIT" && !parseMoney(assetValue)) {
-      setNotice(noticeBeforeCalculate("FLASH_CREDIT"));
+    if (!parseMoney(assetValue)) {
+      setNotice(noticeBeforeCalculate());
       document.querySelector(".product-parameters")?.scrollIntoView({ behavior: "smooth", block: "start" });
       return;
     }
     try {
-      let path = `/proposals/${p.id}/calculate`;
-      let payload: Record<string, unknown> = { quota_ids: selected, fee_percent: "10", start_fee: "1500" };
-      if (p.product === "SDC") {
-        path = `/proposals/${p.id}/calculate-sdc`;
-        payload = { quota_ids: selected, duration_months: duration, capital_source: sdcCapitalSource };
-        if (sdcCapitalSource === "POOL") {
-          if (poolInvestmentAmount) payload.pool_investment_amount = poolInvestmentAmount;
-          if (sdcPoolInvestorRate) payload.pool_investor_rate_percent = sdcPoolInvestorRate;
-        }
+      const flashSource = isCommercial ? "RETAIL" : capitalSource;
+      const fundSource = flashSource === "INSTITUTIONAL";
+      const payload: Record<string, unknown> = {
+        asset_value: assetValue,
+        capital_source: flashSource,
+        term_months: term,
+        ipca_annual_percent: fundSource ? flashIpcaAnnual : "0",
+      };
+      if (flashSource === "RETAIL" && !isCommercial) {
+        if (poolInvestmentAmount) payload.pool_investment_amount = poolInvestmentAmount;
+        if (flashPoolInvestorRate) payload.pool_investor_rate_percent = flashPoolInvestorRate;
       }
-      if (p.product === "FLASH_CREDIT") {
-        path = `/proposals/${p.id}/calculate-flash-credit`;
-        const flashSource = isCommercial ? "RETAIL" : capitalSource;
-        const fundSource = flashSource === "INSTITUTIONAL";
-        payload = {
-          asset_value: assetValue,
-          capital_source: flashSource,
-          term_months: term,
-          ipca_annual_percent: fundSource ? flashIpcaAnnual : "0",
-        };
-        if (flashSource === "RETAIL" && !isCommercial) {
-          if (poolInvestmentAmount) payload.pool_investment_amount = poolInvestmentAmount;
-          if (flashPoolInvestorRate) payload.pool_investor_rate_percent = flashPoolInvestorRate;
-        }
-      }
-      const calc = await api<Calculation>(path, { method: "POST", body: JSON.stringify(payload) });
+      const calc = await api<Calculation>(`/proposals/${p.id}/calculate-flash-credit`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
       setLastCalculation(calc);
       setHighlightProposalId(p.id);
       setCalculatedProposalIds((prev) => new Set(prev).add(p.id));
@@ -610,11 +547,7 @@ export function ProposalsModule() {
             ? "Esta linha SDC ainda não foi calculada. Marque as cotas acima e use «Calcular memória» nesta linha."
             : "Calcule a memória nesta linha antes de gerar o contrato.",
       );
-      if (p.product === "SDC" || p.product === "MARKETPLACE") {
-        document.getElementById("quota-picker")?.scrollIntoView({ behavior: "smooth", block: "start" });
-      } else {
-        document.querySelector(".product-parameters")?.scrollIntoView({ behavior: "smooth", block: "start" });
-      }
+      document.querySelector(".product-parameters")?.scrollIntoView({ behavior: "smooth", block: "start" });
       return;
     }
     setCalculatedProposalIds((prev) => new Set(prev).add(p.id));
@@ -626,10 +559,10 @@ export function ProposalsModule() {
     void load();
   }
 
-  const pageTitle = isCommercial ? "Simulador de valores" : "Propostas e simulações";
+  const pageTitle = "Simulador Flash Capital";
   const pageSubtitle = isCommercial
-    ? "SDC e Flash Capital: selecione o cadastro do cliente, informe o valor e avance com Simular na tabela. Cartas contempladas ficam em Venda Direta e Cadastros."
-    : "Marketplace, SDC e Flash Capital. Simule, gere contrato e registre a venda.";
+    ? "Simulação resumida para o cliente. Cartas contempladas: Venda Direta e Cadastros. SDC: mesa SDC — Capital de Giro."
+    : "Apenas Flash Capital nesta tela. SDC e Marketplace têm módulos próprios; aqui simule, calcule memória e gere contrato.";
 
   return (
     <OperationalLayout title={pageTitle} subtitle={pageSubtitle} icon={<FileText />}>
@@ -638,21 +571,11 @@ export function ProposalsModule() {
         <div>
           <b>Como usar</b>
           <small style={{ display: "block", marginTop: "0.35rem", lineHeight: 1.5 }}>
-            <b>Passo 1</b> — Selecione o <em>cadastro</em> do cliente, o produto (SDC ou Flash) e o valor; clique em{" "}
-            <em>Adicionar simulação</em> (a linha aparece na tabela — o formulário não apaga o cliente).
+            <b>Passo 1</b> — Selecione o <em>cadastro</em> do cliente e o <em>valor solicitado</em>; clique em{" "}
+            <em>Adicionar simulação</em> (a linha Flash aparece na tabela).
             <br />
-            <b>Passo 2</b> —{" "}
-            {isCommercial ? (
-              <>
-                <em>Flash Capital</em>: valor do bem e prazo. <em>SDC</em>: marque cotas (imóvel ou veículo). Clique{" "}
-                <em>Calcular memória</em> na <b>mesma linha</b> da tabela.
-              </>
-            ) : (
-              <>
-                Parâmetros do produto; no SDC marque cotas. Clique <em>Calcular memória</em> na <b>mesma linha</b> da
-                tabela.
-              </>
-            )}
+            <b>Passo 2</b> — Informe <em>valor do bem</em> e <em>prazo</em> nos parâmetros. Clique{" "}
+            <em>Calcular memória</em> na <b>mesma linha</b> da tabela.
             <br />
             {isCommercial ? (
               <>
@@ -675,8 +598,9 @@ export function ProposalsModule() {
               </>
             ) : null}
             <br />
-            <b>SDC</b> — mesa em <Link href="/modules/sdc">SDC — Capital de Giro</Link>. · <b>Flash Capital</b> —{" "}
-            <Link href="/modules/flash-capital">Flash Capital</Link>.
+            <b>SDC</b> — <Link href="/modules/sdc">SDC — Capital de Giro</Link>. · <b>Marketplace</b> —{" "}
+            <Link href="/modules/venda-direta-manual">Venda Direta</Link> / <Link href="/modules/cadastros">Cadastros</Link>.
+            · <b>Flash operação</b> — <Link href="/modules/flash-capital">Flash Capital</Link>.
           </small>
         </div>
       </div>
@@ -706,11 +630,6 @@ export function ProposalsModule() {
             </option>
           ))}
         </select>
-        <select value={newProduct} onChange={(e) => setNewProduct(e.target.value)}>
-          {!isCommercial && <option value="MARKETPLACE">Marketplace</option>}
-          <option value="SDC">SDC</option>
-          <option value="FLASH_CREDIT">Flash Capital</option>
-        </select>
         <CurrencyInput value={requestedAmount} onChange={setRequestedAmount} placeholder="Valor solicitado (R$)" />
         <button type="submit">
           <Plus />
@@ -718,90 +637,15 @@ export function ProposalsModule() {
         </button>
       </form>
       {proposalError && <div className="error">{proposalError}</div>}
-      {(newProduct === "SDC" || newProduct === "FLASH_CREDIT") && (
-        <div className="product-parameters">
+      <div className="product-parameters">
           <div>
-            <b>Parâmetros — {newProduct === "SDC" ? "SDC" : "Flash Capital"}</b>
+            <b>Parâmetros — Flash Capital</b>
             <small>
-              {newProduct === "SDC"
-                ? "SDC: 4,5% a.m. juros simples (bullet) · Pool investidor: 2,5% a.m."
-                : isCommercial
-                  ? "Flash Capital: fruição 2,5% a.m. (Tabela Price). Origem do capital é definida pela matriz."
-                  : "Flash: fruição 2,5% a.m. (Tabela Price) · Pool: 1,6% a.m."}
+              {isCommercial
+                ? "Fruição 2,5% a.m. (Tabela Price). Origem do capital é definida pela matriz."
+                : "Fruição 2,5% a.m. (Tabela Price) · Pool: 1,6% a.m."}
             </small>
           </div>
-          {newProduct === "SDC" && (
-            <>
-              <label>
-                SDC — tipo de cota
-                <select
-                  value={sdcQuotaCategory}
-                  onChange={(e) => {
-                    setSdcQuotaCategory(e.target.value as "REAL_ESTATE" | "VEHICLE");
-                    setSelected([]);
-                  }}
-                >
-                  <option value="REAL_ESTATE">Imóvel</option>
-                  <option value="VEHICLE">Veículo</option>
-                </select>
-                <small>Lista de cotas abaixo mostra só esta categoria.</small>
-              </label>
-              <label>
-                SDC — prazo (meses até o bullet)
-                <input
-                  type="number"
-                  min="1"
-                  max="60"
-                  value={duration}
-                  onChange={(e) => setDuration(Number(e.target.value))}
-                  title="Número de meses da operação. Juros totais = crédito × 4,5% × meses (não é a taxa do investidor)."
-                />
-                <small>Padrão 12 meses. Define o vencimento bullet, não a taxa de repasse.</small>
-              </label>
-              <label>
-                SDC — origem
-                <select value={sdcCapitalSource} onChange={(e) => setSdcCapitalSource(e.target.value)}>
-                  {SDC_CAPITAL_SOURCES.map((x) => (
-                    <option key={x.value} value={x.value}>
-                      {x.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {sdcCapitalSource === "POOL" && (
-                <>
-                  <label>
-                    Pool — valor aplicado (R$) — opcional
-                    <CurrencyInput value={poolInvestmentAmount} onChange={setPoolInvestmentAmount} />
-                    <small>
-                      Quanto do crédito sai do pool de investidores (informativo/campanha). Vazio = repasse padrão 2,5%
-                      a.m. na memória.
-                    </small>
-                  </label>
-                  {poolRatePreview && (
-                    <div className="notice">
-                      <RefreshCw />
-                      Rentabilidade pool: {poolRatePreview.rate}% a.m. (livre de imposto)
-                    </div>
-                  )}
-                  <label>
-                    SDC — override campanha (% a.m., opcional)
-                    <input
-                      type="number"
-                      min="0"
-                      max="4.5"
-                      step="0.1"
-                      value={sdcPoolInvestorRate}
-                      onChange={(e) => setSdcPoolInvestorRate(e.target.value)}
-                      placeholder="Deixe vazio para 2,5% padrão"
-                    />
-                  </label>
-                </>
-              )}
-            </>
-          )}
-          {newProduct === "FLASH_CREDIT" && (
-            <>
               <label>
                 Valor do bem
                 <CurrencyInput value={assetValue} onChange={setAssetValue} />
@@ -859,70 +703,7 @@ export function ProposalsModule() {
                   <option value={60}>60 meses + balão</option>
                 </select>
               </label>
-            </>
-          )}
         </div>
-      )}
-      {showQuotaPicker && (
-        <div className="selection-box" id="quota-picker">
-          <div>
-            <b>Relação de cotas — {newProduct === "SDC" ? `SDC (${sdcQuotaCategory === "REAL_ESTATE" ? "imóvel" : "veículo"})` : "Marketplace"}</b>
-            <small>
-              Marque cotas da mesma administradora (SDC exige combinação compatível). Depois use <em>Calcular memória</em>{" "}
-              na linha ativa da tabela
-              {activeProposal
-                ? ` (${productLabel(activeProposal.product)} · ${brl.format(Number(activeProposal.requested_amount))})`
-                : ""}
-              .
-            </small>
-            {selectedQuotaRows.length > 0 && (
-              <div className="notice" style={{ marginTop: "0.5rem" }}>
-                <CheckCircle2 />
-                {selectedQuotaRows.length} cota(s) · crédito total {brl.format(selectedCreditTotal)}
-                {activeProposal && (
-                  <>
-                    {" "}
-                    · solicitado {brl.format(Number(activeProposal.requested_amount))}
-                    {selectedCreditTotal > 0 && (
-                      <>
-                        {" "}
-                        · desvio{" "}
-                        {(
-                          (Math.abs(selectedCreditTotal - Number(activeProposal.requested_amount)) /
-                            Number(activeProposal.requested_amount)) *
-                          100
-                        ).toFixed(1)}
-                        %
-                      </>
-                    )}
-                  </>
-                )}
-              </div>
-            )}
-          </div>
-          <div>
-            {availableForPicker.length ? (
-              availableForPicker.map((q) => (
-                <label key={q.id}>
-                  <input
-                    type="checkbox"
-                    checked={selected.includes(q.id)}
-                    onChange={(e) =>
-                      setSelected((v) => (e.target.checked ? [...v, q.id] : v.filter((id) => id !== q.id)))
-                    }
-                  />
-                  {proposalQuotaListLabel(q, adminById.get(q.administrator_id))}
-                </label>
-              ))
-            ) : (
-              <p className="muted">
-                Nenhuma cota {newProduct === "SDC" ? (sdcQuotaCategory === "REAL_ESTATE" ? "de imóvel" : "de veículo") : ""}{" "}
-                disponível no inventário no momento.
-              </p>
-            )}
-          </div>
-        </div>
-      )}
       {notice && (
         <div className="notice">
           <RefreshCw />
@@ -932,9 +713,8 @@ export function ProposalsModule() {
       {lastCalculation && <CalculationResult calculation={lastCalculation} hidePlatformFee />}
       <div ref={proposalsTableRef}>
         <DataTable headers={["Produto", "Valor", "Canal", "Comissão", "Parceiro", "Status", "Workflow"]}>
-          {items.map((p) => {
+          {flashProposals.map((p) => {
             const hasContract = contracts.some((c) => c.proposal_id === p.id);
-            const needsQuota = p.product !== "FLASH_CREDIT";
             const hasMemory = calculatedProposalIds.has(p.id);
             const rowActive = activeProposalId === p.id || highlightProposalId === p.id;
             return (
@@ -966,11 +746,7 @@ export function ProposalsModule() {
                   <button
                     type="button"
                     className="table-action"
-                    title={
-                      needsQuota && !selected.length
-                        ? "Marque cotas na lista acima"
-                        : "Gera memória de cálculo desta linha"
-                    }
+                    title="Gera memória de cálculo Flash desta linha"
                     onClick={() => void calculate(p)}
                   >
                     Calcular memória

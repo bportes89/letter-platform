@@ -49,7 +49,7 @@ export const PRODUCT_NAV: ProductNavItem[] = [
   },
   {
     key: "proposals",
-    name: "Simulador de valores",
+    name: "Simulador Flash Capital",
     commercial: true,
   },
   { key: "sdc", name: "SDC — Capital de Giro", commercial: true },
