@@ -2857,6 +2857,16 @@ class SdcDeskEvaluateRequest(BaseModel):
     asset_has_lien: bool = False
     docs_complete: bool = True
     requested_leverage_amount: Decimal | None = Field(default=None, gt=0)
+    client_has_credit_restriction: bool = False
+    company_has_credit_restriction: bool = False
+    contact_name: str | None = Field(default=None, max_length=180)
+    contact_email: str | None = Field(default=None, max_length=180)
+    contact_phone: str | None = Field(default=None, max_length=40)
+    document: str | None = Field(default=None, max_length=32)
+    address: str | None = Field(default=None, max_length=4000)
+    occupation: str | None = Field(default=None, max_length=180)
+    income_value: Decimal | None = Field(default=None, ge=0)
+    partners_json: list[dict] = Field(default_factory=list)
     properties_json: list[dict] = Field(default_factory=list)
     vehicles_json: list[dict] = Field(default_factory=list)
 

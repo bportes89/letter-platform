@@ -356,6 +356,61 @@ def test_flash_desk_evaluate_store_approve_and_sale(client, auth_headers):
     assert sale.json()["solicitation"]["can_create_sale"] is False
 
 
+def test_sdc_desk_property_debt_and_flash_redirect(client, auth_headers):
+    base = {
+        "asset_type": "imovel_urbano",
+        "asset_value": "500000",
+        "docs_complete": True,
+        "person_type": "PF",
+        "client_has_credit_restriction": False,
+    }
+    sfi_ok = client.post(
+        "/api/v1/sdc/desk/evaluate",
+        headers=auth_headers,
+        json={
+            **base,
+            "properties_json": [
+                {
+                    "property_value": "500000",
+                    "is_paid_off": False,
+                    "debt_type": "SFI",
+                    "debt_payoff_value": "100000",
+                }
+            ],
+        },
+    )
+    assert sfi_ok.status_code == 200
+    assert sfi_ok.json()["result"]["viable"] is True
+
+    hipoteca = client.post(
+        "/api/v1/sdc/desk/evaluate",
+        headers=auth_headers,
+        json={
+            **base,
+            "properties_json": [
+                {
+                    "property_value": "500000",
+                    "is_paid_off": False,
+                    "debt_type": "HIPOTECA",
+                    "debt_payoff_value": "100000",
+                }
+            ],
+        },
+    )
+    assert hipoteca.status_code == 200
+    body = hipoteca.json()["result"]
+    assert body["viable"] is False
+    assert body.get("redirect_flash") is True
+    assert body.get("flash_handoff")
+
+    restricao = client.post(
+        "/api/v1/sdc/desk/evaluate",
+        headers=auth_headers,
+        json={**base, "client_has_credit_restriction": True, "properties_json": [{"property_value": "500000", "is_paid_off": True}]},
+    )
+    assert restricao.json()["result"].get("redirect_flash") is True
+
+
 def test_flash_desk_property_debt_rules(client, auth_headers):
     base = {
         "asset_type": "imovel",

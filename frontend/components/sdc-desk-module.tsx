@@ -2,6 +2,12 @@
 
 import { CheckCircle2, FileUp, Plus, RefreshCw, ShoppingCart, ClipboardList, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import {
+  clearFlashHandoff,
+  DeskFlashHandoff,
+  saveFlashHandoff,
+} from "@/lib/desk-flash-handoff";
 import { lookupCep } from "@/lib/cep-lookup";
 import { AdminDocumentPanel } from "@/components/admin-document-panel";
 import { api, apiForm, deleteApi, downloadApi, User } from "@/lib/api";
@@ -96,6 +102,9 @@ type EvalResult = {
   taxa_juros_mensal: string;
   message: string;
   required_docs?: RequiredDoc[];
+  redirect_flash?: boolean;
+  profile_blocked?: boolean;
+  flash_handoff?: DeskFlashHandoff;
 };
 
 type TapafCheckoutUi = {
@@ -171,6 +180,8 @@ const emptyForm = {
   asset_paid_off: true,
   asset_has_lien: false,
   docs_complete: true,
+  client_credit_restriction: "" as "" | "NAO" | "SIM",
+  company_credit_restriction: "" as "" | "NAO" | "SIM",
   requested_leverage_amount: "",
   property_registry: "",
   vehicle_plate: "",
@@ -198,6 +209,9 @@ type SdcPropertyRow = {
   zip: string;
   matricula: string;
   property_value: string;
+  paid_off_answer: "" | "SIM" | "NAO";
+  debt_type: "" | "SFI" | "SFH" | "HIPOTECA" | "DEMAIS_FINANCEIRAS" | "NAO_FINANCEIRAS";
+  debt_payoff_value: string;
 };
 
 type VehicleRow = { plate: string; renavam: string; year: string; vehicle_value: string };
@@ -212,6 +226,9 @@ function newSdcPropertyRow(): SdcPropertyRow {
     zip: "",
     matricula: "",
     property_value: "",
+    paid_off_answer: "",
+    debt_type: "",
+    debt_payoff_value: "",
   };
 }
 
@@ -326,6 +343,7 @@ function chosenCreditFromEval(result: EvalResult, choice: "limite" | "solicitada
 }
 
 export function SdcDeskModule() {
+  const router = useRouter();
   const [tab, setTab] = useState<"nova" | "lista" | "venda">("nova");
   const [user, setUser] = useState<User | null>(null);
   const [items, setItems] = useState<SdcSolicitation[]>([]);
@@ -432,6 +450,13 @@ export function SdcDeskModule() {
     return vehicles.reduce((sum, v) => sum + parseMoney(v.vehicle_value), 0);
   }
 
+  function partnersForPayload() {
+    return sociosPayload(socios).map((row) => ({
+      ...row,
+      has_credit_restriction: row.has_credit_restriction === "SIM",
+    }));
+  }
+
   function propertiesForPayload() {
     return properties.map((p) => ({
       street: p.street.trim(),
@@ -441,8 +466,57 @@ export function SdcDeskModule() {
       zip: p.zip.trim(),
       matricula: p.matricula.trim(),
       property_value: moneyPayload(p.property_value),
+      is_paid_off: p.paid_off_answer === "SIM",
+      debt_type: p.paid_off_answer === "NAO" ? p.debt_type : null,
+      debt_payoff_value:
+        p.paid_off_answer === "NAO" && p.debt_type ? moneyPayload(p.debt_payoff_value) : null,
       full_address: composeSdcPropertyAddress(p),
     }));
+  }
+
+  function validatePropertyFinancial(p: SdcPropertyRow, index: number): string | null {
+    const label = `imóvel ${index + 1}`;
+    if (!p.paid_off_answer) return `Informe se o ${label} está quitado.`;
+    if (p.paid_off_answer === "SIM") return null;
+    if (!parseMoney(p.debt_payoff_value)) return `Informe o valor de quitação do ${label}.`;
+    if (!p.debt_type) return `Selecione o tipo de dívida do ${label}.`;
+    return null;
+  }
+
+  function buildFlashHandoff(): DeskFlashHandoff {
+    return {
+      source: "SDC_DESK",
+      saved_at: new Date().toISOString(),
+      contact_name: form.contact_name.trim(),
+      contact_email: form.contact_email.trim(),
+      contact_phone: form.contact_phone.trim(),
+      document: form.document.trim(),
+      person_type: form.person_type,
+      address: form.address.trim(),
+      occupation: form.occupation.trim(),
+      income_value: moneyPayload(form.income_value),
+      requested_amount: form.requested_leverage_amount.trim()
+        ? moneyPayload(form.requested_leverage_amount)
+        : "",
+      properties: properties.map((p) => ({
+        street: p.street.trim(),
+        number: p.number.trim(),
+        city: p.city.trim(),
+        state: p.state.trim(),
+        zip: p.zip.trim(),
+        matricula: p.matricula.trim(),
+        property_value: moneyPayload(p.property_value),
+        debt_answer: p.paid_off_answer === "NAO" ? "SIM" : p.paid_off_answer === "SIM" ? "NAO" : "",
+        debt_type: p.debt_type,
+        debt_payoff_value: moneyPayload(p.debt_payoff_value),
+      })),
+      partners_json: partnersForPayload(),
+    };
+  }
+
+  function goToFlashCapital() {
+    saveFlashHandoff(buildFlashHandoff());
+    router.push("/modules/flash-capital");
   }
 
   function vehiclesForPayload() {
@@ -497,23 +571,61 @@ export function SdcDeskModule() {
   function evaluatePayload() {
     const requested = form.requested_leverage_amount ? moneyPayload(form.requested_leverage_amount) : null;
     const assetValue = resolvedAssetValue();
+    const allPaidOff = isImovel && properties.every((p) => p.paid_off_answer === "SIM");
     return {
       asset_type: form.asset_type,
       asset_category: form.asset_type,
       operation_type: form.operation_type,
       asset_value: moneyPayload(String(assetValue)),
       asset_year: resolvedAssetYear(),
-      asset_paid_off: form.asset_paid_off,
-      asset_has_lien: form.asset_has_lien,
+      asset_paid_off: isImovel ? allPaidOff : form.asset_paid_off,
+      asset_has_lien: false,
       docs_complete: form.docs_complete,
       person_type: form.person_type,
+      contact_name: form.contact_name.trim(),
+      contact_email: form.contact_email.trim(),
+      contact_phone: form.contact_phone.trim(),
+      document: form.document.trim(),
+      address: form.address.trim(),
+      occupation: form.occupation.trim(),
+      income_value: moneyPayload(form.income_value),
+      client_has_credit_restriction: form.client_credit_restriction === "SIM",
+      company_has_credit_restriction: form.company_credit_restriction === "SIM",
+      partners_json: partnersForPayload(),
       properties_json: isImovel ? propertiesForPayload() : [],
       vehicles_json: isVeiculo ? vehiclesForPayload() : [],
       ...(requested && Number(requested) > 0 ? { requested_leverage_amount: requested } : {}),
     };
   }
 
+  function validateBeforeCalculate(): string | null {
+    if (!form.client_credit_restriction) return "Informe se o cliente possui restrição creditícia.";
+    if (form.person_type === "PJ" && !form.company_credit_restriction) {
+      return "Informe se a empresa (PJ) possui restrição creditícia.";
+    }
+    if (form.person_type === "PJ") {
+      for (let i = 0; i < socios.length; i += 1) {
+        const row = socios[i];
+        if (!row.name.trim() && !row.document.trim()) continue;
+        if (!row.has_credit_restriction) return `Informe restrição creditícia do sócio ${i + 1}.`;
+      }
+    }
+    if (isImovel) {
+      for (let i = 0; i < properties.length; i += 1) {
+        const fin = validatePropertyFinancial(properties[i], i);
+        if (fin) return fin;
+      }
+    }
+    return null;
+  }
+
   async function calculate() {
+    const pre = validateBeforeCalculate();
+    if (pre) {
+      setError(pre);
+      setEvalResult(null);
+      return;
+    }
     setError("");
     setBusy(true);
     setTapafCheckout(null);
@@ -554,6 +666,8 @@ export function SdcDeskModule() {
         if (!p.matricula.trim()) return `Informe a matrícula do imóvel ${i + 1}.`;
         if (!p.street.trim() || !p.city.trim()) return `Complete o endereço do imóvel ${i + 1} (logradouro e cidade).`;
         if (!parseMoney(p.property_value)) return `Informe o valor do imóvel ${i + 1}.`;
+        const fin = validatePropertyFinancial(p, i);
+        if (fin) return fin;
       }
     }
     if (isVeiculo) {
@@ -608,7 +722,7 @@ export function SdcDeskModule() {
           asset_full_address: isImovel
             ? propsPayload.map((p) => p.full_address).filter(Boolean).join("\n---\n") || null
             : null,
-          partners_json: form.person_type === "PJ" ? sociosPayload(socios) : [],
+          partners_json: form.person_type === "PJ" ? partnersForPayload() : [],
           asset_category: form.asset_type,
           operation_type: form.operation_type,
           partner_observation: form.partner_observation.trim() || null,
@@ -897,6 +1011,30 @@ export function SdcDeskModule() {
                   Renda / faturamento (R$)
                   <CurrencyInput value={form.income_value} onChange={(v) => patchForm("income_value", v)} placeholder="R$ 0,00" />
                 </label>
+                <label>
+                  Cliente com restrição creditícia?
+                  <select
+                    value={form.client_credit_restriction}
+                    onChange={(e) => patchForm("client_credit_restriction", e.target.value as "" | "NAO" | "SIM")}
+                  >
+                    <option value="">Selecione…</option>
+                    <option value="NAO">Não</option>
+                    <option value="SIM">Sim</option>
+                  </select>
+                </label>
+                {form.person_type === "PJ" && (
+                  <label>
+                    Empresa (PJ) com restrição creditícia?
+                    <select
+                      value={form.company_credit_restriction}
+                      onChange={(e) => patchForm("company_credit_restriction", e.target.value as "" | "NAO" | "SIM")}
+                    >
+                      <option value="">Selecione…</option>
+                      <option value="NAO">Não</option>
+                      <option value="SIM">Sim</option>
+                    </select>
+                  </label>
+                )}
                 <select
                   value={form.asset_type}
                   onChange={(e) => {
@@ -1070,6 +1208,70 @@ export function SdcDeskModule() {
                             maxLength={2}
                           />
                         </label>
+                        <label>
+                          Imóvel quitado?
+                          <select
+                            value={prop.paid_off_answer}
+                            onChange={(e) => {
+                              const v = e.target.value as SdcPropertyRow["paid_off_answer"];
+                              patchProperties((rows) => {
+                                const next = [...rows];
+                                next[pIdx] = {
+                                  ...next[pIdx],
+                                  paid_off_answer: v,
+                                  debt_type: v === "NAO" ? next[pIdx].debt_type : "",
+                                  debt_payoff_value: v === "NAO" ? next[pIdx].debt_payoff_value : "",
+                                };
+                                return next;
+                              });
+                            }}
+                          >
+                            <option value="">Selecione…</option>
+                            <option value="SIM">Sim, quitado</option>
+                            <option value="NAO">Não — possui dívida</option>
+                          </select>
+                        </label>
+                        {prop.paid_off_answer === "NAO" && (
+                          <>
+                            <label>
+                              Valor de quitação do bem (R$)
+                              <CurrencyInput
+                                value={prop.debt_payoff_value}
+                                onChange={(v) =>
+                                  patchProperties((rows) => {
+                                    const next = [...rows];
+                                    next[pIdx] = { ...next[pIdx], debt_payoff_value: v };
+                                    return next;
+                                  })
+                                }
+                                placeholder="R$ 0,00"
+                              />
+                            </label>
+                            <label style={{ gridColumn: "1 / -1" }}>
+                              Tipo de dívida na matrícula
+                              <select
+                                value={prop.debt_type}
+                                onChange={(e) =>
+                                  patchProperties((rows) => {
+                                    const next = [...rows];
+                                    next[pIdx] = {
+                                      ...next[pIdx],
+                                      debt_type: e.target.value as SdcPropertyRow["debt_type"],
+                                    };
+                                    return next;
+                                  })
+                                }
+                              >
+                                <option value="">Selecione…</option>
+                                <option value="SFI">Financiamento SFI</option>
+                                <option value="SFH">Financiamento SFH</option>
+                                <option value="HIPOTECA">Hipoteca</option>
+                                <option value="DEMAIS_FINANCEIRAS">Demais dívidas financeiras</option>
+                                <option value="NAO_FINANCEIRAS">Dívidas não financeiras</option>
+                              </select>
+                            </label>
+                          </>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -1166,11 +1368,18 @@ export function SdcDeskModule() {
                   </p>
                 )}
               </div>
-              {form.person_type === "PJ" && <PartnerSociosFields value={socios} onChange={setSocios} />}
+              {form.person_type === "PJ" && (
+                <PartnerSociosFields
+                  value={socios}
+                  onChange={setSocios}
+                  captureCreditRestriction
+                  title="Sócios / parceiros (PJ)"
+                />
+              )}
               <div style={{ display: "flex", flexWrap: "wrap", gap: 14, fontSize: 12, fontWeight: 700 }}>
-                <label><input type="checkbox" checked={form.asset_paid_off} onChange={(e) => patchForm("asset_paid_off", e.target.checked)} /> Bem quitado</label>
-                <label><input type="checkbox" checked={form.asset_has_lien} onChange={(e) => patchForm("asset_has_lien", e.target.checked)} /> Bem com pendência</label>
-                <label><input type="checkbox" checked={form.docs_complete} onChange={(e) => patchForm("docs_complete", e.target.checked)} /> Documentação completa</label>
+                <label>
+                  <input type="checkbox" checked={form.docs_complete} onChange={(e) => patchForm("docs_complete", e.target.checked)} /> Documentação completa
+                </label>
               </div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <button type="button" className="admin-button" disabled={busy} onClick={() => void calculate()}>Calcular viabilidade</button>
@@ -1254,6 +1463,22 @@ export function SdcDeskModule() {
                 <div style={{ marginTop: 12 }}>
                   <p style={{ color: "#b42318", fontWeight: 700 }}>{evalResult.message}</p>
                   <ul>{evalResult.motivos.map((m) => <li key={m}>{m}</li>)}</ul>
+                  {evalResult.redirect_flash && (
+                    <div style={{ marginTop: 12, padding: 12, borderRadius: 10, background: "#fff", border: "1px solid var(--line)" }}>
+                      <p style={{ margin: "0 0 10px", fontSize: 12, lineHeight: 1.45 }}>
+                        Este cliente deve seguir pela <b>esteira Flash Capital</b>. Os dados preenchidos no SDC serão
+                        importados automaticamente.
+                      </p>
+                      <button type="button" className="admin-button" onClick={() => goToFlashCapital()}>
+                        Ir para Flash Capital
+                      </button>
+                    </div>
+                  )}
+                  {evalResult.profile_blocked && (
+                    <p className="muted" style={{ marginTop: 10, fontSize: 11 }}>
+                      Sem perfil para SDC e sem encaminhamento automático para Flash Capital.
+                    </p>
+                  )}
                 </div>
               )}
               {evalResult && !tapafCheckout && (

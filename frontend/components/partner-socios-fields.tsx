@@ -7,6 +7,7 @@ export type SocioPartner = {
   document: string;
   role: string;
   share_percent: string;
+  has_credit_restriction?: "" | "NAO" | "SIM";
 };
 
 const emptyRow = (): SocioPartner => ({
@@ -20,9 +21,15 @@ type Props = {
   value: SocioPartner[];
   onChange: (rows: SocioPartner[]) => void;
   title?: string;
+  captureCreditRestriction?: boolean;
 };
 
-export function PartnerSociosFields({ value, onChange, title = "Sócios / parceiros" }: Props) {
+export function PartnerSociosFields({
+  value,
+  onChange,
+  title = "Sócios / parceiros",
+  captureCreditRestriction = false,
+}: Props) {
   const rows = value.length ? value : [emptyRow()];
 
   function patch(index: number, key: keyof SocioPartner, val: string) {
@@ -46,7 +53,14 @@ export function PartnerSociosFields({ value, onChange, title = "Sócios / parcei
       {rows.map((row, index) => (
         <div
           key={index}
-          style={{ display: "grid", gap: 8, gridTemplateColumns: "1.2fr 1fr 1fr 0.6fr auto", alignItems: "end" }}
+          style={{
+            display: "grid",
+            gap: 8,
+            gridTemplateColumns: captureCreditRestriction
+              ? "1.2fr 1fr 1fr 0.6fr 1fr auto"
+              : "1.2fr 1fr 1fr 0.6fr auto",
+            alignItems: "end",
+          }}
         >
           <label>
             Nome
@@ -64,6 +78,19 @@ export function PartnerSociosFields({ value, onChange, title = "Sócios / parcei
             %
             <input value={row.share_percent} onChange={(e) => patch(index, "share_percent", e.target.value)} placeholder="%" />
           </label>
+          {captureCreditRestriction && (
+            <label>
+              Restrição?
+              <select
+                value={row.has_credit_restriction || ""}
+                onChange={(e) => patch(index, "has_credit_restriction", e.target.value)}
+              >
+                <option value="">—</option>
+                <option value="NAO">Não</option>
+                <option value="SIM">Sim</option>
+              </select>
+            </label>
+          )}
           <button type="button" className="table-action" onClick={() => removeRow(index)} aria-label="Remover sócio">
             <Trash2 size={14} />
           </button>

@@ -347,6 +347,130 @@ def _apply_sdc_asset_totals(data: dict) -> dict:
     return merged
 
 
+MAX_PROPERTY_DEBT_PCT = Decimal("0.30")
+DEBT_SFI = "SFI"
+DEBT_SFH = "SFH"
+DEBT_HIPOTECA = "HIPOTECA"
+DEBT_DEMAIS_FINANCEIRAS = "DEMAIS_FINANCEIRAS"
+DEBT_NAO_FINANCEIRAS = "NAO_FINANCEIRAS"
+SDC_FLASH_DEBT_TYPES = frozenset({DEBT_HIPOTECA, DEBT_DEMAIS_FINANCEIRAS})
+SDC_SDC_DEBT_TYPES = frozenset({DEBT_SFI, DEBT_SFH})
+
+
+def _build_flash_handoff_from_sdc(data: dict) -> dict:
+    return {
+        "source": "SDC_DESK",
+        "saved_at": datetime.now(UTC).isoformat(),
+        "contact_name": str(data.get("contact_name") or "").strip(),
+        "contact_email": str(data.get("contact_email") or "").strip(),
+        "contact_phone": str(data.get("contact_phone") or "").strip(),
+        "document": str(data.get("document") or "").strip(),
+        "person_type": str(data.get("person_type") or "PF").strip().upper(),
+        "address": str(data.get("address") or "").strip(),
+        "occupation": str(data.get("occupation") or "").strip(),
+        "income_value": str(data.get("income_value") or "0"),
+        "requested_amount": str(data.get("requested_leverage_amount") or data.get("requested_amount") or ""),
+        "properties": data.get("properties_json") if isinstance(data.get("properties_json"), list) else [],
+        "partners_json": data.get("partners_json") if isinstance(data.get("partners_json"), list) else [],
+    }
+
+
+def _sdc_credit_restrictions(data: dict) -> list[str]:
+    motivos: list[str] = []
+    if bool(data.get("client_has_credit_restriction")):
+        motivos.append("Cliente com restrição creditícia — indicado Flash Capital.")
+    person = str(data.get("person_type") or "PF").strip().upper()
+    if person == "PJ" and bool(data.get("company_has_credit_restriction")):
+        motivos.append("Empresa (PJ) com restrição creditícia — indicado Flash Capital.")
+    partners = data.get("partners_json") or []
+    if isinstance(partners, list):
+        for idx, row in enumerate(partners, start=1):
+            if isinstance(row, dict) and bool(row.get("has_credit_restriction")):
+                motivos.append(f"Sócio {idx} com restrição creditícia — indicado Flash Capital.")
+                break
+    return motivos
+
+
+def _sdc_property_debt_analysis(data: dict) -> tuple[list[str], bool, bool]:
+    """Retorna (motivos, redirect_flash, profile_blocked)."""
+    props = data.get("properties_json") or []
+    if not isinstance(props, list) or not props:
+        return [], False, False
+    motivos: list[str] = []
+    redirect_flash = False
+    profile_blocked = False
+    for idx, row in enumerate(props, start=1):
+        if not isinstance(row, dict):
+            continue
+        label = f"Imóvel {idx}"
+        paid_off = row.get("is_paid_off")
+        if paid_off is None:
+            motivos.append(f"{label}: informe se o imóvel está quitado.")
+            continue
+        if bool(paid_off):
+            continue
+        debt_type = str(row.get("debt_type") or "").strip().upper()
+        property_value = _dec(row.get("property_value") or 0)
+        payoff = _dec(row.get("debt_payoff_value") or 0)
+        if payoff <= 0:
+            motivos.append(f"{label}: informe o valor de quitação do bem.")
+            continue
+        if not debt_type:
+            motivos.append(f"{label}: selecione o tipo de dívida na matrícula.")
+            continue
+        if debt_type == DEBT_NAO_FINANCEIRAS:
+            profile_blocked = True
+            motivos.append(f"{label}: dívidas não financeiras — sem perfil para o produto.")
+            continue
+        if property_value <= 0:
+            motivos.append(f"{label}: informe o valor do imóvel para validar a dívida.")
+            continue
+        ratio = payoff / property_value
+        if ratio > MAX_PROPERTY_DEBT_PCT:
+            profile_blocked = True
+            motivos.append(
+                f"{label}: quitação superior a 30% do valor do bem — sem perfil para o produto."
+            )
+            continue
+        if debt_type in SDC_FLASH_DEBT_TYPES:
+            redirect_flash = True
+            motivos.append(
+                f"{label}: hipoteca ou demais dívidas financeiras — perfil Flash Capital (não SDC)."
+            )
+        elif debt_type not in SDC_SDC_DEBT_TYPES:
+            motivos.append(f"{label}: tipo de dívida inválido.")
+    return motivos, redirect_flash, profile_blocked
+
+
+def _sdc_profile_block_response(
+    data: dict,
+    *,
+    motivos: list[str],
+    required_docs: list[dict],
+    redirect_flash: bool,
+    profile_blocked: bool,
+) -> dict:
+    message = "NÃO FOI POSSÍVEL SEGUIR COM A SUA OPERAÇÃO"
+    if redirect_flash and not profile_blocked:
+        message = "Cliente com perfil Flash Capital — utilize a esteira Flash Capital."
+    payload = {
+        "viable": False,
+        "motivos": motivos,
+        "required_docs": required_docs,
+        "credito_estimado": "0.00",
+        "parcela_estimada": "0.00",
+        "prazo_meses": 0,
+        "taxa_juros_mensal": "0.00",
+        "tipo_categoria": "",
+        "message": message,
+        "redirect_flash": redirect_flash and not profile_blocked,
+        "profile_blocked": profile_blocked,
+    }
+    if redirect_flash and not profile_blocked:
+        payload["flash_handoff"] = _build_flash_handoff_from_sdc(data)
+    return payload
+
+
 def evaluate_sdc_desk(data: dict) -> dict:
     data = _apply_sdc_asset_totals(dict(data))
     motivos: list[str] = []
@@ -356,10 +480,52 @@ def evaluate_sdc_desk(data: dict) -> dict:
     if not tipo_bem or (not is_veiculo and not is_imovel):
         motivos.append("Tipo de bem inválido.")
 
-    if not bool(data.get("asset_paid_off", data.get("bem_quitado", False))):
-        motivos.append("O bem não está quitado.")
-    if bool(data.get("asset_has_lien", data.get("bem_pendencia", False))):
-        motivos.append("O bem possui pendência.")
+    asset_type_key = str(data.get("asset_type") or data.get("tipo_bem") or data.get("asset_category") or "").strip().lower()
+    person_type = str(data.get("person_type") or "PF").strip().upper()
+    operation_type = data.get("operation_type")
+    asset_category = data.get("asset_category") or asset_type_key
+    required_docs = sdc_required_docs(
+        asset_type_key,
+        person_type,
+        operation_type=operation_type,
+        asset_category=asset_category,
+    )
+
+    restriction_motivos = _sdc_credit_restrictions(data)
+    debt_motivos, debt_redirect, debt_blocked = _sdc_property_debt_analysis(data) if is_imovel else ([], False, False)
+    if restriction_motivos:
+        return _sdc_profile_block_response(
+            data,
+            motivos=restriction_motivos,
+            required_docs=required_docs,
+            redirect_flash=True,
+            profile_blocked=False,
+        )
+    if debt_blocked:
+        return _sdc_profile_block_response(
+            data,
+            motivos=debt_motivos,
+            required_docs=required_docs,
+            redirect_flash=False,
+            profile_blocked=True,
+        )
+    if debt_redirect:
+        return _sdc_profile_block_response(
+            data,
+            motivos=debt_motivos,
+            required_docs=required_docs,
+            redirect_flash=True,
+            profile_blocked=False,
+        )
+    motivos.extend([m for m in debt_motivos if "informe" in m.lower() or "selecione" in m.lower() or "inválido" in m.lower()])
+
+    props = data.get("properties_json") or []
+    has_property_debt_fields = isinstance(props, list) and any(isinstance(p, dict) and p.get("is_paid_off") is not None for p in props)
+    if not has_property_debt_fields:
+        if not bool(data.get("asset_paid_off", data.get("bem_quitado", False))):
+            motivos.append("O bem não está quitado.")
+        if bool(data.get("asset_has_lien", data.get("bem_pendencia", False))):
+            motivos.append("O bem possui pendência.")
     if not bool(data.get("docs_complete", data.get("documentacao_completa", False))):
         motivos.append("Documentação incompleta.")
 
@@ -391,17 +557,6 @@ def evaluate_sdc_desk(data: dict) -> dict:
     if valor <= 0:
         motivos.append("Informe o valor total dos bens.")
 
-    asset_type_key = str(data.get("asset_type") or data.get("tipo_bem") or data.get("asset_category") or "").strip().lower()
-    person_type = str(data.get("person_type") or "PF").strip().upper()
-    operation_type = data.get("operation_type")
-    asset_category = data.get("asset_category") or asset_type_key
-    required_docs = sdc_required_docs(
-        asset_type_key,
-        person_type,
-        operation_type=operation_type,
-        asset_category=asset_category,
-    )
-
     if motivos:
         return {
             "viable": False,
@@ -413,6 +568,8 @@ def evaluate_sdc_desk(data: dict) -> dict:
             "taxa_juros_mensal": "0.00",
             "tipo_categoria": "",
             "message": "NÃO FOI POSSÍVEL SEGUIR COM A SUA OPERAÇÃO",
+            "redirect_flash": False,
+            "profile_blocked": False,
         }
 
     if is_veiculo:
@@ -458,6 +615,8 @@ def evaluate_sdc_desk(data: dict) -> dict:
         "taxa_juros_mensal": str(taxa.quantize(Decimal("0.01"))),
         "tipo_categoria": categoria,
         "message": message,
+        "redirect_flash": False,
+        "profile_blocked": False,
     }
 
 

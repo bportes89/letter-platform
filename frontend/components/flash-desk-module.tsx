@@ -12,6 +12,7 @@ import { CurrencyInput } from "@/components/currency-input";
 import { PartnerSociosFields, SocioPartner, sociosPayload } from "@/components/partner-socios-fields";
 import { lookupCep, lookupMunicipalityPopulation } from "@/lib/cep-lookup";
 import { DESK_SIMULATION_NOTICE } from "@/lib/desk-simulation-notice";
+import { clearFlashHandoff, loadFlashHandoff } from "@/lib/desk-flash-handoff";
 
 type RequiredDoc = { code: string; label: string; uploaded?: boolean };
 
@@ -393,6 +394,64 @@ export function FlashDeskModule() {
       .catch((e) => setError(e instanceof Error ? e.message : "Falha ao carregar mesa Flash"))
       .finally(() => setLoading(false));
   }, [load]);
+
+  useEffect(() => {
+    const handoff = loadFlashHandoff();
+    if (!handoff) return;
+    clearFlashHandoff();
+    setTab("nova");
+    setForm((prev) => ({
+      ...prev,
+      contact_name: handoff.contact_name || prev.contact_name,
+      contact_email: handoff.contact_email || prev.contact_email,
+      contact_phone: handoff.contact_phone || prev.contact_phone,
+      document: handoff.document || prev.document,
+      occupation: handoff.occupation || prev.occupation,
+      income_value: handoff.income_value || prev.income_value,
+      requested_amount: handoff.requested_amount || prev.requested_amount,
+      address: handoff.address || prev.address,
+    }));
+    if (handoff.properties?.length) {
+      setProperties(
+        handoff.properties.map((p) => {
+          const hasDebt = p.debt_answer === "SIM";
+          let debtType: FlashPropertyRow["debt_type"] = "";
+          if (hasDebt) {
+            if (p.debt_type === "NAO_FINANCEIRAS") debtType = "OUTRAS";
+            else debtType = "FINANCEIRA";
+          }
+          return {
+            localKey: Math.random().toString(36).slice(2),
+            zone: "URBANO",
+            street: p.street || "",
+            number: p.number || "",
+            city: p.city || "",
+            state: p.state || "",
+            zip: p.zip || "",
+            population: "",
+            matricula: p.matricula || "",
+            property_value: p.property_value || "",
+            debt_answer: hasDebt ? "SIM" : "NAO",
+            debt_type: debtType,
+            debt_payoff_value: p.debt_payoff_value || "",
+            owner_same_as_borrower: true,
+            owners: [{ name: "", document: "", share_percent: "" }],
+          };
+        }),
+      );
+    }
+    if (handoff.partners_json?.length) {
+      setSocios(
+        handoff.partners_json.map((p) => ({
+          name: p.name,
+          document: p.document,
+          role: p.role,
+          share_percent: p.share_percent,
+        })),
+      );
+    }
+    setNotice("Dados importados da mesa SDC — revise e calcule a viabilidade Flash Capital.");
+  }, []);
 
   const filtered = useMemo(
     () => (statusFilter === "ALL" ? items : items.filter((i) => i.status === statusFilter)),
