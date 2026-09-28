@@ -445,29 +445,38 @@ function formatApiErrorDetail(detail: unknown): string {
   return "Não foi possível concluir a solicitação";
 }
 
-export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
+type ApiCallOptions = {
+  /** Menos retentativas/timeout para ações interativas (ex.: robô marketplace). */
+  interactive?: boolean;
+};
+
+export async function api<T>(path: string, options: RequestInit = {}, call?: ApiCallOptions): Promise<T> {
   let token = getToken();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...(options.headers as Record<string, string> | undefined),
   };
+  const retryOpts = call?.interactive ? { timeoutMs: 55_000, maxAttempts: 2 } : undefined;
   let response: Response;
   try {
-    response = await fetchWithRetry(`${API_URL}${path}`, { ...options, headers });
+    response = await fetchWithRetry(`${API_URL}${path}`, { ...options, headers }, retryOpts);
   } catch {
     throw new Error(
-      "Não foi possível conectar à API LETTER. O servidor pode estar iniciando — aguarde até 1 minuto e tente novamente.",
+      call?.interactive
+        ? "A busca do robô demorou demais ou a API não respondeu. Aguarde 1 minuto (servidor acordando) e tente de novo."
+        : "Não foi possível conectar à API LETTER. O servidor pode estar iniciando — aguarde até 1 minuto e tente novamente.",
     );
   }
   if (response.status === 401 && token) {
     const renewed = await refreshAccessToken();
     if (renewed) {
       token = renewed;
-      response = await fetchWithRetry(`${API_URL}${path}`, {
-        ...options,
-        headers: { ...headers, Authorization: `Bearer ${renewed}` },
-      });
+      response = await fetchWithRetry(
+        `${API_URL}${path}`,
+        { ...options, headers: { ...headers, Authorization: `Bearer ${renewed}` } },
+        retryOpts,
+      );
     }
   }
   if (!response.ok) {

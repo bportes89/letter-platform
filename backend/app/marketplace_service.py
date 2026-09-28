@@ -28,8 +28,8 @@ ESTEIRA2_BAND_PERCENT = Decimal("5")
 ESTEIRA2_CREDIT_LANE_LIMIT = 1
 ESTEIRA2_ENTRADA_LANE_LIMIT = 1
 INSTALLMENT_ROLLOVER_DAYS = 7
-# Evita travar o robô com inventário grande (sync de fornecedores).
-MATCHING_QUOTA_POOL_LIMIT = 120
+# Limite do pool antes de combinações (C(n,3) cresce rápido — inventário grande travava Esteira 2).
+MATCHING_QUOTA_POOL_LIMIT = 40
 
 
 def normalize_supplier_key(value: str | None) -> str:
@@ -442,12 +442,18 @@ def _rank_alternatives(
         )
     )
     if len(quotas) > MATCHING_QUOTA_POOL_LIMIT:
-        scored: list[tuple[Decimal, Quota]] = []
+        scored: list[tuple[Decimal, Decimal, Quota]] = []
         for q in quotas:
             pricing = pricing_for_quota(q, suppliers=suppliers)
-            scored.append((_deviation_percent(pricing["credit"], target_amount), q))
-        scored.sort(key=lambda row: (row[0], Decimal(str(row[1].credit_value))))
-        quotas = [q for _, q in scored[:MATCHING_QUOTA_POOL_LIMIT]]
+            credit_dev = _deviation_percent(pricing["credit"], target_amount)
+            entrada_dev = (
+                _deviation_percent(pricing["entrada_final"], target_entrada)
+                if target_entrada is not None and target_entrada > 0
+                else credit_dev
+            )
+            scored.append((credit_dev, entrada_dev, q))
+        scored.sort(key=lambda row: (row[0] + row[1], row[0], Decimal(str(row[2].credit_value))))
+        quotas = [q for _, _, q in scored[:MATCHING_QUOTA_POOL_LIMIT]]
 
     candidates: list[dict] = []
     max_combo_size = min(3, len(quotas))

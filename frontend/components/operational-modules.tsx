@@ -188,6 +188,8 @@ export function MarketplaceModule() {
   const [category,setCategory]=useState("REAL_ESTATE");
   const [result1,setResult1]=useState<MarketplaceEsteira1Result|null>(null);
   const [result2,setResult2]=useState<MarketplaceEsteira2Result|null>(null);
+  const [esteira1Busy,setEsteira1Busy]=useState(false);
+  const [esteira2Busy,setEsteira2Busy]=useState(false);
   const loadCatalog=(cat:string)=>api<MarketplaceCatalogCota[]>(
     `/marketplace/venda-direta-manual/cotas?category=${encodeURIComponent(cat)}&include_reserved=true`,
   ).then(setCatalog).catch(e=>setError(e.message));
@@ -240,8 +242,8 @@ export function MarketplaceModule() {
       asset_is_zero_km:zero,
     };
   };
-  async function assessEsteira1(e:FormEvent){e.preventDefault();setError("");setNotice("");const validation=profileValidationMessage("e1",e1Category,profile);if(validation){setError(validation);return}if(!selectedQuotaIds.length){setError("Selecione ao menos uma carta na lista.");return}try{const data=await api<MarketplaceEsteira1Result>("/marketplace/esteira-1/assess",{method:"POST",body:JSON.stringify({quota_ids:selectedQuotaIds,...profilePayload("e1",e1Category)})});setResult1(data);setNotice(data.message)}catch(err){setError(err instanceof Error?err.message:"Falha na Esteira 1")}}
-  async function matchEsteira2(e:FormEvent){e.preventDefault();setError("");setNotice("");setResult2(null);const validation=profileValidationMessage("e2",category,profile);if(validation){setError(validation);return}if(!parseMoney(targetAmount)){setError("Informe o crédito desejado.");return}if(!parseMoney(targetEntrada)){setError("Informe a entrada desejada.");return}try{const data=await api<MarketplaceEsteira2Result>("/marketplace/esteira-2/match",{method:"POST",body:JSON.stringify({target_amount:String(parseMoney(targetAmount)),target_entrada:String(parseMoney(targetEntrada)),category,...profilePayload("e2",category)})});setResult2(data);setNotice(data.message);if(!data.eligible&&data.blockers?.length)setError(data.blockers.join(" "))}catch(err){setError(err instanceof Error?err.message:"Falha na Esteira 2")}}
+  async function assessEsteira1(e:FormEvent){e.preventDefault();setError("");setNotice("");const validation=profileValidationMessage("e1",e1Category,profile);if(validation){setError(validation);return}if(!selectedQuotaIds.length){setError("Selecione ao menos uma carta na lista.");return}setEsteira1Busy(true);try{const data=await api<MarketplaceEsteira1Result>("/marketplace/esteira-1/assess",{method:"POST",body:JSON.stringify({quota_ids:selectedQuotaIds,...profilePayload("e1",e1Category)})},{interactive:true});setResult1(data);setNotice(data.message)}catch(err){setError(err instanceof Error?err.message:"Falha na Esteira 1")}finally{setEsteira1Busy(false)}}
+  async function matchEsteira2(e:FormEvent){e.preventDefault();setError("");setNotice("");setResult2(null);const validation=profileValidationMessage("e2",category,profile);if(validation){setError(validation);return}if(!parseMoney(targetAmount)){setError("Informe o crédito desejado.");return}if(!parseMoney(targetEntrada)){setError("Informe a entrada desejada.");return}setEsteira2Busy(true);try{const data=await api<MarketplaceEsteira2Result>("/marketplace/esteira-2/match",{method:"POST",body:JSON.stringify({target_amount:String(parseMoney(targetAmount)),target_entrada:String(parseMoney(targetEntrada)),category,...profilePayload("e2",category)})},{interactive:true});setResult2(data);setNotice(data.message);if(!data.eligible&&data.blockers?.length)setError(data.blockers.join(" "))}catch(err){setError(err instanceof Error?err.message:"Falha na Esteira 2")}finally{setEsteira2Busy(false)}}
   async function reserveQuota(quotaId:string){setError("");try{await api("/reservations",{method:"POST",body:JSON.stringify({quota_id:quotaId,ttl_minutes:60})});setNotice("Cota travada por 60 minutos. Prossiga em Propostas.");void loadCatalog(e1Category)}catch(err){setError(err instanceof Error?err.message:"Falha na trava")}}
   async function reserveSelectedQuotas(ids: string[]) {
     setError("");
@@ -331,7 +333,7 @@ export function MarketplaceModule() {
           )}
         </div>
         <ClientProfileFields prefix="e1" category={e1Category} values={profile} flags={flags} onChange={(k,v)=>setProfile(p=>({...p,[k]:v}))} onFlag={(k,v)=>setFlags(p=>({...p,[k]:v}))}/>
-        <button type="submit" className="marketplace-submit" disabled={!selectedQuotaIds.length}><RefreshCw/>Analisar com Nina</button>
+        <button type="submit" className="marketplace-submit" disabled={!selectedQuotaIds.length||esteira1Busy}><RefreshCw className={esteira1Busy?"spin":undefined}/>{esteira1Busy?"Analisando com Nina…":"Analisar com Nina"}</button>
       </div>
     </form>}
     {tab==="esteira2"&&<form className="marketplace-form" onSubmit={matchEsteira2}>
@@ -340,11 +342,12 @@ export function MarketplaceModule() {
         <label className="marketplace-field">Entrada desejada (R$)<CurrencyInput value={targetEntrada} onChange={setTargetEntrada} required/></label>
         <label className="marketplace-field marketplace-field-compact">Categoria<select value={category} onChange={e=>setCategory(e.target.value)}><option value="REAL_ESTATE">Imóvel</option><option value="VEHICLE">Veículo</option></select></label>
         <ClientProfileFields prefix="e2" category={category} values={profile} flags={flags} onChange={(k,v)=>setProfile(p=>({...p,[k]:v}))} onFlag={(k,v)=>setFlags(p=>({...p,[k]:v}))}/>
-        <button type="submit" className="marketplace-submit"><RefreshCw/>Buscar opções robô</button>
+        <button type="submit" className="marketplace-submit" disabled={esteira2Busy}><RefreshCw className={esteira2Busy?"spin":undefined}/>{esteira2Busy?"Buscando opções robô…":"Buscar opções robô"}</button>
       </div>
     </form>}
+    {esteira2Busy&&tab==="esteira2"&&<div className="notice"><Clock3/>Robô Nina consultando o estoque e as regras Bacen — pode levar alguns segundos na primeira busca do dia.</div>}
     {result1&&tab==="esteira1"&&<section className="panel"><div className="panel-title"><h2>Resultado Esteira 1{result1.combo?" (junção manual)":""}</h2></div><div className="notice">{result1.message}</div>{result1.blockers.length>0&&<div className="error">{result1.blockers.map(b=><div key={b}>{b}</div>)}</div>}{(result1.selected_quotas??[result1.quota]).map(q=><p key={q.quota_id}><Pill value={result1.eligible?"CLEARED":"BLOCKED"}/> {quotaBriefLabel(q)}</p>)}{result1.eligible&&(result1.selected_quotas??[result1.quota]).every(q=>q.status==="AVAILABLE"&&q.nina_scan_status==="CLEARED")?<button type="button" className="table-action lock" onClick={()=>void reserveSelectedQuotas((result1.selected_quotas??[result1.quota]).map(q=>q.quota_id))}><LockKeyhole/>Travar 60 min{(result1.selected_quotas?.length??1)>1?` (${result1.selected_quotas?.length} cotas)`:""}</button>:null}{result1.alternatives.length>0&&<><h3>Alternativas Nina</h3>{result1.alternatives.map(m=><MatchCard key={m.quota_ids.join("-")} match={m} onReserve={reserveQuota}/>)}</>}</section>}
-    {result2&&tab==="esteira2"&&<section className="panel"><div className="panel-title"><h2>Opções robô Esteira 2 (régua {result2.band_percent??"5"}%)</h2></div><div className="notice">{result2.message}</div>{result2.blockers.map(b=><div className="error" key={b}>{b}</div>)}{(result2.credit_matches?.length??0)>0&&<h3>Lane crédito</h3>}{(result2.credit_matches??[]).map(m=><MatchCard key={`c-${m.quota_ids.join("-")}`} match={m} onReserve={reserveQuota}/>)}{(result2.entrada_matches?.length??0)>0&&<h3>Lane entrada</h3>}{(result2.entrada_matches??[]).map(m=><MatchCard key={`e-${m.quota_ids.join("-")}`} match={m} onReserve={reserveQuota}/>)}{!(result2.credit_matches?.length||result2.entrada_matches?.length)&&result2.matches.map(m=><MatchCard key={m.quota_ids.join("-")} match={m} onReserve={reserveQuota}/>)}</section>}
+    {result2&&tab==="esteira2"&&!esteira2Busy&&<section className="panel"><div className="panel-title"><h2>Opções robô Esteira 2 (régua {result2.band_percent??"5"}%)</h2></div><div className="notice">{result2.message}</div>{(result2.blockers??[]).map(b=><div className="error" key={b}>{b}</div>)}{(result2.credit_matches?.length??0)>0&&<h3>Lane crédito</h3>}{(result2.credit_matches??[]).map(m=><MatchCard key={`c-${m.quota_ids.join("-")}`} match={m} onReserve={reserveQuota}/>)}{(result2.entrada_matches?.length??0)>0&&<h3>Lane entrada</h3>}{(result2.entrada_matches??[]).map(m=><MatchCard key={`e-${m.quota_ids.join("-")}`} match={m} onReserve={reserveQuota}/>)}{!(result2.credit_matches?.length||result2.entrada_matches?.length)&&result2.matches.map(m=><MatchCard key={m.quota_ids.join("-")} match={m} onReserve={reserveQuota}/>)}</section>}
   </OperationalLayout>
 }
 
