@@ -15,7 +15,7 @@ from app.affiliate_chain_commission_service import (
     sanitize_marketplace_terms_for_user,
 )
 from app.models import Contract, Lead, Proposal, Quota, Role, User
-from app.network_visibility import get_lead_for_user, list_visible_leads, owner_map
+from app.network_visibility import get_lead_for_user, list_cadastros_leads, owner_map
 from app.services import money
 
 PIPELINE_ALL = "ALL"
@@ -49,6 +49,31 @@ SIT_CANCELADO_FALTA = "CANCELADO_FALTA_PAGAMENTO"
 SIT_INCOMPLETO = "INCOMPLETO"
 
 SALE_SITUATIONS = frozenset({SIT_AGUARDANDO, SIT_PAGO, SIT_CONCLUIDO, SIT_CANCELADO, SIT_CANCELADO_FALTA})
+
+SOURCE_LABELS = {
+    "SITE_CHAT": "Site (chat / robô externo)",
+    "VENDA_DIRETA_ROBO": "Robô (painel)",
+    "VENDA_DIRETA_MANUAL": "Venda direta manual",
+    "DIRECT": "Direto",
+    "DASHBOARD": "Painel",
+    "PUBLIC_SITE": "Site público",
+    "CHAT": "Chat",
+    "CADASTRO": "Cadastro",
+    "CLIENT_SIGNUP": "Cadastro cliente",
+    "MARKETPLACE": "Marketplace",
+    "SITE": "Site",
+}
+
+
+def cadastro_source_label(source: str | None) -> str:
+    raw = (source or "").strip()
+    if not raw:
+        return "—"
+    base = raw.split(":")[0]
+    if base.startswith("SITE_CHAT"):
+        return SOURCE_LABELS["SITE_CHAT"]
+    return SOURCE_LABELS.get(base, base.replace("_", " ").title())
+
 
 SITUATION_LABELS = {
     SIT_INCOMPLETO: "Incompleto",
@@ -218,8 +243,15 @@ def _classify(lead: Lead, proposal: Proposal | None, contract: Contract | None, 
 
     if any(q.status == "SOLD" for q in quotas) or (contract and contract.status in {"ACCEPTED", "SIGNED", "ACTIVE", "COMPLETED"}):
         return PIPELINE_CONCLUIDO, SIT_CONCLUIDO
-    if proposal and (contract or any(q.status == "RESERVED" for q in quotas) or proposal.status in {"APPROVED", "UNDER_REVIEW"}):
+    if life.get("paid_at"):
         return PIPELINE_NEGOCIACAO, SIT_PAGO
+    if proposal and (
+        contract
+        or any(q.status == "RESERVED" for q in quotas)
+        or proposal.status in {"APPROVED", "UNDER_REVIEW", "SUBMITTED"}
+        or (isinstance(terms.get("boleto"), dict) and terms.get("boleto", {}).get("codigo_solicitacao"))
+    ):
+        return PIPELINE_NOVOS, SIT_AGUARDANDO
     if proposal and proposal.product == "MARKETPLACE":
         return PIPELINE_NOVOS, SIT_AGUARDANDO
     if lead.product_interest == "MARKETPLACE" or lead.source in MARKETPLACE_SOURCES:
@@ -342,7 +374,7 @@ def apply_situation_transition(
 
 def list_cadastros(db: Session, user: User, *, pipeline: str = PIPELINE_ALL, q: str | None = None) -> list[dict]:
     pipeline = (pipeline or PIPELINE_ALL).upper()
-    leads = list_visible_leads(db, user)
+    leads = list_cadastros_leads(db, user)
     if not leads:
         return []
 
@@ -449,6 +481,7 @@ def list_cadastros(db: Session, user: User, *, pipeline: str = PIPELINE_ALL, q: 
                 "phone": lead.phone,
                 "email": email,
                 "source": lead.source,
+                "source_label": cadastro_source_label(lead.source),
                 "lead_status": lead.status,
                 "pipeline": (
                     "CANCELADO"

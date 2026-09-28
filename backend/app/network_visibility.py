@@ -102,6 +102,54 @@ def visible_owner_ids(db: Session, user: User) -> set[str] | None:
     return set()
 
 
+def lead_visible_to_user(db: Session, user: User, lead: Lead) -> bool:
+    """Lead visível por owner_id ou por commission_originator em proposta Marketplace."""
+    if user.role == Role.CLIENT:
+        return lead.client_user_id == user.id or lead.owner_id == user.id
+    owner_ids = visible_owner_ids(db, user)
+    if owner_ids is None:
+        return True
+    if lead.owner_id in owner_ids:
+        return True
+    originator = db.scalar(
+        select(Proposal.commission_originator_id)
+        .where(
+            Proposal.lead_id == lead.id,
+            Proposal.organization_id == user.organization_id,
+            Proposal.product == "MARKETPLACE",
+        )
+        .order_by(Proposal.created_at.desc())
+        .limit(1)
+    )
+    return bool(originator and originator in owner_ids)
+
+
+def list_cadastros_leads(db: Session, user: User) -> list[Lead]:
+    """Leads operacionais em Cadastros — inclui vendas SITE_CHAT atribuídas por comissão."""
+    leads = list_visible_leads(db, user)
+    by_id = {lead.id: lead for lead in leads}
+    owner_ids = visible_owner_ids(db, user)
+    if owner_ids is None:
+        return leads
+    extra_ids = db.scalars(
+        select(Proposal.lead_id)
+        .where(
+            Proposal.organization_id == user.organization_id,
+            Proposal.product == "MARKETPLACE",
+            Proposal.commission_originator_id.in_(owner_ids),
+        )
+        .distinct()
+    )
+    for lead_id in extra_ids:
+        if lead_id in by_id:
+            continue
+        lead = db.get(Lead, lead_id)
+        if lead and lead.organization_id == user.organization_id:
+            leads.append(lead)
+            by_id[lead_id] = lead
+    return leads
+
+
 def list_visible_leads(db: Session, user: User) -> list[Lead]:
     query = select(Lead).where(Lead.organization_id == user.organization_id)
     if user.role == Role.CLIENT:
@@ -145,8 +193,7 @@ def get_lead_for_user(db: Session, user: User, lead_id: str) -> Lead:
         if lead.client_user_id != user.id and lead.owner_id != user.id:
             raise HTTPException(status_code=404, detail="Lead não encontrado")
         return lead
-    owner_ids = visible_owner_ids(db, user)
-    if owner_ids is not None and lead.owner_id not in owner_ids:
+    if not lead_visible_to_user(db, user, lead):
         raise HTTPException(status_code=404, detail="Lead não encontrado")
     return lead
 

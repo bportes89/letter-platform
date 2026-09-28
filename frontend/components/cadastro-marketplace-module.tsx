@@ -17,6 +17,7 @@ type CadastroRow = {
   phone: string;
   email: string | null;
   source: string;
+  source_label?: string | null;
   lead_status: string;
   pipeline: string;
   situation: string;
@@ -247,7 +248,7 @@ export function CadastroMarketplaceModule() {
           <p>
             {partnerView
               ? "Acompanhe suas vendas do chat e veja a comissão bloqueada da sua fatia na cadeia até a conclusão."
-              : "Onde mora a venda: chat, Venda Direta Manual e Robô. Filtre por etapa (novos, negociação, concluído, incompleto) e edite dados do cliente sem alterar a compra."}
+              : "Onde mora a venda: chat (robô externo), Venda Direta Manual e Robô do painel. Novos = contrato/boleto emitidos, entrada em aberto; Em negociação = entrada paga; Incompleto = simulou e não finalizou; Concluído = transferência feita; Compras = mesma etapa Concluído (visão de compras)."}
           </p>
         </div>
         <div className="operational-icon">
@@ -348,7 +349,7 @@ export function CadastroMarketplaceModule() {
                     <span className={`pill pill-${row.situation.toLowerCase()}`}>{row.situation_label}</span>
                   </td>
                   <td>
-                    <small>{row.source}</small>
+                    <small>{row.source_label || row.source}</small>
                   </td>
                   <td>
                     <button type="button" className="table-action" onClick={() => openDetail(row.lead_id)}>

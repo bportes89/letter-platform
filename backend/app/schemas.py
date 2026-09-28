@@ -2686,6 +2686,7 @@ class CadastroListItem(BaseModel):
     phone: str
     email: str | None = None
     source: str
+    source_label: str | None = None
     lead_status: str
     pipeline: str
     situation: str
