@@ -372,6 +372,9 @@ export function ProposalsModule() {
   const [clients, setClients] = useState<CommercialClient[]>([]);
   const [isCommercial, setIsCommercial] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
+  const [sdcQuotaCategory, setSdcQuotaCategory] = useState<"REAL_ESTATE" | "VEHICLE">("REAL_ESTATE");
+  const [activeProposalId, setActiveProposalId] = useState<string | null>(null);
+  const [calculatedProposalIds, setCalculatedProposalIds] = useState<Set<string>>(() => new Set());
   const [notice, setNotice] = useState("");
   const [proposalError, setProposalError] = useState("");
   const [selectedLeadId, setSelectedLeadId] = useState("");
@@ -413,6 +416,21 @@ export function ProposalsModule() {
 
   const adminById = useMemo(() => new Map(admins.map((a) => [a.id, a.name])), [admins]);
 
+  const refreshCalculatedFlags = async (proposals: Proposal[]) => {
+    const ids = new Set<string>();
+    await Promise.all(
+      proposals.map(async (p) => {
+        try {
+          const calcs = await api<{ id: string }[]>(`/proposals/${p.id}/calculations`);
+          if (calcs.length) ids.add(p.id);
+        } catch {
+          /* ignore */
+        }
+      }),
+    );
+    setCalculatedProposalIds(ids);
+  };
+
   const load = () =>
     Promise.all([
       api<User>("/auth/me"),
@@ -427,6 +445,7 @@ export function ProposalsModule() {
       setQuotas(q);
       setContracts(c);
       setAdmins(a);
+      void refreshCalculatedFlags(p);
       const commercial = ["MASTER_FRANCHISEE", "MANAGER", "PARTNER", "QUOTA_SELLER"].includes(me.role);
       setIsCommercial(commercial);
       if (commercial) {
@@ -445,6 +464,22 @@ export function ProposalsModule() {
   }, []);
 
   const available = useMemo(() => quotas.filter((q) => q.status === "AVAILABLE" || q.status === "RESERVED"), [quotas]);
+  const availableForPicker = useMemo(() => {
+    if (newProduct !== "SDC") return available;
+    return available.filter((q) => q.category === sdcQuotaCategory);
+  }, [available, newProduct, sdcQuotaCategory]);
+  const selectedQuotaRows = useMemo(
+    () => available.filter((q) => selected.includes(q.id)),
+    [available, selected],
+  );
+  const selectedCreditTotal = useMemo(
+    () => selectedQuotaRows.reduce((sum, q) => sum + Number(q.credit_value || 0), 0),
+    [selectedQuotaRows],
+  );
+  const activeProposal = useMemo(
+    () => (activeProposalId ? items.find((p) => p.id === activeProposalId) : null),
+    [activeProposalId, items],
+  );
   const showQuotaPicker = newProduct === "SDC" || (!isCommercial && newProduct === "MARKETPLACE");
 
   async function submit(e: FormEvent<HTMLFormElement>) {
@@ -481,9 +516,10 @@ export function ProposalsModule() {
         }),
       });
       setHighlightProposalId(created.id);
+      setActiveProposalId(created.id);
       setRequestedAmount("");
       setNotice(
-        "Simulação adicionada na tabela abaixo. Marque as cotas (SDC) ou ajuste os parâmetros e clique em Simular na linha correspondente.",
+        "Linha criada na tabela. Marque as cotas acima (se SDC) e clique em «Calcular memória» na mesma linha antes de «Gerar contrato».",
       );
       await load();
       proposalsTableRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -494,6 +530,14 @@ export function ProposalsModule() {
 
   async function calculate(p: Proposal) {
     setNotice("");
+    setProposalError("");
+    setActiveProposalId(p.id);
+    const needsQuotas = p.product === "SDC" || p.product === "MARKETPLACE";
+    if (needsQuotas && !selected.length) {
+      setNotice("Marque ao menos uma cota na lista acima e clique novamente em «Calcular memória».");
+      document.getElementById("quota-picker")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
     try {
       let path = `/proposals/${p.id}/calculate`;
       let payload: Record<string, unknown> = { quota_ids: selected, fee_percent: "10", start_fee: "1500" };
@@ -522,8 +566,8 @@ export function ProposalsModule() {
       const calc = await api<Calculation>(path, { method: "POST", body: JSON.stringify(payload) });
       setLastCalculation(calc);
       setHighlightProposalId(p.id);
-      setNotice(`Memória ${calc.formula_version} criada com sucesso.`);
-      setSelected([]);
+      setCalculatedProposalIds((prev) => new Set(prev).add(p.id));
+      setNotice(`Memória ${calc.formula_version} criada — agora pode «Gerar contrato» nesta linha.`);
       void load();
     } catch (e) {
       setNotice(e instanceof Error ? e.message : "Falha no cálculo");
@@ -531,11 +575,16 @@ export function ProposalsModule() {
   }
 
   async function contract(p: Proposal) {
+    setActiveProposalId(p.id);
     const calcs = await api<{ id: string }[]>(`/proposals/${p.id}/calculations`);
     if (!calcs.length) {
-      setNotice("Calcule a proposta antes de gerar o contrato.");
+      setNotice(
+        "Esta linha ainda não foi calculada. Marque as cotas acima e use «Calcular memória» na mesma linha da tabela.",
+      );
+      document.getElementById("quota-picker")?.scrollIntoView({ behavior: "smooth", block: "start" });
       return;
     }
+    setCalculatedProposalIds((prev) => new Set(prev).add(p.id));
     await api(`/proposals/${p.id}/contracts`, {
       method: "POST",
       body: JSON.stringify({ calculation_memory_id: calcs[0].id }),
@@ -559,10 +608,10 @@ export function ProposalsModule() {
             <b>Passo 1</b> — Selecione o <em>cadastro</em> do cliente, o produto (SDC ou Flash) e o valor; clique em{" "}
             <em>Adicionar simulação</em> (a linha aparece na tabela — o formulário não apaga o cliente).
             <br />
-            <b>Passo 2</b> — Ajuste os parâmetros do produto e, no SDC, marque as cotas na lista (entrada, parcela,
-            prazo e administradora). Clique <em>Simular</em> na linha da tabela.
+            <b>Passo 2</b> — Parâmetros e cotas (SDC: filtre imóvel ou veículo). Clique <em>Calcular memória</em> na{" "}
+            <b>mesma linha</b> da tabela.
             <br />
-            <b>Passo 3</b> — <em>Gerar contrato</em> quando a memória estiver pronta.
+            <b>Passo 3</b> — <em>Gerar contrato</em> só na linha que já tiver memória calculada (botão fica ativo).
             {isCommercial ? (
               <>
                 <br />
@@ -632,6 +681,20 @@ export function ProposalsModule() {
           </div>
           {newProduct === "SDC" && (
             <>
+              <label>
+                SDC — tipo de cota
+                <select
+                  value={sdcQuotaCategory}
+                  onChange={(e) => {
+                    setSdcQuotaCategory(e.target.value as "REAL_ESTATE" | "VEHICLE");
+                    setSelected([]);
+                  }}
+                >
+                  <option value="REAL_ESTATE">Imóvel</option>
+                  <option value="VEHICLE">Veículo</option>
+                </select>
+                <small>Lista de cotas abaixo mostra só esta categoria.</small>
+              </label>
               <label>
                 SDC — prazo (meses até o bullet)
                 <input
@@ -748,17 +811,45 @@ export function ProposalsModule() {
         </div>
       )}
       {showQuotaPicker && (
-        <div className="selection-box">
+        <div className="selection-box" id="quota-picker">
           <div>
-            <b>Relação de cotas — {newProduct === "SDC" ? "SDC" : "Marketplace"}</b>
+            <b>Relação de cotas — {newProduct === "SDC" ? `SDC (${sdcQuotaCategory === "REAL_ESTATE" ? "imóvel" : "veículo"})` : "Marketplace"}</b>
             <small>
-              Marque uma ou mais cotas disponíveis ou travadas. Cada linha mostra administradora, crédito, entrada,
-              parcela e quantidade de parcelas. Depois clique <em>Simular</em> na proposta na tabela.
+              Marque cotas da mesma administradora (SDC exige combinação compatível). Depois use <em>Calcular memória</em>{" "}
+              na linha ativa da tabela
+              {activeProposal
+                ? ` (${productLabel(activeProposal.product)} · ${brl.format(Number(activeProposal.requested_amount))})`
+                : ""}
+              .
             </small>
+            {selectedQuotaRows.length > 0 && (
+              <div className="notice" style={{ marginTop: "0.5rem" }}>
+                <CheckCircle2 />
+                {selectedQuotaRows.length} cota(s) · crédito total {brl.format(selectedCreditTotal)}
+                {activeProposal && (
+                  <>
+                    {" "}
+                    · solicitado {brl.format(Number(activeProposal.requested_amount))}
+                    {selectedCreditTotal > 0 && (
+                      <>
+                        {" "}
+                        · desvio{" "}
+                        {(
+                          (Math.abs(selectedCreditTotal - Number(activeProposal.requested_amount)) /
+                            Number(activeProposal.requested_amount)) *
+                          100
+                        ).toFixed(1)}
+                        %
+                      </>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
           </div>
           <div>
-            {available.length ? (
-              available.map((q) => (
+            {availableForPicker.length ? (
+              availableForPicker.map((q) => (
                 <label key={q.id}>
                   <input
                     type="checkbox"
@@ -771,7 +862,10 @@ export function ProposalsModule() {
                 </label>
               ))
             ) : (
-              <p className="muted">Nenhuma cota disponível no inventário no momento.</p>
+              <p className="muted">
+                Nenhuma cota {newProduct === "SDC" ? (sdcQuotaCategory === "REAL_ESTATE" ? "de imóvel" : "de veículo") : ""}{" "}
+                disponível no inventário no momento.
+              </p>
             )}
           </div>
         </div>
@@ -788,11 +882,13 @@ export function ProposalsModule() {
           {items.map((p) => {
             const hasContract = contracts.some((c) => c.proposal_id === p.id);
             const needsQuota = p.product !== "FLASH_CREDIT";
+            const hasMemory = calculatedProposalIds.has(p.id);
+            const rowActive = activeProposalId === p.id || highlightProposalId === p.id;
             return (
               <tr
                 key={p.id}
                 style={
-                  highlightProposalId === p.id ? { background: "rgba(34, 197, 94, 0.08)" } : undefined
+                  rowActive ? { background: "rgba(34, 197, 94, 0.08)" } : undefined
                 }
               >
                 <td>
@@ -814,10 +910,25 @@ export function ProposalsModule() {
                   <Pill value={p.status} />
                 </td>
                 <td className="actions-cell">
-                  <button className="table-action" disabled={needsQuota && !selected.length} onClick={() => calculate(p)}>
-                    Simular
+                  <button
+                    type="button"
+                    className="table-action"
+                    title={
+                      needsQuota && !selected.length
+                        ? "Marque cotas na lista acima"
+                        : "Gera memória de cálculo desta linha"
+                    }
+                    onClick={() => void calculate(p)}
+                  >
+                    Calcular memória
                   </button>
-                  <button className="table-action" disabled={hasContract} onClick={() => contract(p)}>
+                  <button
+                    type="button"
+                    className="table-action"
+                    disabled={hasContract || !hasMemory}
+                    title={!hasMemory ? "Calcule a memória nesta linha antes" : undefined}
+                    onClick={() => void contract(p)}
+                  >
                     {hasContract ? "Contrato criado" : "Gerar contrato"}
                   </button>
                 </td>
