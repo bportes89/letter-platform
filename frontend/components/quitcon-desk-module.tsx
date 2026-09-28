@@ -261,11 +261,18 @@ export function QuitConDeskModule() {
       if (!q.group_code.trim() || !q.quota_code.trim()) {
         throw new Error("Preencha grupo e cota em todas as linhas.");
       }
+      if (!String(q.meses_restantes).trim()) {
+        throw new Error(
+          `Informe a quantidade de parcelas restantes na cota ${label} (campo "Qtd. parcelas").`,
+        );
+      }
       if (!Number.isFinite(meses) || meses < 1 || meses > 240) {
-        throw new Error(`Quantidade de parcelas inválida na cota ${label}.`);
+        throw new Error(
+          `Quantidade de parcelas inválida na cota ${label}. Use um número entre 1 e 240.`,
+        );
       }
       if (parseMoney(q.installment_value) <= 0) {
-        throw new Error(`Informe a parcela atual na cota ${label}.`);
+        throw new Error(`Informe o valor da parcela atual na cota ${label}.`);
       }
       return {
         group_code: q.group_code.trim(),
@@ -680,7 +687,8 @@ export function QuitConDeskModule() {
 
               <p className="muted" style={{ fontSize: 12, lineHeight: 1.5, margin: 0 }}>
                 A quitação QuitCon é permitida apenas para cotas com o <b>bem já faturado</b>. Informe somente as cotas
-                <b> alienadas ao mesmo bem</b> (junção de cotas). Use o botão abaixo para incluir cada cota do conjunto.
+                <b> alienadas ao mesmo bem</b> (junção de cotas). Em cada linha preencha <b>grupo, cota, valor da parcela e
+                qtd. de parcelas restantes</b> (quantas parcelas ainda faltam pagar).
               </p>
 
               <div style={{ display: "grid", gap: 8 }}>
@@ -717,7 +725,7 @@ export function QuitConDeskModule() {
                         style={{
                           display: "grid",
                           gap: 8,
-                          gridTemplateColumns: "minmax(72px, 1fr) minmax(72px, 1fr) minmax(120px, 1.2fr) minmax(100px, 1fr) auto",
+                          gridTemplateColumns: "repeat(auto-fit, minmax(128px, 1fr))",
                         }}
                       >
                         <label style={{ display: "grid", gap: 4, fontSize: 11, fontWeight: 700 }}>
@@ -760,11 +768,12 @@ export function QuitConDeskModule() {
                           />
                         </label>
                         <label style={{ display: "grid", gap: 4, fontSize: 11, fontWeight: 700 }}>
-                          Qtd. parcelas
+                          Qtd. parcelas restantes *
                           <input
                             type="number"
                             min={1}
                             max={240}
+                            required
                             placeholder="Ex.: 48"
                             value={line.meses_restantes}
                             onChange={(e) => {
