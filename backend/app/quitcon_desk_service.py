@@ -238,11 +238,6 @@ def evaluate_quitcon_desk(data: dict) -> dict:
                 "registry_number": registry_number,
             }
             total_vp_override = total_vp
-            for row in breakdown:
-                if _dec(row.get("credit_at_billing")) <= 0:
-                    motivos.append(
-                        f"Cota {row['registry_number']}: informe o valor do crédito quando faturou o bem."
-                    )
     else:
         saldo = _dec(data.get("outstanding_balance") or 0)
         if saldo <= 0:
@@ -411,10 +406,16 @@ def get_solicitation(db: Session, user: User, solicitation_id: str) -> QuitConSo
     return item
 
 
+def _quitcon_property_is_imovel(property_type: str | None) -> bool:
+    key = str(property_type or "").strip().upper()
+    return key.startswith("IMOVEL")
+
+
 def store_solicitation(db: Session, user: User, payload: dict) -> QuitConSolicitation:
     assert_desk_access(user)
     addr_errors = _address_errors(payload.get("client_address_json"), "Endereço do cliente")
-    addr_errors.extend(_address_errors(payload.get("asset_address_json"), "Endereço do bem alienado"))
+    if _quitcon_property_is_imovel(payload.get("property_type")):
+        addr_errors.extend(_address_errors(payload.get("asset_address_json"), "Endereço do bem alienado"))
     if addr_errors:
         raise HTTPException(status_code=422, detail={"message": "Endereço incompleto", "motivos": addr_errors})
     if bool(payload.get("operational_service")) and not bool(payload.get("operational_service_accepted")):

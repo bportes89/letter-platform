@@ -72,8 +72,8 @@ type AddressFields = {
 type QuotaLine = {
   group_code: string;
   quota_code: string;
-  credit_at_billing: string;
   installment_value: string;
+  /** Quantidade de parcelas restantes (cálculo do saldo e VP). */
   meses_restantes: string;
 };
 
@@ -127,7 +127,6 @@ const emptyAddress = (): AddressFields => ({
 const emptyQuotaLine = (): QuotaLine => ({
   group_code: "",
   quota_code: "",
-  credit_at_billing: "",
   installment_value: "",
   meses_restantes: "",
 });
@@ -263,20 +262,16 @@ export function QuitConDeskModule() {
         throw new Error("Preencha grupo e cota em todas as linhas.");
       }
       if (!Number.isFinite(meses) || meses < 1 || meses > 240) {
-        throw new Error(`Prazo restante inválido na cota ${label}.`);
+        throw new Error(`Quantidade de parcelas inválida na cota ${label}.`);
       }
       if (parseMoney(q.installment_value) <= 0) {
         throw new Error(`Informe a parcela atual na cota ${label}.`);
-      }
-      if (parseMoney(q.credit_at_billing) <= 0) {
-        throw new Error(`Informe o crédito no faturamento na cota ${label}.`);
       }
       return {
         group_code: q.group_code.trim(),
         quota_code: q.quota_code.trim(),
         installment_value: moneyPayload(q.installment_value),
         meses_restantes: meses,
-        credit_at_billing: moneyPayload(q.credit_at_billing),
       };
     });
   }
@@ -302,8 +297,10 @@ export function QuitConDeskModule() {
     }
     const clientAddrMsg = addressValidationMessage(clientAddress, "Endereço do cliente");
     if (clientAddrMsg) return clientAddrMsg;
-    const assetAddrMsg = addressValidationMessage(assetAddress, "Endereço do bem alienado");
-    if (assetAddrMsg) return assetAddrMsg;
+    if (isImovel) {
+      const assetAddrMsg = addressValidationMessage(assetAddress, "Endereço do bem alienado");
+      if (assetAddrMsg) return assetAddrMsg;
+    }
     if (isImovel && !alienatedRegistry.trim()) return "Informe a matrícula do imóvel alienado.";
     if (!isImovel && !alienatedPlate.trim() && !alienatedChassi.trim()) {
       return "Informe placa ou chassi do veículo alienado.";
@@ -407,7 +404,7 @@ export function QuitConDeskModule() {
     try {
       await validateContactFields();
       const payload = evaluatePayload();
-      const assetFormatted = composeAddress(assetAddress);
+      const assetFormatted = isImovel ? composeAddress(assetAddress) : "";
       const created = await api<QuitConSolicitation>("/quitcon/desk/solicitations", {
         method: "POST",
         body: JSON.stringify({
@@ -421,10 +418,10 @@ export function QuitConDeskModule() {
           occupation: form.occupation.trim() || null,
           income_value: moneyPayload(form.income_value),
           client_address_json: addressPayload(clientAddress),
-          asset_address_json: addressPayload(assetAddress),
+          asset_address_json: isImovel ? addressPayload(assetAddress) : null,
           operational_service_accepted: form.operational_service_accepted,
           alienated_property_registry: isImovel ? alienatedRegistry.trim() || null : null,
-          alienated_asset_address: assetFormatted || null,
+          alienated_asset_address: isImovel && assetFormatted ? assetFormatted : null,
           alienated_vehicle_plate: !isImovel ? alienatedPlate.trim() || null : null,
           alienated_vehicle_chassi: !isImovel ? alienatedChassi.trim() || null : null,
           alienated_vehicle_renavam: !isImovel ? alienatedRenavam.trim() || null : null,
@@ -716,60 +713,68 @@ export function QuitConDeskModule() {
                         background: "#fafcfb",
                       }}
                     >
-                      <div style={{ display: "grid", gap: 8, gridTemplateColumns: "1fr 1fr 1fr 1fr 100px auto" }}>
-                        <input
-                          placeholder="Grupo"
-                          value={line.group_code}
-                          onChange={(e) => {
-                            const next = [...quotaLines];
-                            next[idx] = { ...next[idx], group_code: e.target.value };
-                            setQuotaLines(next);
-                            setEvalResult(null);
-                          }}
-                        />
-                        <input
-                          placeholder="Cota"
-                          value={line.quota_code}
-                          onChange={(e) => {
-                            const next = [...quotaLines];
-                            next[idx] = { ...next[idx], quota_code: e.target.value };
-                            setQuotaLines(next);
-                            setEvalResult(null);
-                          }}
-                        />
-                        <CurrencyInput
-                          placeholder="Crédito no faturamento"
-                          value={line.credit_at_billing}
-                          onChange={(v) => {
-                            const next = [...quotaLines];
-                            next[idx] = { ...next[idx], credit_at_billing: v };
-                            setQuotaLines(next);
-                            setEvalResult(null);
-                          }}
-                        />
-                        <CurrencyInput
-                          placeholder="Parcela atual"
-                          value={line.installment_value}
-                          onChange={(v) => {
-                            const next = [...quotaLines];
-                            next[idx] = { ...next[idx], installment_value: v };
-                            setQuotaLines(next);
-                            setEvalResult(null);
-                          }}
-                        />
-                        <input
-                          type="number"
-                          min={1}
-                          max={240}
-                          placeholder="Meses"
-                          value={line.meses_restantes}
-                          onChange={(e) => {
-                            const next = [...quotaLines];
-                            next[idx] = { ...next[idx], meses_restantes: e.target.value };
-                            setQuotaLines(next);
-                            setEvalResult(null);
-                          }}
-                        />
+                      <div
+                        style={{
+                          display: "grid",
+                          gap: 8,
+                          gridTemplateColumns: "minmax(72px, 1fr) minmax(72px, 1fr) minmax(120px, 1.2fr) minmax(100px, 1fr) auto",
+                        }}
+                      >
+                        <label style={{ display: "grid", gap: 4, fontSize: 11, fontWeight: 700 }}>
+                          Grupo
+                          <input
+                            placeholder="Ex.: 23001"
+                            value={line.group_code}
+                            onChange={(e) => {
+                              const next = [...quotaLines];
+                              next[idx] = { ...next[idx], group_code: e.target.value };
+                              setQuotaLines(next);
+                              setEvalResult(null);
+                            }}
+                          />
+                        </label>
+                        <label style={{ display: "grid", gap: 4, fontSize: 11, fontWeight: 700 }}>
+                          Cota
+                          <input
+                            placeholder="Ex.: 11"
+                            value={line.quota_code}
+                            onChange={(e) => {
+                              const next = [...quotaLines];
+                              next[idx] = { ...next[idx], quota_code: e.target.value };
+                              setQuotaLines(next);
+                              setEvalResult(null);
+                            }}
+                          />
+                        </label>
+                        <label style={{ display: "grid", gap: 4, fontSize: 11, fontWeight: 700 }}>
+                          Valor da parcela
+                          <CurrencyInput
+                            placeholder="R$ 0,00"
+                            value={line.installment_value}
+                            onChange={(v) => {
+                              const next = [...quotaLines];
+                              next[idx] = { ...next[idx], installment_value: v };
+                              setQuotaLines(next);
+                              setEvalResult(null);
+                            }}
+                          />
+                        </label>
+                        <label style={{ display: "grid", gap: 4, fontSize: 11, fontWeight: 700 }}>
+                          Qtd. parcelas
+                          <input
+                            type="number"
+                            min={1}
+                            max={240}
+                            placeholder="Ex.: 48"
+                            value={line.meses_restantes}
+                            onChange={(e) => {
+                              const next = [...quotaLines];
+                              next[idx] = { ...next[idx], meses_restantes: e.target.value };
+                              setQuotaLines(next);
+                              setEvalResult(null);
+                            }}
+                          />
+                        </label>
                         {quotaLines.length > 1 && (
                           <button
                             type="button"
@@ -812,13 +817,76 @@ export function QuitConDeskModule() {
               </div>
 
               <div style={{ display: "grid", gap: 8 }}>
-                <b>Endereço do bem alienado (contrato)</b>
+                <b>{isImovel ? "Imóvel alienado (contrato)" : "Veículo alienado (contrato)"}</b>
                 {isImovel && (
-                  <input
-                    placeholder="Matrícula do imóvel"
-                    value={alienatedRegistry}
-                    onChange={(e) => setAlienatedRegistry(e.target.value)}
-                  />
+                  <>
+                    <input
+                      placeholder="Matrícula do imóvel"
+                      value={alienatedRegistry}
+                      onChange={(e) => setAlienatedRegistry(e.target.value)}
+                    />
+                    <div style={{ display: "grid", gap: 8, gridTemplateColumns: "120px 1fr 1fr" }}>
+                      <input
+                        placeholder="CEP do bem"
+                        value={assetAddress.zip}
+                        onChange={(e) => {
+                          setAssetAddress({ ...assetAddress, zip: e.target.value });
+                          setEvalResult(null);
+                        }}
+                        onBlur={(e) => void fillAssetCep(e.target.value)}
+                      />
+                      <input
+                        placeholder="Logradouro"
+                        value={assetAddress.street}
+                        onChange={(e) => {
+                          setAssetAddress({ ...assetAddress, street: e.target.value });
+                          setEvalResult(null);
+                        }}
+                        style={{ gridColumn: "span 2" }}
+                      />
+                      <input
+                        placeholder="Número"
+                        value={assetAddress.number}
+                        onChange={(e) => {
+                          setAssetAddress({ ...assetAddress, number: e.target.value });
+                          setEvalResult(null);
+                        }}
+                      />
+                      <input
+                        placeholder="Complemento"
+                        value={assetAddress.complement}
+                        onChange={(e) => {
+                          setAssetAddress({ ...assetAddress, complement: e.target.value });
+                          setEvalResult(null);
+                        }}
+                      />
+                      <input
+                        placeholder="Bairro"
+                        value={assetAddress.district}
+                        onChange={(e) => {
+                          setAssetAddress({ ...assetAddress, district: e.target.value });
+                          setEvalResult(null);
+                        }}
+                      />
+                      <input
+                        placeholder="Cidade"
+                        value={assetAddress.city}
+                        onChange={(e) => {
+                          setAssetAddress({ ...assetAddress, city: e.target.value });
+                          setEvalResult(null);
+                        }}
+                      />
+                      <input
+                        placeholder="UF"
+                        value={assetAddress.state}
+                        maxLength={2}
+                        onChange={(e) => {
+                          setAssetAddress({ ...assetAddress, state: e.target.value.toUpperCase() });
+                          setEvalResult(null);
+                        }}
+                      />
+                    </div>
+                  </>
                 )}
                 {!isImovel && (
                   <div style={{ display: "grid", gap: 8, gridTemplateColumns: "1fr 1fr" }}>
@@ -832,67 +900,6 @@ export function QuitConDeskModule() {
                     />
                   </div>
                 )}
-                <div style={{ display: "grid", gap: 8, gridTemplateColumns: "120px 1fr 1fr" }}>
-                  <input
-                    placeholder="CEP do bem"
-                    value={assetAddress.zip}
-                    onChange={(e) => {
-                      setAssetAddress({ ...assetAddress, zip: e.target.value });
-                      setEvalResult(null);
-                    }}
-                    onBlur={(e) => void fillAssetCep(e.target.value)}
-                  />
-                  <input
-                    placeholder="Logradouro"
-                    value={assetAddress.street}
-                    onChange={(e) => {
-                      setAssetAddress({ ...assetAddress, street: e.target.value });
-                      setEvalResult(null);
-                    }}
-                    style={{ gridColumn: "span 2" }}
-                  />
-                  <input
-                    placeholder="Número"
-                    value={assetAddress.number}
-                    onChange={(e) => {
-                      setAssetAddress({ ...assetAddress, number: e.target.value });
-                      setEvalResult(null);
-                    }}
-                  />
-                  <input
-                    placeholder="Complemento"
-                    value={assetAddress.complement}
-                    onChange={(e) => {
-                      setAssetAddress({ ...assetAddress, complement: e.target.value });
-                      setEvalResult(null);
-                    }}
-                  />
-                  <input
-                    placeholder="Bairro"
-                    value={assetAddress.district}
-                    onChange={(e) => {
-                      setAssetAddress({ ...assetAddress, district: e.target.value });
-                      setEvalResult(null);
-                    }}
-                  />
-                  <input
-                    placeholder="Cidade"
-                    value={assetAddress.city}
-                    onChange={(e) => {
-                      setAssetAddress({ ...assetAddress, city: e.target.value });
-                      setEvalResult(null);
-                    }}
-                  />
-                  <input
-                    placeholder="UF"
-                    value={assetAddress.state}
-                    maxLength={2}
-                    onChange={(e) => {
-                      setAssetAddress({ ...assetAddress, state: e.target.value.toUpperCase() });
-                      setEvalResult(null);
-                    }}
-                  />
-                </div>
               </div>
               <PartnerSociosFields value={socios} onChange={setSocios} />
               <div style={{ display: "flex", flexWrap: "wrap", gap: 14, fontSize: 12, fontWeight: 700 }}>
