@@ -22,6 +22,7 @@ def resolve_pool_investor_rate(
     pool_investor_rate_percent: Decimal | None,
     max_rate: Decimal,
     default_rate: Decimal,
+    flat_rate_label: str | None = None,
 ) -> tuple[Decimal, dict]:
     meta: dict = {
         "pool_investor_tax_status": POOL_INVESTOR_TAX_STATUS,
@@ -32,11 +33,12 @@ def resolve_pool_investor_rate(
         rate = pool_investor_rate_percent
         meta["pool_investor_rate_source"] = "MANUAL_CAMPAIGN_OVERRIDE"
     elif pool_investment_amount is not None:
-        rate = POOL_INVESTOR_RATE_PERCENT
+        rate = default_rate
         amount = _money(pool_investment_amount)
         meta["pool_investor_rate_source"] = "POOL_FLAT"
         meta["pool_investor_tier"] = "FLAT"
-        meta["pool_investor_tier_label"] = "1,6% a.m. (pool)"
+        label = flat_rate_label or f"{default_rate}% a.m. (pool)"
+        meta["pool_investor_tier_label"] = label
         meta["pool_investment_amount"] = str(amount)
     else:
         rate = default_rate

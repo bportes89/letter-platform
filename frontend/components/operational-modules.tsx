@@ -407,8 +407,9 @@ export function ProposalsModule() {
   const poolRatePreview = useMemo(() => {
     const amount = Number(poolInvestmentAmount);
     if (!amount || amount <= 0) return null;
-    return { rate: "1,6" };
-  }, [poolInvestmentAmount]);
+    const rate = newProduct === "SDC" ? "2,5" : "1,6";
+    return { rate };
+  }, [poolInvestmentAmount, newProduct]);
 
   const adminById = useMemo(() => new Map(admins.map((a) => [a.id, a.name])), [admins]);
 
@@ -625,15 +626,23 @@ export function ProposalsModule() {
             <b>Parâmetros — {newProduct === "SDC" ? "SDC" : "Flash Capital"}</b>
             <small>
               {newProduct === "SDC"
-                ? "SDC: 4,5% total · Pool investidor: 1,6% a.m."
+                ? "SDC: 4,5% a.m. juros simples (bullet) · Pool investidor: 2,5% a.m."
                 : "Flash: fruição 2,5% a.m. (Tabela Price) · Pool: 1,6% a.m."}
             </small>
           </div>
           {newProduct === "SDC" && (
             <>
               <label>
-                SDC — duração
-                <input type="number" min="1" max="60" value={duration} onChange={(e) => setDuration(Number(e.target.value))} />
+                SDC — prazo (meses até o bullet)
+                <input
+                  type="number"
+                  min="1"
+                  max="60"
+                  value={duration}
+                  onChange={(e) => setDuration(Number(e.target.value))}
+                  title="Número de meses da operação. Juros totais = crédito × 4,5% × meses (não é a taxa do investidor)."
+                />
+                <small>Padrão 12 meses. Define o vencimento bullet, não a taxa de repasse.</small>
               </label>
               <label>
                 SDC — origem
@@ -648,9 +657,12 @@ export function ProposalsModule() {
               {sdcCapitalSource === "POOL" && (
                 <>
                   <label>
-                    Pool — valor aplicado (R$)
+                    Pool — valor aplicado (R$) — opcional
                     <CurrencyInput value={poolInvestmentAmount} onChange={setPoolInvestmentAmount} />
-                    <small>Rentabilidade pool: 1,6% a.m.</small>
+                    <small>
+                      Quanto do crédito sai do pool de investidores (informativo/campanha). Vazio = repasse padrão 2,5%
+                      a.m. na memória.
+                    </small>
                   </label>
                   {poolRatePreview && (
                     <div className="notice">
@@ -667,7 +679,7 @@ export function ProposalsModule() {
                       step="0.1"
                       value={sdcPoolInvestorRate}
                       onChange={(e) => setSdcPoolInvestorRate(e.target.value)}
-                      placeholder="Deixe vazio para 1,6% padrão"
+                      placeholder="Deixe vazio para 2,5% padrão"
                     />
                   </label>
                 </>

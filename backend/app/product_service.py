@@ -13,6 +13,7 @@ from app.services import validate_quota_combination
 HUNDRED = Decimal("100")
 TWELVE = Decimal("12")
 FLASH_CAPITAL_PRODUCT = "FLASH_CREDIT"  # identificador interno preservado; exibição: Flash Capital
+SDC_POOL_INVESTOR_RATE_MONTHLY = Decimal("2.5")  # repasse pool SDC (juros simples bullet)
 
 
 def money(value: Decimal) -> Decimal:
@@ -77,12 +78,13 @@ def build_sdc_simulation_output(
         platform_spread = money(Decimal("0"))
         pool_meta: dict = {}
     else:
-        default_investor = Decimal("1.6")
+        default_investor = SDC_POOL_INVESTOR_RATE_MONTHLY
         investor_rate, pool_meta = resolve_pool_investor_rate(
             pool_investment_amount=pool_investment_amount,
             pool_investor_rate_percent=pool_investor_rate_percent,
             max_rate=monthly_interest_rate,
             default_rate=default_investor,
+            flat_rate_label="2,5% a.m. (pool SDC)",
         )
         platform_rate = money(monthly_interest_rate - investor_rate)
         investor_interest = money(principal * investor_rate / HUNDRED * duration_months)

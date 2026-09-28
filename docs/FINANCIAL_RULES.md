@@ -15,9 +15,11 @@ As regras abaixo reproduzem as premissas recebidas na documentação da LETTER. 
 
 ### Origem `POOL`
 
-- Taxa total travada: **4,5% a.m.** (juros simples).
-- Repasse padrão investidores: **1,6%**; spread plataforma: **2,9%**.
-- **Rentabilidade pool** (`pool_investment_amount`): **1,6% a.m.** para qualquer valor aplicado (spread plataforma ajusta automaticamente).
+- Taxa total travada: **4,5% a.m.** (juros simples, amortização **bullet** no vencimento).
+- **Prazo (`duration_months`)**: meses até o vencimento bullet (padrão 12) — multiplica juros totais da operação, não é a taxa em si.
+- Repasse padrão investidores pool: **2,5% a.m.**; spread plataforma: **2,0%**.
+- **Pool — valor aplicado** (`pool_investment_amount`, opcional): montante do crédito financiado pelo pool (controle/campanha); se vazio, usa o repasse padrão do produto.
+- **Rentabilidade pool** com valor aplicado informado: mesma taxa padrão **2,5% a.m.** (spread plataforma ajusta automaticamente).
 - **Campanha:** `pool_investor_rate_percent` sobrescreve a faixa automática (até 4,5%).
 - **Fiscal:** rentabilidade do investidor pool registrada como `EXEMPT_NOT_WITHHELD` (livre de retenção na origem, política LETTER).
 
@@ -25,7 +27,7 @@ As regras abaixo reproduzem as premissas recebidas na documentação da LETTER. 
 
 - Todo o spread (4,5% × meses) permanece no fundo; spread da plataforma = 0%.
 
-Exemplo canônico pool: R$ 800.000 por 12 meses gera R$ 432.000 de juros, sendo R$ 153.600 para investidores (1,6% a.m.) e R$ 278.400 de spread LETTER.
+Exemplo canônico pool: R$ 800.000 por 12 meses gera R$ 432.000 de juros, sendo R$ 240.000 para investidores (2,5% a.m.) e R$ 192.000 de spread LETTER.
 
 ## Flash Capital — `flash-capital-v1` / `flash-capital-v2` / `flash-capital-v3`
 

@@ -3388,11 +3388,11 @@ def test_sdc_pool_investor_tier_auto(client, auth_headers):
     })
     assert calculated.status_code == 201
     output = calculated.json()["output"]
-    assert output["pool_investor_rate_percent"] == "1.6"
+    assert output["pool_investor_rate_percent"] == "2.5"
     assert output["pool_investor_tier"] == "FLAT"
     assert output["pool_investor_tax_status"] == "EXEMPT_NOT_WITHHELD"
-    assert output["investor_interest"] == "153600.00"
-    assert output["platform_spread"] == "278400.00"
+    assert output["investor_interest"] == "240000.00"
+    assert output["platform_spread"] == "192000.00"
 
 
 def test_flash_capital_canonical_fee_and_commission_base(client, auth_headers):
