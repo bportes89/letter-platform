@@ -14,11 +14,29 @@ import { DESK_SIMULATION_NOTICE } from "@/lib/desk-simulation-notice";
 
 type RequiredDoc = { code: string; label: string; uploaded?: boolean };
 
+type StatusLogEntry = {
+  at: string;
+  user_name: string;
+  status: string;
+  status_label: string;
+  notes: string | null;
+  pending_doc_codes?: string[];
+};
+
 type SdcSolicitation = {
   id: string;
   status: string;
   status_label: string;
   status_notes: string | null;
+  status_log?: StatusLogEntry[];
+  pending_doc_codes?: string[];
+  partner_observation?: string | null;
+  asset_category?: string;
+  asset_category_label?: string;
+  operation_type?: string;
+  operation_type_label?: string;
+  awaiting_pendency_upload?: boolean;
+  full_required_docs?: RequiredDoc[];
   contact_name: string;
   contact_email: string;
   contact_phone: string;
@@ -39,7 +57,15 @@ type SdcSolicitation = {
   source_channel: string | null;
   source_channel_label: string | null;
   lead_id: string | null;
-  documents: Array<{ id: string; doc_type: string; document_id?: string | null; filename?: string | null; status?: string | null; created_at: string | null }>;
+  documents: Array<{
+    id: string;
+    doc_type: string;
+    upload_batch?: string;
+    document_id?: string | null;
+    filename?: string | null;
+    status?: string | null;
+    created_at: string | null;
+  }>;
   required_docs?: RequiredDoc[];
   docs_checklist_complete?: boolean;
   can_submit_documents?: boolean;
@@ -101,10 +127,17 @@ type QuotaRow = {
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
 const ASSET_TYPES = [
-  { value: "imovel", label: "Imóvel" },
-  { value: "veiculo_leve", label: "Veículo leve" },
-  { value: "veiculo_pesado", label: "Veículo pesado" },
-  { value: "maquina", label: "Máquina" },
+  { value: "imovel_urbano", label: "Imóvel urbano" },
+  { value: "imovel_rural", label: "Imóvel rural" },
+  { value: "veiculo", label: "Veículo" },
+  { value: "maquina_agricola", label: "Máquina agrícola" },
+] as const;
+
+const OPERATION_TYPES = [
+  { value: "PF_PF", label: "PF comprando de PF" },
+  { value: "PF_PJ", label: "PF comprando de PJ" },
+  { value: "PJ_PJ", label: "PJ comprando de PJ" },
+  { value: "PJ_PF", label: "PJ comprando de PF" },
 ] as const;
 
 const STATUS_OPTIONS = [
@@ -122,10 +155,12 @@ const emptyForm = {
   contact_phone: "",
   document: "",
   person_type: "PF",
+  operation_type: "PF_PF",
   address: "",
   occupation: "",
   income_value: "",
-  asset_type: "imovel",
+  partner_observation: "",
+  asset_type: "imovel_urbano",
   asset_value: "",
   asset_year: "",
   asset_paid_off: true,
@@ -185,6 +220,96 @@ function composeSdcPropertyAddress(p: SdcPropertyRow): string {
   return parts.join(" · ");
 }
 
+type ChecklistConfigRow = {
+  asset_category: string;
+  asset_category_label: string;
+  operation_type: string;
+  operation_type_label: string;
+  items: Array<{ code: string; label: string }>;
+  customized?: boolean;
+};
+
+function SdcChecklistConfigPanel() {
+  const [rows, setRows] = useState<ChecklistConfigRow[]>([]);
+  const [selectedKey, setSelectedKey] = useState("");
+  const [draftItems, setDraftItems] = useState("");
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const selected = useMemo(
+    () => rows.find((r) => `${r.asset_category}:${r.operation_type}` === selectedKey) ?? null,
+    [rows, selectedKey],
+  );
+
+  useEffect(() => {
+    api<ChecklistConfigRow[]>("/sdc/desk/checklist-config")
+      .then((list) => {
+        setRows(list);
+        if (!selectedKey && list[0]) setSelectedKey(`${list[0].asset_category}:${list[0].operation_type}`);
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : "Falha ao carregar checklists"));
+  }, []);
+
+  useEffect(() => {
+    if (!selected) return;
+    setDraftItems(JSON.stringify(selected.items, null, 2));
+  }, [selected?.asset_category, selected?.operation_type, selected?.items]);
+
+  async function saveConfig() {
+    if (!selected) return;
+    setError("");
+    setNotice("");
+    setBusy(true);
+    try {
+      const parsed = JSON.parse(draftItems) as Array<{ code: string; label: string }>;
+      if (!Array.isArray(parsed) || !parsed.length) throw new Error("Informe ao menos um item.");
+      const updated = await api<ChecklistConfigRow[]>("/sdc/desk/checklist-config", {
+        method: "PUT",
+        body: JSON.stringify({
+          asset_category: selected.asset_category,
+          operation_type: selected.operation_type,
+          items: parsed,
+        }),
+      });
+      setRows(updated);
+      setNotice("Checklist salvo.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "JSON inválido ou falha ao salvar");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div style={{ marginTop: 12 }}>
+      {error && <div className="error" style={{ marginBottom: 8 }}>{error}</div>}
+      {notice && <div className="notice" style={{ marginBottom: 8 }}>{notice}</div>}
+      <div style={{ display: "grid", gap: 10, gridTemplateColumns: "minmax(0,1fr) minmax(0,1.2fr)" }}>
+        <select value={selectedKey} onChange={(e) => setSelectedKey(e.target.value)} style={{ padding: 8, borderRadius: 8 }}>
+          {rows.map((r) => (
+            <option key={`${r.asset_category}:${r.operation_type}`} value={`${r.asset_category}:${r.operation_type}`}>
+              {r.asset_category_label} — {r.operation_type_label}{r.customized ? " *" : ""}
+            </option>
+          ))}
+        </select>
+        <button type="button" className="admin-button" disabled={busy || !selected} onClick={() => void saveConfig()}>
+          Salvar itens obrigatórios
+        </button>
+      </div>
+      <p className="muted" style={{ fontSize: 10, margin: "8px 0" }}>
+        Edite o JSON (campos <code>code</code> e <code>label</code>) para cada combinação de bem + tipo de operação. * = personalizado.
+      </p>
+      <textarea
+        value={draftItems}
+        onChange={(e) => setDraftItems(e.target.value)}
+        rows={12}
+        style={{ width: "100%", fontFamily: "monospace", fontSize: 11 }}
+      />
+    </div>
+  );
+}
+
 function chosenCreditFromEval(result: EvalResult, choice: "limite" | "solicitada" | null): string {
   if (result.requested_exceeds_limit) {
     return result.simulacao_limite?.credito || result.limite_maximo_credito || result.credito_estimado;
@@ -220,12 +345,16 @@ export function SdcDeskModule() {
   const [tapafScroll, setTapafScroll] = useState(false);
   const [tapafCb1, setTapafCb1] = useState(false);
   const [tapafCb2, setTapafCb2] = useState(false);
+  const [adminStatus, setAdminStatus] = useState("AWAITING_DOCS");
+  const [adminNotes, setAdminNotes] = useState("");
+  const [adminPending, setAdminPending] = useState<string[]>([]);
+  const [partnerObsDraft, setPartnerObsDraft] = useState("");
 
   const isInternal = isInternalProductRole(user?.role);
-  const needsYear = ["veiculo_leve", "veiculo_pesado", "maquina"].includes(form.asset_type);
-  const isImovel = form.asset_type === "imovel";
-  const isVeiculo = form.asset_type === "veiculo_leve" || form.asset_type === "veiculo_pesado";
-  const isMaquina = form.asset_type === "maquina";
+  const needsYear = ["veiculo", "veiculo_leve", "veiculo_pesado", "maquina", "maquina_agricola"].includes(form.asset_type);
+  const isImovel = ["imovel", "imovel_urbano", "imovel_rural"].includes(form.asset_type);
+  const isVeiculo = ["veiculo", "veiculo_leve", "veiculo_pesado"].includes(form.asset_type);
+  const isMaquina = ["maquina", "maquina_agricola"].includes(form.asset_type);
 
   const load = useCallback(async () => {
     const [me, list, qs] = await Promise.all([
@@ -273,6 +402,14 @@ export function SdcDeskModule() {
     if (firstMissing) setDocType(firstMissing);
     else if (selected.required_docs[0]) setDocType(selected.required_docs[0].code);
   }, [selected?.id, selected?.required_docs]);
+
+  useEffect(() => {
+    if (!selected) return;
+    setAdminStatus(selected.status);
+    setAdminNotes(selected.status_notes || "");
+    setAdminPending(selected.pending_doc_codes || []);
+    setPartnerObsDraft(selected.partner_observation || "");
+  }, [selected?.id, selected?.status, selected?.status_notes, selected?.pending_doc_codes, selected?.partner_observation]);
 
   function patchForm<K extends keyof typeof emptyForm>(key: K, value: (typeof emptyForm)[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -357,6 +494,8 @@ export function SdcDeskModule() {
     const assetValue = resolvedAssetValue();
     return {
       asset_type: form.asset_type,
+      asset_category: form.asset_type,
+      operation_type: form.operation_type,
       asset_value: moneyPayload(String(assetValue)),
       asset_year: resolvedAssetYear(),
       asset_paid_off: form.asset_paid_off,
@@ -465,6 +604,9 @@ export function SdcDeskModule() {
             ? propsPayload.map((p) => p.full_address).filter(Boolean).join("\n---\n") || null
             : null,
           partners_json: form.person_type === "PJ" ? sociosPayload(socios) : [],
+          asset_category: form.asset_type,
+          operation_type: form.operation_type,
+          partner_observation: form.partner_observation.trim() || null,
         }),
       });
       setNotice(`SDC gravado: ${created.contact_name} — ${created.status_label}. Conclua o TAPAF no painel ao lado.`);
@@ -554,18 +696,43 @@ export function SdcDeskModule() {
     }
   }
 
-  async function updateStatus(item: SdcSolicitation, status: string) {
+  async function updateStatus(
+    item: SdcSolicitation,
+    status: string,
+    opts?: { status_notes?: string; pending_doc_codes?: string[] },
+  ) {
     setError("");
     setBusy(true);
     try {
       const updated = await api<SdcSolicitation>(`/sdc/desk/solicitations/${item.id}`, {
         method: "PATCH",
-        body: JSON.stringify({ status }),
+        body: JSON.stringify({
+          status,
+          status_notes: opts?.status_notes ?? null,
+          pending_doc_codes: opts?.pending_doc_codes ?? [],
+        }),
       });
       setNotice(`${updated.contact_name}: ${updated.status_label}`);
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Falha ao atualizar status");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function savePartnerObservation(item: SdcSolicitation) {
+    setError("");
+    setBusy(true);
+    try {
+      await api<SdcSolicitation>(`/sdc/desk/solicitations/${item.id}/partner-observation`, {
+        method: "PATCH",
+        body: JSON.stringify({ partner_observation: partnerObsDraft.trim() || null }),
+      });
+      setNotice("Observação salva.");
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Falha ao salvar observação");
     } finally {
       setBusy(false);
     }
@@ -578,6 +745,7 @@ export function SdcDeskModule() {
       const body = new FormData();
       body.append("file", file);
       body.append("doc_type", type);
+      if (item.awaiting_pendency_upload) body.append("upload_batch", "PENDENCY");
       await apiForm(`/sdc/desk/solicitations/${item.id}/documents`, body);
       setNotice(`Documento anexado em ${item.contact_name}`);
       await load();
@@ -593,7 +761,11 @@ export function SdcDeskModule() {
     setBusy(true);
     try {
       const updated = await api<SdcSolicitation>(`/sdc/desk/solicitations/${item.id}/submit-documents`, { method: "POST" });
-      setNotice(`Documentação transmitida — ${updated.contact_name} em análise LETTER.`);
+      setNotice(
+        updated.status === "UNDER_REVIEW" && updated.awaiting_pendency_upload === false && item.status === "PENDING"
+          ? `Pendências reenviadas — ${updated.contact_name} em análise LETTER.`
+          : `Documentação transmitida — ${updated.contact_name} em análise LETTER.`,
+      );
       setSelectedId(updated.id);
       await load();
     } catch (e) {
@@ -730,6 +902,20 @@ export function SdcDeskModule() {
                 >
                   {ASSET_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
                 </select>
+                <select
+                  value={form.operation_type}
+                  onChange={(e) => patchForm("operation_type", e.target.value)}
+                  title="Tipo de operação"
+                >
+                  {OPERATION_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+                </select>
+                <textarea
+                  placeholder="Observação do parceiro sobre esta proposta (opcional)"
+                  value={form.partner_observation}
+                  onChange={(e) => patchForm("partner_observation", e.target.value)}
+                  rows={2}
+                  style={{ gridColumn: "1 / -1" }}
+                />
                 {isMaquina && (
                   <>
                     <label>
@@ -990,7 +1176,9 @@ export function SdcDeskModule() {
               {!evalResult && !tapafCheckout && <p className="muted" style={{ marginTop: 10 }}>Preencha e clique em Calcular viabilidade.</p>}
               {evalResult?.required_docs?.length && !tapafCheckout && (
                 <p className="muted" style={{ fontSize: 10, marginTop: 8 }}>
-                  Após gravar, na aba Acompanhamento você anexará {evalResult.required_docs.length} documentos do checklist ({form.asset_type === "imovel" ? "imóvel" : "bem"}).
+                  Após gravar, na aba Acompanhamento você anexará {evalResult.required_docs.length} documentos do checklist (
+                  {OPERATION_TYPES.find((o) => o.value === form.operation_type)?.label ?? "operação"} ·{" "}
+                  {ASSET_TYPES.find((a) => a.value === form.asset_type)?.label ?? "bem"}).
                 </p>
               )}
               {evalResult?.viable && !tapafCheckout && (
@@ -1145,14 +1333,14 @@ export function SdcDeskModule() {
                     </td>
                     <td style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
                       {isInternal && (
-                        <select
-                          value={item.status}
-                          disabled={busy}
-                          onChange={(e) => void updateStatus(item, e.target.value)}
-                          style={{ padding: "6px 8px", borderRadius: 8, border: "1px solid var(--line)", fontSize: 11 }}
+                        <button
+                          type="button"
+                          className="table-action"
+                          onClick={() => setSelectedId(item.id)}
+                          title="Ver retorno e pendências no detalhe abaixo"
                         >
-                          {STATUS_OPTIONS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-                        </select>
+                          Esteira
+                        </button>
                       )}
                       <label className="table-action" style={{ cursor: "pointer" }}>
                         <FileUp />
@@ -1196,10 +1384,111 @@ export function SdcDeskModule() {
                   label={selected.source_channel_label}
                   leadId={selected.lead_id}
                 />
+                {(selected.operation_type_label || selected.asset_category_label) && (
+                  <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>
+                    {selected.asset_category_label || selected.asset_type_label}
+                    {selected.operation_type_label ? ` · ${selected.operation_type_label}` : ""}
+                  </div>
+                )}
+                {!isInternal && (
+                  <div style={{ marginTop: 12 }}>
+                    <b style={{ fontSize: 12 }}>Observação do parceiro</b>
+                    <textarea
+                      value={partnerObsDraft}
+                      onChange={(e) => setPartnerObsDraft(e.target.value)}
+                      rows={3}
+                      style={{ width: "100%", marginTop: 6, fontSize: 12 }}
+                      placeholder="Informações adicionais sobre a proposta…"
+                    />
+                    <button type="button" className="table-action" style={{ marginTop: 6 }} disabled={busy} onClick={() => void savePartnerObservation(selected)}>
+                      Salvar observação
+                    </button>
+                  </div>
+                )}
+                {selected.partner_observation && isInternal && (
+                  <div style={{ marginTop: 10, fontSize: 11 }}>
+                    <b>Observação do parceiro:</b> {selected.partner_observation}
+                  </div>
+                )}
+                {isInternal && (
+                  <div style={{ marginTop: 14, padding: 12, borderRadius: 10, border: "1px solid var(--line)", background: "#fafcfb" }}>
+                    <b style={{ fontSize: 12 }}>Retorno LETTER (esteira)</b>
+                    <div style={{ display: "grid", gap: 8, marginTop: 8, gridTemplateColumns: "1fr 1fr" }}>
+                      <select value={adminStatus} onChange={(e) => setAdminStatus(e.target.value)} style={{ padding: 8, borderRadius: 8, border: "1px solid var(--line)" }}>
+                        {STATUS_OPTIONS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+                      </select>
+                      <button
+                        type="button"
+                        className="admin-button"
+                        disabled={busy}
+                        onClick={() => {
+                          if (adminStatus === "PENDING" && !adminPending.length) {
+                            setError("Marque os documentos pendentes antes de salvar.");
+                            return;
+                          }
+                          void updateStatus(selected, adminStatus, {
+                            status_notes: adminNotes.trim() || null,
+                            pending_doc_codes: adminStatus === "PENDING" ? adminPending : [],
+                          });
+                        }}
+                      >
+                        Salvar retorno
+                      </button>
+                    </div>
+                    <textarea
+                      value={adminNotes}
+                      onChange={(e) => setAdminNotes(e.target.value)}
+                      rows={3}
+                      placeholder="Mensagem de retorno ao parceiro (pendência ou andamento)…"
+                      style={{ width: "100%", marginTop: 8, fontSize: 12 }}
+                    />
+                    {adminStatus === "PENDING" && (
+                      <div style={{ marginTop: 8 }}>
+                        <small className="muted">Documentos a reenviar (lote separado):</small>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 6 }}>
+                          {(selected.full_required_docs ?? selected.required_docs ?? []).map((d) => (
+                            <label key={d.code} style={{ fontSize: 11, display: "flex", gap: 6, alignItems: "center" }}>
+                              <input
+                                type="checkbox"
+                                checked={adminPending.includes(d.code)}
+                                onChange={(e) => {
+                                  setAdminPending((prev) =>
+                                    e.target.checked ? [...prev, d.code] : prev.filter((c) => c !== d.code),
+                                  );
+                                }}
+                              />
+                              {d.label}
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+                {(selected.status_log?.length ?? 0) > 0 && (
+                  <div style={{ marginTop: 12 }}>
+                    <b style={{ fontSize: 12 }}>Histórico de retornos</b>
+                    <ul style={{ margin: "6px 0 0", paddingLeft: 18, fontSize: 11, lineHeight: 1.5 }}>
+                      {selected.status_log!.map((entry, idx) => (
+                        <li key={`${entry.at}-${idx}`}>
+                          <strong>{entry.status_label}</strong> — {entry.user_name} ·{" "}
+                          {entry.at ? new Date(entry.at).toLocaleString("pt-BR") : "—"}
+                          {entry.notes ? <div className="muted">{entry.notes}</div> : null}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
                 <div style={{ marginTop: 12 }}>
-                  <b style={{ fontSize: 12 }}>Checklist documental ({selected.asset_type_label}{selected.person_type === "PJ" ? " · PJ" : ""})</b>
+                  <b style={{ fontSize: 12 }}>
+                    Checklist documental
+                    {selected.awaiting_pendency_upload ? " — somente pendências" : ""}
+                  </b>
                   <p className="muted" style={{ fontSize: 11, margin: "6px 0 8px" }}>
                     Anexe cada item do checklist. O botão <em>Transmitir documentação</em> só libera quando todos estiverem marcados.
+                    {selected.awaiting_pendency_upload
+                      ? " Os arquivos de pendência ficam em lote separado dos documentos iniciais."
+                      : ""}
                   </p>
                   <ul style={{ margin: "0 0 12px", paddingLeft: 18, fontSize: 11, lineHeight: 1.5 }}>
                     {(selected.required_docs ?? []).map((d) => (
@@ -1208,7 +1497,7 @@ export function SdcDeskModule() {
                       </li>
                     ))}
                   </ul>
-                  {!isInternal && selected.status === "AWAITING_DOCS" && (
+                  {!isInternal && (selected.status === "AWAITING_DOCS" || selected.awaiting_pendency_upload) && (
                     <button
                       type="button"
                       className="admin-button"
@@ -1216,10 +1505,12 @@ export function SdcDeskModule() {
                       disabled={busy || !selected.can_submit_documents}
                       onClick={() => void submitDocuments(selected)}
                     >
-                      Transmitir documentação para análise
+                      {selected.awaiting_pendency_upload
+                        ? "Enviar documentação pendente"
+                        : "Transmitir documentação para análise"}
                     </button>
                   )}
-                  {selected.status === "AWAITING_DOCS" && !selected.can_submit_documents && (
+                  {(selected.status === "AWAITING_DOCS" || selected.awaiting_pendency_upload) && !selected.can_submit_documents && (
                     <p className="muted" style={{ fontSize: 10, margin: "0 0 10px" }}>
                       Faltam itens do checklist — anexe todos os tipos obrigatórios antes de transmitir.
                     </p>
@@ -1227,8 +1518,15 @@ export function SdcDeskModule() {
                 </div>
                 <AdminDocumentPanel
                   title={`Arquivos anexados (${selected.documents.length})`}
-                  hint="Escolha o tipo do checklist no seletor e anexe o arquivo correspondente."
-                  documents={selected.documents}
+                  hint={
+                    selected.awaiting_pendency_upload
+                      ? "Anexe apenas os tipos marcados na pendência — serão enviados em lote separado."
+                      : "Escolha o tipo do checklist no seletor e anexe o arquivo correspondente."
+                  }
+                  documents={selected.documents.map((d) => ({
+                    ...d,
+                    filename: d.upload_batch === "PENDENCY" ? `[Pendência] ${d.filename || d.doc_type}` : d.filename,
+                  }))}
                   busy={busy}
                   canDelete={isInternal}
                   docTypeOptions={[...sdcDocTypeOptions, { value: "SDC_SUPPORT", label: "Documento de apoio (opcional)" }]}
@@ -1267,6 +1565,21 @@ export function SdcDeskModule() {
           </div>
         )}
       </section>
+
+      {isInternal ? (
+        <section className="panel operational-panel" style={{ marginTop: 16 }}>
+          <div className="page-heading" style={{ marginBottom: 8 }}>
+            <div>
+              <span className="eyebrow dark">INTERNO</span>
+              <h2 style={{ fontSize: 18, margin: "6px 0" }}>Checklists SDC (documentos obrigatórios)</h2>
+              <p className="muted">Configure os itens por tipo de bem e tipo de operação (PF/PJ).</p>
+            </div>
+          </div>
+          <div style={{ padding: "0 18px 18px" }}>
+            <SdcChecklistConfigPanel />
+          </div>
+        </section>
+      ) : null}
 
       {isInternal ? (
         <section className="panel operational-panel" style={{ marginTop: 16 }}>

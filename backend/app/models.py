@@ -416,6 +416,11 @@ class SdcSolicitation(TimestampMixin, Base):
     evaluation_json: Mapped[str] = mapped_column(Text, default="{}")
     proposal_id: Mapped[str | None] = mapped_column(ForeignKey("proposals.id"), index=True)
     quota_id: Mapped[str | None] = mapped_column(ForeignKey("quotas.id"), index=True)
+    asset_category: Mapped[str | None] = mapped_column(String(40), index=True)
+    operation_type: Mapped[str | None] = mapped_column(String(20), index=True)
+    partner_observation: Mapped[str | None] = mapped_column(Text)
+    status_log_json: Mapped[str | None] = mapped_column(Text)
+    pending_doc_codes_json: Mapped[str | None] = mapped_column(Text)
 
 
 class SdcSolicitationDocument(TimestampMixin, Base):
@@ -427,6 +432,19 @@ class SdcSolicitationDocument(TimestampMixin, Base):
     doc_type: Mapped[str] = mapped_column(String(80), default="SDC_SUPPORT")
     comment: Mapped[str | None] = mapped_column(Text)
     uploaded_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"))
+    upload_batch: Mapped[str] = mapped_column(String(20), default="INITIAL", index=True)
+
+
+class SdcChecklistConfig(TimestampMixin, Base):
+    """Itens obrigatórios por categoria de bem + tipo de operação (configurável pela LETTER)."""
+
+    __tablename__ = "sdc_checklist_configs"
+    __table_args__ = (UniqueConstraint("organization_id", "asset_category", "operation_type", name="uq_sdc_checklist_org_cat_op"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    asset_category: Mapped[str] = mapped_column(String(40), index=True)
+    operation_type: Mapped[str] = mapped_column(String(20), index=True)
+    items_json: Mapped[str] = mapped_column(Text, default="[]")
 
 
 class FlashSolicitation(TimestampMixin, Base):

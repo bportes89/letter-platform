@@ -2821,6 +2821,9 @@ class VenderCotaCloseRequest(BaseModel):
 
 class SdcDeskEvaluateRequest(BaseModel):
     asset_type: str = Field(min_length=2, max_length=40)
+    asset_category: str | None = Field(default=None, max_length=40)
+    operation_type: str | None = Field(default=None, max_length=20)
+    person_type: str = "PF"
     asset_value: Decimal = Field(gt=0)
     asset_year: int | None = Field(default=None, ge=1950, le=2100)
     asset_paid_off: bool = True
@@ -2850,11 +2853,30 @@ class SdcDeskStoreRequest(SdcDeskEvaluateRequest):
     asset_full_address: str | None = Field(default=None, max_length=4000)
     partners_json: list[dict] = Field(default_factory=list)
     chosen_credit_amount: Decimal | None = Field(default=None, gt=0)
+    asset_category: str | None = Field(default=None, max_length=40)
+    operation_type: str | None = Field(default=None, max_length=20)
+    partner_observation: str | None = Field(default=None, max_length=8000)
 
 
 class SdcDeskStatusUpdate(BaseModel):
     status: str = Field(min_length=3, max_length=40)
     status_notes: str | None = Field(default=None, max_length=4000)
+    pending_doc_codes: list[str] = Field(default_factory=list)
+
+
+class SdcDeskPartnerObservationUpdate(BaseModel):
+    partner_observation: str | None = Field(default=None, max_length=8000)
+
+
+class SdcChecklistConfigItem(BaseModel):
+    code: str = Field(min_length=1, max_length=80)
+    label: str = Field(min_length=2, max_length=500)
+
+
+class SdcChecklistConfigSave(BaseModel):
+    asset_category: str = Field(min_length=2, max_length=40)
+    operation_type: str = Field(min_length=3, max_length=20)
+    items: list[SdcChecklistConfigItem] = Field(min_length=1)
 
 
 class SdcDeskSaleCreate(BaseModel):

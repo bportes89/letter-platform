@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from json import dumps as json_dumps
 from json import loads as json_loads
@@ -15,6 +15,13 @@ from sqlalchemy.orm import Session
 from app.desk_solicitation_meta import desk_payload_extras, evaluation_json_with_meta, evaluation_meta
 from app.document_service import persist_upload, purge_document, purge_document_links
 from app.models import Document, Lead, Proposal, Quota, Role, SdcSolicitation, SdcSolicitationDocument, User
+from app.sdc_checklist_service import (
+    ASSET_CATEGORY_LABELS,
+    OPERATION_TYPE_LABELS,
+    normalize_asset_category,
+    normalize_operation_type,
+    resolve_required_docs,
+)
 from app.network_service import PARTNER_NETWORK_ROLES
 from app.services import money
 
@@ -26,8 +33,25 @@ DESK_ROLES = frozenset({
     Role.PARTNER,
 })
 
-TIPOS_VEICULO = frozenset({"veiculo_leve", "veiculo_pesado", "maquina", "carro", "caminhao", "maquina_rural"})
-TIPOS_IMOVEL = frozenset({"imovel", "casa", "lote", "imovel_rural", "imovel_comercial", "apartamento"})
+TIPOS_VEICULO = frozenset({
+    "veiculo",
+    "veiculo_leve",
+    "veiculo_pesado",
+    "maquina",
+    "maquina_agricola",
+    "carro",
+    "caminhao",
+    "maquina_rural",
+})
+TIPOS_IMOVEL = frozenset({
+    "imovel",
+    "imovel_urbano",
+    "casa",
+    "lote",
+    "imovel_rural",
+    "imovel_comercial",
+    "apartamento",
+})
 IDADE_MAX = {
     "carro": 10,
     "caminhao": 15,
@@ -35,6 +59,8 @@ IDADE_MAX = {
     "veiculo_leve": 10,
     "veiculo_pesado": 15,
     "maquina": 5,
+    "maquina_agricola": 5,
+    "veiculo": 10,
 }
 PORC_CREDITO_VEICULO = Decimal("0.50")
 PORC_CREDITO_IMOVEL = Decimal("0.35")
@@ -60,36 +86,8 @@ STATUS_LABELS = {
     STATUS_CANCELLED: "Cancelado",
 }
 
-DOCS_CLIENT_BASE = [
-    {"code": "RG_CPF", "label": "RG e CPF (ou CNH) — proponente"},
-    {"code": "COMPROVANTE_RENDA", "label": "Comprovante de renda / faturamento (últimos 3 meses)"},
-    {"code": "COMPROVANTE_ENDERECO", "label": "Comprovante de endereço do proponente"},
-]
-DOCS_PJ = [
-    {"code": "CONTRATO_SOCIAL", "label": "Contrato social / alterações consolidadas (PJ)"},
-    {"code": "QSA_REPRESENTANTES", "label": "QSA / procuração dos representantes legais (PJ)"},
-]
-DOCS_SDC_IMOVEL = [
-    {"code": "MATRICULA_ENOTARIADO", "label": "Matrícula atualizada (e-notariado)"},
-    {"code": "LAUDO_AVALIACAO", "label": "Laudo de avaliação do imóvel em garantia"},
-    {"code": "IPTU_IPTUR", "label": "IPTU / carnê do imóvel (exercício vigente)"},
-    {"code": "SERASA", "label": "Consulta Serasa / restrições cadastrais"},
-    {"code": "BACEN", "label": "Consulta Bacen (SCR)"},
-]
-DOCS_SDC_VEHICLE = [
-    {"code": "CRLV", "label": "CRLV (DETRAN — consulta prevalece)"},
-    {"code": "FIPE_MOLICAR", "label": "Tabela FIPE ou Molicar"},
-    {"code": "LAUDO_AVALIACAO", "label": "Laudo de avaliação do veículo"},
-    {"code": "COMPROVANTE_QUITACAO", "label": "Comprovante de quitação / ausência de gravame"},
-    {"code": "SERASA", "label": "Consulta Serasa / restrições cadastrais"},
-    {"code": "BACEN", "label": "Consulta Bacen (SCR)"},
-]
-DOCS_SDC_MAQUINA = [
-    {"code": "NOTA_FISCAL_MAQUINA", "label": "Nota fiscal / registro da máquina ou equipamento"},
-    {"code": "LAUDO_AVALIACAO", "label": "Laudo de avaliação do equipamento"},
-    {"code": "SERASA", "label": "Consulta Serasa / restrições cadastrais"},
-    {"code": "BACEN", "label": "Consulta Bacen (SCR)"},
-]
+UPLOAD_BATCH_INITIAL = "INITIAL"
+UPLOAD_BATCH_PENDENCY = "PENDENCY"
 
 TIPOS_LABEL = {
     "imovel": "Imóvel",
@@ -104,7 +102,95 @@ TIPOS_LABEL = {
     "carro": "Veículo leve",
     "caminhao": "Veículo pesado",
     "maquina_rural": "Máquina",
+    "imovel_urbano": "Imóvel urbano",
+    "veiculo": "Veículo",
+    "maquina_agricola": "Máquina agrícola",
 }
+
+
+def _item_asset_category(item: SdcSolicitation) -> str:
+    if item.asset_category:
+        return normalize_asset_category(item.asset_category)
+    return normalize_asset_category(item.asset_type)
+
+
+def _item_operation_type(item: SdcSolicitation) -> str:
+    return normalize_operation_type(item.operation_type, item.person_type)
+
+
+def sdc_required_docs(
+    asset_type: str,
+    person_type: str = "PF",
+    *,
+    db: Session | None = None,
+    organization_id: str | None = None,
+    operation_type: str | None = None,
+    asset_category: str | None = None,
+) -> list[dict]:
+    category = normalize_asset_category(asset_category or asset_type)
+    op = normalize_operation_type(operation_type, person_type)
+    return resolve_required_docs(
+        db,
+        organization_id,
+        asset_type=category,
+        operation_type=op,
+        person_type=person_type,
+    )
+
+
+def _load_status_log(item: SdcSolicitation) -> list[dict]:
+    raw = item.status_log_json
+    if not raw:
+        return []
+    try:
+        parsed = json_loads(raw)
+        return parsed if isinstance(parsed, list) else []
+    except (TypeError, ValueError):
+        return []
+
+
+def _save_status_log(item: SdcSolicitation, entries: list[dict]) -> None:
+    item.status_log_json = json_dumps(entries, ensure_ascii=False)
+
+
+def _load_pending_codes(item: SdcSolicitation) -> list[str]:
+    raw = item.pending_doc_codes_json
+    if not raw:
+        return []
+    try:
+        parsed = json_loads(raw)
+        if isinstance(parsed, list):
+            return [str(c).strip().upper() for c in parsed if c]
+    except (TypeError, ValueError):
+        pass
+    return []
+
+
+def _save_pending_codes(item: SdcSolicitation, codes: list[str]) -> None:
+    item.pending_doc_codes_json = json_dumps(codes, ensure_ascii=False) if codes else None
+
+
+def _append_status_log(
+    item: SdcSolicitation,
+    user: User,
+    *,
+    status: str,
+    notes: str | None = None,
+    pending_doc_codes: list[str] | None = None,
+) -> None:
+    entries = _load_status_log(item)
+    entries.append(
+        {
+            "at": datetime.now(UTC).isoformat(),
+            "user_id": user.id,
+            "user_name": (user.name or user.email or user.id),
+            "status": status,
+            "status_label": STATUS_LABELS.get(status, status),
+            "notes": (notes or "").strip() or None,
+            "pending_doc_codes": pending_doc_codes or [],
+        }
+    )
+    _save_status_log(item, entries)
 
 
 def assert_desk_access(user: User) -> None:
@@ -112,35 +198,62 @@ def assert_desk_access(user: User) -> None:
         raise HTTPException(status_code=403, detail="Sem acesso à mesa comercial SDC")
 
 
-def sdc_required_docs(asset_type: str, person_type: str = "PF") -> list[dict]:
-    """Checklist documental SDC por tipo de bem e PF/PJ (mesa comercial)."""
-    tipo = (asset_type or "").strip().lower()
-    pt = (person_type or "PF").strip().upper()
-    rows: list[dict] = list(DOCS_CLIENT_BASE)
-    if pt == "PJ":
-        rows.extend(DOCS_PJ)
-    if tipo in TIPOS_IMOVEL:
-        rows.extend(DOCS_SDC_IMOVEL)
-    elif tipo == "maquina":
-        rows.extend(DOCS_SDC_MAQUINA)
-    elif tipo in TIPOS_VEICULO:
-        rows.extend(DOCS_SDC_VEHICLE)
-    return rows
+def _required_docs_for_item(db: Session | None, item: SdcSolicitation) -> list[dict]:
+    return sdc_required_docs(
+        item.asset_type,
+        item.person_type,
+        db=db,
+        organization_id=item.organization_id,
+        operation_type=item.operation_type,
+        asset_category=_item_asset_category(item),
+    )
 
 
-def _allowed_doc_types(asset_type: str, person_type: str) -> set[str]:
-    codes = {d["code"] for d in sdc_required_docs(asset_type, person_type)}
+def _allowed_doc_types(db: Session | None, item: SdcSolicitation) -> set[str]:
+    codes = {d["code"] for d in _required_docs_for_item(db, item)}
     codes.add("SDC_SUPPORT")
+    if item.status == STATUS_PENDING:
+        pending = set(_load_pending_codes(item))
+        if pending:
+            return pending | {"SDC_SUPPORT"}
     return codes
 
 
-def _checklist_uploaded_codes(docs: list[SdcSolicitationDocument]) -> set[str]:
-    return {d.doc_type for d in docs if d.doc_type}
+def _checklist_uploaded_codes(
+    docs: list[SdcSolicitationDocument],
+    *,
+    upload_batch: str | None = None,
+) -> set[str]:
+    out: set[str] = set()
+    for d in docs:
+        if not d.doc_type or d.doc_type == "SDC_SUPPORT":
+            continue
+        batch = (d.upload_batch or UPLOAD_BATCH_INITIAL).upper()
+        if upload_batch and batch != upload_batch.upper():
+            continue
+        out.add(d.doc_type)
+    return out
 
 
-def checklist_complete_for(item: SdcSolicitation, docs: list[SdcSolicitationDocument]) -> bool:
-    required = {d["code"] for d in sdc_required_docs(item.asset_type, item.person_type)}
-    uploaded = _checklist_uploaded_codes(docs)
+def _active_required_codes(item: SdcSolicitation, db: Session | None) -> set[str]:
+    if item.status == STATUS_PENDING:
+        pending = _load_pending_codes(item)
+        if pending:
+            return set(pending)
+    return {d["code"] for d in _required_docs_for_item(db, item)}
+
+
+def checklist_complete_for(
+    item: SdcSolicitation,
+    docs: list[SdcSolicitationDocument],
+    db: Session | None = None,
+) -> bool:
+    if item.status == STATUS_PENDING and _load_pending_codes(item):
+        required = _active_required_codes(item, db)
+        uploaded = _checklist_uploaded_codes(docs, upload_batch=UPLOAD_BATCH_PENDENCY)
+        return required.issubset(uploaded)
+    required = _active_required_codes(item, db)
+    uploaded = _checklist_uploaded_codes(docs, upload_batch=UPLOAD_BATCH_INITIAL)
     return required.issubset(uploaded)
 
 
@@ -151,12 +264,31 @@ def submit_documents(db: Session, user: User, item: SdcSolicitation) -> SdcSolic
         raise HTTPException(status_code=403, detail="Transmissão é ação do parceiro; admin altera status manualmente.")
     if item.status in STATUS_TERMINAL:
         raise HTTPException(status_code=422, detail="Solicitação encerrada — não é possível transmitir documentação.")
+    docs = list_documents(db, item.id)
+    if item.status == STATUS_PENDING and _load_pending_codes(item):
+        if not checklist_complete_for(item, docs, db):
+            required = _load_pending_codes(item)
+            uploaded = _checklist_uploaded_codes(docs, upload_batch=UPLOAD_BATCH_PENDENCY)
+            missing_codes = [c for c in required if c not in uploaded]
+            catalog = {d["code"]: d for d in _required_docs_for_item(db, item)}
+            missing = [catalog.get(c, {"code": c, "label": c}) for c in missing_codes]
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "message": "Anexe todos os documentos pendentes antes de reenviar.",
+                    "missing": missing,
+                },
+            )
+        item.status = STATUS_UNDER_REVIEW
+        _save_pending_codes(item, [])
+        _append_status_log(item, user, status=STATUS_UNDER_REVIEW, notes="Documentação pendente reenviada pelo parceiro.")
+        db.flush()
+        return item
     if item.status != STATUS_AWAITING_DOCS:
         raise HTTPException(status_code=422, detail="Documentação já foi transmitida ou está em análise.")
-    docs = list_documents(db, item.id)
-    if not checklist_complete_for(item, docs):
-        uploaded = _checklist_uploaded_codes(docs)
-        missing = [d for d in sdc_required_docs(item.asset_type, item.person_type) if d["code"] not in uploaded]
+    if not checklist_complete_for(item, docs, db):
+        uploaded = _checklist_uploaded_codes(docs, upload_batch=UPLOAD_BATCH_INITIAL)
+        missing = [d for d in _required_docs_for_item(db, item) if d["code"] not in uploaded]
         raise HTTPException(
             status_code=422,
             detail={
@@ -165,6 +297,7 @@ def submit_documents(db: Session, user: User, item: SdcSolicitation) -> SdcSolic
             },
         )
     item.status = STATUS_UNDER_REVIEW
+    _append_status_log(item, user, status=STATUS_UNDER_REVIEW, notes="Documentação inicial transmitida pelo parceiro.")
     db.flush()
     return item
 
@@ -258,9 +391,16 @@ def evaluate_sdc_desk(data: dict) -> dict:
     if valor <= 0:
         motivos.append("Informe o valor total dos bens.")
 
-    asset_type_key = str(data.get("asset_type") or data.get("tipo_bem") or "").strip().lower()
+    asset_type_key = str(data.get("asset_type") or data.get("tipo_bem") or data.get("asset_category") or "").strip().lower()
     person_type = str(data.get("person_type") or "PF").strip().upper()
-    required_docs = sdc_required_docs(asset_type_key, person_type)
+    operation_type = data.get("operation_type")
+    asset_category = data.get("asset_category") or asset_type_key
+    required_docs = sdc_required_docs(
+        asset_type_key,
+        person_type,
+        operation_type=operation_type,
+        asset_category=asset_category,
+    )
 
     if motivos:
         return {
@@ -502,11 +642,18 @@ def store_solicitation(db: Session, user: User, payload: dict) -> SdcSolicitatio
     if _is_admin(user) and payload.get("partner_user_id"):
         partner_id = payload["partner_user_id"]
 
+    asset_type_key = str(payload["asset_type"]).strip().lower()
+    asset_category = normalize_asset_category(payload.get("asset_category") or asset_type_key)
+    operation_type = normalize_operation_type(payload.get("operation_type"), payload.get("person_type"))
+
     item = SdcSolicitation(
         organization_id=user.organization_id,
         partner_user_id=partner_id,
         created_by_id=user.id,
         status=STATUS_AWAITING_DOCS,
+        asset_category=asset_category,
+        operation_type=operation_type,
+        partner_observation=(str(payload.get("partner_observation") or "").strip() or None),
         contact_name=str(payload["contact_name"]).strip(),
         contact_email=str(payload["contact_email"]).strip().lower(),
         contact_phone=str(payload.get("contact_phone") or "").strip(),
@@ -515,7 +662,7 @@ def store_solicitation(db: Session, user: User, payload: dict) -> SdcSolicitatio
         address=str(payload.get("address") or "").strip() or None,
         occupation=str(payload.get("occupation") or "").strip() or None,
         income_value=money(_dec(payload.get("income_value") or 0)),
-        asset_type=str(payload["asset_type"]).strip().lower(),
+        asset_type=asset_type_key,
         asset_value=money(_dec(payload["asset_value"])),
         asset_year=int(payload["asset_year"]) if payload.get("asset_year") else None,
         asset_paid_off=bool(payload.get("asset_paid_off", True)),
@@ -552,19 +699,57 @@ def store_solicitation(db: Session, user: User, payload: dict) -> SdcSolicitatio
     return item
 
 
-def update_status(db: Session, user: User, item: SdcSolicitation, status: str, notes: str | None = None) -> SdcSolicitation:
+def update_status(
+    db: Session,
+    user: User,
+    item: SdcSolicitation,
+    status: str,
+    notes: str | None = None,
+    *,
+    pending_doc_codes: list[str] | None = None,
+) -> SdcSolicitation:
     assert_desk_access(user)
     if not _is_admin(user):
         raise HTTPException(status_code=403, detail="Apenas operação LETTER altera o status do SDC")
     status = status.upper().strip()
     if status not in STATUS_LABELS:
         raise HTTPException(status_code=422, detail="Status inválido")
-    if item.status in STATUS_TERMINAL and status != item.status:
-        # allow admin override only from PENDING/UNDER_REVIEW typically; still allow change with notes
-        pass
+    if status == STATUS_PENDING:
+        codes = [str(c).strip().upper() for c in (pending_doc_codes or []) if c]
+        if not codes:
+            raise HTTPException(
+                status_code=422,
+                detail="Ao pendenciar, informe quais itens do checklist devem ser reenviados.",
+            )
+        allowed = {d["code"] for d in _required_docs_for_item(db, item)}
+        invalid = [c for c in codes if c not in allowed]
+        if invalid:
+            raise HTTPException(status_code=422, detail=f"Itens inválidos no checklist: {', '.join(invalid)}")
+        _save_pending_codes(item, codes)
+    elif status != STATUS_PENDING:
+        if status != item.status or not _load_pending_codes(item):
+            _save_pending_codes(item, [])
     item.status = status
     if notes is not None:
         item.status_notes = notes
+    _append_status_log(
+        item,
+        user,
+        status=status,
+        notes=notes,
+        pending_doc_codes=_load_pending_codes(item) if status == STATUS_PENDING else [],
+    )
+    db.flush()
+    return item
+
+
+def update_partner_observation(db: Session, user: User, item: SdcSolicitation, observation: str | None) -> SdcSolicitation:
+    assert_desk_access(user)
+    if _is_admin(user):
+        raise HTTPException(status_code=403, detail="Observação do parceiro é preenchida pelo parceiro.")
+    if item.status in STATUS_TERMINAL:
+        raise HTTPException(status_code=422, detail="Solicitação encerrada.")
+    item.partner_observation = (observation or "").strip() or None
     db.flush()
     return item
 
@@ -577,6 +762,7 @@ async def add_document(
     upload: UploadFile,
     doc_type: str,
     comment: str | None = None,
+    upload_batch: str | None = None,
 ) -> SdcSolicitationDocument:
     assert_desk_access(user)
     if item.status in STATUS_TERMINAL and not _is_admin(user):
@@ -584,9 +770,18 @@ async def add_document(
     if item.status == STATUS_APPROVED and not _is_admin(user):
         raise HTTPException(status_code=422, detail="SDC aprovado não aceita novos documentos do parceiro.")
     dtype = (doc_type or "SDC_SUPPORT").strip().upper()[:80]
-    allowed = _allowed_doc_types(item.asset_type, item.person_type)
+    allowed = _allowed_doc_types(db, item)
     if dtype not in allowed:
         raise HTTPException(status_code=422, detail=f"Tipo de documento inválido para este SDC. Use um item do checklist.")
+    batch = (upload_batch or "").strip().upper() or UPLOAD_BATCH_INITIAL
+    if item.status == STATUS_PENDING and _load_pending_codes(item):
+        if dtype != "SDC_SUPPORT" and dtype not in _load_pending_codes(item):
+            raise HTTPException(status_code=422, detail="Anexe somente os documentos indicados na pendência.")
+        batch = UPLOAD_BATCH_PENDENCY
+    elif item.status != STATUS_AWAITING_DOCS and not _is_admin(user):
+        raise HTTPException(status_code=422, detail="Novos anexos do checklist só na fase de documentação ou pendência.")
+    if batch not in {UPLOAD_BATCH_INITIAL, UPLOAD_BATCH_PENDENCY}:
+        batch = UPLOAD_BATCH_INITIAL
     document = await persist_upload(upload, user, "sdc_solicitation", item.id, dtype)
     document.status = "CLEAN"
     db.add(document)
@@ -598,6 +793,7 @@ async def add_document(
         doc_type=dtype,
         comment=(comment or None),
         uploaded_by_id=user.id,
+        upload_batch=batch,
     )
     db.add(row)
     db.flush()
@@ -631,6 +827,7 @@ def _document_link_view(db: Session, row: SdcSolicitationDocument) -> dict:
         "id": row.id,
         "doc_type": row.doc_type,
         "comment": row.comment,
+        "upload_batch": row.upload_batch or UPLOAD_BATCH_INITIAL,
         "document_id": row.document_id,
         "filename": document.filename if document else None,
         "status": document.status if document else None,
@@ -714,14 +911,41 @@ def solicitation_view(
     db: Session | None = None,
 ) -> dict:
     doc_rows = docs or []
-    uploaded = _checklist_uploaded_codes(doc_rows)
-    required = sdc_required_docs(item.asset_type, item.person_type)
-    complete = checklist_complete_for(item, doc_rows)
+    pending_codes = _load_pending_codes(item)
+    initial_uploaded = _checklist_uploaded_codes(doc_rows, upload_batch=UPLOAD_BATCH_INITIAL)
+    pendency_uploaded = _checklist_uploaded_codes(doc_rows, upload_batch=UPLOAD_BATCH_PENDENCY)
+    required = _required_docs_for_item(db, item) if db else sdc_required_docs(
+        item.asset_type,
+        item.person_type,
+        operation_type=item.operation_type,
+        asset_category=_item_asset_category(item),
+    )
+    if item.status == STATUS_PENDING and pending_codes:
+        uploaded = pendency_uploaded
+        required_rows = [d for d in required if d["code"] in pending_codes]
+    else:
+        uploaded = initial_uploaded
+        required_rows = required
+    complete = checklist_complete_for(item, doc_rows, db)
+    can_submit = False
+    if item.status == STATUS_AWAITING_DOCS:
+        can_submit = complete
+    elif item.status == STATUS_PENDING and pending_codes:
+        can_submit = complete
+    asset_cat = _item_asset_category(item)
+    op = _item_operation_type(item)
     return {
         "id": item.id,
         "status": item.status,
         "status_label": STATUS_LABELS.get(item.status, item.status),
         "status_notes": item.status_notes,
+        "status_log": _load_status_log(item),
+        "pending_doc_codes": pending_codes,
+        "partner_observation": item.partner_observation,
+        "asset_category": asset_cat,
+        "asset_category_label": ASSET_CATEGORY_LABELS.get(asset_cat, asset_cat),
+        "operation_type": op,
+        "operation_type_label": OPERATION_TYPE_LABELS.get(op, op),
         "partner_user_id": item.partner_user_id,
         "contact_name": item.contact_name,
         "contact_email": item.contact_email,
@@ -744,9 +968,11 @@ def solicitation_view(
         "interest_rate_monthly": str(money(_dec(item.interest_rate_monthly))),
         "proposal_id": item.proposal_id,
         "quota_id": item.quota_id,
-        "required_docs": [{**d, "uploaded": d["code"] in uploaded} for d in required],
+        "required_docs": [{**d, "uploaded": d["code"] in uploaded} for d in required_rows],
+        "full_required_docs": [{**d, "uploaded": d["code"] in initial_uploaded} for d in required],
         "docs_checklist_complete": complete,
-        "can_submit_documents": item.status == STATUS_AWAITING_DOCS and complete,
+        "can_submit_documents": can_submit,
+        "awaiting_pendency_upload": item.status == STATUS_PENDING and bool(pending_codes),
         "documents": [
             _document_link_view(db, d) if db else {
                 "id": d.id,

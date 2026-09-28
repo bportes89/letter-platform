@@ -102,7 +102,12 @@ from app.schemas import (
     MarketplaceBoletoIssueResponse, MarketplaceInterMockWebhookRequest, MarketplaceZapSignRefreshResponse,
     MarketplaceBindChatLeadRequest, MarketplaceBindChatLeadResponse,
     VenderCotaCalculateRequest, VenderCotaStoreRequest, QuotaOfferRangeUpdate, QuotaSellOfferUpdate, VenderCotaCloseRequest,
-    SdcDeskEvaluateRequest, SdcDeskStoreRequest, SdcDeskStatusUpdate, SdcDeskSaleCreate,
+    SdcDeskEvaluateRequest,
+    SdcDeskStoreRequest,
+    SdcDeskStatusUpdate,
+    SdcDeskSaleCreate,
+    SdcDeskPartnerObservationUpdate,
+    SdcChecklistConfigSave,
     FlashDeskEvaluateRequest, FlashDeskStoreRequest, FlashDeskStatusUpdate, FlashDeskSaleCreate,
     QuitConDeskEvaluateRequest, QuitConDeskStoreRequest, QuitConDeskStatusUpdate,
     ProposalView, QuotaCreate, QuotaUpdate, QuotaView, QuotaComplianceRejectRequest, NinaQuotaScanView, RecoveredAssetCreate, RecoveredAssetView, RefreshRequest,
@@ -3532,10 +3537,18 @@ def sdc_desk_status(
     from app.sdc_desk_service import get_solicitation, list_documents, solicitation_view, update_status
 
     item = get_solicitation(db, user, solicitation_id)
-    update_status(db, user, item, payload.status, payload.status_notes)
+    update_status(
+        db,
+        user,
+        item,
+        payload.status,
+        payload.status_notes,
+        pending_doc_codes=payload.pending_doc_codes,
+    )
     audit(db, user, "sdc_desk.status_updated", "sdc_solicitation", item.id, {
         "status": item.status,
         "status_notes": item.status_notes,
+        "pending_doc_codes": payload.pending_doc_codes,
     })
     db.commit()
     db.refresh(item)
@@ -3548,13 +3561,22 @@ async def sdc_desk_upload_doc(
     file: UploadFile = File(...),
     doc_type: str = Form("SDC_SUPPORT"),
     comment: str | None = Form(None),
+    upload_batch: str | None = Form(None),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     from app.sdc_desk_service import add_document, get_solicitation, list_documents, solicitation_view
 
     item = get_solicitation(db, user, solicitation_id)
-    await add_document(db, user, item, upload=file, doc_type=doc_type, comment=comment)
+    await add_document(
+        db,
+        user,
+        item,
+        upload=file,
+        doc_type=doc_type,
+        comment=comment,
+        upload_batch=upload_batch,
+    )
     audit(db, user, "sdc_desk.document_uploaded", "sdc_solicitation", item.id, {
         "filename": file.filename,
         "doc_type": doc_type,
@@ -3563,6 +3585,56 @@ async def sdc_desk_upload_doc(
     db.commit()
     db.refresh(item)
     return solicitation_view(item, list_documents(db, item.id), db)
+
+
+@router.patch("/sdc/desk/solicitations/{solicitation_id}/partner-observation")
+def sdc_desk_partner_observation(
+    solicitation_id: str,
+    payload: SdcDeskPartnerObservationUpdate,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.sdc_desk_service import get_solicitation, list_documents, solicitation_view, update_partner_observation
+
+    item = get_solicitation(db, user, solicitation_id)
+    update_partner_observation(db, user, item, payload.partner_observation)
+    db.commit()
+    db.refresh(item)
+    return solicitation_view(item, list_documents(db, item.id), db)
+
+
+@router.get("/sdc/desk/checklist-config")
+def sdc_desk_list_checklist_config(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.sdc_checklist_service import list_checklist_configs
+    from app.sdc_desk_service import assert_desk_access, _is_admin
+
+    assert_desk_access(user)
+    if not _is_admin(user):
+        raise HTTPException(status_code=403, detail="Somente operação LETTER configura checklists")
+    return list_checklist_configs(db, user.organization_id)
+
+
+@router.put("/sdc/desk/checklist-config")
+def sdc_desk_save_checklist_config(
+    payload: SdcChecklistConfigSave,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.sdc_checklist_service import list_checklist_configs, save_checklist_config
+    from app.sdc_desk_service import assert_desk_access, _is_admin
+
+    assert_desk_access(user)
+    if not _is_admin(user):
+        raise HTTPException(status_code=403, detail="Somente operação LETTER configura checklists")
+    save_checklist_config(
+        db,
+        user.organization_id,
+        asset_category=payload.asset_category,
+        operation_type=payload.operation_type,
+        items=[i.model_dump() for i in payload.items],
+    )
+    db.commit()
+    return list_checklist_configs(db, user.organization_id)
 
 
 @router.post("/sdc/desk/solicitations/{solicitation_id}/submit-documents")
