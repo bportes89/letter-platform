@@ -165,9 +165,17 @@ def lead_marketplace_shortcut_profile(lead: Lead) -> dict:
     if document:
         document = "".join(ch for ch in str(document) if ch.isdigit())
 
+    email = merged.get("email")
+    if not email:
+        for key in MARKETPLACE_SNAPSHOT_KEYS:
+            block = detail.get(key)
+            if isinstance(block, dict) and block.get("email"):
+                email = block.get("email")
+                break
+
     return {
         "document": document or None,
-        "email": merged.get("email"),
+        "email": email,
         "person_type": merged.get("person_type") or "PF",
         "address": address,
         "monthly_income": merged.get("monthly_income"),

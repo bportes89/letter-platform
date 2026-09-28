@@ -31,6 +31,8 @@ type CotaOption = {
   nina_scan_status: string | null;
   administrator_name: string | null;
   supplier_source: string | null;
+  installment_due_date?: string | null;
+  status?: string;
 };
 
 function withinSearchBand(actual: number, target: number): boolean {
@@ -56,6 +58,15 @@ type CadastroOption = {
   asset_year?: number | null;
 };
 
+type CadastroDetail = CadastroOption & {
+  credit_value?: string | null;
+  entrada_value?: string | null;
+};
+
+function quotaReadyForSale(c: CotaOption): boolean {
+  return (c.status ?? "AVAILABLE") === "AVAILABLE" && !!c.installment_due_date;
+}
+
 type PartnerOption = { id: string; name: string; role: string; email: string | null };
 
 type StoreResult = {
@@ -73,6 +84,7 @@ export function VendaDiretaManualModule() {
   const [filterCredit, setFilterCredit] = useState("");
   const [filterEntrada, setFilterEntrada] = useState("");
   const [filterAdministratorId, setFilterAdministratorId] = useState("");
+  const [showIncompleteQuotas, setShowIncompleteQuotas] = useState(false);
   const [cotas, setCotas] = useState<CotaOption[]>([]);
   const [cadastros, setCadastros] = useState<CadastroOption[]>([]);
   const [partners, setPartners] = useState<PartnerOption[]>([]);
@@ -123,25 +135,40 @@ export function VendaDiretaManualModule() {
     loadMeta().catch(() => undefined);
   }, [loadMeta]);
 
-  function applyCadastro(id: string) {
-    setExistingId(id);
-    const row = cadastros.find((x) => x.lead_id === id);
-    if (!row) return;
+  function fillCadastroFromRow(row: CadastroOption | CadastroDetail) {
     setName(row.name || "");
     setEmail(row.email || "");
     setPhone(row.phone || "");
     const pt = row.person_type || "PF";
     setPersonType(pt);
     setDocument(formatDocumentDigits(row.document, pt));
-    setZipcode(row.address?.zipcode || "");
-    setStreet(row.address?.street || "");
-    setNumber(row.address?.number || "");
-    setNeighborhood(row.address?.neighborhood || "");
-    setCity(row.address?.city || "");
-    setUf(row.address?.uf || "");
+    const addr = row.address || {};
+    setZipcode(addr.zipcode || "");
+    setStreet(addr.street || "");
+    setNumber(addr.number || "");
+    setNeighborhood(addr.neighborhood || "");
+    setCity(addr.city || "");
+    setUf(addr.uf || "");
     if (row.monthly_income) setIncome(String(row.monthly_income));
     if (row.asset_value) setAssetValue(String(row.asset_value));
     if (row.asset_year) setAssetYear(String(row.asset_year));
+    const detail = row as CadastroDetail;
+    if (detail.credit_value) setFilterCredit(String(detail.credit_value));
+    if (detail.entrada_value) setFilterEntrada(String(detail.entrada_value));
+  }
+
+  async function applyCadastro(id: string) {
+    setExistingId(id);
+    if (!id) return;
+    setError("");
+    try {
+      const detail = await api<CadastroDetail>(`/marketplace/cadastros/${id}`);
+      fillCadastroFromRow(detail);
+    } catch {
+      const row = cadastros.find((x) => x.lead_id === id);
+      if (row) fillCadastroFromRow(row);
+      else setError("Não foi possível carregar os dados do cadastro.");
+    }
   }
 
   async function submit(e: FormEvent) {
@@ -159,6 +186,17 @@ export function VendaDiretaManualModule() {
       }
       if (!quotaIds.length) {
         setError("Selecione ao menos uma cota.");
+        setBusy(false);
+        return;
+      }
+      const blocked = quotaIds.filter((id) => {
+        const c = cotas.find((x) => x.quota_id === id);
+        return c && !quotaReadyForSale(c);
+      });
+      if (blocked.length) {
+        setError(
+          "Uma ou mais cotas estão incompletas (falta vencimento da parcela no Inventário). O admin deve completar antes da venda.",
+        );
         setBusy(false);
         return;
       }
@@ -223,16 +261,21 @@ export function VendaDiretaManualModule() {
     const creditTarget = parseMoney(filterCredit);
     const entradaTarget = parseMoney(filterEntrada);
     return cotas.filter((c) => {
+      if (!showIncompleteQuotas && !quotaReadyForSale(c)) return false;
       if (filterAdministratorId && c.administrator_id !== filterAdministratorId) return false;
       const credit = Number(c.credit_value);
       const entrada = Number(c.entrada_final);
       return withinSearchBand(credit, creditTarget) && withinSearchBand(entrada, entradaTarget);
     });
-  }, [cotas, filterCredit, filterEntrada, filterAdministratorId]);
+  }, [cotas, filterCredit, filterEntrada, filterAdministratorId, showIncompleteQuotas]);
 
   const selectedList = cotas.filter((c) => quotaIds.includes(c.quota_id));
 
   function toggleQuota(c: CotaOption, checked: boolean) {
+    if (checked && !quotaReadyForSale(c)) {
+      setError("Cota sem vencimento de parcela — o admin deve completar no Inventário antes de vender.");
+      return;
+    }
     if (!checked) {
       setQuotaIds((ids) => ids.filter((id) => id !== c.quota_id));
       return;
@@ -355,8 +398,16 @@ export function VendaDiretaManualModule() {
               </select>
             </label>
             <small className="marketplace-hint">
-              Crédito e entrada: tolerância de ±5%. Administradora: lista do estoque da categoria.
+              Crédito e entrada: tolerância de ±5%. Só cotas com vencimento de parcela cadastrado podem ser vendidas.
             </small>
+            <label className="marketplace-field marketplace-field-compact" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <input
+                type="checkbox"
+                checked={showIncompleteQuotas}
+                onChange={(e) => setShowIncompleteQuotas(e.target.checked)}
+              />
+              Mostrar cotas incompletas (admin)
+            </label>
             <div className="marketplace-field marketplace-field-wide quota-pick-list">
               <b>Cotas (multi-seleção){filteredCotas.length ? ` — ${filteredCotas.length} opção(ões)` : ""}</b>
               <div className="quota-pick-scroll">
@@ -365,16 +416,23 @@ export function VendaDiretaManualModule() {
                     Nenhuma cota neste filtro. Ajuste crédito, entrada, administradora ou a categoria.
                   </small>
                 ) : (
-                  filteredCotas.map((c) => (
-                    <label key={c.quota_id} className="quota-pick-row">
-                      <input
-                        type="checkbox"
-                        checked={quotaIds.includes(c.quota_id)}
-                        onChange={(e) => toggleQuota(c, e.target.checked)}
-                      />
-                      <span>{cotaListLabel(c)}</span>
-                    </label>
-                  ))
+                  filteredCotas.map((c) => {
+                    const ready = quotaReadyForSale(c);
+                    return (
+                      <label key={c.quota_id} className="quota-pick-row" style={{ opacity: ready ? 1 : 0.7 }}>
+                        <input
+                          type="checkbox"
+                          disabled={!ready}
+                          checked={quotaIds.includes(c.quota_id)}
+                          onChange={(e) => toggleQuota(c, e.target.checked)}
+                        />
+                        <span>
+                          {cotaListLabel(c)}
+                          {!ready ? <small className="muted"> — incompleta (vencimento no Inventário)</small> : null}
+                        </span>
+                      </label>
+                    );
+                  })
                 )}
               </div>
             </div>
@@ -389,7 +447,7 @@ export function VendaDiretaManualModule() {
           <div className="marketplace-form-row">
             <label className="marketplace-field marketplace-field-wide">
               Cadastro existente (atalho)
-              <select value={existingId} onChange={(e) => applyCadastro(e.target.value)}>
+              <select value={existingId} onChange={(e) => void applyCadastro(e.target.value)}>
                 <option value="">Novo cliente</option>
                 {cadastros.map((c) => (
                   <option key={c.lead_id} value={c.lead_id}>

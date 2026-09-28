@@ -70,6 +70,8 @@ def list_cotas_options(
 
     rows: list[dict] = []
     for q in quotas:
+        if not q.installment_due_date and not user_sees_supplier_quota_identity(user):
+            continue
         admin = db.get(Administrator, q.administrator_id)
         pricing = pricing_for_quota(q, suppliers=suppliers)
         masked = mask_quota_fields(
