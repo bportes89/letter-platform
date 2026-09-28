@@ -135,6 +135,23 @@ function marketplaceCotaLabel(c: MarketplaceCatalogCota): string {
   return commercialQuotaDisplay(c);
 }
 
+function noticeAfterProposalCreated(product: string): string {
+  if (product === "FLASH_CREDIT") {
+    return "Linha Flash Capital criada na tabela. Confira valor do bem e prazo nos parâmetros e clique «Calcular memória» na mesma linha.";
+  }
+  if (product === "SDC") {
+    return "Linha SDC criada. Marque as cotas acima (imóvel ou veículo) e clique «Calcular memória» na mesma linha.";
+  }
+  return "Linha criada na tabela. Marque as cotas e clique «Calcular memória» na mesma linha.";
+}
+
+function noticeBeforeCalculate(product: string): string {
+  if (product === "FLASH_CREDIT") {
+    return "Informe o valor do bem nos parâmetros Flash e clique novamente em «Calcular memória».";
+  }
+  return "Marque ao menos uma cota na lista acima e clique novamente em «Calcular memória».";
+}
+
 function proposalQuotaListLabel(q: Quota, administratorName?: string | null): string {
   const cat = q.category === "REAL_ESTATE" ? "Imóvel" : "Veículo";
   const base = commercialQuotaDisplay({
@@ -518,9 +535,7 @@ export function ProposalsModule() {
       setHighlightProposalId(created.id);
       setActiveProposalId(created.id);
       setRequestedAmount("");
-      setNotice(
-        "Linha criada na tabela. Marque as cotas acima (se SDC) e clique em «Calcular memória» na mesma linha antes de «Gerar contrato».",
-      );
+      setNotice(noticeAfterProposalCreated(product));
       await load();
       proposalsTableRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     } catch (err) {
@@ -534,8 +549,13 @@ export function ProposalsModule() {
     setActiveProposalId(p.id);
     const needsQuotas = p.product === "SDC" || p.product === "MARKETPLACE";
     if (needsQuotas && !selected.length) {
-      setNotice("Marque ao menos uma cota na lista acima e clique novamente em «Calcular memória».");
+      setNotice(noticeBeforeCalculate(p.product));
       document.getElementById("quota-picker")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+    if (p.product === "FLASH_CREDIT" && !parseMoney(assetValue)) {
+      setNotice(noticeBeforeCalculate("FLASH_CREDIT"));
+      document.querySelector(".product-parameters")?.scrollIntoView({ behavior: "smooth", block: "start" });
       return;
     }
     try {
@@ -580,9 +600,17 @@ export function ProposalsModule() {
     const calcs = await api<{ id: string }[]>(`/proposals/${p.id}/calculations`);
     if (!calcs.length) {
       setNotice(
-        "Esta linha ainda não foi calculada. Marque as cotas acima e use «Calcular memória» na mesma linha da tabela.",
+        p.product === "FLASH_CREDIT"
+          ? "Esta linha Flash ainda não foi calculada. Ajuste valor do bem/prazo e use «Calcular memória» nesta linha."
+          : p.product === "SDC"
+            ? "Esta linha SDC ainda não foi calculada. Marque as cotas acima e use «Calcular memória» nesta linha."
+            : "Calcule a memória nesta linha antes de gerar o contrato.",
       );
-      document.getElementById("quota-picker")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      if (p.product === "SDC" || p.product === "MARKETPLACE") {
+        document.getElementById("quota-picker")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      } else {
+        document.querySelector(".product-parameters")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
       return;
     }
     setCalculatedProposalIds((prev) => new Set(prev).add(p.id));
@@ -609,8 +637,18 @@ export function ProposalsModule() {
             <b>Passo 1</b> — Selecione o <em>cadastro</em> do cliente, o produto (SDC ou Flash) e o valor; clique em{" "}
             <em>Adicionar simulação</em> (a linha aparece na tabela — o formulário não apaga o cliente).
             <br />
-            <b>Passo 2</b> — Parâmetros e cotas (SDC: filtre imóvel ou veículo). Clique <em>Calcular memória</em> na{" "}
-            <b>mesma linha</b> da tabela.
+            <b>Passo 2</b> —{" "}
+            {isCommercial ? (
+              <>
+                <em>Flash Capital</em>: valor do bem e prazo. <em>SDC</em>: marque cotas (imóvel ou veículo). Clique{" "}
+                <em>Calcular memória</em> na <b>mesma linha</b> da tabela.
+              </>
+            ) : (
+              <>
+                Parâmetros do produto; no SDC marque cotas. Clique <em>Calcular memória</em> na <b>mesma linha</b> da
+                tabela.
+              </>
+            )}
             <br />
             <b>Passo 3</b> — <em>Gerar contrato</em> só na linha que já tiver memória calculada (botão fica ativo).
             {isCommercial ? (
