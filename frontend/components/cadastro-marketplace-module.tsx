@@ -4,6 +4,7 @@ import { CheckCircle2, ClipboardList, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { AdminDocumentPanel } from "@/components/admin-document-panel";
+import { MarketplaceContractEditor } from "@/components/marketplace-contract-editor";
 import { api, API_URL, apiForm, deleteApi, downloadApi } from "@/lib/api";
 import { isInternalProductRole } from "@/lib/product-nav";
 
@@ -93,9 +94,23 @@ export function CadastroMarketplaceModule() {
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [myRole, setMyRole] = useState("");
+  const [contractEditorOpen, setContractEditorOpen] = useState(false);
+  const [templateDraft, setTemplateDraft] = useState("");
+  const [templateBusy, setTemplateBusy] = useState(false);
   const partnerView = myRole === "PARTNER" || myRole === "QUOTA_SELLER";
   const canManageDocs = myRole !== "CLIENT";
   const canDeleteDocs = isInternalProductRole(myRole);
+  const canEditContract = isInternalProductRole(myRole);
+  const hasContractHtml = Boolean(
+    selected?.has_site_contract || (selected?.snapshot && (selected.snapshot as { contract_html?: string }).contract_html),
+  );
+
+  useEffect(() => {
+    if (!canEditContract) return;
+    api<{ template_html: string }>("/marketplace/settings/contract-template")
+      .then((row) => setTemplateDraft(row.template_html))
+      .catch(() => setTemplateDraft(""));
+  }, [canEditContract]);
 
   useEffect(() => {
     api<{ role: string }>("/auth/me")
@@ -442,12 +457,60 @@ export function CadastroMarketplaceModule() {
                 type="button"
                 className="table-action"
                 style={{ marginLeft: "0.75rem" }}
+                onClick={() => setContractEditorOpen(true)}
+                disabled={busy || !hasContractHtml}
+              >
+                Abrir contrato
+              </button>
+              <button
+                type="button"
+                className="table-action"
+                style={{ marginLeft: "0.5rem" }}
                 onClick={() => void openContractPdf()}
                 disabled={busy || !selected.has_site_contract}
               >
-                Ver contrato (PDF)
+                PDF
               </button>
             </div>
+            {canEditContract && (
+              <details className="notice" style={{ marginTop: 10 }}>
+                <summary style={{ cursor: "pointer", fontWeight: 700 }}>Template global do contrato (placeholders programados)</summary>
+                <p className="muted" style={{ fontSize: 11, margin: "8px 0" }}>
+                  Use chaves como {"{nome}"}, {"{documento}"}, {"{valor_credito}"} — na venda viram campos travados (cinza).
+                </p>
+                <textarea
+                  value={templateDraft}
+                  onChange={(e) => setTemplateDraft(e.target.value)}
+                  rows={10}
+                  style={{ width: "100%", fontFamily: "monospace", fontSize: 11 }}
+                />
+                <button
+                  type="button"
+                  className="admin-button"
+                  style={{ marginTop: 8 }}
+                  disabled={templateBusy || !templateDraft.trim()}
+                  onClick={() => {
+                    setTemplateBusy(true);
+                    api("/marketplace/settings/contract-template", {
+                      method: "PUT",
+                      body: JSON.stringify({ template_html: templateDraft }),
+                    })
+                      .then(() => setNotice("Template de contrato salvo."))
+                      .catch((e) => setError(e instanceof Error ? e.message : "Falha ao salvar template"))
+                      .finally(() => setTemplateBusy(false));
+                  }}
+                >
+                  Salvar template
+                </button>
+              </details>
+            )}
+            <MarketplaceContractEditor
+              leadId={selected.lead_id}
+              open={contractEditorOpen}
+              onClose={() => setContractEditorOpen(false)}
+              onSaved={() => void openDetail(selected.lead_id)}
+              onOpenPdf={() => void openContractPdf()}
+            />
             {canManageDocs ? (
               <AdminDocumentPanel
                 title={`Documentos do cliente (${docs.length})`}

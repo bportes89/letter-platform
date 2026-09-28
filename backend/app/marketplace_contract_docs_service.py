@@ -17,6 +17,15 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import Document, Lead, Proposal, Role, User
+from app.marketplace_contract_template_service import (
+    LOCKED_FIELD_LABELS,
+    assert_locked_fields_unchanged,
+    extract_locked_fields,
+    load_organization_template,
+    render_marketplace_contract_html,
+    save_organization_template,
+)
+from app.cadastro_service import seed_marketplace_lifecycle
 from app.network_visibility import get_lead_for_user
 from app.storage_service import get_storage
 
@@ -63,16 +72,27 @@ def site_contract_meta(terms: dict, snap: dict | None = None) -> dict:
     }
 
 
-def resolve_contract_html(db: Session, user: User, lead_id: str) -> tuple[str, dict]:
+INTERNAL_CONTRACT_EDIT_ROLES = frozenset({
+    Role.PLATFORM_ADMIN,
+    Role.INTERNAL_STAFF,
+    Role.MASTER_FRANCHISEE,
+    Role.MANAGER,
+})
+
+
+def _load_lead_contract_html(db: Session, user: User, lead_id: str) -> tuple[Lead, str, dict, Proposal | None]:
     lead = get_lead_for_user(db, user, lead_id)
     proposal = _proposal_for_lead(db, user, lead)
     terms = _parse_json(proposal.terms_json) if proposal else {}
     snap = {}
-    try:
-        detail = _parse_json(lead.scr_detail_json)
-        snap = detail.get("chat") if isinstance(detail.get("chat"), dict) else {}
-    except Exception:
-        snap = {}
+    detail = _parse_json(lead.scr_detail_json)
+    from app.cadastro_service import marketplace_snapshot_key
+
+    snap_key = marketplace_snapshot_key(detail)
+    if isinstance(detail.get(snap_key), dict):
+        snap = detail[snap_key]
+    elif isinstance(detail.get("chat"), dict):
+        snap = detail["chat"]
     html = str(terms.get("contract_html") or "").strip()
     if not html:
         html = str(snap.get("contract_html") or "").strip()
@@ -83,6 +103,76 @@ def resolve_contract_html(db: Session, user: User, lead_id: str) -> tuple[str, d
             "channel": "SITE_CHAT",
             "provider": "SITE_CHAT_ACK",
         }
+    return lead, html, ack, proposal
+
+
+def contract_document_view(db: Session, user: User, lead_id: str) -> dict:
+    lead, html, ack, _proposal = _load_lead_contract_html(db, user, lead_id)
+    if not html:
+        raise HTTPException(status_code=404, detail="Contrato ainda não foi gerado para este cadastro.")
+    locked = [
+        {"field": k, "label": LOCKED_FIELD_LABELS.get(k, k), "value": v}
+        for k, v in extract_locked_fields(html).items()
+    ]
+    return {
+        "html": html,
+        "can_edit": user.role in INTERNAL_CONTRACT_EDIT_ROLES,
+        "has_site_contract": bool(html and ack.get("accepted_at")),
+        "contract_ack": ack or None,
+        "locked_fields": locked,
+    }
+
+
+def save_lead_contract_html(db: Session, user: User, lead_id: str, html: str) -> dict:
+    if user.role not in INTERNAL_CONTRACT_EDIT_ROLES:
+        raise HTTPException(status_code=403, detail="Somente operação LETTER pode editar o contrato.")
+    lead, previous, ack, proposal = _load_lead_contract_html(db, user, lead_id)
+    if not previous:
+        raise HTTPException(status_code=404, detail="Contrato ainda não foi gerado.")
+    cleaned = (html or "").strip()
+    if not cleaned:
+        raise HTTPException(status_code=422, detail="Contrato vazio.")
+    try:
+        assert_locked_fields_unchanged(previous, cleaned)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    detail = _parse_json(lead.scr_detail_json)
+    from app.cadastro_service import marketplace_snapshot_key
+
+    snap_key = marketplace_snapshot_key(detail)
+    snap = detail.get(snap_key) if isinstance(detail.get(snap_key), dict) else {}
+    if not isinstance(snap, dict):
+        snap = {}
+    snap["contract_html"] = cleaned
+    detail[snap_key] = snap
+    lead.scr_detail_json = json.dumps(detail, ensure_ascii=False)
+
+    if proposal:
+        terms = seed_marketplace_lifecycle(_parse_json(proposal.terms_json))
+        terms["contract_html"] = cleaned
+        proposal.terms_json = json.dumps(terms, ensure_ascii=False)
+    db.flush()
+    return contract_document_view(db, user, lead_id)
+
+
+def regenerate_lead_contract_html(db: Session, user: User, lead_id: str) -> dict:
+    if user.role not in INTERNAL_CONTRACT_EDIT_ROLES:
+        raise HTTPException(status_code=403, detail="Somente operação LETTER pode regerar o contrato.")
+    lead, _prev, _ack, proposal = _load_lead_contract_html(db, user, lead_id)
+    detail = _parse_json(lead.scr_detail_json)
+    from app.cadastro_service import marketplace_snapshot_key
+
+    snap_key = marketplace_snapshot_key(detail)
+    snap = detail.get(snap_key) if isinstance(detail.get(snap_key), dict) else {}
+    if not isinstance(snap, dict) or not snap:
+        raise HTTPException(status_code=422, detail="Snapshot da compra indisponível para regerar contrato.")
+    html = render_marketplace_contract_html(db, user.organization_id, lead, snap)
+    return save_lead_contract_html(db, user, lead_id, html)
+
+
+def resolve_contract_html(db: Session, user: User, lead_id: str) -> tuple[str, dict]:
+    lead, html, ack, _proposal = _load_lead_contract_html(db, user, lead_id)
     if not html:
         raise HTTPException(status_code=404, detail="Contrato do chat ainda não aceito nesta compra.")
     if not ack.get("accepted_at"):

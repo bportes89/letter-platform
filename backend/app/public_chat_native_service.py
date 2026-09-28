@@ -232,60 +232,10 @@ def _lookup_cep(cep: str) -> dict:
         raise HTTPException(422, "Não foi possível consultar o CEP. Tente novamente.") from exc
 
 
-def _contract_html(lead: Lead, snap: dict) -> str:
-    person = str(snap.get("person_type") or "PF").upper()
-    doc = _digits(lead.document or snap.get("document") or "")
-    address = snap.get("address") if isinstance(snap.get("address"), dict) else {}
-    nome = str(snap.get("razao_social") or lead.name or "")
-    if person != "PJ":
-        nome = lead.name or nome
-    credit = snap.get("handoff_credit")
-    entrada = snap.get("handoff_entrada")
-    quotas = snap.get("handoff_quotas") or []
-    admins = ", ".join(
-        sorted({str(q.get("administradora") or "").strip() for q in quotas if q.get("administradora")})
-    ) or "—"
-    parcelas_txt = "; ".join(
-        f"{q.get('parcelas') or '—'}x de {q.get('price_parcela') or '—'}" for q in quotas
-    ) or "—"
-    end_txt = (
-        f"{address.get('street') or '—'}, {address.get('number') or '—'} "
-        f"{address.get('complement') or ''} — {address.get('neighborhood') or '—'}, "
-        f"{address.get('city') or '—'}/{address.get('uf') or '—'} CEP {address.get('zipcode') or '—'}"
-    ).strip()
-    profissao = str(snap.get("profession") or snap.get("activity") or "—")
-    renda = snap.get("declared_income")
-    proofs = snap.get("income_proof") or []
-    proof_labels = ", ".join(INCOME_PROOF_OPTIONS.get(str(p), str(p)) for p in proofs) or "—"
-    from datetime import date
+def _contract_html(lead: Lead, snap: dict, db: Session | None = None) -> str:
+    from app.marketplace_contract_template_service import render_marketplace_contract_html
 
-    today = date.today()
-    meses = (
-        "janeiro fevereiro março abril maio junho julho agosto setembro outubro novembro dezembro"
-    ).split()
-    data_extenso = f"{today.day} de {meses[today.month - 1]} de {today.year}"
-    return (
-        "<p><strong>LETTER BANK LTDA</strong> — CNPJ 41.163.819/0001-57<br/>"
-        "Representada por Sr. Paulo Stutz Netto Souza — foro em Nanuque/MG</p>"
-        "<p><strong>Termo de intermediação de cota contemplada</strong></p>"
-        f"<p><strong>Contratante:</strong> {nome}<br/>"
-        f"<strong>Documento:</strong> {doc or '—'} ({'CNPJ' if person == 'PJ' else 'CPF'})<br/>"
-        f"<strong>{'Ramo de atividade' if person == 'PJ' else 'Profissão'}:</strong> {profissao}<br/>"
-        f"<strong>{'Faturamento mensal' if person == 'PJ' else 'Renda mensal'}:</strong> "
-        f"{_brl(renda) if renda not in (None, '') else '—'}<br/>"
-        f"<strong>Comprovação de renda:</strong> {proof_labels}<br/>"
-        f"<strong>Endereço:</strong> {end_txt}<br/>"
-        f"<strong>E-mail:</strong> {snap.get('email') or '—'} · <strong>WhatsApp:</strong> {lead.phone or '—'}</p>"
-        f"<p><strong>Objeto:</strong> intermediação de cota(s) contemplada(s).<br/>"
-        f"Administradora(s): {admins}<br/>"
-        f"Crédito: {_brl(credit or 0)} · Entrada: {_brl(entrada or 0)}<br/>"
-        f"Parcelas: {parcelas_txt}<br/>"
-        f"Reserva das cotas: {RESERVE_TTL} minutos a partir da escolha.</p>"
-        "<p>PIX de referência LETTER: <strong>COMERCIAL@LETTER.APP.BR</strong> (Banco Inter).</p>"
-        "<p>Ao aceitar, o contratante confirma ciência das condições de intermediação. "
-        "A assinatura digital completa (ZapSign) pode ser enviada após a criação da conta LETTER.</p>"
-        f"<p>{address.get('city') or 'Brasil'}, {data_extenso}.</p>"
-    )
+    return render_marketplace_contract_html(db, lead.organization_id, lead, snap)
 
 
 def _income_proof_item(selected: list[str]) -> dict:
@@ -1506,7 +1456,7 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
             from datetime import UTC, datetime
 
             snap["contract_accepted_at"] = datetime.now(UTC).isoformat()
-            html = _contract_html(lead, snap)
+            html = _contract_html(lead, snap, db)
             snap["contract_html"] = html
             _save_lead_snapshot(lead, snap)
             proposal = db.get(Proposal, snap.get("proposal_id")) if snap.get("proposal_id") else None
@@ -1580,7 +1530,7 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
                 ],
                 lead_id=lead.id,
             )
-        html = _contract_html(lead, snap)
+        html = _contract_html(lead, snap, db)
         return _wrap(
             [
                 {

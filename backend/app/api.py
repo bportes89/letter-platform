@@ -99,7 +99,13 @@ from app.schemas import (
     VendaDiretaManualStoreRequest, VendaDiretaManualStoreResponse,
     CadastroListItem, CadastroDetailView, CadastroUpdateRequest, MarketplaceBlockedCommissionSummary,
     MarketplaceExtratoItem,
-    MarketplaceBoletoIssueResponse, MarketplaceInterMockWebhookRequest, MarketplaceZapSignRefreshResponse,
+    MarketplaceBoletoIssueResponse,
+    MarketplaceInterMockWebhookRequest,
+    MarketplaceZapSignRefreshResponse,
+    MarketplaceContractDocumentView,
+    MarketplaceContractHtmlUpdate,
+    MarketplaceContractTemplateView,
+    MarketplaceContractTemplateUpdate,
     MarketplaceBindChatLeadRequest, MarketplaceBindChatLeadResponse,
     VenderCotaCalculateRequest, VenderCotaStoreRequest, QuotaOfferRangeUpdate, QuotaSellOfferUpdate, VenderCotaCloseRequest,
     SdcDeskEvaluateRequest,
@@ -2557,6 +2563,73 @@ def marketplace_cadastro_contract_pdf(lead_id: str, user: User = Depends(get_cur
         media_type="application/pdf",
         headers={"Content-Disposition": f'inline; filename="{filename}"'},
     )
+
+
+@router.get("/marketplace/cadastros/{lead_id}/contrato", response_model=MarketplaceContractDocumentView)
+def marketplace_cadastro_contract_html(lead_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.marketplace_contract_docs_service import contract_document_view
+
+    return contract_document_view(db, user, lead_id)
+
+
+@router.put("/marketplace/cadastros/{lead_id}/contrato", response_model=MarketplaceContractDocumentView)
+def marketplace_cadastro_contract_html_save(
+    lead_id: str,
+    payload: MarketplaceContractHtmlUpdate,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.marketplace_contract_docs_service import save_lead_contract_html
+
+    result = save_lead_contract_html(db, user, lead_id, payload.html)
+    audit(db, user, "marketplace.contract_html_updated", "lead", lead_id, {})
+    db.commit()
+    return result
+
+
+@router.post("/marketplace/cadastros/{lead_id}/contrato/regenerate", response_model=MarketplaceContractDocumentView)
+def marketplace_cadastro_contract_regenerate(
+    lead_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.marketplace_contract_docs_service import regenerate_lead_contract_html
+
+    result = regenerate_lead_contract_html(db, user, lead_id)
+    audit(db, user, "marketplace.contract_html_regenerated", "lead", lead_id, {})
+    db.commit()
+    return result
+
+
+@router.get("/marketplace/settings/contract-template", response_model=MarketplaceContractTemplateView)
+def marketplace_contract_template_get(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.marketplace_contract_docs_service import INTERNAL_CONTRACT_EDIT_ROLES
+    from app.marketplace_contract_template_service import LOCKED_FIELD_LABELS, load_organization_template
+
+    if user.role not in INTERNAL_CONTRACT_EDIT_ROLES:
+        raise HTTPException(status_code=403, detail="Somente operação LETTER configura o template.")
+    template = load_organization_template(db, user.organization_id)
+    placeholders = sorted({f"{{{k}}}" for k in LOCKED_FIELD_LABELS} | {"{profissao_label}", "{renda_label}", "{reserva_minutos}", "{cidade}"})
+    return {"template_html": template, "placeholders": placeholders}
+
+
+@router.put("/marketplace/settings/contract-template", response_model=MarketplaceContractTemplateView)
+def marketplace_contract_template_save(
+    payload: MarketplaceContractTemplateUpdate,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.marketplace_contract_docs_service import INTERNAL_CONTRACT_EDIT_ROLES
+    from app.marketplace_contract_template_service import LOCKED_FIELD_LABELS, load_organization_template, save_organization_template
+
+    if user.role not in INTERNAL_CONTRACT_EDIT_ROLES:
+        raise HTTPException(status_code=403, detail="Somente operação LETTER configura o template.")
+    save_organization_template(user.organization_id, payload.template_html)
+    audit(db, user, "marketplace.contract_template_updated", "organization", user.organization_id, {})
+    db.commit()
+    template = load_organization_template(db, user.organization_id)
+    placeholders = sorted({f"{{{k}}}" for k in LOCKED_FIELD_LABELS} | {"{profissao_label}", "{renda_label}", "{reserva_minutos}", "{cidade}"})
+    return {"template_html": template, "placeholders": placeholders}
 
 
 @router.get("/marketplace/cadastros/{lead_id}/documents", response_model=list[DocumentView])

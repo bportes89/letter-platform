@@ -2723,6 +2723,33 @@ class CadastroDetailView(CadastroListItem):
     zapsign: dict | None = None
 
 
+class MarketplaceContractLockedField(BaseModel):
+    field: str
+    label: str
+    value: str
+
+
+class MarketplaceContractDocumentView(BaseModel):
+    html: str
+    can_edit: bool = False
+    has_site_contract: bool = False
+    contract_ack: dict | None = None
+    locked_fields: list[MarketplaceContractLockedField] = Field(default_factory=list)
+
+
+class MarketplaceContractHtmlUpdate(BaseModel):
+    html: str = Field(min_length=20)
+
+
+class MarketplaceContractTemplateView(BaseModel):
+    template_html: str
+    placeholders: list[str] = Field(default_factory=list)
+
+
+class MarketplaceContractTemplateUpdate(BaseModel):
+    template_html: str = Field(min_length=20)
+
+
 class MarketplaceZapSignRefreshResponse(BaseModel):
     zapsign: dict | None = None
 
