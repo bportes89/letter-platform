@@ -1427,7 +1427,7 @@ export function SdcDeskModule() {
                             return;
                           }
                           void updateStatus(selected, adminStatus, {
-                            status_notes: adminNotes.trim() || null,
+                            status_notes: adminNotes.trim() || undefined,
                             pending_doc_codes: adminStatus === "PENDING" ? adminPending : [],
                           });
                         }}
