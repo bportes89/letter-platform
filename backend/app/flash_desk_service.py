@@ -409,6 +409,7 @@ def store_solicitation(db: Session, user: User, payload: dict) -> FlashSolicitat
                         "property_registry",
                         "lien_payoff_value",
                         "asset_full_address",
+                        "borrower_address_json",
                         "partners_json",
                         "properties_json",
                     ),

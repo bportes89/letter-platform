@@ -55,9 +55,11 @@ def build_desk_contract_html(product: str, context: dict) -> str:
     }.get(product.upper(), product)
     valor = str(context.get("amount_label") or context.get("credit") or "—")
     bem = str(context.get("asset_label") or "—")
+    endereco = str(context.get("address") or "").strip()
+    endereco_block = f"<br/><strong>Endereço:</strong> {endereco}" if endereco else ""
     return (
         f'<div class="letter-contract-body"><p><strong>LETTER BANK LTDA</strong> — Contrato {prod_label}</p>'
-        f"<p><strong>Contratante:</strong> {nome}<br/><strong>Documento:</strong> {doc}</p>"
+        f"<p><strong>Contratante:</strong> {nome}<br/><strong>Documento:</strong> {doc}{endereco_block}</p>"
         f"<p><strong>Objeto:</strong> {bem}<br/><strong>Valor de referência:</strong> {valor}</p>"
         "<p>Este documento complementa a taxa TAPAF e a esteira operacional LETTER. "
         "A assinatura eletrônica via ZapSign será solicitada após a confirmação do pagamento TAPAF, "
@@ -249,6 +251,7 @@ def flash_context_from_solicitation(item: FlashSolicitation) -> dict:
     return {
         "contact_name": item.contact_name,
         "document": item.document,
+        "address": item.address,
         "amount_label": f"R$ {item.principal}",
         "asset_label": f"{item.asset_category} — {item.asset_type}",
     }

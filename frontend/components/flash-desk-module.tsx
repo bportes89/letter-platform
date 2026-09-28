@@ -98,6 +98,13 @@ const emptyForm = {
   document: "",
   person_type: "PJ",
   address: "",
+  hq_street: "",
+  hq_number: "",
+  hq_neighborhood: "",
+  hq_city: "",
+  hq_state: "",
+  hq_zip: "",
+  hq_complement: "",
   occupation: "",
   income_value: "",
   asset_type: "imovel",
@@ -157,6 +164,31 @@ function composePropertyAddress(p: FlashPropertyRow): string {
   return parts.join(" · ");
 }
 
+function composeBorrowerAddress(form: typeof emptyForm): string {
+  const line1 = [form.hq_street.trim(), form.hq_number.trim()].filter(Boolean).join(", ");
+  const parts = [
+    line1,
+    form.hq_complement.trim(),
+    form.hq_neighborhood.trim(),
+    [form.hq_city.trim(), form.hq_state.trim()].filter(Boolean).join(" / "),
+    form.hq_zip.trim() ? `CEP ${form.hq_zip.trim()}` : "",
+  ].filter(Boolean);
+  return parts.join(" · ");
+}
+
+function borrowerAddressPayload(form: typeof emptyForm) {
+  return {
+    street: form.hq_street.trim(),
+    number: form.hq_number.trim(),
+    neighborhood: form.hq_neighborhood.trim(),
+    city: form.hq_city.trim(),
+    state: form.hq_state.trim(),
+    zip: form.hq_zip.trim(),
+    complement: form.hq_complement.trim(),
+    full_address: composeBorrowerAddress(form),
+  };
+}
+
 function parseMoney(value: string): number {
   const raw = String(value || "").trim();
   if (!raw) return 0;
@@ -203,7 +235,6 @@ export function FlashDeskModule() {
   const [tapafScroll, setTapafScroll] = useState(false);
   const [tapafCb1, setTapafCb1] = useState(false);
   const [tapafCb2, setTapafCb2] = useState(false);
-  const [hqZip, setHqZip] = useState("");
   const tapafPanelRef = useRef<HTMLDivElement>(null);
 
   const isInternal = isInternalProductRole(user?.role);
@@ -277,6 +308,13 @@ export function FlashDeskModule() {
     if (!form.contact_email.trim()) return "Informe o e-mail do tomador.";
     if (!form.contact_phone.trim()) return "Informe o telefone do tomador.";
     if (!form.document.trim()) return "Informe o CNPJ do tomador.";
+    if (!form.hq_street.trim() || !form.hq_number.trim()) {
+      return "Informe logradouro e número da sede do tomador (PJ).";
+    }
+    if (!form.hq_city.trim() || !form.hq_state.trim()) {
+      return "Informe cidade e UF da sede do tomador.";
+    }
+    if (form.hq_zip.replace(/\D/g, "").length !== 8) return "Informe o CEP completo da sede do tomador.";
     if (!properties.length) return "Inclua ao menos um imóvel.";
     for (let i = 0; i < properties.length; i += 1) {
       const p = properties[i];
@@ -390,7 +428,8 @@ export function FlashDeskModule() {
           contact_phone: form.contact_phone.trim(),
           document: form.document.trim() || null,
           person_type: "PJ",
-          address: form.address.trim() || null,
+          address: composeBorrowerAddress(form) || null,
+          borrower_address_json: borrowerAddressPayload(form),
           occupation: form.occupation.trim() || null,
           income_value: moneyPayload(form.income_value),
           asset_full_address: fullAddress || null,
@@ -428,10 +467,18 @@ export function FlashDeskModule() {
   async function fillHqCep(cep: string) {
     const addr = await lookupCep(cep);
     if (!addr) return;
-    const line = [addr.street, addr.neighborhood, addr.city, addr.uf, addr.zipcode ? `CEP ${addr.zipcode}` : ""]
-      .filter(Boolean)
-      .join(", ");
-    patchForm("address", line);
+    setForm((prev) => {
+      const next = {
+        ...prev,
+        hq_zip: addr.zipcode,
+        hq_street: addr.street || prev.hq_street,
+        hq_neighborhood: addr.neighborhood || prev.hq_neighborhood,
+        hq_city: addr.city || prev.hq_city,
+        hq_state: addr.uf || prev.hq_state,
+      };
+      return { ...next, address: composeBorrowerAddress(next) };
+    });
+    setEvalResult(null);
   }
 
   async function acceptTapaf() {
@@ -673,11 +720,17 @@ export function FlashDeskModule() {
                   <small className="muted">Receita bruta média por mês da empresa.</small>
                 </label>
                 <input placeholder="Ramo de atividade" value={form.occupation} onChange={(e) => patchForm("occupation", e.target.value)} />
+                <div style={{ gridColumn: "1 / -1", marginTop: 4 }}>
+                  <b style={{ fontSize: 11 }}>Endereço da sede (tomador)</b>
+                  <small className="muted" style={{ display: "block" }}>
+                    Dados completos para o contrato (logradouro, número, bairro, cidade e UF).
+                  </small>
+                </div>
                 <label>
-                  CEP da sede (tomador)
+                  CEP
                   <input
-                    value={hqZip}
-                    onChange={(e) => setHqZip(e.target.value)}
+                    value={form.hq_zip}
+                    onChange={(e) => patchForm("hq_zip", e.target.value)}
                     onBlur={(e) => {
                       const z = e.target.value;
                       if (z.replace(/\D/g, "").length === 8) void fillHqCep(z);
@@ -686,12 +739,52 @@ export function FlashDeskModule() {
                     inputMode="numeric"
                   />
                 </label>
-                <input
-                  style={{ gridColumn: "1 / -1" }}
-                  placeholder="Endereço da sede (tomador) — preenchido pelo CEP ou digite manualmente"
-                  value={form.address}
-                  onChange={(e) => patchForm("address", e.target.value)}
-                />
+                <label>
+                  Logradouro
+                  <input
+                    placeholder="Rua / avenida"
+                    value={form.hq_street}
+                    onChange={(e) => patchForm("hq_street", e.target.value)}
+                  />
+                </label>
+                <label>
+                  Número
+                  <input placeholder="Nº" value={form.hq_number} onChange={(e) => patchForm("hq_number", e.target.value)} />
+                </label>
+                <label>
+                  Bairro
+                  <input
+                    placeholder="Bairro"
+                    value={form.hq_neighborhood}
+                    onChange={(e) => patchForm("hq_neighborhood", e.target.value)}
+                  />
+                </label>
+                <label>
+                  Cidade
+                  <input placeholder="Cidade" value={form.hq_city} onChange={(e) => patchForm("hq_city", e.target.value)} />
+                </label>
+                <label>
+                  UF
+                  <input
+                    placeholder="MG"
+                    maxLength={2}
+                    value={form.hq_state}
+                    onChange={(e) => patchForm("hq_state", e.target.value.toUpperCase())}
+                  />
+                </label>
+                <label style={{ gridColumn: "1 / -1" }}>
+                  Complemento (opcional)
+                  <input
+                    placeholder="Sala, andar, bloco…"
+                    value={form.hq_complement}
+                    onChange={(e) => patchForm("hq_complement", e.target.value)}
+                  />
+                </label>
+                {composeBorrowerAddress(form) ? (
+                  <p className="muted" style={{ gridColumn: "1 / -1", margin: 0, fontSize: 11 }}>
+                    Resumo: {composeBorrowerAddress(form)}
+                  </p>
+                ) : null}
                 <label>
                   Valor solicitado (R$)
                   <CurrencyInput value={form.requested_amount} onChange={(v) => patchForm("requested_amount", v)} placeholder="R$ 0,00" />
