@@ -588,7 +588,11 @@ export function ProposalsModule() {
       setLastCalculation(calc);
       setHighlightProposalId(p.id);
       setCalculatedProposalIds((prev) => new Set(prev).add(p.id));
-      setNotice(`Memória ${calc.formula_version} criada — agora pode «Gerar contrato» nesta linha.`);
+      setNotice(
+        isCommercial
+          ? `Simulação ${calc.formula_version} — valores resumidos acima (sem geração de contrato nesta tela).`
+          : `Memória ${calc.formula_version} criada — agora pode «Gerar contrato» nesta linha.`,
+      );
       void load();
     } catch (e) {
       setNotice(e instanceof Error ? e.message : "Falha no cálculo");
@@ -650,9 +654,10 @@ export function ProposalsModule() {
               </>
             )}
             <br />
-            <b>Passo 3</b> — <em>Gerar contrato</em> só na linha que já tiver memória calculada (botão fica ativo).
             {isCommercial ? (
               <>
+                <b>Passo 3</b> — Use o resumo da memória para apresentar ao cliente. Contrato e operação completa ficam com a
+                matriz.
                 <br />
                 <b>Marketplace</b> — use{" "}
                 <Link href="/modules/venda-direta-manual">Venda Direta Manual</Link> ou{" "}
@@ -660,10 +665,15 @@ export function ProposalsModule() {
               </>
             ) : (
               <>
+                <b>Passo 3</b> — <em>Gerar contrato</em> só na linha que já tiver memória calculada (botão fica ativo).
+              </>
+            )}
+            {!isCommercial ? (
+              <>
                 <br />
                 <b>Marketplace</b> — exige cotas travadas no inventário antes do contrato.
               </>
-            )}
+            ) : null}
             <br />
             <b>SDC</b> — mesa em <Link href="/modules/sdc">SDC — Capital de Giro</Link>. · <b>Flash Capital</b> —{" "}
             <Link href="/modules/flash-capital">Flash Capital</Link>.
@@ -919,7 +929,7 @@ export function ProposalsModule() {
           {notice}
         </div>
       )}
-      {lastCalculation && <CalculationResult calculation={lastCalculation} />}
+      {lastCalculation && <CalculationResult calculation={lastCalculation} hidePlatformFee />}
       <div ref={proposalsTableRef}>
         <DataTable headers={["Produto", "Valor", "Canal", "Comissão", "Parceiro", "Status", "Workflow"]}>
           {items.map((p) => {
@@ -965,15 +975,17 @@ export function ProposalsModule() {
                   >
                     Calcular memória
                   </button>
-                  <button
-                    type="button"
-                    className="table-action"
-                    disabled={hasContract || !hasMemory}
-                    title={!hasMemory ? "Calcule a memória nesta linha antes" : undefined}
-                    onClick={() => void contract(p)}
-                  >
-                    {hasContract ? "Contrato criado" : "Gerar contrato"}
-                  </button>
+                  {!isCommercial && (
+                    <button
+                      type="button"
+                      className="table-action"
+                      disabled={hasContract || !hasMemory}
+                      title={!hasMemory ? "Calcule a memória nesta linha antes" : undefined}
+                      onClick={() => void contract(p)}
+                    >
+                      {hasContract ? "Contrato criado" : "Gerar contrato"}
+                    </button>
+                  )}
                 </td>
               </tr>
             );
@@ -984,7 +996,49 @@ export function ProposalsModule() {
   );
 }
 
-function CalculationResult({calculation}:{calculation:Calculation}){const labels:Record<string,string>={principal:"Principal (nominal)",total_interest:"Juros totais",investor_interest:"Investidores",platform_spread:"Spread LETTER",maturity_total:"Total no vencimento",start_fee_total:"Taxa de Start",start_fee_milestone_1:"Marco 1",start_fee_milestone_2:"Marco 2",intermediation_fee:"Fee 10%",capital_commission:"Captação 1%",asset_value:"Valor do bem",ltv_percent:"LTV (%)",monthly_payment:"Parcela",balloon_payment:"Parcela balão",management_fee_total:"Gestão 0,5%",itbi_provision:"Provisão ITBI",platform_fee:"Fee plataforma",structuring_fee:"Fee plataforma",partner_commission_base:"Base comissão rede",net_payout:"Payout líquido",total_contract:"Total do contrato",pool_investor_rate_percent:"Rentabilidade pool (% a.m.)",pool_investor_tier_label:"Faixa pool",pool_investor_tax_status:"Status fiscal pool",investor_rate_percent:"Rentabilidade investidor (% a.m.)",platform_spread_rate_percent:"Spread plataforma (% a.m.)"};const entries=Object.entries(calculation.output).filter(([key,value])=>labels[key]&&value!==null);const notes=[calculation.output.partner_commission_basis_note,calculation.output.interest_basis_note,calculation.output.pool_investor_tax_note].filter(x=>typeof x==="string");const quitconContext=calculation.formula_version.startsWith("sdc-")&&calculation.quitcon_sdc?{proposalId:calculation.proposal_id,calculationMemoryId:calculation.id,mesesRestantes:Number(calculation.output.duration_months??calculation.input.duration_months??0)||undefined}:undefined;return <div className="calculation-result"><div><span className="eyebrow dark">MEMÓRIA VERSIONADA</span><b>{calculation.formula_version}</b></div>{notes.map((note,i)=><small key={i}>{String(note)}</small>)}<div>{entries.map(([key,value])=><article key={key}><small>{labels[key]}</small><strong>{key.includes("percent")||key==="pool_investor_rate_percent"?`${value}%`:key==="pool_investor_tax_status"?"Livre de imposto (sem retenção)":key.includes("tier")?String(value):brl.format(Number(value))}</strong></article>)}</div>{calculation.quitcon_sdc&&<SdcQuitConProjectionTable data={calculation.quitcon_sdc} context={quitconContext}/>}</div>}
+const CALC_HIDDEN_PLATFORM_FEE_KEYS = new Set(["platform_fee", "structuring_fee"]);
+
+function CalculationResult({
+  calculation,
+  hidePlatformFee = true,
+}: {
+  calculation: Calculation;
+  hidePlatformFee?: boolean;
+}) {
+  const labels: Record<string, string> = {
+    principal: "Principal (nominal)",
+    total_interest: "Juros totais",
+    investor_interest: "Investidores",
+    platform_spread: "Spread LETTER",
+    maturity_total: "Total no vencimento",
+    start_fee_total: "Taxa de Start",
+    start_fee_milestone_1: "Marco 1",
+    start_fee_milestone_2: "Marco 2",
+    intermediation_fee: "Fee 10%",
+    capital_commission: "Captação 1%",
+    asset_value: "Valor do bem",
+    ltv_percent: "LTV (%)",
+    monthly_payment: "Parcela",
+    balloon_payment: "Parcela balão",
+    management_fee_total: "Gestão 0,5%",
+    itbi_provision: "Provisão ITBI",
+    platform_fee: "Fee plataforma",
+    structuring_fee: "Fee plataforma",
+    partner_commission_base: "Base comissão rede",
+    net_payout: "Payout líquido",
+    total_contract: "Total do contrato",
+    pool_investor_rate_percent: "Rentabilidade pool (% a.m.)",
+    pool_investor_tier_label: "Faixa pool",
+    pool_investor_tax_status: "Status fiscal pool",
+    investor_rate_percent: "Rentabilidade investidor (% a.m.)",
+    platform_spread_rate_percent: "Spread plataforma (% a.m.)",
+  };
+  const entries = Object.entries(calculation.output).filter(
+    ([key, value]) =>
+      labels[key] &&
+      value !== null &&
+      !(hidePlatformFee && CALC_HIDDEN_PLATFORM_FEE_KEYS.has(key)),
+  );const notes=[calculation.output.partner_commission_basis_note,calculation.output.interest_basis_note,calculation.output.pool_investor_tax_note].filter(x=>typeof x==="string");const quitconContext=calculation.formula_version.startsWith("sdc-")&&calculation.quitcon_sdc?{proposalId:calculation.proposal_id,calculationMemoryId:calculation.id,mesesRestantes:Number(calculation.output.duration_months??calculation.input.duration_months??0)||undefined}:undefined;return <div className="calculation-result"><div><span className="eyebrow dark">MEMÓRIA VERSIONADA</span><b>{calculation.formula_version}</b></div>{notes.map((note,i)=><small key={i}>{String(note)}</small>)}<div>{entries.map(([key,value])=><article key={key}><small>{labels[key]}</small><strong>{key.includes("percent")||key==="pool_investor_rate_percent"?`${value}%`:key==="pool_investor_tax_status"?"Livre de imposto (sem retenção)":key.includes("tier")?String(value):brl.format(Number(value))}</strong></article>)}</div>{calculation.quitcon_sdc&&<SdcQuitConProjectionTable data={calculation.quitcon_sdc} context={quitconContext}/>}</div>}
 
 function OperationalLayout({title,subtitle,icon,children}:{title:string;subtitle:string;icon:React.ReactNode;children:React.ReactNode}){return <><div className="page-heading"><div><span className="eyebrow dark">OPERAÇÃO ATIVA</span><h1>{title}</h1><p>{subtitle}</p></div><div className="operational-icon">{icon}</div></div><section className="panel operational-panel">{children}</section></>}
 function DataTable({headers,children}:{headers:string[];children:React.ReactNode}){return <div className="table-wrap"><table className="data-table"><thead><tr>{headers.map(h=><th key={h}>{h}</th>)}</tr></thead><tbody>{children}</tbody></table></div>}
