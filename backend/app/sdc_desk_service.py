@@ -902,7 +902,16 @@ def create_sale_from_sdc(
     quota.status = "RESERVED"
     item.quota_id = quota.id
     db.flush()
-    return {"proposal_id": proposal.id, "lead_id": lead_id, "quota_id": quota.id}
+    lead = db.get(Lead, lead_id) if lead_id else None
+    from app.product_contract_flow_service import emit_sdc_cap_giro_contract_and_zapsign
+
+    zapsign = emit_sdc_cap_giro_contract_and_zapsign(db, user, item, proposal, lead)
+    return {
+        "proposal_id": proposal.id,
+        "lead_id": lead_id,
+        "quota_id": quota.id,
+        "contract_zapsign": zapsign,
+    }
 
 
 def solicitation_view(

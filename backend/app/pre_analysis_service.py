@@ -427,6 +427,10 @@ def confirm_tapaf_payment(db: Session, user: User, pauta: PreAnalysisPauta, even
         total_amount=money(amount),
         inventory_context=inventory_context,
     )
+    if proposal and proposal.product == "FLASH_CREDIT":
+        from app.product_contract_flow_service import send_zapsign_after_tapaf_paid
+
+        send_zapsign_after_tapaf_paid(db, proposal)
     return pauta
 
 

@@ -346,6 +346,9 @@ def apply_situation_transition(
             from app.marketplace_notification_service import dispatch_payment_received_notifications
 
             dispatch_payment_received_notifications(db, user, lead, proposal)
+        from app.product_contract_flow_service import send_marketplace_zapsign_after_entrada_paid
+
+        send_marketplace_zapsign_after_entrada_paid(db, lead, proposal)
         lead.status = "PROPOSAL"
         return
 

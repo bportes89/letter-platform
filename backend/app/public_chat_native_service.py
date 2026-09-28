@@ -1469,44 +1469,17 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
                 }
                 terms["contract_html"] = html
                 terms["person_type"] = snap.get("person_type") or "PF"
+                from app.product_contract_flow_service import mark_marketplace_contract_at_purchase
+
+                mark_marketplace_contract_at_purchase(terms)
                 proposal.terms_json = json.dumps(terms, ensure_ascii=False)
                 db.flush()
-                zapsign_block = None
-                from app.marketplace_zapsign_service import ensure_marketplace_zapsign
-
-                zapsign_block = ensure_marketplace_zapsign(
-                    db,
-                    lead=lead,
-                    proposal=proposal,
-                    html=html,
-                    ack=terms["contract_ack"],
-                    signer_email=str(snap.get("email") or ""),
-                    signer_name=lead.name,
-                )
-            else:
-                zapsign_block = None
             db.flush()
-            if zapsign_block and zapsign_block.get("sign_url"):
-                return _wrap(
-                    [
-                        {
-                            "text": (
-                                "Contrato registrado. A assinatura digital foi enviada pelo ZapSign — "
-                                "você pode assinar agora ou depois no escritório virtual."
-                            ),
-                            "options": [
-                                {"name": "Assinar contrato (ZapSign)", "link": zapsign_block["sign_url"]},
-                                {"name": "Continuar", "next": int(STEP_ACCOUNT_CTA)},
-                            ],
-                        }
-                    ],
-                    lead_id=lead.id,
-                )
-            follow_text = "Contrato de intermediação registrado."
-            if zapsign_block and zapsign_block.get("status") == "ERROR":
-                follow_text += " A assinatura ZapSign poderá ser reenviada pelo escritório virtual."
-            else:
-                follow_text += " Agora vamos criar o acesso ao escritório virtual."
+            follow_text = (
+                "Contrato de intermediação registrado. Após a confirmação do pagamento da entrada, "
+                "enviaremos o contrato para assinatura digital (ZapSign). "
+                "Agora vamos criar o acesso ao escritório virtual."
+            )
             return _wrap(
                 [
                     {

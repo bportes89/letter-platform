@@ -297,6 +297,9 @@ def confirm_tapaf_payment(db: Session, user: User, operacao: QuitConOperacao, ev
     storage.put(dossier_key, b"%PDF-1.4\n% QuitCon compliance dossier sandbox\n", "application/pdf")
     operacao.compliance_dossier_uri = f"s3://letter-vault-private/{dossier_key}"
     db.flush()
+    from app.product_contract_flow_service import send_quitcon_zapsign_after_tapaf
+
+    send_quitcon_zapsign_after_tapaf(db, operacao)
     return operacao
 
 

@@ -4651,7 +4651,7 @@ def test_marketplace_partner_sees_my_blocked_commission_slice(client, auth_heade
     assert Decimal(blocked.json()["blocked_for_withdrawal"]) >= Decimal("12000.00")
 
 
-def test_marketplace_chat_sends_zapsign_on_contract_accept(client, auth_headers, monkeypatch):
+def test_marketplace_chat_sends_zapsign_after_entrada_paid(client, auth_headers, monkeypatch):
     class FakeZapSignClient:
         def __init__(self, *args, **kwargs):
             pass
@@ -4688,6 +4688,7 @@ def test_marketplace_chat_sends_zapsign_on_contract_accept(client, auth_headers,
             }
 
     monkeypatch.setattr("app.marketplace_zapsign_service.settings.zapsign_api_token", "zapsign-test-token")
+    monkeypatch.setattr("app.zapsign_signature_service.settings.zapsign_api_token", "zapsign-test-token")
     monkeypatch.setattr("app.marketplace_zapsign_service.ZapSignClient", FakeZapSignClient)
 
     email_addr = "maria.chat.zapsign@letter.com.br"
@@ -4766,11 +4767,19 @@ def test_marketplace_chat_sends_zapsign_on_contract_accept(client, auth_headers,
     assert accept.status_code == 200, accept.text
     accept_opts = accept.json()["OBJ"]["chat_next"][0].get("options") or []
     zapsign_links = [o.get("link") for o in accept_opts if "zapsign" in str(o.get("link", "")).lower()]
-    assert zapsign_links, "aceite do contrato deveria expor link ZapSign"
+    assert not zapsign_links, "ZapSign só após confirmação do pagamento da entrada"
 
     detail = client.get(f"/api/v1/marketplace/cadastros/{lead_id}", headers=auth_headers)
     assert detail.status_code == 200
-    zs = detail.json().get("zapsign") or {}
+    assert not (detail.json().get("zapsign") or {}).get("sign_url")
+
+    paid = client.patch(
+        f"/api/v1/marketplace/cadastros/{lead_id}",
+        headers=auth_headers,
+        json={"situation": "PAGO"},
+    )
+    assert paid.status_code == 200, paid.text
+    zs = paid.json().get("zapsign") or {}
     assert zs.get("status") == "SENT"
     assert "zapsign" in (zs.get("sign_url") or "")
 

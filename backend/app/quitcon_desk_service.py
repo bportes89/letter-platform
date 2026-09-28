@@ -669,6 +669,19 @@ def create_sale_from_quitcon(db: Session, user: User, item: QuitConSolicitation)
         parcelas_em_dia=item.parcelas_em_dia,
     )
     checkout = generate_tapaf_checkout(operacao)
+    from app.product_contract_flow_service import emit_desk_contract_on_tapaf
+
+    emit_desk_contract_on_tapaf(
+        db,
+        proposal,
+        product="QUITCON",
+        context={
+            "contact_name": item.contact_name,
+            "document": item.document,
+            "amount_label": f"R$ {item.quitacao_vp_amount}",
+            "asset_label": f"{item.property_type} — matrícula {item.registry_number}",
+        },
+    )
     item.proposal_id = proposal.id
     item.quitcon_operacao_id = operacao.id
     db.flush()

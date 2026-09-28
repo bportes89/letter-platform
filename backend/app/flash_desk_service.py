@@ -323,6 +323,14 @@ def open_tapaf_checkout_for_solicitation(db: Session, user: User, item: FlashSol
     db.flush()
 
     checkout = generate_tapaf_checkout(pauta)
+    from app.product_contract_flow_service import emit_desk_contract_on_tapaf, flash_context_from_solicitation
+
+    emit_desk_contract_on_tapaf(
+        db,
+        proposal,
+        product="FLASH",
+        context=flash_context_from_solicitation(item),
+    )
     tapaf_meta["pauta_id"] = pauta.id
     tapaf_meta["pauta_code"] = pauta.pauta_code
     meta["tapaf"] = tapaf_meta
