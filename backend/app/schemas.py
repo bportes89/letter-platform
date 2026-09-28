@@ -3016,7 +3016,12 @@ class QuitConDeskStatusUpdate(BaseModel):
 
 
 class BISummaryView(BaseModel):
-    funnel: dict; portfolio: dict; risk: dict; funding: dict; recovery: dict
+    funnel: dict
+    portfolio: dict
+    risk: dict
+    funding: dict
+    recovery: dict
+    structured_volume: dict = Field(default_factory=dict)
 
 class OperationalJobCreate(BaseModel):
     job_type: str; idempotency_key: str = Field(min_length=8,max_length=120)

@@ -213,7 +213,36 @@ function RiskPanel({ persona }: { persona: string }) {
   );
 }
 
+type StructuredVolume = {
+  marketplace: string;
+  sdc: string;
+  flash_capital: string;
+  total: string;
+  counts?: { marketplace: number; sdc: number; flash_capital: number };
+  note?: string;
+};
+
 function FinancialPanel() {
+  const [volume, setVolume] = useState<StructuredVolume | null>(null);
+  const [loadError, setLoadError] = useState(false);
+
+  useEffect(() => {
+    api<{ structured_volume: StructuredVolume }>("/bi/summary")
+      .then((res) => setVolume(res.structured_volume))
+      .catch(() => setLoadError(true));
+  }, []);
+
+  const marketplace = volume ? Number(volume.marketplace) : 0;
+  const sdc = volume ? Number(volume.sdc) : 0;
+  const flash = volume ? Number(volume.flash_capital) : 0;
+  const total = volume ? Number(volume.total) : 0;
+  const denom = total > 0 ? total : 1;
+  const segments = [
+    { key: "marketplace", label: "Marketplace", value: marketplace, pct: (marketplace / denom) * 100 },
+    { key: "sdc", label: "SDC", value: sdc, pct: (sdc / denom) * 100 },
+    { key: "flash", label: "Flash Capital", value: flash, pct: (flash / denom) * 100 },
+  ];
+
   return (
     <section className="panel panel-float">
       <div className="panel-title">
@@ -222,18 +251,59 @@ function FinancialPanel() {
           <h2>Volume estruturado</h2>
         </div>
       </div>
-      <div className="big-number">{money.format(800000)}</div>
-      <p className="muted">Volume de demonstração em propostas</p>
-      <div className="split-bar">
-        <i />
-        <i />
-        <i />
-      </div>
-      <div className="legend">
-        <span>Marketplace</span>
-        <span>SDC</span>
-        <span>Flash Capital</span>
-      </div>
+      {!volume && !loadError && <p className="muted" style={{ marginTop: 10 }}>Carregando volume por esteira…</p>}
+      {loadError && (
+        <p className="muted" style={{ marginTop: 10 }}>Não foi possível carregar o volume estruturado.</p>
+      )}
+      {volume && (
+        <>
+          <div className="big-number">{money.format(total)}</div>
+          <p className="muted" style={{ lineHeight: 1.45 }}>
+            {volume.note ||
+              "Soma das propostas Marketplace e solicitações ativas nas mesas SDC e Flash Capital."}
+          </p>
+          <div
+            style={{
+              display: "flex",
+              height: 10,
+              borderRadius: 6,
+              overflow: "hidden",
+              background: "#e4ebe7",
+              marginTop: 14,
+            }}
+            aria-hidden
+          >
+            {segments.map((seg) =>
+              seg.pct > 0 ? (
+                <div
+                  key={seg.key}
+                  style={{
+                    width: `${seg.pct}%`,
+                    background: seg.key === "marketplace" ? "var(--green)" : seg.key === "sdc" ? "#00b872" : "#067647",
+                  }}
+                />
+              ) : null,
+            )}
+            {total <= 0 && <div style={{ width: "100%", background: "#dfe8e3" }} />}
+          </div>
+          <div className="legend">
+            {segments.map((seg) => {
+              const n =
+                seg.key === "flash"
+                  ? volume.counts?.flash_capital
+                  : seg.key === "sdc"
+                    ? volume.counts?.sdc
+                    : volume.counts?.marketplace;
+              return (
+                <span key={seg.key}>
+                  {seg.label}
+                  {volume.counts ? ` (${n ?? 0})` : ""}: {money.format(seg.value)}
+                </span>
+              );
+            })}
+          </div>
+        </>
+      )}
     </section>
   );
 }

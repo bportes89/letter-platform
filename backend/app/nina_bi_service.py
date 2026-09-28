@@ -7,10 +7,13 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models import (
-    AuctionSettlement, DelinquencyCase, FundingOpportunity, Invoice, Lead,
-    Proposal, Quota, UnderwritingAssessment, UnderwritingDecision,
+    AuctionSettlement, DelinquencyCase, FlashSolicitation, FundingOpportunity, Invoice, Lead,
+    Proposal, Quota, SdcSolicitation, UnderwritingAssessment, UnderwritingDecision,
     UnderwritingPolicy, User,
 )
+
+DESK_VOLUME_EXCLUDED_STATUSES = frozenset({"CANCELLED", "REJECTED"})
+MARKETPLACE_EXCLUDED_STATUSES = frozenset({"CANCELLED", "EXPIRED"})
 
 
 def money(value: Decimal) -> Decimal:
@@ -111,9 +114,112 @@ def _build_quota_ranking_candidates(quotas: list[Quota], target: Decimal) -> lis
     return candidates
 
 
+def structured_volume_summary(db: Session, user: User) -> dict:
+    """Volume em propostas/solicitações ativas por esteira (org ou rede do parceiro)."""
+    from app.network_visibility import list_visible_proposals, visible_owner_ids
+
+    org = user.organization_id
+    owner_ids = visible_owner_ids(db, user)
+
+    if owner_ids is None:
+        marketplace_amount = money(
+            Decimal(
+                str(
+                    db.scalar(
+                        select(func.coalesce(func.sum(Proposal.requested_amount), 0)).where(
+                            Proposal.organization_id == org,
+                            Proposal.product == "MARKETPLACE",
+                            Proposal.status.notin_(tuple(MARKETPLACE_EXCLUDED_STATUSES)),
+                        )
+                    )
+                    or 0
+                )
+            )
+        )
+        marketplace_count = (
+            db.scalar(
+                select(func.count())
+                .select_from(Proposal)
+                .where(
+                    Proposal.organization_id == org,
+                    Proposal.product == "MARKETPLACE",
+                    Proposal.status.notin_(tuple(MARKETPLACE_EXCLUDED_STATUSES)),
+                )
+            )
+            or 0
+        )
+    else:
+        visible = [
+            p
+            for p in list_visible_proposals(db, user)
+            if p.product == "MARKETPLACE" and p.status not in MARKETPLACE_EXCLUDED_STATUSES
+        ]
+        marketplace_amount = money(
+            sum((Decimal(str(p.requested_amount)) for p in visible), Decimal("0"))
+        )
+        marketplace_count = len(visible)
+
+    def _desk_totals(model, amount_column):
+        filters = [
+            model.organization_id == org,
+            model.status.notin_(tuple(DESK_VOLUME_EXCLUDED_STATUSES)),
+        ]
+        if owner_ids is not None:
+            filters.append(model.partner_user_id.in_(owner_ids))
+        amount = money(
+            Decimal(
+                str(
+                    db.scalar(select(func.coalesce(func.sum(amount_column), 0)).where(*filters)) or 0
+                )
+            )
+        )
+        count = db.scalar(select(func.count()).select_from(model).where(*filters)) or 0
+        return amount, int(count)
+
+    sdc_amount, sdc_count = _desk_totals(SdcSolicitation, SdcSolicitation.credit_estimated)
+    flash_amount, flash_count = _desk_totals(FlashSolicitation, FlashSolicitation.principal)
+    total = money(marketplace_amount + sdc_amount + flash_amount)
+
+    return {
+        "marketplace": str(marketplace_amount),
+        "sdc": str(sdc_amount),
+        "flash_capital": str(flash_amount),
+        "total": str(total),
+        "counts": {
+            "marketplace": marketplace_count,
+            "sdc": sdc_count,
+            "flash_capital": flash_count,
+        },
+        "note": "Soma de valores solicitados (Marketplace) e crédito/principal estimado nas mesas SDC e Flash Capital, excluindo canceladas/reprovadas.",
+    }
+
+
 def bi_summary(db:Session,user:User)->dict:
     org=user.organization_id
     count=lambda model,*filters: db.scalar(select(func.count()).select_from(model).where(model.organization_id==org,*filters)) or 0
     total=lambda model,column,*filters: money(Decimal(str(db.scalar(select(func.coalesce(func.sum(column),0)).where(model.organization_id==org,*filters)) or 0)))
     invoice_total=total(Invoice,Invoice.total_amount);paid=total(Invoice,Invoice.paid_amount);overdue=total(DelinquencyCase,DelinquencyCase.penalty_amount)+total(DelinquencyCase,DelinquencyCase.late_interest_amount)
-    return {"funnel":{"leads":count(Lead),"proposals":count(Proposal),"approved":count(Proposal,Proposal.status=="UNDERWRITING_APPROVE")},"portfolio":{"invoiced":str(invoice_total),"paid":str(paid),"open":str(money(invoice_total-paid)),"delinquency_charges":str(money(overdue))},"risk":{"assessments":count(UnderwritingAssessment),"high_risk":count(UnderwritingAssessment,UnderwritingAssessment.risk_band=="HIGH"),"pending_decisions":count(UnderwritingAssessment,UnderwritingAssessment.status=="PENDING_DECISION")},"funding":{"target":str(total(FundingOpportunity,FundingOpportunity.target_amount)),"funded":str(total(FundingOpportunity,FundingOpportunity.funded_amount))},"recovery":{"settled":str(total(AuctionSettlement,AuctionSettlement.gross_amount))}}
+    return {
+        "funnel": {
+            "leads": count(Lead),
+            "proposals": count(Proposal),
+            "approved": count(Proposal, Proposal.status == "UNDERWRITING_APPROVE"),
+        },
+        "portfolio": {
+            "invoiced": str(invoice_total),
+            "paid": str(paid),
+            "open": str(money(invoice_total - paid)),
+            "delinquency_charges": str(money(overdue)),
+        },
+        "risk": {
+            "assessments": count(UnderwritingAssessment),
+            "high_risk": count(UnderwritingAssessment, UnderwritingAssessment.risk_band == "HIGH"),
+            "pending_decisions": count(UnderwritingAssessment, UnderwritingAssessment.status == "PENDING_DECISION"),
+        },
+        "funding": {
+            "target": str(total(FundingOpportunity, FundingOpportunity.target_amount)),
+            "funded": str(total(FundingOpportunity, FundingOpportunity.funded_amount)),
+        },
+        "recovery": {"settled": str(total(AuctionSettlement, AuctionSettlement.gross_amount))},
+        "structured_volume": structured_volume_summary(db, user),
+    }

@@ -2784,8 +2784,12 @@ def test_nina_underwriting_explanation_decision_and_ranking(client, auth_headers
 def test_bi_summary_and_executive_csv(client, auth_headers):
     summary=client.get("/api/v1/bi/summary",headers=auth_headers)
     assert summary.status_code==200
-    assert summary.json()["risk"]["assessments"]>=1
-    assert Decimal(summary.json()["portfolio"]["invoiced"])>0
+    body = summary.json()
+    assert body["risk"]["assessments"] >= 1
+    assert Decimal(body["portfolio"]["invoiced"]) > 0
+    sv = body["structured_volume"]
+    assert "marketplace" in sv and "sdc" in sv and "flash_capital" in sv
+    assert Decimal(sv["total"]) >= Decimal(sv["marketplace"])
     report=client.get("/api/v1/bi/executive-report.csv",headers=auth_headers)
     assert report.status_code==200 and report.content.startswith("\ufeffsection,metric,value".encode("utf-8"))
     assert b"portfolio,invoiced" in report.content
