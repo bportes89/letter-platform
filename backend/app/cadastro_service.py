@@ -132,6 +132,55 @@ def _snapshot_from_lead(lead: Lead) -> dict:
     return {}
 
 
+def lead_marketplace_shortcut_profile(lead: Lead) -> dict:
+    """CPF/CNPJ, endereço e filtros comerciais para atalhos (Venda Direta / Robô)."""
+    detail = _parse_json(lead.scr_detail_json)
+    merged: dict = {}
+    address: dict = {}
+    for key in MARKETPLACE_SNAPSHOT_KEYS:
+        block = detail.get(key)
+        if not isinstance(block, dict):
+            continue
+        for field, value in block.items():
+            if field == "address" and isinstance(value, dict):
+                for ak, av in value.items():
+                    if av and not address.get(ak):
+                        address[ak] = av
+            elif value not in (None, "") and not merged.get(field):
+                merged[field] = value
+    primary = _snapshot_from_lead(lead)
+    if isinstance(primary, dict):
+        for field, value in primary.items():
+            if field == "address" and isinstance(value, dict):
+                for ak, av in value.items():
+                    if av:
+                        address[ak] = av
+            elif value not in (None, "") and not merged.get(field):
+                merged[field] = value
+    for field in ("zipcode", "street", "number", "neighborhood", "city", "uf"):
+        if merged.get(field) and not address.get(field):
+            address[field] = merged[field]
+
+    document = lead.document or merged.get("document") or merged.get("cpf") or merged.get("cnpj") or ""
+    if document:
+        document = "".join(ch for ch in str(document) if ch.isdigit())
+
+    return {
+        "document": document or None,
+        "email": merged.get("email"),
+        "person_type": merged.get("person_type") or "PF",
+        "address": address,
+        "monthly_income": merged.get("monthly_income"),
+        "asset_value": merged.get("asset_value"),
+        "asset_year": merged.get("asset_year"),
+        "target_amount": merged.get("target_amount"),
+        "target_entrada": merged.get("target_entrada"),
+        "category": merged.get("category"),
+        "has_credit_restriction": merged.get("has_credit_restriction"),
+        "asset_is_zero_km": merged.get("asset_is_zero_km"),
+    }
+
+
 def _pipeline_for_situation(situation: str) -> str:
     if situation == SIT_AGUARDANDO:
         return PIPELINE_NOVOS
@@ -553,8 +602,10 @@ def update_cadastro(
         lead.name = name.strip()
     if phone is not None:
         lead.phone = phone.strip()
+    doc_updated = False
     if document is not None:
         lead.document = "".join(ch for ch in document if ch.isdigit()) or lead.document
+        doc_updated = True
     if lead_status is not None:
         allowed = {"NEW", "CONTACTED", "QUALIFIED", "PROPOSAL", "CONVERTED", "CANCELLED"}
         if lead_status not in allowed:
@@ -564,6 +615,8 @@ def update_cadastro(
     detail = _parse_json(lead.scr_detail_json)
     key = marketplace_snapshot_key(detail)
     snap = detail.get(key) if isinstance(detail.get(key), dict) else {}
+    if doc_updated and lead.document:
+        snap["document"] = lead.document
     if email is not None:
         snap["email"] = email.strip()
     address = snap.get("address") if isinstance(snap.get("address"), dict) else {}

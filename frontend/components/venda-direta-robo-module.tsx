@@ -6,7 +6,7 @@ import { FormEvent, useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { CurrencyInput } from "@/components/currency-input";
 import { lookupCep } from "@/lib/cep-lookup";
-import { validationMessageForPerson } from "@/lib/br-validation";
+import { formatDocumentDigits, validationMessageForPerson } from "@/lib/br-validation";
 
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
@@ -87,7 +87,25 @@ export function VendaDiretaRoboModule() {
   const [income, setIncome] = useState("");
   const [assetValue, setAssetValue] = useState("");
   const [assetYear, setAssetYear] = useState("");
-  const [cadastros, setCadastros] = useState<Array<{ lead_id: string; label: string; name: string; email: string | null; phone: string; document: string | null; person_type: string; address: Record<string, string> }>>([]);
+  type CadastroShortcut = {
+    lead_id: string;
+    label: string;
+    name: string;
+    email: string | null;
+    phone: string;
+    document: string | null;
+    person_type: string;
+    address: Record<string, string>;
+    monthly_income?: string | null;
+    asset_value?: string | null;
+    asset_year?: number | null;
+    target_amount?: string | null;
+    target_entrada?: string | null;
+    category?: string | null;
+    has_credit_restriction?: boolean | null;
+    asset_is_zero_km?: boolean | null;
+  };
+  const [cadastros, setCadastros] = useState<CadastroShortcut[]>([]);
   const [existingId, setExistingId] = useState("");
 
   const loadCadastros = useCallback(async () => {
@@ -104,19 +122,30 @@ export function VendaDiretaRoboModule() {
 
   function applyCadastro(id: string) {
     setExistingId(id);
+    if (!id) return;
     const row = cadastros.find((x) => x.lead_id === id);
     if (!row) return;
+    setError("");
     setName(row.name || "");
     setEmail(row.email || "");
     setPhone(row.phone || "");
-    setPersonType(row.person_type || "PF");
-    setDocument(row.document || "");
+    const pt = row.person_type || "PF";
+    setPersonType(pt);
+    setDocument(formatDocumentDigits(row.document, pt));
     setZipcode(row.address?.zipcode || "");
     setStreet(row.address?.street || "");
     setNumber(row.address?.number || "");
     setNeighborhood(row.address?.neighborhood || "");
     setCity(row.address?.city || "");
     setUf(row.address?.uf || "");
+    if (row.target_amount) setTargetAmount(String(row.target_amount));
+    if (row.target_entrada) setTargetEntrada(String(row.target_entrada));
+    if (row.monthly_income) setIncome(String(row.monthly_income));
+    if (row.asset_value) setAssetValue(String(row.asset_value));
+    if (row.asset_year) setAssetYear(String(row.asset_year));
+    if (row.category) setCategory(row.category);
+    if (row.has_credit_restriction != null) setDirty(!!row.has_credit_restriction);
+    if (row.asset_is_zero_km != null) setZeroKm(!!row.asset_is_zero_km);
   }
 
   async function onCepBlur() {
@@ -174,7 +203,9 @@ export function VendaDiretaRoboModule() {
         setBusy(false);
         return;
       }
-      const data = await api<SearchResult>("/marketplace/venda-direta-robo/search", {
+      const data = await api<SearchResult>(
+        "/marketplace/venda-direta-robo/search",
+        {
         method: "POST",
         body: JSON.stringify({
           name,
@@ -198,7 +229,9 @@ export function VendaDiretaRoboModule() {
           city: city || null,
           uf: uf || null,
         }),
-      });
+      },
+        { interactive: true },
+      );
       if (!data.eligible) {
         setResult(null);
         setError(data.blockers?.join(" ") || data.message || "Nenhuma cota encontrada para esses filtros.");
@@ -404,7 +437,7 @@ export function VendaDiretaRoboModule() {
             </div>
 
             <button type="submit" className="marketplace-submit" disabled={busy}>
-              <RefreshCw />
+              <RefreshCw className={busy ? "spin" : undefined} />
               {busy ? "Buscando…" : "Buscar cotas"}
             </button>
           </form>

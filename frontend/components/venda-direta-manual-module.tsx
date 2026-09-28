@@ -6,7 +6,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { CurrencyInput } from "@/components/currency-input";
 import { lookupCep } from "@/lib/cep-lookup";
-import { validationMessageForPerson } from "@/lib/br-validation";
+import { formatDocumentDigits, validationMessageForPerson } from "@/lib/br-validation";
 import { commercialQuotaDisplay } from "@/lib/commercial-quota-label";
 
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
@@ -51,6 +51,9 @@ type CadastroOption = {
   person_type: string;
   address: Record<string, string>;
   label: string;
+  monthly_income?: string | null;
+  asset_value?: string | null;
+  asset_year?: number | null;
 };
 
 type PartnerOption = { id: string; name: string; role: string; email: string | null };
@@ -126,14 +129,18 @@ export function VendaDiretaManualModule() {
     setName(row.name || "");
     setEmail(row.email || "");
     setPhone(row.phone || "");
-    setPersonType(row.person_type || "PF");
-    setDocument(row.document || "");
+    const pt = row.person_type || "PF";
+    setPersonType(pt);
+    setDocument(formatDocumentDigits(row.document, pt));
     setZipcode(row.address?.zipcode || "");
     setStreet(row.address?.street || "");
     setNumber(row.address?.number || "");
     setNeighborhood(row.address?.neighborhood || "");
     setCity(row.address?.city || "");
     setUf(row.address?.uf || "");
+    if (row.monthly_income) setIncome(String(row.monthly_income));
+    if (row.asset_value) setAssetValue(String(row.asset_value));
+    if (row.asset_year) setAssetYear(String(row.asset_year));
   }
 
   async function submit(e: FormEvent) {

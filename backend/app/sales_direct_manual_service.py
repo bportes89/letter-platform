@@ -119,14 +119,17 @@ def list_cadastros(db: Session, user: User, *, q: str | None = None) -> list[dic
     leads = list(db.scalars(stmt))
     needle = (q or "").strip().lower()
     rows = []
+    from app.cadastro_service import lead_marketplace_shortcut_profile
+
     for lead in leads:
-        snap = _snapshot_from_lead(lead)
-        email = snap.get("email")
-        person_type = snap.get("person_type") or "PF"
-        address = snap.get("address") if isinstance(snap.get("address"), dict) else {}
+        profile = lead_marketplace_shortcut_profile(lead)
+        email = profile.get("email")
+        person_type = profile.get("person_type") or "PF"
+        address = profile.get("address") if isinstance(profile.get("address"), dict) else {}
+        document = profile.get("document") or lead.document
         label = f"(#{lead.id[:8]}) {lead.name}"
-        if lead.document:
-            label += f" ({lead.document})"
+        if document:
+            label += f" ({document})"
         if email:
             label += f" {email}"
         if needle and needle not in label.lower() and needle not in (lead.phone or "").lower():
@@ -135,11 +138,19 @@ def list_cadastros(db: Session, user: User, *, q: str | None = None) -> list[dic
             {
                 "lead_id": lead.id,
                 "name": lead.name,
-                "document": lead.document,
+                "document": document,
                 "phone": lead.phone,
                 "email": email,
                 "person_type": person_type,
                 "address": address,
+                "monthly_income": profile.get("monthly_income"),
+                "asset_value": profile.get("asset_value"),
+                "asset_year": profile.get("asset_year"),
+                "target_amount": profile.get("target_amount"),
+                "target_entrada": profile.get("target_entrada"),
+                "category": profile.get("category"),
+                "has_credit_restriction": profile.get("has_credit_restriction"),
+                "asset_is_zero_km": profile.get("asset_is_zero_km"),
                 "label": label,
                 "source": lead.source,
                 "status": lead.status,

@@ -56,3 +56,16 @@ export function validationMessageForPerson(document: string, email: string, phon
   if (!isValidPhoneBr(phone)) return "Telefone inválido (10 ou 11 dígitos).";
   return null;
 }
+
+/** Exibe CPF/CNPJ a partir de dígitos (atalho de cadastro). */
+export function formatDocumentDigits(document: string | null | undefined, personType = "PF"): string {
+  const d = digitsOnly(document || "");
+  if (!d) return "";
+  if (d.length === 11) {
+    return d.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4");
+  }
+  if (d.length === 14) {
+    return d.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, "$1.$2.$3/$4-$5");
+  }
+  return personType === "PJ" ? d : d;
+}

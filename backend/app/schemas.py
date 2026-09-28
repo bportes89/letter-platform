@@ -2608,6 +2608,14 @@ class VendaDiretaManualCadastroOption(BaseModel):
     email: str | None = None
     person_type: str = "PF"
     address: dict = Field(default_factory=dict)
+    monthly_income: str | None = None
+    asset_value: str | None = None
+    asset_year: int | None = None
+    target_amount: str | None = None
+    target_entrada: str | None = None
+    category: str | None = None
+    has_credit_restriction: bool | None = None
+    asset_is_zero_km: bool | None = None
     label: str
     source: str
     status: str

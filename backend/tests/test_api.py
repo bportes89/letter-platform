@@ -832,7 +832,9 @@ def test_cadastro_patch_visible_in_venda_direta_shortcut(client, auth_headers):
     row = next((r for r in rows.json() if r["lead_id"] == lead_id), None)
     assert row is not None
     assert row["email"] == "atalho.vd@letter.test"
+    assert row["document"] == "39053344705"
     assert row["address"].get("city") == "Juiz de Fora"
+    assert row["address"].get("street") == "Rua Atalho"
 
 
 def test_marketplace_proposal_simulation_lists_in_cadastros(client, auth_headers):
