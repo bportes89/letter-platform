@@ -355,12 +355,63 @@ def test_flash_desk_evaluate_store_approve_and_sale(client, auth_headers):
     assert sale.json()["flash_route"]["route"] == "DIRECT_CLEAN"
     assert sale.json()["solicitation"]["can_create_sale"] is False
 
-    again = client.post(
-        f"/api/v1/flash/desk/solicitations/{sid}/sale",
+
+def test_flash_desk_property_debt_rules(client, auth_headers):
+    base = {
+        "asset_type": "imovel",
+        "asset_value": "1000000",
+        "docs_complete": True,
+        "term_months": 36,
+        "capital_source": "RETAIL",
+        "properties_json": [
+            {
+                "property_value": "1000000",
+                "has_debt": True,
+                "debt_type": "OUTRAS",
+            }
+        ],
+    }
+    outras = client.post("/api/v1/flash/desk/evaluate", headers=auth_headers, json=base)
+    assert outras.status_code == 200
+    assert outras.json()["result"]["viable"] is False
+    assert any("outras dívidas" in m.lower() for m in outras.json()["result"]["motivos"])
+
+    finance_ok = client.post(
+        "/api/v1/flash/desk/evaluate",
         headers=auth_headers,
-        json={},
+        json={
+            **base,
+            "properties_json": [
+                {
+                    "property_value": "1000000",
+                    "has_debt": True,
+                    "debt_type": "FINANCEIRA",
+                    "debt_payoff_value": "250000",
+                }
+            ],
+        },
     )
-    assert again.status_code == 409
+    assert finance_ok.status_code == 200
+    assert finance_ok.json()["result"]["viable"] is True
+
+    finance_high = client.post(
+        "/api/v1/flash/desk/evaluate",
+        headers=auth_headers,
+        json={
+            **base,
+            "properties_json": [
+                {
+                    "property_value": "1000000",
+                    "has_debt": True,
+                    "debt_type": "FINANCEIRA",
+                    "debt_payoff_value": "350000",
+                }
+            ],
+        },
+    )
+    assert finance_high.status_code == 200
+    assert finance_high.json()["result"]["viable"] is False
+    assert any("30%" in m for m in finance_high.json()["result"]["motivos"])
 
 
 def test_quitcon_desk_evaluate_store_approve_and_sale(client, auth_headers):

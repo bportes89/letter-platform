@@ -30,10 +30,13 @@ TIPOS_VEICULO = frozenset({"veiculo", "veiculo_leve", "veiculo_pesado", "maquina
 TIPOS_IMOVEL = frozenset({"imovel", "casa", "lote", "imovel_rural", "imovel_comercial", "apartamento", "REAL_ESTATE"})
 
 MAX_LTV = Decimal("0.40")
+MAX_FINANCE_DEBT_PCT = Decimal("0.30")
 PLATFORM_FEE_PCT = Decimal("10")
 ITBI_PCT = Decimal("3")
 RATE_MONTHLY = Decimal("2.5")
 ALLOWED_TERMS = frozenset({36, 60})
+DEBT_FINANCEIRA = "FINANCEIRA"
+DEBT_OUTRAS = "OUTRAS"
 
 STATUS_AWAITING_DOCS = "AWAITING_DOCS"
 STATUS_UNDER_REVIEW = "UNDER_REVIEW"
@@ -97,6 +100,40 @@ def _price_payment(principal: Decimal, rate_pct: Decimal, months: int) -> Decima
     return money(parcela)
 
 
+def _validate_properties_debts(data: dict) -> list[str]:
+    props = data.get("properties_json") or []
+    if not isinstance(props, list) or not props:
+        return []
+    motivos: list[str] = []
+    for idx, row in enumerate(props, start=1):
+        if not isinstance(row, dict):
+            continue
+        label = f"Imóvel {idx}"
+        has_debt = row.get("has_debt")
+        if has_debt is None:
+            motivos.append(f"{label}: informe se o imóvel possui dívidas.")
+            continue
+        if not bool(has_debt):
+            continue
+        debt_type = str(row.get("debt_type") or "").strip().upper()
+        if debt_type == DEBT_OUTRAS:
+            motivos.append(f"{label}: outras dívidas — sem perfil para Flash Capital.")
+            continue
+        if debt_type != DEBT_FINANCEIRA:
+            motivos.append(f"{label}: selecione o tipo de dívida (financeira ou outras).")
+            continue
+        property_value = _dec(row.get("property_value") or 0)
+        payoff = _dec(row.get("debt_payoff_value") or 0)
+        if payoff <= 0:
+            motivos.append(f"{label}: informe o valor da quitação da dívida financeira.")
+            continue
+        if property_value > 0 and payoff > money(property_value * MAX_FINANCE_DEBT_PCT):
+            motivos.append(
+                f"{label}: quitação financeira superior a 30% do valor do bem — sem perfil para o produto."
+            )
+    return motivos
+
+
 def _apply_properties_asset_total(data: dict) -> dict:
     """Se houver imóveis no payload, usa a soma dos valores como valor do bem."""
     props = data.get("properties_json") or []
@@ -124,10 +161,15 @@ def evaluate_flash_desk(data: dict) -> dict:
     if not category:
         motivos.append("Tipo de bem inválido (use imóvel ou veículo).")
 
-    if not bool(data.get("asset_paid_off", True)):
-        motivos.append("O bem não está quitado.")
-    if bool(data.get("asset_has_lien", False)):
-        motivos.append("O bem possui pendência/gravame impeditivo.")
+    props = data.get("properties_json") or []
+    if isinstance(props, list) and props:
+        motivos.extend(_validate_properties_debts(data))
+    else:
+        if not bool(data.get("asset_paid_off", True)):
+            motivos.append("O bem não está quitado.")
+        if bool(data.get("asset_has_lien", False)):
+            motivos.append("O bem possui pendência/gravame impeditivo.")
+
     if not bool(data.get("docs_complete", True)):
         motivos.append("Documentação incompleta (checklist Flash Capital).")
 

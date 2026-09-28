@@ -132,6 +132,9 @@ type FlashPropertyRow = {
   population: string;
   matricula: string;
   property_value: string;
+  debt_answer: "" | "NAO" | "SIM";
+  debt_type: "" | "FINANCEIRA" | "OUTRAS";
+  debt_payoff_value: string;
   owner_same_as_borrower: boolean;
   owners: PropertyOwner[];
 };
@@ -148,6 +151,9 @@ function newPropertyRow(): FlashPropertyRow {
     population: "",
     matricula: "",
     property_value: "",
+    debt_answer: "",
+    debt_type: "",
+    debt_payoff_value: "",
     owner_same_as_borrower: false,
     owners: [{ name: "", document: "", share_percent: "" }],
   };
@@ -267,6 +273,12 @@ export function FlashDeskModule() {
         population: p.population.trim(),
         matricula: p.matricula.trim(),
         property_value: moneyPayload(p.property_value),
+        has_debt: p.debt_answer === "SIM",
+        debt_type: p.debt_answer === "SIM" ? p.debt_type : null,
+        debt_payoff_value:
+          p.debt_answer === "SIM" && p.debt_type === "FINANCEIRA"
+            ? moneyPayload(p.debt_payoff_value)
+            : null,
         owner_same_as_borrower: p.owner_same_as_borrower,
         owners,
         full_address: composePropertyAddress(p),
@@ -303,6 +315,35 @@ export function FlashDeskModule() {
     }
   }
 
+  function validatePropertyDebts(p: FlashPropertyRow, index: number): string | null {
+    const label = `imóvel ${index + 1}`;
+    if (!p.debt_answer) return `Informe se o ${label} possui dívidas.`;
+    if (p.debt_answer === "NAO") return null;
+    if (!p.debt_type) return `Selecione o tipo de dívida do ${label}.`;
+    if (p.debt_type === "OUTRAS") return `Outras dívidas no ${label} — sem perfil para Flash Capital.`;
+    if (!parseMoney(p.debt_payoff_value)) return `Informe o valor da quitação financeira do ${label}.`;
+    const pv = parseMoney(p.property_value);
+    const payoff = parseMoney(p.debt_payoff_value);
+    if (pv > 0 && payoff > pv * 0.3) {
+      return `Quitação financeira do ${label} superior a 30% do valor do bem — sem perfil para o produto.`;
+    }
+    return null;
+  }
+
+  function validateBeforeCalculate(): string | null {
+    if (!properties.length) return "Inclua ao menos um imóvel.";
+    for (let i = 0; i < properties.length; i += 1) {
+      const p = properties[i];
+      if (!p.matricula.trim()) return `Informe a matrícula do imóvel ${i + 1}.`;
+      if (!parseMoney(p.property_value)) return `Informe o valor do imóvel ${i + 1}.`;
+      if (!p.street.trim() || !p.city.trim()) return `Complete o endereço do imóvel ${i + 1}.`;
+      const debtErr = validatePropertyDebts(p, i);
+      if (debtErr) return debtErr;
+    }
+    if (!totalPropertiesValue()) return "Informe o valor de pelo menos um imóvel.";
+    return null;
+  }
+
   function validateBeforeStore(): string | null {
     if (!form.contact_name.trim()) return "Informe a razão social do tomador (PJ).";
     if (!form.contact_email.trim()) return "Informe o e-mail do tomador.";
@@ -321,6 +362,8 @@ export function FlashDeskModule() {
       if (!p.matricula.trim()) return `Informe a matrícula do imóvel ${i + 1}.`;
       if (!p.street.trim() || !p.city.trim()) return `Complete o endereço do imóvel ${i + 1}.`;
       if (!parseMoney(p.property_value)) return `Informe o valor do imóvel ${i + 1}.`;
+      const debtErr = validatePropertyDebts(p, i);
+      if (debtErr) return debtErr;
       if (!p.owner_same_as_borrower) {
         const active = p.owners.filter((o) => o.name.trim() || o.document.trim());
         if (!active.length) return `Informe ao menos um titular do imóvel ${i + 1}.`;
@@ -380,9 +423,9 @@ export function FlashDeskModule() {
       asset_value: total > 0 ? String(total) : moneyPayload(form.asset_value),
       requested_amount: form.requested_amount.trim() ? moneyPayload(form.requested_amount) : null,
       asset_year: null,
-      asset_paid_off: form.asset_paid_off,
-      asset_has_lien: form.asset_has_lien,
-      lien_payoff_value: form.asset_has_lien && form.lien_payoff_value ? moneyPayload(form.lien_payoff_value) : null,
+      asset_paid_off: properties.every((p) => p.debt_answer === "NAO"),
+      asset_has_lien: false,
+      lien_payoff_value: null,
       property_registry: registry || null,
       properties_json: props,
       docs_complete: form.docs_complete,
@@ -392,6 +435,12 @@ export function FlashDeskModule() {
   }
 
   async function calculate() {
+    const precheck = validateBeforeCalculate();
+    if (precheck) {
+      setError(precheck);
+      setEvalResult(null);
+      return;
+    }
     setError("");
     setBusy(true);
     setTapafCheckout(null);
@@ -793,12 +842,6 @@ export function FlashDeskModule() {
                   <option value="36">36 meses</option>
                   <option value="60">60 meses (balloon 36)</option>
                 </select>
-                {form.asset_has_lien && (
-                  <label style={{ gridColumn: "1 / -1" }}>
-                    Valor quitação gravame (R$)
-                    <CurrencyInput value={form.lien_payoff_value} onChange={(v) => patchForm("lien_payoff_value", v)} />
-                  </label>
-                )}
               </div>
               <PartnerSociosFields value={socios} onChange={setSocios} />
 
@@ -885,20 +928,13 @@ export function FlashDeskModule() {
                       />
                     </label>
                     <label>
-                      População do município
+                      População do município (IBGE)
                       <input
-                        placeholder="Informe ou use CEP"
-                        inputMode="numeric"
-                        value={prop.population}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          patchProperties((rows) => {
-                            const next = [...rows];
-                            next[pIdx] = { ...next[pIdx], population: v };
-                            return next;
-                          });
-                        }}
+                        readOnly
+                        placeholder="Preenchido automaticamente ao informar o CEP"
+                        value={prop.population ? Number(prop.population).toLocaleString("pt-BR") : ""}
                       />
+                      <small className="muted">Estimativa municipal via CEP — não precisa digitar.</small>
                     </label>
                     <label>
                       Logradouro
@@ -961,6 +997,77 @@ export function FlashDeskModule() {
                         }}
                       />
                     </label>
+                    <label>
+                      O imóvel possui dívidas?
+                      <select
+                        value={prop.debt_answer}
+                        onChange={(e) => {
+                          const v = e.target.value as FlashPropertyRow["debt_answer"];
+                          patchProperties((rows) => {
+                            const next = [...rows];
+                            next[pIdx] = {
+                              ...next[pIdx],
+                              debt_answer: v,
+                              debt_type: v === "SIM" ? next[pIdx].debt_type : "",
+                              debt_payoff_value: v === "SIM" ? next[pIdx].debt_payoff_value : "",
+                            };
+                            return next;
+                          });
+                        }}
+                      >
+                        <option value="">Selecione…</option>
+                        <option value="NAO">Não</option>
+                        <option value="SIM">Sim</option>
+                      </select>
+                    </label>
+                    {prop.debt_answer === "SIM" && (
+                      <>
+                        <label>
+                          Tipo de dívida
+                          <select
+                            value={prop.debt_type}
+                            onChange={(e) => {
+                              const v = e.target.value as FlashPropertyRow["debt_type"];
+                              patchProperties((rows) => {
+                                const next = [...rows];
+                                next[pIdx] = {
+                                  ...next[pIdx],
+                                  debt_type: v,
+                                  debt_payoff_value: v === "FINANCEIRA" ? next[pIdx].debt_payoff_value : "",
+                                };
+                                return next;
+                              });
+                            }}
+                          >
+                            <option value="">Selecione…</option>
+                            <option value="FINANCEIRA">Financeira</option>
+                            <option value="OUTRAS">Outras dívidas</option>
+                          </select>
+                        </label>
+                        {prop.debt_type === "OUTRAS" && (
+                          <p className="muted" style={{ gridColumn: "1 / -1", margin: 0, fontSize: 11, color: "#b42318" }}>
+                            Outras dívidas não têm perfil para Flash Capital.
+                          </p>
+                        )}
+                        {prop.debt_type === "FINANCEIRA" && (
+                          <label style={{ gridColumn: "1 / -1" }}>
+                            Valor da quitação financeira (R$)
+                            <CurrencyInput
+                              value={prop.debt_payoff_value}
+                              onChange={(v) => {
+                                patchProperties((rows) => {
+                                  const next = [...rows];
+                                  next[pIdx] = { ...next[pIdx], debt_payoff_value: v };
+                                  return next;
+                                });
+                              }}
+                              placeholder="R$ 0,00"
+                            />
+                            <small className="muted">Limite: até 30% do valor do imóvel.</small>
+                          </label>
+                        )}
+                      </>
+                    )}
                   </div>
 
                   <label style={{ fontSize: 11, fontWeight: 700, display: "flex", alignItems: "flex-start", gap: 8, marginTop: 4 }}>
@@ -1089,9 +1196,9 @@ export function FlashDeskModule() {
               </button>
 
               <div style={{ display: "flex", flexWrap: "wrap", gap: 14, fontSize: 12, fontWeight: 700 }}>
-                <label><input type="checkbox" checked={form.asset_paid_off} onChange={(e) => patchForm("asset_paid_off", e.target.checked)} /> Bem quitado</label>
-                <label><input type="checkbox" checked={form.asset_has_lien} onChange={(e) => patchForm("asset_has_lien", e.target.checked)} /> Bem com pendência</label>
-                <label><input type="checkbox" checked={form.docs_complete} onChange={(e) => patchForm("docs_complete", e.target.checked)} /> Checklist lastros ok</label>
+                <label>
+                  <input type="checkbox" checked={form.docs_complete} onChange={(e) => patchForm("docs_complete", e.target.checked)} /> Checklist lastros ok
+                </label>
               </div>
               {totalPropertiesValue() > 0 && (
                 <p className="muted" style={{ margin: 0, fontSize: 11 }}>
