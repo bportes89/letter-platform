@@ -183,6 +183,7 @@ export function MarketplaceModule() {
   const [e1Category,setE1Category]=useState<"REAL_ESTATE"|"VEHICLE">("REAL_ESTATE");
   const [e1FilterCredit,setE1FilterCredit]=useState("");
   const [e1FilterEntrada,setE1FilterEntrada]=useState("");
+  const [e1FilterAdministratorId,setE1FilterAdministratorId]=useState("");
   const [targetAmount,setTargetAmount]=useState("");
   const [targetEntrada,setTargetEntrada]=useState("");
   const [category,setCategory]=useState("REAL_ESTATE");
@@ -194,18 +195,26 @@ export function MarketplaceModule() {
     `/marketplace/venda-direta-manual/cotas?category=${encodeURIComponent(cat)}&include_reserved=true`,
   ).then(setCatalog).catch(e=>setError(e.message));
   useEffect(()=>{void loadCatalog(e1Category)},[e1Category]);
-  const e1FilterActive = parseMoney(e1FilterCredit) > 0 || parseMoney(e1FilterEntrada) > 0;
+  const e1FilterActive = parseMoney(e1FilterCredit) > 0 || parseMoney(e1FilterEntrada) > 0 || !!e1FilterAdministratorId;
+  const e1AdministratorOptions=useMemo(()=>{
+    const map=new Map<string,string>();
+    for(const c of catalog){
+      if(c.administrator_id) map.set(c.administrator_id,c.administrator_name||"Administradora");
+    }
+    return [...map.entries()].sort((a,b)=>a[1].localeCompare(b[1],"pt-BR"));
+  },[catalog]);
   const e1Catalog=useMemo(()=>{
     const creditTarget=parseMoney(e1FilterCredit);
     const entradaTarget=parseMoney(e1FilterEntrada);
     return catalog
       .filter(c=>{
+        if(e1FilterAdministratorId&&c.administrator_id!==e1FilterAdministratorId) return false;
         const credit=Number(c.credit_value);
         const entrada=Number(c.entrada_final);
         return withinSearchBand(credit,creditTarget)&&withinSearchBand(entrada,entradaTarget);
       })
       .sort((a,b)=>Number(a.credit_value)-Number(b.credit_value));
-  },[catalog,e1FilterCredit,e1FilterEntrada]);
+  },[catalog,e1FilterCredit,e1FilterEntrada,e1FilterAdministratorId]);
   const e1SelectableCatalog = e1Catalog.filter((c) => (c.status ?? "AVAILABLE") === "AVAILABLE");
   const e1PendingInCatalog = catalog.filter((c) => c.status === "PENDING_REVIEW");
   const selectedCatalog=e1Catalog.filter(c=>selectedQuotaIds.includes(c.quota_id));
@@ -274,33 +283,34 @@ export function MarketplaceModule() {
     {notice&&<div className="notice"><CheckCircle2/>{notice}</div>}{error&&<div className="error">{error}</div>}
     {tab==="esteira1"&&<form className="marketplace-form" onSubmit={assessEsteira1}>
       <div className="marketplace-subtabs">
-        <button type="button" className={`marketplace-tab${e1Category==="REAL_ESTATE"?" active":""}`} onClick={()=>{setE1Category("REAL_ESTATE");setSelectedQuotaIds([])}}>Imóvel</button>
-        <button type="button" className={`marketplace-tab${e1Category==="VEHICLE"?" active":""}`} onClick={()=>{setE1Category("VEHICLE");setSelectedQuotaIds([])}}>Veículo</button>
+        <button type="button" className={`marketplace-tab${e1Category==="REAL_ESTATE"?" active":""}`} onClick={()=>{setE1Category("REAL_ESTATE");setSelectedQuotaIds([]);setE1FilterAdministratorId("")}}>Imóvel</button>
+        <button type="button" className={`marketplace-tab${e1Category==="VEHICLE"?" active":""}`} onClick={()=>{setE1Category("VEHICLE");setSelectedQuotaIds([]);setE1FilterAdministratorId("")}}>Veículo</button>
       </div>
       <div className="marketplace-form-row">
         <label className="marketplace-field"><span className="marketplace-field-label"><Search size={14}/> Buscar por crédito (R$)</span><CurrencyInput value={e1FilterCredit} onChange={setE1FilterCredit} placeholder="Ex.: 250.000"/></label>
         <label className="marketplace-field"><span className="marketplace-field-label"><Search size={14}/> Buscar por entrada (R$)</span><CurrencyInput value={e1FilterEntrada} onChange={setE1FilterEntrada} placeholder="Ex.: 80.000"/></label>
-        <small className="marketplace-hint">Filtro com tolerância de ±5% quando você informa um valor. Deixe crédito e entrada em branco para listar todo o estoque.</small>
+        <label className="marketplace-field">Administradora<select value={e1FilterAdministratorId} onChange={e=>setE1FilterAdministratorId(e.target.value)}><option value="">Todas</option>{e1AdministratorOptions.map(([id,name])=><option key={id} value={id}>{name}</option>)}</select></label>
+        <small className="marketplace-hint">Crédito e entrada: ±5%. Administradora: lista do estoque. Deixe crédito/entrada em branco para ver todas.</small>
         {e1FilterActive ? (
-          <button type="button" className="table-action" style={{ marginTop: 6 }} onClick={() => { setE1FilterCredit(""); setE1FilterEntrada(""); }}>
+          <button type="button" className="table-action" style={{ marginTop: 6 }} onClick={() => { setE1FilterCredit(""); setE1FilterEntrada(""); setE1FilterAdministratorId(""); }}>
             Limpar filtros de busca
           </button>
         ) : null}
       </div>
       <div className="marketplace-form-row">
-        <div className="marketplace-field marketplace-field-wide">
+        <div className="marketplace-field marketplace-field-wide quota-pick-list">
           <b>
             Cartas disponíveis (marque uma ou mais — junção só na mesma administradora)
             {e1SelectableCatalog.length ? ` · ${e1SelectableCatalog.length} liberada(s)` : ""}
             {e1Catalog.length > e1SelectableCatalog.length ? ` · ${e1Catalog.length - e1SelectableCatalog.length} aguardando aprovação` : ""}
           </b>
-          <div style={{ maxHeight: 240, overflowY: "auto", marginTop: 8 }}>
+          <div className="quota-pick-scroll" style={{ maxHeight: 240 }}>
             {e1Catalog.length === 0 ? (
               <small className="muted">
                 {catalog.length === 0
                   ? `Nenhuma carta de ${e1Category === "REAL_ESTATE" ? "imóvel" : "veículo"} no estoque. Cadastre em Inventário ou sincronize Fornecedores e aprove a cota (compliance).`
                   : e1FilterActive
-                    ? `Há ${catalog.length} carta(s) no estoque, mas nenhuma com crédito/entrada na faixa de ±5% dos valores informados. Limpe os filtros ou ajuste crédito e entrada.`
+                    ? `Há ${catalog.length} carta(s) no estoque, mas nenhuma combina os filtros (crédito/entrada ±5% ou administradora). Limpe os filtros ou ajuste os valores.`
                     : "Nenhuma carta nesta categoria. Cadastre no Inventário."}
                 {catalog.length > 0 && catalog.every((c) => c.status === "PENDING_REVIEW") ? (
                   <> {e1PendingInCatalog.length} cota(s) aguardam aprovação no Inventário antes de liberar para venda.</>
@@ -310,16 +320,18 @@ export function MarketplaceModule() {
               e1Catalog.map((c) => {
                 const selectable = (c.status ?? "AVAILABLE") === "AVAILABLE";
                 return (
-                  <label key={c.quota_id} style={{ display: "block", marginBottom: 6, opacity: selectable ? 1 : 0.75 }}>
+                  <label key={c.quota_id} className="quota-pick-row" style={{ opacity: selectable ? 1 : 0.75 }}>
                     <input
                       type="checkbox"
                       disabled={!selectable}
                       checked={selectedQuotaIds.includes(c.quota_id)}
                       onChange={(e) => toggleEsteira1Quota(c, e.target.checked)}
                     />
-                    {marketplaceCotaLabel(c)}
-                    {!selectable ? <small className="muted"> — aguardando aprovação (Inventário)</small> : null}
-                    {c.status === "RESERVED" ? <small className="muted"> — reservada</small> : null}
+                    <span>
+                      {marketplaceCotaLabel(c)}
+                      {!selectable ? <small className="muted"> — aguardando aprovação (Inventário)</small> : null}
+                      {c.status === "RESERVED" ? <small className="muted"> — reservada</small> : null}
+                    </span>
                   </label>
                 );
               })

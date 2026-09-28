@@ -72,6 +72,7 @@ export function VendaDiretaManualModule() {
   const [category, setCategory] = useState("REAL_ESTATE");
   const [filterCredit, setFilterCredit] = useState("");
   const [filterEntrada, setFilterEntrada] = useState("");
+  const [filterAdministratorId, setFilterAdministratorId] = useState("");
   const [cotas, setCotas] = useState<CotaOption[]>([]);
   const [cadastros, setCadastros] = useState<CadastroOption[]>([]);
   const [partners, setPartners] = useState<PartnerOption[]>([]);
@@ -208,15 +209,26 @@ export function VendaDiretaManualModule() {
     }
   }
 
+  const administratorOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const c of cotas) {
+      if (c.administrator_id) {
+        map.set(c.administrator_id, c.administrator_name || "Administradora");
+      }
+    }
+    return [...map.entries()].sort((a, b) => a[1].localeCompare(b[1], "pt-BR"));
+  }, [cotas]);
+
   const filteredCotas = useMemo(() => {
     const creditTarget = parseMoney(filterCredit);
     const entradaTarget = parseMoney(filterEntrada);
     return cotas.filter((c) => {
+      if (filterAdministratorId && c.administrator_id !== filterAdministratorId) return false;
       const credit = Number(c.credit_value);
       const entrada = Number(c.entrada_final);
       return withinSearchBand(credit, creditTarget) && withinSearchBand(entrada, entradaTarget);
     });
-  }, [cotas, filterCredit, filterEntrada]);
+  }, [cotas, filterCredit, filterEntrada, filterAdministratorId]);
 
   const selectedList = cotas.filter((c) => quotaIds.includes(c.quota_id));
 
@@ -307,6 +319,7 @@ export function VendaDiretaManualModule() {
                   setQuotaIds([]);
                   setFilterCredit("");
                   setFilterEntrada("");
+                  setFilterAdministratorId("");
                 }}
               >
                 <option value="REAL_ESTATE">Imóvel</option>
@@ -327,21 +340,39 @@ export function VendaDiretaManualModule() {
               </span>
               <CurrencyInput value={filterEntrada} onChange={setFilterEntrada} placeholder="Ex.: 80.000" />
             </label>
-            <small className="marketplace-hint">Filtro com tolerância de ±5% quando você informa um valor.</small>
-            <div className="marketplace-field marketplace-field-wide">
+            <label className="marketplace-field">
+              Administradora
+              <select
+                value={filterAdministratorId}
+                onChange={(e) => setFilterAdministratorId(e.target.value)}
+              >
+                <option value="">Todas</option>
+                {administratorOptions.map(([id, name]) => (
+                  <option key={id} value={id}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <small className="marketplace-hint">
+              Crédito e entrada: tolerância de ±5%. Administradora: lista do estoque da categoria.
+            </small>
+            <div className="marketplace-field marketplace-field-wide quota-pick-list">
               <b>Cotas (multi-seleção){filteredCotas.length ? ` — ${filteredCotas.length} opção(ões)` : ""}</b>
-              <div style={{ maxHeight: 220, overflowY: "auto", marginTop: 8 }}>
+              <div className="quota-pick-scroll">
                 {filteredCotas.length === 0 ? (
-                  <small className="muted">Nenhuma cota neste filtro. Ajuste crédito/entrada ou a categoria.</small>
+                  <small className="muted">
+                    Nenhuma cota neste filtro. Ajuste crédito, entrada, administradora ou a categoria.
+                  </small>
                 ) : (
                   filteredCotas.map((c) => (
-                    <label key={c.quota_id} style={{ display: "block", marginBottom: 6 }}>
+                    <label key={c.quota_id} className="quota-pick-row">
                       <input
                         type="checkbox"
                         checked={quotaIds.includes(c.quota_id)}
                         onChange={(e) => toggleQuota(c, e.target.checked)}
                       />
-                      {cotaListLabel(c)}
+                      <span>{cotaListLabel(c)}</span>
                     </label>
                   ))
                 )}
