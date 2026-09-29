@@ -41,6 +41,7 @@ type MarketplaceMatch = {
   deviation_percent: string;
   entrada_deviation_percent?: string | null;
   score: number;
+  administrator_name?: string | null;
   explanation: string;
   message?: string | null;
   lane?: string | null;
