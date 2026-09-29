@@ -1,7 +1,7 @@
 """Marketplace cartas contempladas — Esteira 1 (parceiro) e Esteira 2 (robô Nina / Paulo).
 
 Esteira 2 (WhatsApp Paulo Stutz):
-- Régua de corte 5% em crédito e entrada
+- Régua de corte 10% em crédito e entrada
 - ~2 opções por crédito + ~2 por entrada (dedupe)
 - Parcela vencendo em ≤7 dias: −1 prazo + valor na entrada
 - Markup sobre crédito na entrada: Fraga/Bittelo/Lance +3%; Uni/Contemplado SP/Lume +10%
@@ -24,7 +24,7 @@ from app.quota_inventory_service import run_nina_quota_scan
 from app.services import money
 
 DEFAULT_INCOME_RATIO = Decimal("3")
-ESTEIRA2_BAND_PERCENT = Decimal("5")
+ESTEIRA2_BAND_PERCENT = Decimal("10")
 ESTEIRA2_CREDIT_LANE_LIMIT = 1
 ESTEIRA2_ENTRADA_LANE_LIMIT = 1
 INSTALLMENT_ROLLOVER_DAYS = 7
@@ -406,7 +406,7 @@ def _eligible_combo_candidate(
             f"Nina selecionou {len(quotas)} cota(s) · crédito R$ {pricing['credit']} "
             f"(desvio {credit_dev}%) · entrada efetiva R$ {pricing['entrada_final']}."
         ),
-        "message": "Combinação compatível com perfil, Bacen/approval_rules e régua de 5%.",
+        "message": "Combinação compatível com perfil, Bacen/approval_rules e régua de 10%.",
     }
 
 
@@ -707,7 +707,7 @@ def esteira2_nina_curated_match(
     as_of: date | None = None,
     affiliate_markup: dict[str, str] | None = None,
 ) -> dict:
-    """Esteira 2 robô: banda 5%, lanes crédito/entrada, rollover 7d e markup fornecedor."""
+    """Esteira 2 robô: banda 10%, lanes crédito/entrada, rollover 7d e markup fornecedor."""
     del monthly_commitment
     if category not in {"REAL_ESTATE", "VEHICLE"}:
         raise HTTPException(status_code=422, detail="Categoria deve ser REAL_ESTATE ou VEHICLE.")
@@ -751,7 +751,7 @@ def esteira2_nina_curated_match(
         return {
             "esteira": "NINA_CURATED",
             "eligible": False,
-            "blockers": ["Informe a entrada desejada do cliente (lane entrada com régua de 5%)."],
+            "blockers": ["Informe a entrada desejada do cliente (lane entrada com régua de 10%)."],
             "matches": [],
             "credit_matches": [],
             "entrada_matches": [],
@@ -818,7 +818,7 @@ def esteira2_nina_curated_match(
     return {
         "esteira": "NINA_CURATED",
         "eligible": bool(matches),
-        "blockers": [] if matches else ["Nenhuma combinação na régua de 5% para o perfil e as regras Bacen/internas."],
+        "blockers": [] if matches else ["Nenhuma combinação na régua de 10% para o perfil e as regras Bacen/internas."],
         "matches": matches,
         "credit_matches": credit_lane,
         "entrada_matches": entrada_lane,

@@ -244,15 +244,6 @@ export function Shell({ children }: { children: React.ReactNode }) {
                       <LayoutDashboard />
                       Visão geral
                     </Link>
-                    <Link
-                      className={pathname === "/seguranca" ? "active" : ""}
-                      href="/seguranca"
-                      onClick={() => setOpen(false)}
-                    >
-                      <ShieldCheck />
-                      Autenticação 2 etapas
-                    </Link>
-
                     {commercialNav.length > 0 && (
                       <>
                         <div className="nav-label">Comercial</div>

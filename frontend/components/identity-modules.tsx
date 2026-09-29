@@ -4,7 +4,6 @@ import { FormEvent, useCallback, useEffect, useState } from "react";
 import { Building2, KeyRound, Plus, RefreshCw, ShieldCheck, UserPlus, Users } from "lucide-react";
 import { api, AuthSession, Branch, Invitation, KycCase, User } from "@/lib/api";
 import { AdminUserForm } from "@/components/admin-user-form";
-import { MfaSetupPanel } from "@/components/mfa-setup-panel";
 import {
   GESTAO_INVITE_ROLE_GROUPS,
   GESTAO_PERSONA_TABS,
@@ -301,7 +300,6 @@ export function IdentityModule() {
                 <th>Gestão</th>
                 <th>Papel técnico</th>
                 <th>Filial</th>
-                <th>MFA</th>
                 <th>Último acesso</th>
                 <th>Status</th>
               </tr>
@@ -313,7 +311,6 @@ export function IdentityModule() {
                   <td>{gestaoPersonaLabelForRole(u.role)}</td>
                   <td><small>{u.role}</small></td>
                   <td>{branches.find((b) => b.id === u.branch_id)?.name ?? "Matriz"}</td>
-                  <td><span className={`pill ${u.mfa_enabled ? "pill-approved" : ""}`}>{u.mfa_enabled ? "ATIVO" : "PENDENTE"}</span></td>
                   <td>{date(u.last_login_at)}</td>
                   <td>{u.active ? "Ativo" : "Inativo"}</td>
                 </tr>
@@ -342,8 +339,8 @@ export function SecurityModule(){
   const [sessions,setSessions]=useState<AuthSession[]>([]),[message,setMessage]=useState("");
   const load=useCallback(()=>api<AuthSession[]>("/auth/sessions").then(setSessions),[]);useEffect(()=>{load().catch(e=>setMessage(e.message))},[load]);
   async function revoke(id:string){await api(`/auth/sessions/${id}`,{method:"DELETE"});setMessage("Sessão revogada.");await load()}
-  async function stepUp(event:FormEvent<HTMLFormElement>){event.preventDefault();const f=new FormData(event.currentTarget);await api("/auth/step-up",{method:"POST",body:JSON.stringify({password:f.get("password"),otp:f.get("otp")||null})});setMessage("Autenticação reforçada válida por 10 minutos.");await load()}
-  return <><Heading icon={<KeyRound/>} eyebrow="SEGURANÇA" title="Sessões e autenticação reforçada" text="MFA TOTP, rotação de refresh token, revogação de sessões e step-up para ações financeiras."/>{message&&<div className="notice"><ShieldCheck/>{message}</div>}<div className="admin-grid"><MfaSetupPanel compact /><section className="panel"><h2>Step-up financeiro</h2><form className="stack-form" onSubmit={stepUp}><input name="password" type="password" placeholder="Confirme sua senha" required/><input name="otp" inputMode="numeric" placeholder="MFA, se ativado"/><button><ShieldCheck/>Autorizar por 10 minutos</button></form></section></div><section className="panel identity-table"><div className="panel-title"><h2>Sessões</h2><button onClick={()=>load()}><RefreshCw/>Atualizar</button></div>{sessions.map(s=><div className="session-row" key={s.id}><div><b>{s.user_agent||"Cliente desconhecido"}</b><small>{s.ip_address||"IP indisponível"} · vista {date(s.last_seen_at)} · expira {date(s.expires_at)}</small></div><div className="actions-cell"><span className={`pill ${s.active?"pill-approved":"pill-cancelled"}`}>{s.active?"ATIVA":"REVOGADA"}</span>{s.active&&<button className="table-action" onClick={()=>revoke(s.id)}>Revogar</button>}</div></div>)}</section></>
+  async function stepUp(event:FormEvent<HTMLFormElement>){event.preventDefault();const f=new FormData(event.currentTarget);await api("/auth/step-up",{method:"POST",body:JSON.stringify({password:f.get("password")})});setMessage("Autenticação reforçada válida por 10 minutos.");await load()}
+  return <><Heading icon={<KeyRound/>} eyebrow="SEGURANÇA" title="Sessões e step-up" text="Revogação de sessões e confirmação de senha para ações financeiras. O login usa código por e-mail."/>{message&&<div className="notice"><ShieldCheck/>{message}</div>}<div className="admin-grid"><section className="panel"><h2>Step-up financeiro</h2><form className="stack-form" onSubmit={stepUp}><input name="password" type="password" placeholder="Confirme sua senha" required/><button><ShieldCheck/>Autorizar por 10 minutos</button></form></section></div><section className="panel identity-table"><div className="panel-title"><h2>Sessões</h2><button onClick={()=>load()}><RefreshCw/>Atualizar</button></div>{sessions.map(s=><div className="session-row" key={s.id}><div><b>{s.user_agent||"Cliente desconhecido"}</b><small>{s.ip_address||"IP indisponível"} · vista {date(s.last_seen_at)} · expira {date(s.expires_at)}</small></div><div className="actions-cell"><span className={`pill ${s.active?"pill-approved":"pill-cancelled"}`}>{s.active?"ATIVA":"REVOGADA"}</span>{s.active&&<button className="table-action" onClick={()=>revoke(s.id)}>Revogar</button>}</div></div>)}</section></>
 }
 
 export function ComplianceModule(){

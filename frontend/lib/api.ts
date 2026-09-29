@@ -528,15 +528,12 @@ export async function apiForm<T>(path: string, body: FormData): Promise<T> {
 export async function downloadApi(path:string,filename:string){const token=getToken();const response=await fetch(`${API_URL}${path}`,{headers:{...(token?{Authorization:`Bearer ${token}`}:{})}});if(!response.ok)throw new Error("Não foi possível exportar o relatório");const url=URL.createObjectURL(await response.blob());const link=document.createElement("a");link.href=url;link.download=filename;link.click();URL.revokeObjectURL(url)}
 
 export class LoginChallengeError extends Error {
-  kind: "email_otp" | "mfa";
-
-  constructor(kind: "email_otp" | "mfa", message: string) {
+  constructor(message: string) {
     super(message);
-    this.kind = kind;
   }
 }
 
-export async function login(email: string, password: string, opts?: { emailOtp?: string; mfaOtp?: string }) {
+export async function login(email: string, password: string, opts?: { emailOtp?: string }) {
   const response = await fetch(`${API_URL}/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -544,19 +541,14 @@ export async function login(email: string, password: string, opts?: { emailOtp?:
       email,
       password,
       email_otp: opts?.emailOtp?.trim() || undefined,
-      otp: opts?.mfaOtp?.trim() || undefined,
     }),
   });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
     const detail = typeof body.detail === "string" ? body.detail : "";
     if (response.status === 428) {
-      if (detail.toLowerCase().includes("e-mail")) {
-        throw new LoginChallengeError("email_otp", detail);
-      }
       throw new LoginChallengeError(
-        "mfa",
-        detail || "Informe o código de 6 dígitos do seu app autenticador.",
+        detail || "Enviamos um código de 6 dígitos para o seu e-mail. Informe-o para continuar.",
       );
     }
     throw new Error(detail || "E-mail ou senha inválidos");

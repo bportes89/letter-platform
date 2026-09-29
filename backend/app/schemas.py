@@ -2278,7 +2278,7 @@ class MarketplaceEsteira2Response(BaseModel):
     matches: list[MarketplaceMatchView] = Field(default_factory=list)
     credit_matches: list[MarketplaceMatchView] = Field(default_factory=list)
     entrada_matches: list[MarketplaceMatchView] = Field(default_factory=list)
-    band_percent: str = "5"
+    band_percent: str = "10"
     message: str
 
 
@@ -2308,7 +2308,7 @@ class VendaDiretaRoboSearchResponse(BaseModel):
     matches: list[MarketplaceMatchView] = Field(default_factory=list)
     credit_matches: list[MarketplaceMatchView] = Field(default_factory=list)
     entrada_matches: list[MarketplaceMatchView] = Field(default_factory=list)
-    band_percent: str = "5"
+    band_percent: str = "10"
     message: str
 
 

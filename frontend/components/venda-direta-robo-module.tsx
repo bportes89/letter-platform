@@ -295,7 +295,7 @@ export function VendaDiretaRoboModule() {
           <span className="eyebrow dark">VENDAS</span>
           <h1>Venda Direta — Robô</h1>
           <p>
-            Preencha cliente e filtros; o robô Esteira 2 (régua 5%, lanes crédito/entrada, rollover e markup)
+            Preencha cliente e filtros; o robô Esteira 2 (régua 10%, lanes crédito/entrada, rollover e markup)
             sugere cotas. Confirme para gravar lead + proposta e travar 60 minutos.
           </p>
         </div>
@@ -446,7 +446,7 @@ export function VendaDiretaRoboModule() {
         {step === 2 && result && (
           <div>
             <p>
-              Pré-cadastro <b>{result.client_name}</b> · régua {result.band_percent ?? "5"}% · lead{" "}
+              Pré-cadastro <b>{result.client_name}</b> · régua {result.band_percent ?? "10"}% · lead{" "}
               <code>{result.lead_id.slice(0, 8)}…</code>
             </p>
             {result.blockers.map((b) => (

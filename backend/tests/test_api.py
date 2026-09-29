@@ -636,12 +636,12 @@ def test_marketplace_esteira1_and_esteira2(client, auth_headers):
     body2 = esteira2.json()
     assert body2["esteira"] == "NINA_CURATED"
     assert isinstance(body2["matches"], list)
-    assert body2.get("band_percent") == "5"
+    assert body2.get("band_percent") == "10"
     assert "credit_matches" in body2 and "entrada_matches" in body2
 
 
 def test_marketplace_esteira2_robot_band_rollover_and_markup(client, auth_headers):
-    """Paulo: régua 5%, rollover ≤7d, markup Fraga +3% / Uni +10%."""
+    """Paulo: régua 10%, rollover ≤7d, markup Fraga +3% / Uni +10%."""
     from datetime import date, timedelta
 
     quotas = client.get("/api/v1/quotas", headers=auth_headers).json()
@@ -671,7 +671,7 @@ def test_marketplace_esteira2_robot_band_rollover_and_markup(client, auth_header
     res = client.post("/api/v1/marketplace/esteira-2/match", headers=auth_headers, json=profile)
     assert res.status_code == 200
     body = res.json()
-    assert body["band_percent"] == "5"
+    assert body["band_percent"] == "10"
     assert body["eligible"] is True
     assert len(body["credit_matches"]) <= 1
     assert len(body["entrada_matches"]) <= 1
@@ -687,7 +687,7 @@ def test_marketplace_esteira2_robot_band_rollover_and_markup(client, auth_header
     assert qbrief["markup_percent"] in {"3", "3.00"}
     assert qbrief["remaining_installments"] == 47
 
-    # Fora da banda 5%: alvo 1M não casa com inventário ~400k
+    # Fora da banda 10%: alvo 1M não casa com inventário ~400k
     miss = client.post(
         "/api/v1/marketplace/esteira-2/match",
         headers=auth_headers,
@@ -703,7 +703,7 @@ def test_marketplace_esteira2_robot_band_rollover_and_markup(client, auth_header
     )
     assert miss.status_code == 200
     for m in miss.json()["matches"]:
-        assert abs(Decimal(m["total_credit"]) - Decimal("1000000")) / Decimal("1000000") * 100 <= Decimal("5")
+        assert abs(Decimal(m["total_credit"]) - Decimal("1000000")) / Decimal("1000000") * 100 <= Decimal("10")
 
 
 def test_venda_direta_robo_search_and_confirm(client, auth_headers):
@@ -2101,19 +2101,21 @@ def test_login_email_otp_requires_email_delivery(client, monkeypatch):
     assert "Não foi possível enviar" in response.json()["detail"]
 
 
-def test_mfa_activation_and_login_challenge(client, auth_headers):
+def test_mfa_activation_and_login_challenge(client, auth_headers, monkeypatch):
     import pyotp
+
+    monkeypatch.setattr("app.core.config.settings.login_email_otp", False)
     setup = client.post("/api/v1/auth/mfa/setup", headers=auth_headers)
     assert setup.status_code == 200
     otp = pyotp.TOTP(setup.json()["secret"]).now()
-    assert client.post("/api/v1/auth/mfa/enable", headers=auth_headers, json={"otp":otp}).status_code == 200
-    blocked = client.post("/api/v1/auth/login", json={"email":"admin@letter.com.br","password":"Letter@123"})
-    assert blocked.status_code == 428
-    otp = pyotp.TOTP(setup.json()["secret"]).now()
-    allowed = client.post("/api/v1/auth/login", json={"email":"admin@letter.com.br","password":"Letter@123","otp":otp})
+    assert client.post("/api/v1/auth/mfa/enable", headers=auth_headers, json={"otp": otp}).status_code == 200
+    allowed = client.post(
+        "/api/v1/auth/login",
+        json={"email": "admin@letter.com.br", "password": "Letter@123"},
+    )
     assert allowed.status_code == 200
     otp = pyotp.TOTP(setup.json()["secret"]).now()
-    assert client.post("/api/v1/auth/mfa/disable", headers=auth_headers, json={"otp":otp}).status_code == 200
+    assert client.post("/api/v1/auth/mfa/disable", headers=auth_headers, json={"otp": otp}).status_code == 200
 
 
 def test_kyc_mock_workflow(client, auth_headers):

@@ -93,7 +93,7 @@ def search_cotas(
         if not blockers:
             blockers = [
                 match.get("message")
-                or "Não encontramos cota na régua de 5% para esses filtros. Ajuste crédito, entrada ou cadastre cotas no Inventário.",
+                or "Não encontramos cota na régua de 10% para esses filtros. Ajuste crédito, entrada ou cadastre cotas no Inventário.",
             ]
         return {
             "lead_id": "",
@@ -104,7 +104,7 @@ def search_cotas(
             "matches": [],
             "credit_matches": [],
             "entrada_matches": [],
-            "band_percent": match.get("band_percent") or "5",
+            "band_percent": match.get("band_percent") or "10",
             "message": blockers[0],
         }
 
@@ -153,7 +153,7 @@ def search_cotas(
         "matches": match.get("matches") or [],
         "credit_matches": match.get("credit_matches") or [],
         "entrada_matches": match.get("entrada_matches") or [],
-        "band_percent": match.get("band_percent") or "5",
+        "band_percent": match.get("band_percent") or "10",
         "message": match.get("message") or "Opções encontradas pelo robô. Escolha uma cota para confirmar.",
     }
 

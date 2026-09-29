@@ -95,8 +95,7 @@ export function LoginForm({ operacaoOnly = false }: Props) {
   const [showPassword, setShowPassword] = useState(false);
   const [remember, setRemember] = useState(false);
   const [emailOtp, setEmailOtp] = useState("");
-  const [mfaOtp, setMfaOtp] = useState("");
-  const [step, setStep] = useState<"password" | "email_otp" | "mfa">("password");
+  const [step, setStep] = useState<"password" | "email_otp">("password");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(false);
@@ -198,8 +197,7 @@ export function LoginForm({ operacaoOnly = false }: Props) {
     setLoading(true);
     try {
       await login(email, password, {
-        emailOtp: step === "email_otp" || step === "mfa" ? emailOtp : undefined,
-        mfaOtp: step === "mfa" ? mfaOtp : undefined,
+        emailOtp: step === "email_otp" ? emailOtp : undefined,
       });
       try {
         await completeLogin();
@@ -210,13 +208,8 @@ export function LoginForm({ operacaoOnly = false }: Props) {
       }
     } catch (e) {
       if (e instanceof LoginChallengeError) {
-        if (e.kind === "email_otp") {
-          setStep("email_otp");
-          setNotice(e.message);
-        } else {
-          setStep("mfa");
-          setError(e.message);
-        }
+        setStep("email_otp");
+        setNotice(e.message);
       } else {
         setError(e instanceof Error ? e.message : "Falha no acesso");
       }
@@ -310,22 +303,6 @@ export function LoginForm({ operacaoOnly = false }: Props) {
         </label>
       )}
 
-      {step === "mfa" && (
-        <label className="site-login-area-label">
-          Código do autenticador
-          <small>App autenticador (6 dígitos)</small>
-          <input
-            value={mfaOtp}
-            onChange={(e) => setMfaOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
-            inputMode="numeric"
-            placeholder="6 dígitos"
-            required
-            autoComplete="one-time-code"
-            autoFocus
-          />
-        </label>
-      )}
-
       {step === "password" && (
         <div className="site-login-row">
           <label className="site-login-remember">
@@ -349,9 +326,7 @@ export function LoginForm({ operacaoOnly = false }: Props) {
           ? "Autenticando…"
           : step === "password"
             ? "Entrar"
-            : step === "email_otp"
-              ? "Confirmar código do e-mail"
-              : "Confirmar e entrar"}
+            : "Confirmar código do e-mail"}
       </button>
 
       {passwordLocked && (
@@ -362,7 +337,6 @@ export function LoginForm({ operacaoOnly = false }: Props) {
           onClick={() => {
             setStep("password");
             setEmailOtp("");
-            setMfaOtp("");
             setNotice("");
             setError("");
           }}

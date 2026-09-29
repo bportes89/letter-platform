@@ -374,9 +374,6 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
                 status_code=428,
                 detail="Enviamos um código de 6 dígitos para o seu e-mail. Informe-o para continuar.",
             )
-    if user.mfa_enabled and (not payload.otp or not verify_mfa(user, payload.otp)):
-        db.commit()
-        raise HTTPException(status_code=428, detail="Código MFA obrigatório ou inválido")
     from app.master_tree_service import sync_user_master_tree
 
     if login_otp_enabled:
@@ -525,7 +522,6 @@ def support_reset_user_mfa(
 @router.post("/auth/step-up")
 def step_up(payload:StepUpRequest,request:Request,user:User=Depends(get_current_user),db:Session=Depends(get_db)):
     if not verify_password(payload.password,user.password_hash): raise HTTPException(status_code=401,detail="Senha inválida")
-    if user.mfa_enabled and (not payload.otp or not verify_mfa(user,payload.otp)): raise HTTPException(status_code=422,detail="Código MFA inválido")
     raw=request.headers.get("authorization","").removeprefix("Bearer ");claims=decode_token(raw);session=db.get(AuthSession,claims.get("sid"));session.step_up_until=datetime.now(UTC)+__import__('datetime').timedelta(minutes=10);db.commit();return {"step_up_until":session.step_up_until}
 
 

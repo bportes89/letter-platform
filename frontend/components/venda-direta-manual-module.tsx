@@ -16,7 +16,7 @@ function parseMoney(value: string): number {
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
-const SEARCH_BAND = 0.05;
+const SEARCH_BAND = 0.1;
 
 type CotaOption = {
   quota_id: string;
@@ -398,7 +398,7 @@ export function VendaDiretaManualModule() {
               </select>
             </label>
             <small className="marketplace-hint">
-              Crédito e entrada: tolerância de ±5%. Só cotas com vencimento de parcela cadastrado podem ser vendidas.
+              Crédito e entrada: tolerância de ±10%. Só cotas com vencimento de parcela cadastrado podem ser vendidas.
             </small>
             <label className="marketplace-field marketplace-field-compact" style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <input

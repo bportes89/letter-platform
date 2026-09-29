@@ -841,7 +841,7 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
                             {"name": "Ajustar crédito", "next": int(STEP_CREDIT)},
                             {"name": "Recomeçar", "next": 0},
                         ],
-                        "options_empty": "Nenhuma cota na régua de 5%.",
+                        "options_empty": "Nenhuma cota na régua de 10%.",
                     }
                 ],
                 lead_id=lead.id,
@@ -849,7 +849,7 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
         return _wrap(
             [
                 {
-                    "text": "Encontrei estas opções pelo robô Esteira 2 (régua 5%). Escolha uma:",
+                    "text": "Encontrei estas opções pelo robô Esteira 2 (régua 10%). Escolha uma:",
                     "options": options,
                     "options_quotas": True,
                 }

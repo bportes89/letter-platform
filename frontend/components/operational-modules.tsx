@@ -115,7 +115,7 @@ type MarketplaceEsteira2Result = {
   message: string;
 };
 
-const ESTEIRA_SEARCH_BAND = 0.05;
+const ESTEIRA_SEARCH_BAND = 0.1;
 
 function parseMoney(value: string): number {
   const n = Number(String(value || "").replace(",", "."));
@@ -267,7 +267,7 @@ export function MarketplaceModule() {
   function MatchCard({match,onReserve}:{match:MarketplaceMatch;onReserve:(id:string)=>void}) {
     return <article className="backlog-item"><div><strong>{match.administrator_name??"Administradora"} · crédito {brl.format(Number(match.total_credit))}{match.total_entrada?` · entrada ${brl.format(Number(match.total_entrada))}`:""}</strong><p>{match.explanation}{match.message?` — ${match.message}`:""}</p><small>Lane {match.lane??"—"} · Score {match.score} · Desvio crédito {match.deviation_percent}%{match.entrada_deviation_percent!=null?` · Desvio entrada ${match.entrada_deviation_percent}%`:""}{match.rollover_applied?" · Rollover 7d":""}{match.remaining_installments!=null?` · ${match.remaining_installments} parcelas`:""}</small><div>{match.quotas.map(q=><label key={q.quota_id} style={{display:"block",marginTop:"0.5rem"}}><span>{quotaBriefLabel(q)}{q.rollover_applied?" · rollover":""} · Nina {q.nina_scan_status??"PENDENTE"}</span>{q.status==="AVAILABLE"&&q.nina_scan_status==="CLEARED"?<button type="button" className="table-action lock" style={{marginLeft:"0.75rem"}} onClick={()=>onReserve(q.quota_id)}><LockKeyhole/>Travar 60 min</button>:null}</label>)}</div></div></article>;
   }
-  return <OperationalLayout title="Marketplace — Cartas contempladas" subtitle="Esteira 2 (robô): 1 opção na banda de 5% para crédito e 1 para entrada, rollover 7 dias e markup do fornecedor. Regras Bacen via approval_rules sincronizadas." icon={<WalletCards/>}>
+  return <OperationalLayout title="Marketplace — Cartas contempladas" subtitle="Esteira 2 (robô): 1 opção na banda de 10% para crédito e 1 para entrada, rollover 7 dias e markup do fornecedor. Regras Bacen via approval_rules sincronizadas." icon={<WalletCards/>}>
     <div className="notice"><Clock3/>Admin cadastra cotas (fornecedor + prazo restante) em <b>Inventário</b>. Sync Bacen em <b>Administradoras</b> alimenta approval_rules usadas no matching. Finalize a venda em <b>Propostas</b>.</div>
     <div className="marketplace-tabs">
       <button type="button" className={`marketplace-tab${tab==="esteira1"?" active":""}`} onClick={()=>setTab("esteira1")}>Esteira 1 — Escolha do parceiro</button>
@@ -283,7 +283,7 @@ export function MarketplaceModule() {
         <label className="marketplace-field"><span className="marketplace-field-label"><Search size={14}/> Buscar por crédito (R$)</span><CurrencyInput value={e1FilterCredit} onChange={setE1FilterCredit} placeholder="Ex.: 250.000"/></label>
         <label className="marketplace-field"><span className="marketplace-field-label"><Search size={14}/> Buscar por entrada (R$)</span><CurrencyInput value={e1FilterEntrada} onChange={setE1FilterEntrada} placeholder="Ex.: 80.000"/></label>
         <label className="marketplace-field">Administradora<select value={e1FilterAdministratorId} onChange={e=>setE1FilterAdministratorId(e.target.value)}><option value="">Todas</option>{e1AdministratorOptions.map(([id,name])=><option key={id} value={id}>{name}</option>)}</select></label>
-        <small className="marketplace-hint">Crédito e entrada: ±5%. Administradora: lista do estoque. Deixe crédito/entrada em branco para ver todas.</small>
+        <small className="marketplace-hint">Crédito e entrada: ±10%. Administradora: lista do estoque. Deixe crédito/entrada em branco para ver todas.</small>
         {e1FilterActive ? (
           <button type="button" className="table-action" style={{ marginTop: 6 }} onClick={() => { setE1FilterCredit(""); setE1FilterEntrada(""); setE1FilterAdministratorId(""); }}>
             Limpar filtros de busca
@@ -303,7 +303,7 @@ export function MarketplaceModule() {
                 {catalog.length === 0
                   ? `Nenhuma carta de ${e1Category === "REAL_ESTATE" ? "imóvel" : "veículo"} no estoque. Cadastre em Inventário ou sincronize Fornecedores e aprove a cota (compliance).`
                   : e1FilterActive
-                    ? `Há ${catalog.length} carta(s) no estoque, mas nenhuma combina os filtros (crédito/entrada ±5% ou administradora). Limpe os filtros ou ajuste os valores.`
+                    ? `Há ${catalog.length} carta(s) no estoque, mas nenhuma combina os filtros (crédito/entrada ±10% ou administradora). Limpe os filtros ou ajuste os valores.`
                     : "Nenhuma carta nesta categoria. Cadastre no Inventário."}
                 {catalog.length > 0 && catalog.every((c) => c.status === "PENDING_REVIEW") ? (
                   <> {e1PendingInCatalog.length} cota(s) aguardam aprovação no Inventário antes de liberar para venda.</>
@@ -352,7 +352,7 @@ export function MarketplaceModule() {
     </form>}
     {esteira2Busy&&tab==="esteira2"&&<div className="notice"><Clock3/>Robô Nina consultando o estoque e as regras Bacen — pode levar alguns segundos na primeira busca do dia.</div>}
     {result1&&tab==="esteira1"&&<section className="panel"><div className="panel-title"><h2>Resultado Esteira 1{result1.combo?" (junção manual)":""}</h2></div><div className="notice">{result1.message}</div>{result1.blockers.length>0&&<div className="error">{result1.blockers.map(b=><div key={b}>{b}</div>)}</div>}{(result1.selected_quotas??[result1.quota]).map(q=><p key={q.quota_id}><Pill value={result1.eligible?"CLEARED":"BLOCKED"}/> {quotaBriefLabel(q)}</p>)}{result1.eligible&&(result1.selected_quotas??[result1.quota]).every(q=>q.status==="AVAILABLE"&&q.nina_scan_status==="CLEARED")?<button type="button" className="table-action lock" onClick={()=>void reserveSelectedQuotas((result1.selected_quotas??[result1.quota]).map(q=>q.quota_id))}><LockKeyhole/>Travar 60 min{(result1.selected_quotas?.length??1)>1?` (${result1.selected_quotas?.length} cotas)`:""}</button>:null}{result1.alternatives.length>0&&<><h3>Alternativas Nina</h3>{result1.alternatives.map(m=><MatchCard key={m.quota_ids.join("-")} match={m} onReserve={reserveQuota}/>)}</>}</section>}
-    {result2&&tab==="esteira2"&&!esteira2Busy&&<section className="panel"><div className="panel-title"><h2>Opções robô Esteira 2 (régua {result2.band_percent??"5"}%)</h2></div><div className="notice">{result2.message}</div>{(result2.blockers??[]).map(b=><div className="error" key={b}>{b}</div>)}{(result2.credit_matches?.length??0)>0&&<h3>Lane crédito</h3>}{(result2.credit_matches??[]).map(m=><MatchCard key={`c-${m.quota_ids.join("-")}`} match={m} onReserve={reserveQuota}/>)}{(result2.entrada_matches?.length??0)>0&&<h3>Lane entrada</h3>}{(result2.entrada_matches??[]).map(m=><MatchCard key={`e-${m.quota_ids.join("-")}`} match={m} onReserve={reserveQuota}/>)}{!(result2.credit_matches?.length||result2.entrada_matches?.length)&&result2.matches.map(m=><MatchCard key={m.quota_ids.join("-")} match={m} onReserve={reserveQuota}/>)}</section>}
+    {result2&&tab==="esteira2"&&!esteira2Busy&&<section className="panel"><div className="panel-title"><h2>Opções robô Esteira 2 (régua {result2.band_percent??"10"}%)</h2></div><div className="notice">{result2.message}</div>{(result2.blockers??[]).map(b=><div className="error" key={b}>{b}</div>)}{(result2.credit_matches?.length??0)>0&&<h3>Lane crédito</h3>}{(result2.credit_matches??[]).map(m=><MatchCard key={`c-${m.quota_ids.join("-")}`} match={m} onReserve={reserveQuota}/>)}{(result2.entrada_matches?.length??0)>0&&<h3>Lane entrada</h3>}{(result2.entrada_matches??[]).map(m=><MatchCard key={`e-${m.quota_ids.join("-")}`} match={m} onReserve={reserveQuota}/>)}{!(result2.credit_matches?.length||result2.entrada_matches?.length)&&result2.matches.map(m=><MatchCard key={m.quota_ids.join("-")} match={m} onReserve={reserveQuota}/>)}</section>}
   </OperationalLayout>
 }
 
