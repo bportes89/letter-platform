@@ -48,6 +48,63 @@ SIT_CANCELADO = "CANCELADO"
 SIT_CANCELADO_FALTA = "CANCELADO_FALTA_PAGAMENTO"
 SIT_INCOMPLETO = "INCOMPLETO"
 
+_GESTAO_ROLE_LABEL: dict[Role, str] = {
+    Role.CLIENT: "Cliente",
+    Role.RETAIL_INVESTOR: "Investidor",
+    Role.INSTITUTIONAL_FUND: "Fundo",
+    Role.QUOTA_SELLER: "Fornecedor",
+    Role.PARTNER: "Parceiro",
+    Role.MASTER_FRANCHISEE: "Franqueado",
+    Role.MANAGER: "Franqueado",
+    Role.PLATFORM_ADMIN: "Operação LETTER",
+    Role.INTERNAL_STAFF: "Operação LETTER",
+    Role.AUDITOR: "Operação LETTER",
+}
+
+
+def _gestao_label_for_role(role: str | Role | None) -> str | None:
+    if not role:
+        return None
+    try:
+        parsed = Role(str(role))
+    except ValueError:
+        return str(role)
+    return _GESTAO_ROLE_LABEL.get(parsed, str(role))
+
+
+def _marketplace_parties(row: dict, snap: dict, terms: dict, life: dict) -> dict:
+    release = life.get("commission_release") if isinstance(life.get("commission_release"), dict) else {}
+    return {
+        "cliente": {
+            "nome": row.get("name"),
+            "documento": row.get("document"),
+            "email": row.get("email"),
+            "telefone": row.get("phone"),
+            "tipo_pessoa": row.get("person_type") or snap.get("person_type"),
+        },
+        "parceiro": {
+            "nome": row.get("partner_name"),
+            "papel_tecnico": row.get("partner_role"),
+            "papel_label": _gestao_label_for_role(row.get("partner_role")),
+        },
+        "fornecedor": {
+            "fontes": row.get("supplier_sources") or [],
+            "confirmou_transferencia": bool(row.get("supplier_transfer_confirmed")),
+            "total_comissao": release.get("supplier_total"),
+        },
+        "fundo": {
+            "observacao": terms.get("fund_name") or terms.get("escrow_provider"),
+            "comissao_plataforma": release.get("platform_total"),
+        },
+        "investidor": {
+            "observacao": terms.get("investor_name"),
+        },
+        "franqueado": {
+            "comissao_rede": release.get("affiliate_total"),
+            "referencia": release.get("reference"),
+        },
+    }
+
 SALE_SITUATIONS = frozenset({SIT_AGUARDANDO, SIT_PAGO, SIT_CONCLUIDO, SIT_CANCELADO, SIT_CANCELADO_FALTA})
 
 SOURCE_LABELS = {
@@ -612,6 +669,7 @@ def get_cadastro_detail(db: Session, user: User, lead_id: str) -> dict:
         "has_site_contract": contract_meta["has_site_contract"],
         "contract_ack": contract_meta["contract_ack"],
         "zapsign": zapsign_view_from_terms(terms),
+        "parties": _marketplace_parties(row, snap, terms, life),
     }
 
 

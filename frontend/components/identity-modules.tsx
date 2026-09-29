@@ -5,8 +5,12 @@ import { Building2, KeyRound, Plus, RefreshCw, ShieldCheck, UserPlus, Users } fr
 import { api, AuthSession, Branch, Invitation, KycCase, User } from "@/lib/api";
 import { AdminUserForm } from "@/components/admin-user-form";
 import { MfaSetupPanel } from "@/components/mfa-setup-panel";
-
-const roles = ["PLATFORM_ADMIN","INTERNAL_STAFF","MASTER_FRANCHISEE","MANAGER","PARTNER","CLIENT","QUOTA_SELLER","RETAIL_INVESTOR","INSTITUTIONAL_FUND","AUDITOR"];
+import {
+  GESTAO_INVITE_ROLE_GROUPS,
+  GESTAO_PERSONA_TABS,
+  gestaoPersonaForRole,
+  gestaoPersonaLabelForRole,
+} from "@/lib/gestao-personas";
 const date = (value:string|null) => value ? new Date(value).toLocaleString("pt-BR") : "—";
 
 function inviteLink(token: string) {
@@ -36,6 +40,12 @@ export function IdentityModule() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [lastInviteLink, setLastInviteLink] = useState("");
+  const [personaTab, setPersonaTab] = useState<(typeof GESTAO_PERSONA_TABS)[number]["key"]>("ALL");
+
+  const filteredUsers = users.filter((u) => {
+    if (personaTab === "ALL") return true;
+    return gestaoPersonaForRole(u.role) === personaTab;
+  });
 
   const loadBranches = useCallback(async () => api<Branch[]>("/admin/branches"), []);
   const loadInvites = useCallback(async () => api<Invitation[]>("/admin/invitations"), []);
@@ -237,8 +247,16 @@ export function IdentityModule() {
           <h2><UserPlus /> Convidar usuário</h2>
           <form className="stack-form" onSubmit={invite}>
             <input name="email" type="email" placeholder="E-mail" required disabled={busy} />
-            <select name="role" disabled={busy}>
-              {roles.map((r) => <option key={r}>{r}</option>)}
+            <select name="role" disabled={busy} defaultValue="CLIENT">
+              {GESTAO_INVITE_ROLE_GROUPS.map((group) => (
+                <optgroup key={group.persona} label={group.label}>
+                  {group.roles.map((r) => (
+                    <option key={r} value={r}>
+                      {gestaoPersonaLabelForRole(r)} ({r})
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
             </select>
             <select name="branch_id" disabled={busy || branches.length === 0}>
               <option value="">Sem filial (Matriz)</option>
@@ -255,8 +273,20 @@ export function IdentityModule() {
       </div>
       <section className="panel identity-table">
         <div className="panel-title">
-          <h2>Usuários ({users.length})</h2>
+          <h2>Usuários ({filteredUsers.length}{personaTab !== "ALL" ? ` / ${users.length}` : ""})</h2>
           <span>{branches.length} filiais</span>
+        </div>
+        <div className="identity-persona-tabs">
+          {GESTAO_PERSONA_TABS.map((tab) => (
+            <button
+              key={tab.key}
+              type="button"
+              className={`marketplace-tab${personaTab === tab.key ? " active" : ""}`}
+              onClick={() => setPersonaTab(tab.key)}
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
         {usersError && (
           <small className="muted" style={{ display: "block", marginBottom: 12, color: "#b42318" }}>
@@ -268,7 +298,8 @@ export function IdentityModule() {
             <thead>
               <tr>
                 <th>Usuário</th>
-                <th>Papel</th>
+                <th>Gestão</th>
+                <th>Papel técnico</th>
                 <th>Filial</th>
                 <th>MFA</th>
                 <th>Último acesso</th>
@@ -276,10 +307,11 @@ export function IdentityModule() {
               </tr>
             </thead>
             <tbody>
-              {users.map((u) => (
+              {filteredUsers.map((u) => (
                 <tr key={u.id}>
                   <td><b>{u.name}</b><small>{u.email}</small></td>
-                  <td>{u.role}</td>
+                  <td>{gestaoPersonaLabelForRole(u.role)}</td>
+                  <td><small>{u.role}</small></td>
                   <td>{branches.find((b) => b.id === u.branch_id)?.name ?? "Matriz"}</td>
                   <td><span className={`pill ${u.mfa_enabled ? "pill-approved" : ""}`}>{u.mfa_enabled ? "ATIVO" : "PENDENTE"}</span></td>
                   <td>{date(u.last_login_at)}</td>

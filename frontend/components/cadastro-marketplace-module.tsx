@@ -2,10 +2,11 @@
 
 import { CheckCircle2, ClipboardList, RefreshCw } from "lucide-react";
 import Link from "next/link";
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { AdminDocumentPanel } from "@/components/admin-document-panel";
 import { MarketplaceContractEditor } from "@/components/marketplace-contract-editor";
 import { api, API_URL, apiForm, deleteApi, downloadApi } from "@/lib/api";
+import { gestaoPersonaLabelForRole } from "@/lib/gestao-personas";
 import { isInternalProductRole } from "@/lib/product-nav";
 
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
@@ -26,6 +27,7 @@ type CadastroRow = {
   credit_value: string | null;
   entrada_value: string | null;
   partner_name: string | null;
+  partner_role?: string | null;
   proposal_id: string | null;
   proposal_status: string | null;
   quota_codes: string[];
@@ -42,10 +44,44 @@ type CadastroRow = {
   } | null;
 };
 
+type MarketplaceParties = {
+  cliente?: Record<string, unknown>;
+  parceiro?: Record<string, unknown>;
+  fornecedor?: Record<string, unknown>;
+  fundo?: Record<string, unknown>;
+  investidor?: Record<string, unknown>;
+  franqueado?: Record<string, unknown>;
+};
+
+function CadastroPartyBlock({
+  title,
+  children,
+  readOnlySummary,
+}: {
+  title: string;
+  readOnlySummary?: ReactNode;
+  children?: ReactNode;
+}) {
+  return (
+    <fieldset className="cadastro-party-block">
+      <legend>{title}</legend>
+      {readOnlySummary ? <div className="cadastro-party-readonly">{readOnlySummary}</div> : null}
+      {children}
+    </fieldset>
+  );
+}
+
+function partyText(value: unknown): string {
+  if (value === undefined || value === null || value === "") return "—";
+  if (Array.isArray(value)) return value.length ? value.join(", ") : "—";
+  return String(value);
+}
+
 type CadastroDetail = CadastroRow & {
   address: Record<string, string>;
   purchase_readonly: Record<string, unknown>;
   snapshot: Record<string, unknown>;
+  parties?: MarketplaceParties;
   can_conclude?: boolean;
   commission_release?: {
     reference?: string;
@@ -399,23 +435,25 @@ export function CadastroMarketplaceModule() {
                 {selected.my_chain_commission.status === "BLOCKED" ? "bloqueada até concluir a venda" : "liberada"}
               </div>
             ) : null}
-            <div className="notice">
-              Compra (somente leitura): crédito{" "}
-              {selected.credit_value ? brl.format(Number(selected.credit_value)) : "—"} · entrada{" "}
-              {selected.entrada_value ? brl.format(Number(selected.entrada_value)) : "—"} · cotas{" "}
-              {(selected.quota_codes || []).join(", ") || "—"} · fornecedores{" "}
-              {(selected.supplier_sources || []).join(", ") || "—"}
-              {selected.commission_release_status ? ` · comissão ${selected.commission_release_status}` : ""}
-              {selected.proposal_id ? (
+            <CadastroPartyBlock
+              title="Dados da compra"
+              readOnlySummary={
                 <>
-                  {" "}
-                  ·{" "}
-                  <Link href={`/modules/proposals?lead_id=${selected.lead_id}`}>
-                    Proposta {selected.proposal_id.slice(0, 8)}…
-                  </Link>
+                  <p>
+                    Crédito {selected.credit_value ? brl.format(Number(selected.credit_value)) : "—"} · entrada{" "}
+                    {selected.entrada_value ? brl.format(Number(selected.entrada_value)) : "—"} · cotas{" "}
+                    {(selected.quota_codes || []).join(", ") || "—"}
+                  </p>
+                  {selected.proposal_id ? (
+                    <p>
+                      <Link href={`/modules/proposals?lead_id=${selected.lead_id}`}>
+                        Proposta {selected.proposal_id.slice(0, 8)}…
+                      </Link>
+                    </p>
+                  ) : null}
                 </>
-              ) : null}
-            </div>
+              }
+            />
             {!partnerView && selected.commission_release ? (
               <div className="notice">
                 Liberação: fornecedor{" "}
@@ -552,88 +590,182 @@ export function CadastroMarketplaceModule() {
                 )}
               </div>
             )}
-            <div className="marketplace-form-row">
-              <label className="marketplace-field">
-                Nome
-                <input name="name" defaultValue={selected.name} required />
-              </label>
-              <label className="marketplace-field">
-                Telefone
-                <input name="phone" defaultValue={selected.phone} required />
-              </label>
-              <label className="marketplace-field">
-                Documento
-                <input name="document" defaultValue={selected.document || ""} />
-              </label>
-              <label className="marketplace-field">
-                E-mail
-                <input name="email" type="email" defaultValue={selected.email || ""} />
-              </label>
-              {!partnerView && selected.lifecycle_editable ? (
+            {(() => {
+              const p = selected.parties;
+              const parceiroNome = partyText(p?.parceiro?.nome ?? selected.partner_name);
+              const parceiroPapel =
+                partyText(p?.parceiro?.papel_label) !== "—"
+                  ? partyText(p?.parceiro?.papel_label)
+                  : gestaoPersonaLabelForRole(selected.partner_role || String(p?.parceiro?.papel_tecnico || ""));
+              const fornecedorFontes = partyText(p?.fornecedor?.fontes ?? selected.supplier_sources);
+              return (
                 <>
-                  <label className="marketplace-field marketplace-field-compact">
-                    Situação da venda
-                    <select name="situation" defaultValue={selected.situation}>
-                      {SALE_SITUATIONS.map((s) => (
-                        <option key={s.value} value={s.value}>
-                          {s.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="marketplace-field marketplace-field-compact">
-                    Fornecedor confirmou transferência
-                    <select name="supplier_transfer_confirmed" defaultValue={selected.supplier_transfer_confirmed ? "1" : "0"}>
-                      <option value="0">Não</option>
-                      <option value="1">Sim</option>
-                    </select>
-                  </label>
-                  <label className="marketplace-field marketplace-field-wide">
-                    Forçar conclusão sem confirmação do fornecedor
-                    <select name="force_admin_conclude" defaultValue="0">
-                      <option value="0">Não</option>
-                      <option value="1">Sim (admin)</option>
-                    </select>
-                  </label>
+                  <CadastroPartyBlock
+                    title="Cliente"
+                    readOnlySummary={
+                      <p>
+                        Tipo pessoa: {partyText(p?.cliente?.tipo_pessoa ?? selected.snapshot?.person_type)}
+                      </p>
+                    }
+                  >
+                    <div className="marketplace-form-row">
+                      <label className="marketplace-field">
+                        Nome
+                        <input name="name" defaultValue={selected.name} required />
+                      </label>
+                      <label className="marketplace-field">
+                        Telefone
+                        <input name="phone" defaultValue={selected.phone} required />
+                      </label>
+                      <label className="marketplace-field">
+                        Documento
+                        <input name="document" defaultValue={selected.document || ""} />
+                      </label>
+                      <label className="marketplace-field">
+                        E-mail
+                        <input name="email" type="email" defaultValue={selected.email || ""} />
+                      </label>
+                      {!partnerView ? (
+                        <label className="marketplace-field marketplace-field-compact">
+                          Status lead
+                          <select name="lead_status" defaultValue={selected.lead_status}>
+                            {["NEW", "CONTACTED", "QUALIFIED", "PROPOSAL", "CONVERTED", "CANCELLED"].map((s) => (
+                              <option key={s} value={s}>
+                                {s}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      ) : null}
+                      <label className="marketplace-field marketplace-field-compact">
+                        CEP
+                        <input name="zipcode" defaultValue={selected.address?.zipcode || ""} />
+                      </label>
+                      <label className="marketplace-field">
+                        Rua
+                        <input name="street" defaultValue={selected.address?.street || ""} />
+                      </label>
+                      <label className="marketplace-field marketplace-field-compact">
+                        Número
+                        <input name="number" defaultValue={selected.address?.number || ""} />
+                      </label>
+                      <label className="marketplace-field">
+                        Bairro
+                        <input name="neighborhood" defaultValue={selected.address?.neighborhood || ""} />
+                      </label>
+                      <label className="marketplace-field">
+                        Cidade
+                        <input name="city" defaultValue={selected.address?.city || ""} />
+                      </label>
+                      <label className="marketplace-field marketplace-field-compact">
+                        UF
+                        <input name="uf" defaultValue={selected.address?.uf || ""} maxLength={2} />
+                      </label>
+                    </div>
+                  </CadastroPartyBlock>
+
+                  <CadastroPartyBlock
+                    title="Parceiro"
+                    readOnlySummary={
+                      <p>
+                        Nome: {parceiroNome} · perfil: {parceiroPapel}
+                        {selected.my_chain_commission
+                          ? ` · sua comissão ${brl.format(Number(selected.my_chain_commission.amount))}`
+                          : ""}
+                      </p>
+                    }
+                  />
+
+                  <CadastroPartyBlock
+                    title="Fornecedor"
+                    readOnlySummary={
+                      <p>
+                        Fontes / API: {fornecedorFontes}
+                        {p?.fornecedor?.total_comissao
+                          ? ` · comissão fornecedor ${brl.format(Number(p.fornecedor.total_comissao))}`
+                          : ""}
+                      </p>
+                    }
+                  >
+                    {!partnerView && selected.lifecycle_editable ? (
+                      <div className="marketplace-form-row">
+                        <label className="marketplace-field marketplace-field-compact">
+                          Fornecedor confirmou transferência
+                          <select
+                            name="supplier_transfer_confirmed"
+                            defaultValue={selected.supplier_transfer_confirmed ? "1" : "0"}
+                          >
+                            <option value="0">Não</option>
+                            <option value="1">Sim</option>
+                          </select>
+                        </label>
+                        <label className="marketplace-field marketplace-field-wide">
+                          Forçar conclusão sem confirmação do fornecedor
+                          <select name="force_admin_conclude" defaultValue="0">
+                            <option value="0">Não</option>
+                            <option value="1">Sim (admin)</option>
+                          </select>
+                        </label>
+                      </div>
+                    ) : null}
+                  </CadastroPartyBlock>
+
+                  <CadastroPartyBlock
+                    title="Fundo"
+                    readOnlySummary={
+                      <p>
+                        {partyText(p?.fundo?.observacao) !== "—"
+                          ? partyText(p?.fundo?.observacao)
+                          : "Vinculado à entrada / escrow quando a operação usar fundo (Flash Invest)."}
+                        {p?.fundo?.comissao_plataforma
+                          ? ` · plataforma ${brl.format(Number(p.fundo.comissao_plataforma))}`
+                          : ""}
+                      </p>
+                    }
+                  />
+
+                  <CadastroPartyBlock
+                    title="Investidor"
+                    readOnlySummary={
+                      <p>
+                        {partyText(p?.investidor?.observacao) !== "—"
+                          ? partyText(p?.investidor?.observacao)
+                          : "Sem investidor retail vinculado a este cadastro Marketplace."}
+                      </p>
+                    }
+                  />
+
+                  <CadastroPartyBlock
+                    title="Franqueado"
+                    readOnlySummary={
+                      <p>
+                        Comissão rede:{" "}
+                        {p?.franqueado?.comissao_rede
+                          ? brl.format(Number(p.franqueado.comissao_rede))
+                          : "—"}
+                        {p?.franqueado?.referencia ? ` · ref. ${partyText(p.franqueado.referencia)}` : ""}
+                        {selected.commission_release_status ? ` · status ${selected.commission_release_status}` : ""}
+                      </p>
+                    }
+                  >
+                    {!partnerView && selected.lifecycle_editable ? (
+                      <div className="marketplace-form-row">
+                        <label className="marketplace-field marketplace-field-compact">
+                          Situação da venda
+                          <select name="situation" defaultValue={selected.situation}>
+                            {SALE_SITUATIONS.map((s) => (
+                              <option key={s.value} value={s.value}>
+                                {s.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      </div>
+                    ) : null}
+                  </CadastroPartyBlock>
                 </>
-              ) : null}
-              {!partnerView ? (
-                <label className="marketplace-field marketplace-field-compact">
-                  Status lead
-                  <select name="lead_status" defaultValue={selected.lead_status}>
-                    {["NEW", "CONTACTED", "QUALIFIED", "PROPOSAL", "CONVERTED", "CANCELLED"].map((s) => (
-                      <option key={s} value={s}>
-                        {s}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              ) : null}
-              <label className="marketplace-field marketplace-field-compact">
-                CEP
-                <input name="zipcode" defaultValue={selected.address?.zipcode || ""} />
-              </label>
-              <label className="marketplace-field">
-                Rua
-                <input name="street" defaultValue={selected.address?.street || ""} />
-              </label>
-              <label className="marketplace-field marketplace-field-compact">
-                Número
-                <input name="number" defaultValue={selected.address?.number || ""} />
-              </label>
-              <label className="marketplace-field">
-                Bairro
-                <input name="neighborhood" defaultValue={selected.address?.neighborhood || ""} />
-              </label>
-              <label className="marketplace-field">
-                Cidade
-                <input name="city" defaultValue={selected.address?.city || ""} />
-              </label>
-              <label className="marketplace-field marketplace-field-compact">
-                UF
-                <input name="uf" defaultValue={selected.address?.uf || ""} maxLength={2} />
-              </label>
-            </div>
+              );
+            })()}
             {!partnerView ? (
               <button type="submit" className="marketplace-submit" disabled={busy}>
                 <RefreshCw />
