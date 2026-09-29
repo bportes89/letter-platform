@@ -431,10 +431,14 @@ export function AttendanceBotSection() {
   const onInput = async (flowIndex: number, itemIndex: number, item: ChatItem, e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!isCurrent(flowIndex) || busy || !item.input) return;
-    if (!(await requireApi())) return;
-    const fd = new FormData(e.currentTarget);
+    const formEl = e.currentTarget;
+    const fd = new FormData(formEl);
     const value = String(fd.get(item.input.name) ?? "").trim();
-    if (!value) return;
+    if (!value) {
+      setError("Preencha o campo antes de prosseguir.");
+      return;
+    }
+    if (!(await requireApi())) return;
     if (item.input.name === "name" && !fullNameOk(value)) {
       setError("Informe nome e sobrenome completos (ex.: Maria da Silva).");
       return;
@@ -608,7 +612,11 @@ export function AttendanceBotSection() {
                             disabled={busy || connecting}
                           />
                         )}
-                        <button type="submit" className="attendance-primary" disabled={busy || connecting}>
+                        <button
+                          type="submit"
+                          className="attendance-primary"
+                          disabled={busy || (connecting && !apiConnected)}
+                        >
                           Prosseguir
                         </button>
                       </form>

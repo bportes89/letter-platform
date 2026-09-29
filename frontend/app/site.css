@@ -1846,6 +1846,7 @@
   width: 80px;
   transition: margin-top 0.8s ease-out;
   z-index: 2;
+  pointer-events: none;
 }
 
 .attendance-mascot {
@@ -1883,6 +1884,7 @@
 .attendance-sdc-result,
 .attendance-contract {
   position: relative;
+  z-index: 3;
   padding-left: 5rem;
   margin-bottom: 0.85rem;
 }
