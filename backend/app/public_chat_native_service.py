@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from datetime import date
 from decimal import Decimal, InvalidOperation
@@ -24,6 +25,8 @@ from app.sdc_desk_service import evaluate_sdc_desk, store_solicitation as store_
 from app.flash_desk_service import evaluate_flash_desk, store_solicitation as store_flash_solicitation
 from app.quitcon_desk_service import evaluate_quitcon_desk, store_solicitation as store_quitcon_solicitation
 from app.services import money, reserve_quota
+
+logger = logging.getLogger(__name__)
 
 SOURCE = "SITE_CHAT"
 PRODUCT = "MARKETPLACE"
@@ -738,8 +741,11 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
         )
 
     if step == STEP_ASSET:
+        raw_asset = data.get("asset_value")
+        if raw_asset in (None, "") and lead:
+            raw_asset = _lead_snapshot(lead).get("asset_value")
         try:
-            asset = _money_input(data.get("asset_value"))
+            asset = _money_input(raw_asset)
         except HTTPException:
             return _retry("Informe o valor do bem!", STEP_ASSET, input_name="asset_value", label="Valor do bem")
         if asset <= 0:
@@ -761,20 +767,41 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
         zero_km = bool(snap.get("asset_is_zero_km"))
 
         affiliate_markup = _chat_affiliate_markup(db, org, snap)
-        match = esteira2_nina_curated_match(
-            db,
-            actor,
-            target_amount=target_amount,
-            category=category,
-            asset_year=asset_year,
-            monthly_income=monthly_income,
-            monthly_commitment=Decimal("0"),
-            asset_value=asset,
-            has_credit_restriction=has_restriction,
-            asset_is_zero_km=zero_km,
-            target_entrada=target_entrada if target_entrada and target_entrada > 0 else None,
-            affiliate_markup=affiliate_markup,
-        )
+        try:
+            match = esteira2_nina_curated_match(
+                db,
+                actor,
+                target_amount=target_amount,
+                category=category,
+                asset_year=asset_year,
+                monthly_income=monthly_income,
+                monthly_commitment=Decimal("0"),
+                asset_value=asset,
+                has_credit_restriction=has_restriction,
+                asset_is_zero_km=zero_km,
+                target_entrada=target_entrada if target_entrada and target_entrada > 0 else None,
+                affiliate_markup=affiliate_markup,
+            )
+        except HTTPException:
+            raise
+        except Exception:
+            logger.exception("esteira2_nina_curated_match failed for lead %s", lead.id)
+            return _wrap(
+                [
+                    {
+                        "text": (
+                            "Não conseguimos buscar cotas agora. Tente de novo em instantes "
+                            "ou ajuste crédito/entrada."
+                        ),
+                        "options": [
+                            {"name": "Tentar novamente", "next": int(STEP_ASSET)},
+                            {"name": "Ajustar crédito", "next": int(STEP_CREDIT)},
+                            {"name": "Recomeçar", "next": 0},
+                        ],
+                    }
+                ],
+                lead_id=lead.id,
+            )
         options: list[dict] = []
         for lane_name, lane_rows in (
             ("Crédito", match.get("credit_matches") or []),

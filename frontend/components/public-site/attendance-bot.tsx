@@ -117,7 +117,12 @@ export function AttendanceBotSection() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const blockRef = useRef<HTMLDivElement>(null);
+  const formRef = useRef<Record<string, unknown>>({});
   const [mascotTop, setMascotTop] = useState(0);
+
+  useEffect(() => {
+    formRef.current = form;
+  }, [form]);
 
   const currentFlowIndex = flows.length - 1;
   const isCurrent = (flowIndex: number) => flowIndex === currentFlowIndex;
@@ -177,7 +182,13 @@ export function AttendanceBotSection() {
     try {
       const data = await fetchChatHome({});
       if (data.info) setSiteInfo((prev) => ({ ...prev, ...data.info }));
-      if (data.lead_id) setForm((prev) => ({ ...prev, lead_id: data.lead_id }));
+      if (data.lead_id) {
+        setForm((prev) => {
+          const next = { ...prev, lead_id: data.lead_id };
+          formRef.current = next;
+          return next;
+        });
+      }
       setApiConnected(true);
       setError("");
       return true;
@@ -336,7 +347,7 @@ export function AttendanceBotSection() {
     setBusy(true);
     setError("");
     if (echo) recordEcho(echo.flowIndex, echo.itemIndex, echo.value);
-    const mergedForm = formOverride ?? form;
+    const mergedForm = formOverride ?? formRef.current;
     try {
       if (Number.isFinite(numeric) && numeric <= -9101) {
         await advanceVmc(numeric, mergedForm);
@@ -350,15 +361,28 @@ export function AttendanceBotSection() {
       }
       const payload = { ...mergedForm, back, referral_code: getStoredReferralCode() };
       const data = await fetchChatStep(step, payload);
-      if (data.lead_id) {
-        setForm({ ...mergedForm, lead_id: data.lead_id });
-      }
+      setForm((prev) => {
+        const next = { ...prev, ...mergedForm };
+        if (data.lead_id) next.lead_id = data.lead_id;
+        formRef.current = next;
+        return next;
+      });
       if (!Array.isArray(data.chat_next) || data.chat_next.length === 0) {
         setError("O atendimento não retornou a próxima etapa. Toque em «Reiniciar conversa» e tente de novo.");
+        if (echo) {
+          setEchoes((prev) =>
+            prev.filter((x) => !(x.flowIndex === echo.flowIndex && x.itemIndex === echo.itemIndex)),
+          );
+        }
         return;
       }
       pushFlow(data.chat_next, data.info);
     } catch (e) {
+      if (echo) {
+        setEchoes((prev) =>
+          prev.filter((x) => !(x.flowIndex === echo.flowIndex && x.itemIndex === echo.itemIndex)),
+        );
+      }
       setError(e instanceof Error ? e.message : "Não foi possível avançar no atendimento.");
     } finally {
       setBusy(false);
@@ -392,7 +416,7 @@ export function AttendanceBotSection() {
       else window.location.href = href;
       return;
     }
-    const nextForm = { ...form };
+    const nextForm = { ...formRef.current };
     if (option.id !== undefined) nextForm.option_id = option.id;
     if (option.save !== undefined) {
       nextForm.option_save = option.save;
@@ -400,6 +424,7 @@ export function AttendanceBotSection() {
         nextForm.vmc_tipo = option.save;
       }
     }
+    formRef.current = nextForm;
     setForm(nextForm);
     const next = option.next ?? item.next ?? 0;
     if (typeof next === "number" && next <= -9101) {
@@ -443,7 +468,8 @@ export function AttendanceBotSection() {
       setError("Informe nome e sobrenome completos (ex.: Maria da Silva).");
       return;
     }
-    const nextForm = { ...form, [item.input.name]: value };
+    const nextForm = { ...formRef.current, [item.input.name]: value };
+    formRef.current = nextForm;
     setForm(nextForm);
     const displayValue = isChatMoneyField(item.input.name) ? formatChatBrlDisplay(value) : value;
     const display =
@@ -546,8 +572,14 @@ export function AttendanceBotSection() {
               height={100}
               className="attendance-mascot"
             />
-            {meta[currentFlowIndex]?.loading ? <span className="attendance-typing" aria-hidden /> : null}
+            {meta[currentFlowIndex]?.loading || busy ? <span className="attendance-typing" aria-hidden /> : null}
           </div>
+
+          {busy && apiConnected ? (
+            <div className="attendance-bot-row" data-chat-item>
+              <div className="attendance-bot-bubble">Buscando opções de cota…</div>
+            </div>
+          ) : null}
 
           {flows.map((items, flowIndex) =>
             items.map((item, itemIndex) => {

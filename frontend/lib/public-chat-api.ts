@@ -103,6 +103,9 @@ export type ChatHomeResponse = {
 };
 
 const CHAT_FETCH_TIMEOUT_MS = 45_000;
+/** Esteira 2 / Nina pode demorar em cold start do servidor. */
+const CHAT_MATCH_STEP_TIMEOUT_MS = 120_000;
+const CHAT_HEAVY_STEPS = new Set([10011, 10012, 10013, 10014]);
 
 const chatBrl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
@@ -242,9 +245,12 @@ export async function fetchChatHome(
 }
 
 export async function fetchChatStep(step: number | string, body: Record<string, unknown> = {}): Promise<ChatHomeResponse> {
+  const stepNum = typeof step === "number" ? step : Number(step);
+  const timeoutMs = CHAT_HEAVY_STEPS.has(stepNum) ? CHAT_MATCH_STEP_TIMEOUT_MS : CHAT_FETCH_TIMEOUT_MS;
   const data = await chatFetch<{ OBJ?: { chat_next?: ChatItem[]; info?: ChatSiteInfo; lead_id?: string } }>(
     `/public/site/chat/home/${step}`,
     body,
+    { timeoutMs },
   );
   return {
     chat_next: data.OBJ?.chat_next ?? [],
