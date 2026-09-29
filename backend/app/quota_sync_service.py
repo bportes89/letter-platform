@@ -176,8 +176,8 @@ def _apply_row(
     available = _reserva_available(row.get("reserva") or row.get("status") or "disponivel")
     administrator = _resolve_administrator(db, adm_name, admin_cache)
     now = datetime.now(UTC)
-    due_date = _installment_due_from_row(row) if _due_date_keys_in_row(row) else None
     has_due_date = _due_date_keys_in_row(row)
+    due_date = _installment_due_from_row(row) if has_due_date else None
 
     quota = existing.get(external_ref)
     if quota and quota.status in PROTECTED_STATUSES:
@@ -194,8 +194,12 @@ def _apply_row(
         quota.administrator_name_txt = adm_name
         quota.synced_at = now
         quota.sync_origin = sync_origin
-        if has_due_date:
+        if due_date:
             quota.installment_due_date = due_date
+        else:
+            from app.quota_inventory_service import ensure_quota_installment_due
+
+            ensure_quota_installment_due(quota)
         if quota.status not in PROTECTED_STATUSES:
             quota.status = "AVAILABLE" if available else "INACTIVE"
         return "updated"
@@ -211,7 +215,7 @@ def _apply_row(
         premium_value=entrada,
         installment_value=parcela,
         remaining_installments=parcelas or None,
-        installment_due_date=due_date if has_due_date else None,
+        installment_due_date=due_date,
         supplier_source=normalize_supplier_key(supplier.source_key),
         external_ref=external_ref,
         sync_origin=sync_origin,
@@ -221,6 +225,10 @@ def _apply_row(
     )
     db.add(item)
     existing[external_ref] = item
+    if not item.installment_due_date:
+        from app.quota_inventory_service import ensure_quota_installment_due
+
+        ensure_quota_installment_due(item)
     return "created"
 
 

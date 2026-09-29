@@ -28,8 +28,28 @@ def is_trusted_stock_ingest(quota: Quota) -> bool:
     return bool(quota.seller_id) and origin == "MANUAL"
 
 
-def _default_installment_due() -> date:
-    return utcnow().date() + timedelta(days=30)
+def default_installment_due_date(as_of: date | None = None) -> date:
+    """Dia 10 do mês subsequente; se essa data já passou, dia 10 do mês seguinte."""
+    today = as_of or utcnow().date()
+    year, month = today.year, today.month + 1
+    if month > 12:
+        month = 1
+        year += 1
+    candidate = date(year, month, 10)
+    if candidate <= today:
+        month += 1
+        if month > 12:
+            month = 1
+            year += 1
+        candidate = date(year, month, 10)
+    return candidate
+
+
+def ensure_quota_installment_due(quota: Quota, as_of: date | None = None) -> bool:
+    if quota.installment_due_date:
+        return False
+    quota.installment_due_date = default_installment_due_date(as_of)
+    return True
 
 
 def run_nina_quota_scan(db: Session, user: User, quota: Quota) -> dict:
@@ -45,6 +65,7 @@ def run_nina_quota_scan(db: Session, user: User, quota: Quota) -> dict:
     rules = parse_rules(admin.rules_json)
     credit_rules = rules.get("credit_utilization_rules") if isinstance(rules.get("credit_utilization_rules"), dict) else {}
 
+    ensure_quota_installment_due(quota)
     blockers: list[str] = []
     if not quota.installment_due_date:
         blockers.append("Informe o vencimento da parcela no cadastro da cota.")
@@ -127,8 +148,7 @@ def marketplace_ready_on_ingest(db: Session, user: User, quota: Quota) -> None:
     if quota.status == "INACTIVE":
         return
     quota.status = "AVAILABLE"
-    if not quota.installment_due_date:
-        quota.installment_due_date = _default_installment_due()
+    ensure_quota_installment_due(quota)
     try:
         run_nina_quota_scan(db, user, quota)
     except HTTPException:

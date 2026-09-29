@@ -1866,6 +1866,16 @@ def test_marketplace_vehicle_age_from_admin_rules(client, auth_headers):
     assert any("anos" in b.lower() for b in result.json()["blockers"])
 
 
+def test_default_installment_due_day_ten():
+    from datetime import date
+
+    from app.quota_inventory_service import default_installment_due_date
+
+    assert default_installment_due_date(date(2026, 1, 5)) == date(2026, 2, 10)
+    assert default_installment_due_date(date(2026, 2, 10)) == date(2026, 3, 10)
+    assert default_installment_due_date(date(2026, 12, 20)) == date(2027, 1, 10)
+
+
 def test_quota_admin_ingest_auto_clears_nina(client, auth_headers):
     """Cotas do inventário admin entram aprovadas (Nina CLEARED) sem fila de compliance."""
     admins = client.get("/api/v1/administrators", headers=auth_headers).json()
@@ -1885,7 +1895,9 @@ def test_quota_admin_ingest_auto_clears_nina(client, auth_headers):
     body = created.json()
     assert body["status"] == "AVAILABLE"
     assert body["nina_scan_status"] == "CLEARED"
-    assert body["installment_due_date"]
+    from datetime import date as date_cls
+
+    assert date_cls.fromisoformat(body["installment_due_date"]).day == 10
     locked = client.post(
         "/api/v1/reservations",
         headers=auth_headers,

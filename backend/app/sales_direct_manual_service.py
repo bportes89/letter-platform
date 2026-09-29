@@ -68,10 +68,16 @@ def list_cotas_options(
     )
     from app.marketplace_partner_view import mask_quota_fields
 
+    from app.quota_inventory_service import ensure_quota_installment_due
+
     rows: list[dict] = []
+    due_touched = False
     for q in quotas:
-        if not q.installment_due_date and not user_sees_supplier_quota_identity(user):
-            continue
+        if ensure_quota_installment_due(q):
+            due_touched = True
+    if due_touched:
+        db.flush()
+    for q in quotas:
         admin = db.get(Administrator, q.administrator_id)
         pricing = pricing_for_quota(q, suppliers=suppliers)
         masked = mask_quota_fields(
@@ -241,8 +247,10 @@ def store_manual(
             raise HTTPException(status_code=404, detail=f"Cota não encontrada: {qid}.")
         if quota.status != "AVAILABLE":
             raise HTTPException(status_code=422, detail=f"Cota indisponível: {qid}.")
-        if not quota.installment_due_date:
-            raise HTTPException(status_code=422, detail="Cota sem vencimento de parcela — complete no Inventário.")
+        from app.quota_inventory_service import ensure_quota_installment_due
+
+        ensure_quota_installment_due(quota)
+        db.flush()
         quotas.append(quota)
 
     admin_ids = {q.administrator_id for q in quotas}
