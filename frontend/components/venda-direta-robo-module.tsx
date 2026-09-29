@@ -5,6 +5,7 @@ import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { CurrencyInput } from "@/components/currency-input";
+import { MarketplaceQuotaFields } from "@/components/marketplace-quota-fields";
 import { lookupCep } from "@/lib/cep-lookup";
 import { formatDocumentDigits, validationMessageForPerson } from "@/lib/br-validation";
 
@@ -23,6 +24,8 @@ type MatchQuota = {
   premium_value: string;
   entrada_final?: string | null;
   installment_value?: string;
+  installment_due_date?: string | null;
+  remaining_installments?: number | null;
   supplier_source?: string | null;
   markup_percent?: string | null;
   rollover_applied?: boolean;
@@ -502,34 +505,28 @@ function MatchCard({
   onConfirm: (m: MarketplaceMatch) => void;
 }) {
   return (
-    <article className="backlog-item">
-      <div>
-        <strong>
-          {match.quotas[0]?.administrator_name ?? "Administradora"} · crédito {brl.format(Number(match.total_credit))}
-          {match.total_entrada ? ` · entrada ${brl.format(Number(match.total_entrada))}` : ""}
-        </strong>
-        <p>
-          {match.explanation}
-          {match.message ? ` — ${match.message}` : ""}
-        </p>
-        <small>
-          Lane {match.lane ?? "—"} · Score {match.score} · Desvio crédito {match.deviation_percent}%
-          {match.entrada_deviation_percent != null ? ` · Desvio entrada ${match.entrada_deviation_percent}%` : ""}
-          {match.rollover_applied ? " · Rollover 7d" : ""}
-          {match.markup_amount ? ` · Markup ${brl.format(Number(match.markup_amount))}` : ""}
-        </small>
-        <div>
-          {match.quotas.map((q) => (
-            <div key={q.quota_id} style={{ marginTop: "0.35rem" }}>
-              {q.group_code} · {q.quota_code} · crédito {brl.format(Number(q.credit_value))} · entrada{" "}
-              {brl.format(Number(q.entrada_final ?? q.premium_value))} · Nina {q.nina_scan_status ?? "PENDENTE"}
-            </div>
-          ))}
+    <article className="marketplace-match-card">
+      <p>
+        {match.explanation}
+        {match.message ? ` — ${match.message}` : ""}
+      </p>
+      <small>
+        Lane {match.lane ?? "—"} · Score {match.score} · Desvio crédito {match.deviation_percent}%
+        {match.entrada_deviation_percent != null ? ` · Desvio entrada ${match.entrada_deviation_percent}%` : ""}
+        {match.rollover_applied ? " · Rollover 7d" : ""}
+        {match.markup_amount ? ` · Markup ${brl.format(Number(match.markup_amount))}` : ""}
+      </small>
+      {match.quotas.map((q) => (
+        <div className="marketplace-match-quota" key={q.quota_id}>
+          <MarketplaceQuotaFields quota={q} administratorFallback={match.administrator_name} />
+          <small className="muted" style={{ display: "block", marginTop: 6 }}>
+            {q.group_code} · {q.quota_code} · Nina {q.nina_scan_status ?? "PENDENTE"}
+          </small>
         </div>
-        <button type="button" className="marketplace-submit" style={{ marginTop: "0.75rem" }} disabled={busy} onClick={() => onConfirm(match)}>
-          Confirmar esta opção
-        </button>
-      </div>
+      ))}
+      <button type="button" className="marketplace-submit" style={{ marginTop: "0.75rem" }} disabled={busy} onClick={() => onConfirm(match)}>
+        Confirmar esta opção
+      </button>
     </article>
   );
 }
