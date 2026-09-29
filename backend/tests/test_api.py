@@ -1866,8 +1866,8 @@ def test_marketplace_vehicle_age_from_admin_rules(client, auth_headers):
     assert any("anos" in b.lower() for b in result.json()["blockers"])
 
 
-def test_quota_lock_requires_nina_scan(client, auth_headers):
-    # Sessão de testes compartilha o DB: garante uma cota sem varredura Nina fresca.
+def test_quota_admin_ingest_auto_clears_nina(client, auth_headers):
+    """Cotas do inventário admin entram aprovadas (Nina CLEARED) sem fila de compliance."""
     admins = client.get("/api/v1/administrators", headers=auth_headers).json()
     created = client.post(
         "/api/v1/quotas",
@@ -1875,16 +1875,23 @@ def test_quota_lock_requires_nina_scan(client, auth_headers):
         json={
             "administrator_id": admins[0]["id"],
             "group_code": "LOCK",
-            "quota_code": "NEEDSCAN",
+            "quota_code": "AUTOCLEAR",
             "category": "REAL_ESTATE",
             "credit_value": "100000",
             "installment_value": "800",
-            "installment_due_date": "2026-11-01",
         },
     )
-    assert created.status_code == 201
-    blocked = client.post("/api/v1/reservations", headers=auth_headers, json={"quota_id": created.json()["id"], "ttl_minutes": 60})
-    assert blocked.status_code == 422
+    assert created.status_code == 201, created.text
+    body = created.json()
+    assert body["status"] == "AVAILABLE"
+    assert body["nina_scan_status"] == "CLEARED"
+    assert body["installment_due_date"]
+    locked = client.post(
+        "/api/v1/reservations",
+        headers=auth_headers,
+        json={"quota_id": body["id"], "ttl_minutes": 60},
+    )
+    assert locked.status_code == 201, locked.text
 
 
 def test_calculation_contract_and_acceptance(client, auth_headers):

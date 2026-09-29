@@ -15,6 +15,21 @@ from app.services import utcnow
 
 QUOTA_LOCK_TTL_MINUTES = 60
 NINA_SCAN_MAX_AGE_MINUTES = 30
+TRUSTED_STOCK_ORIGINS = frozenset({"MANUAL", "JSON", "SCRAPE"})
+
+
+def is_trusted_stock_ingest(quota: Quota) -> bool:
+    """API/sync e cadastro admin — sem fila de compliance do portal fornecedor."""
+    origin = (quota.sync_origin or "MANUAL").upper()
+    if origin in TRUSTED_STOCK_ORIGINS:
+        return True
+    if origin == "SUPPLIER_PORTAL":
+        return False
+    return bool(quota.seller_id) and origin == "MANUAL"
+
+
+def _default_installment_due() -> date:
+    return utcnow().date() + timedelta(days=30)
 
 
 def run_nina_quota_scan(db: Session, user: User, quota: Quota) -> dict:
@@ -92,8 +107,28 @@ def _nina_scan_fresh(quota: Quota) -> bool:
 
 def auto_nina_scan_on_ingest(db: Session, user: User, quota: Quota) -> None:
     """Varredura Nina automática após criação/sync admin ou API (best-effort)."""
+    if is_trusted_stock_ingest(quota):
+        marketplace_ready_on_ingest(db, user, quota)
+        return
     if quota.status not in {"AVAILABLE", "PENDING_REVIEW"}:
         return
+    try:
+        run_nina_quota_scan(db, user, quota)
+    except HTTPException:
+        pass
+
+
+def marketplace_ready_on_ingest(db: Session, user: User, quota: Quota) -> None:
+    """Cotas de site/API/admin: AVAILABLE + Nina CLEARED sem aprovação manual de compliance."""
+    if quota.status in {"RESERVED", "SOLD"}:
+        return
+    if not is_trusted_stock_ingest(quota):
+        return
+    if quota.status == "INACTIVE":
+        return
+    quota.status = "AVAILABLE"
+    if not quota.installment_due_date:
+        quota.installment_due_date = _default_installment_due()
     try:
         run_nina_quota_scan(db, user, quota)
     except HTTPException:

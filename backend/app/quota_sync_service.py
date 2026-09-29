@@ -391,11 +391,11 @@ def _sync_one(db: Session, *, organization_id: str, supplier: QuotaSupplier, act
     }
     ingest_user = actor or _sync_actor(db, organization_id)
     if ingest_user:
-        from app.quota_inventory_service import auto_nina_scan_on_ingest
+        from app.quota_inventory_service import marketplace_ready_on_ingest
 
         for quota in existing.values():
-            if quota.status == "AVAILABLE" and (not quota.nina_scan_status or quota.nina_scan_status == "PENDING"):
-                auto_nina_scan_on_ingest(db, ingest_user, quota)
+            if quota.status == "AVAILABLE":
+                marketplace_ready_on_ingest(db, ingest_user, quota)
 
     _stamp_supplier(supplier, status="OK", detail=detail)
     db.flush()

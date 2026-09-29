@@ -2267,9 +2267,9 @@ def create_quota(payload: QuotaCreate, user: User = Depends(require_scope("inven
     quota = Quota(organization_id=user.organization_id, seller_id=user.id, **payload.model_dump())
     db.add(quota)
     db.flush()
-    from app.quota_inventory_service import auto_nina_scan_on_ingest
+    from app.quota_inventory_service import marketplace_ready_on_ingest
 
-    auto_nina_scan_on_ingest(db, user, quota)
+    marketplace_ready_on_ingest(db, user, quota)
     audit(db, user, "quota.created", "quota", quota.id)
     db.commit()
     db.refresh(quota)
@@ -2282,8 +2282,14 @@ def update_quota(quota_id: str, payload: QuotaUpdate, user: User = Depends(requi
     if not quota: raise HTTPException(status_code=404, detail="Cota não encontrada")
     if quota.status in {"RESERVED", "SOLD"} and payload.status not in {None, quota.status}:
         raise HTTPException(status_code=409, detail="Status protegido por workflow de reserva/venda")
-    for field, value in payload.model_dump(exclude_unset=True).items(): setattr(quota, field, value)
-    audit(db, user, "quota.updated", "quota", quota.id, payload.model_dump(exclude_unset=True, mode="json")); db.commit(); db.refresh(quota)
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(quota, field, value)
+    from app.quota_inventory_service import marketplace_ready_on_ingest
+
+    marketplace_ready_on_ingest(db, user, quota)
+    audit(db, user, "quota.updated", "quota", quota.id, payload.model_dump(exclude_unset=True, mode="json"))
+    db.commit()
+    db.refresh(quota)
     return quota
 
 
