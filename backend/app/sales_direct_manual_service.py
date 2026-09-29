@@ -159,6 +159,7 @@ def list_cadastros(db: Session, user: User, *, q: str | None = None) -> list[dic
                 "category": profile.get("category"),
                 "has_credit_restriction": profile.get("has_credit_restriction"),
                 "asset_is_zero_km": profile.get("asset_is_zero_km"),
+                "occupation": profile.get("occupation"),
                 "label": label,
                 "source": lead.source,
                 "status": lead.status,

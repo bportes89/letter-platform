@@ -56,11 +56,18 @@ type CadastroOption = {
   monthly_income?: string | null;
   asset_value?: string | null;
   asset_year?: number | null;
+  target_amount?: string | null;
+  target_entrada?: string | null;
+  category?: string | null;
+  has_credit_restriction?: boolean | null;
+  asset_is_zero_km?: boolean | null;
+  occupation?: string | null;
 };
 
 type CadastroDetail = CadastroOption & {
   credit_value?: string | null;
   entrada_value?: string | null;
+  occupation?: string | null;
 };
 
 function quotaReadyForSale(c: CotaOption): boolean {
@@ -142,6 +149,7 @@ export function VendaDiretaManualModule() {
     const pt = row.person_type || "PF";
     setPersonType(pt);
     setDocument(formatDocumentDigits(row.document, pt));
+    if (row.occupation) setOccupation(String(row.occupation));
     const addr = row.address || {};
     setZipcode(addr.zipcode || "");
     setStreet(addr.street || "");
@@ -152,23 +160,26 @@ export function VendaDiretaManualModule() {
     if (row.monthly_income) setIncome(String(row.monthly_income));
     if (row.asset_value) setAssetValue(String(row.asset_value));
     if (row.asset_year) setAssetYear(String(row.asset_year));
+    if (row.has_credit_restriction != null) setDirty(!!row.has_credit_restriction);
+    if (row.asset_is_zero_km != null) setZeroKm(!!row.asset_is_zero_km);
+    if (row.category) setCategory(row.category);
     const detail = row as CadastroDetail;
-    if (detail.credit_value) setFilterCredit(String(detail.credit_value));
-    if (detail.entrada_value) setFilterEntrada(String(detail.entrada_value));
+    const credit = detail.credit_value || row.target_amount;
+    const entrada = detail.entrada_value || row.target_entrada;
+    if (credit) setFilterCredit(String(credit));
+    if (entrada) setFilterEntrada(String(entrada));
   }
 
-  async function applyCadastro(id: string) {
+  function applyCadastro(id: string) {
     setExistingId(id);
     if (!id) return;
     setError("");
-    try {
-      const detail = await api<CadastroDetail>(`/marketplace/cadastros/${id}`);
-      fillCadastroFromRow(detail);
-    } catch {
-      const row = cadastros.find((x) => x.lead_id === id);
-      if (row) fillCadastroFromRow(row);
-      else setError("Não foi possível carregar os dados do cadastro.");
+    const row = cadastros.find((x) => x.lead_id === id);
+    if (!row) {
+      setError("Cadastro não encontrado na lista. Atualize a página.");
+      return;
     }
+    fillCadastroFromRow(row);
   }
 
   async function submit(e: FormEvent) {
@@ -210,7 +221,9 @@ export function VendaDiretaManualModule() {
         setBusy(false);
         return;
       }
-      const data = await api<StoreResult>("/marketplace/venda-direta-manual/store", {
+      const data = await api<StoreResult>(
+        "/marketplace/venda-direta-manual/store",
+        {
         method: "POST",
         body: JSON.stringify({
           name,
@@ -235,7 +248,9 @@ export function VendaDiretaManualModule() {
           has_credit_restriction: dirty,
           asset_is_zero_km: zeroKm,
         }),
-      });
+      },
+        { interactive: true },
+      );
       setDone(data);
       setNotice(data.message);
       setQuotaIds([]);
@@ -447,7 +462,7 @@ export function VendaDiretaManualModule() {
           <div className="marketplace-form-row">
             <label className="marketplace-field marketplace-field-wide">
               Cadastro existente (atalho)
-              <select value={existingId} onChange={(e) => void applyCadastro(e.target.value)}>
+              <select value={existingId} onChange={(e) => applyCadastro(e.target.value)}>
                 <option value="">Novo cliente</option>
                 {cadastros.map((c) => (
                   <option key={c.lead_id} value={c.lead_id}>

@@ -259,6 +259,7 @@ def lead_marketplace_shortcut_profile(lead: Lead) -> dict:
         "document": document or None,
         "email": email,
         "person_type": merged.get("person_type") or "PF",
+        "occupation": merged.get("occupation"),
         "address": address,
         "monthly_income": merged.get("monthly_income"),
         "asset_value": merged.get("asset_value"),
@@ -484,7 +485,6 @@ def list_cadastros(db: Session, user: User, *, pipeline: str = PIPELINE_ALL, q: 
         if not _is_marketplace_row(lead, proposal):
             continue
         terms = terms_by_proposal.get(proposal.id, {}) if proposal else {}
-        snap = _snapshot_from_lead(lead)
         quota_ids = [str(x) for x in (terms.get("quota_ids") or [])]
         linked_quotas = [quota_by_id[qid] for qid in quota_ids if qid in quota_by_id]
         contract = contract_by_proposal.get(proposal.id) if proposal else None
@@ -499,102 +499,183 @@ def list_cadastros(db: Session, user: User, *, pipeline: str = PIPELINE_ALL, q: 
         elif pipeline != PIPELINE_ALL and bucket != pipeline:
             continue
 
-        email = snap.get("email") or terms.get("client_email")
-        calc = terms.get("calculation") if isinstance(terms.get("calculation"), dict) else {}
-        credit = (
-            terms.get("total_credit")
-            or calc.get("credit_total")
-            or (str(proposal.requested_amount) if proposal else None)
-        )
-        entrada = terms.get("total_entrada") or terms.get("total_entrada_base") or calc.get("premium_total")
-        if not entrada and snap.get("pricing"):
-            entrada = (snap.get("pricing") or {}).get("entrada_final")
-        suppliers = sorted(
-            {
-                str(q.supplier_source)
-                for q in linked_quotas
-                if q.supplier_source
-            }
-            | {
-                str(row.get("supplier_source"))
-                for row in (terms.get("quotas") or [])
-                if isinstance(row, dict) and row.get("supplier_source")
-            }
-        )
-        owner = owners.get(lead.owner_id) if lead.owner_id else None
-        label_bits = f"{lead.name} {lead.document or ''} {lead.phone} {email or ''}".lower()
+        profile = lead_marketplace_shortcut_profile(lead)
+        snap = _snapshot_from_lead(lead)
+        email = profile.get("email") or snap.get("email") or terms.get("client_email")
+        label_bits = f"{lead.name} {profile.get('document') or lead.document or ''} {lead.phone} {email or ''}".lower()
         if needle and needle not in label_bits:
             continue
 
-        my_chain_commission = partner_chain_commission_slice(
-            terms,
-            user.id,
+        built = _cadastro_row_for_lead(
+            db,
+            user,
+            lead,
+            proposal,
+            terms=terms,
+            contract=contract,
+            linked_quotas=linked_quotas,
+            bucket=bucket,
             situation=situation,
-            commission_release_status=life.get("commission_release_status"),
+            life=life,
+            owner=owners.get(lead.owner_id) if lead.owner_id else None,
+            profile=profile,
         )
-        rows.append(
-            {
-                "lead_id": lead.id,
-                "created_at": lead.created_at,
-                "name": lead.name,
-                "document": lead.document,
-                "phone": lead.phone,
-                "email": email,
-                "source": lead.source,
-                "source_label": cadastro_source_label(lead.source),
-                "lead_status": lead.status,
-                "pipeline": (
-                    "CANCELADO"
-                    if situation in {SIT_CANCELADO, SIT_CANCELADO_FALTA}
-                    else bucket
-                    if bucket != PIPELINE_ALL
-                    else PIPELINE_INCOMPLETO
-                ),
-                "situation": situation,
-                "situation_label": SITUATION_LABELS.get(situation, situation),
-                "credit_value": str(money(Decimal(str(credit)))) if credit not in (None, "") else None,
-                "entrada_value": str(money(Decimal(str(entrada)))) if entrada not in (None, "") else None,
-                "partner_name": owner.name if owner else None,
-                "partner_role": owner.role if owner else None,
-                "proposal_id": proposal.id if proposal else None,
-                "proposal_status": proposal.status if proposal else None,
-                "contract_id": contract.id if contract else None,
-                "contract_status": contract.status if contract else None,
-                "quota_ids": quota_ids,
-                "quota_codes": [f"{q.group_code}/{q.quota_code}" for q in linked_quotas],
-                "supplier_sources": suppliers,
-                "person_type": snap.get("person_type") or terms.get("person_type"),
-                "supplier_transfer_confirmed": bool(life.get("supplier_transfer_confirmed")),
-                "commission_release_status": life.get("commission_release_status"),
-                "paid_at": life.get("paid_at"),
-                "lifecycle_editable": bool(proposal)
-                and user.role
-                in {
-                    Role.PLATFORM_ADMIN,
-                    Role.INTERNAL_STAFF,
-                    Role.MASTER_FRANCHISEE,
-                    Role.MANAGER,
-                },
-                "my_chain_commission": my_chain_commission,
-            }
-        )
+        if built:
+            rows.append(built)
     return rows
+
+
+def _cadastro_row_for_lead(
+    db: Session,
+    user: User,
+    lead: Lead,
+    proposal: Proposal | None,
+    *,
+    terms: dict,
+    contract: Contract | None,
+    linked_quotas: list[Quota],
+    bucket: str,
+    situation: str,
+    life: dict,
+    owner: User | None,
+    profile: dict | None = None,
+) -> dict | None:
+    if not _is_marketplace_row(lead, proposal):
+        return None
+    profile = profile or lead_marketplace_shortcut_profile(lead)
+    snap = _snapshot_from_lead(lead)
+    quota_ids = [str(x) for x in (terms.get("quota_ids") or [])]
+    calc = terms.get("calculation") if isinstance(terms.get("calculation"), dict) else {}
+    credit = (
+        terms.get("total_credit")
+        or calc.get("credit_total")
+        or (str(proposal.requested_amount) if proposal else None)
+        or profile.get("target_amount")
+    )
+    entrada = (
+        terms.get("total_entrada")
+        or terms.get("total_entrada_base")
+        or calc.get("premium_total")
+        or profile.get("target_entrada")
+    )
+    if not entrada and snap.get("pricing"):
+        entrada = (snap.get("pricing") or {}).get("entrada_final")
+    suppliers = sorted(
+        {
+            str(q.supplier_source)
+            for q in linked_quotas
+            if q.supplier_source
+        }
+        | {
+            str(row.get("supplier_source"))
+            for row in (terms.get("quotas") or [])
+            if isinstance(row, dict) and row.get("supplier_source")
+        }
+    )
+    email = profile.get("email") or snap.get("email") or terms.get("client_email")
+    my_chain_commission = partner_chain_commission_slice(
+        terms,
+        user.id,
+        situation=situation,
+        commission_release_status=life.get("commission_release_status"),
+    )
+    return {
+        "lead_id": lead.id,
+        "created_at": lead.created_at,
+        "name": lead.name,
+        "document": profile.get("document") or lead.document,
+        "phone": lead.phone,
+        "email": email,
+        "source": lead.source,
+        "source_label": cadastro_source_label(lead.source),
+        "lead_status": lead.status,
+        "pipeline": (
+            "CANCELADO"
+            if situation in {SIT_CANCELADO, SIT_CANCELADO_FALTA}
+            else bucket
+            if bucket != PIPELINE_ALL
+            else PIPELINE_INCOMPLETO
+        ),
+        "situation": situation,
+        "situation_label": SITUATION_LABELS.get(situation, situation),
+        "credit_value": str(money(Decimal(str(credit)))) if credit not in (None, "") else None,
+        "entrada_value": str(money(Decimal(str(entrada)))) if entrada not in (None, "") else None,
+        "partner_name": owner.name if owner else None,
+        "partner_role": owner.role if owner else None,
+        "proposal_id": proposal.id if proposal else None,
+        "proposal_status": proposal.status if proposal else None,
+        "contract_id": contract.id if contract else None,
+        "contract_status": contract.status if contract else None,
+        "quota_ids": quota_ids,
+        "quota_codes": [f"{q.group_code}/{q.quota_code}" for q in linked_quotas],
+        "supplier_sources": suppliers,
+        "person_type": profile.get("person_type") or snap.get("person_type") or terms.get("person_type"),
+        "supplier_transfer_confirmed": bool(life.get("supplier_transfer_confirmed")),
+        "commission_release_status": life.get("commission_release_status"),
+        "paid_at": life.get("paid_at"),
+        "lifecycle_editable": bool(proposal)
+        and user.role
+        in {
+            Role.PLATFORM_ADMIN,
+            Role.INTERNAL_STAFF,
+            Role.MASTER_FRANCHISEE,
+            Role.MANAGER,
+        },
+        "my_chain_commission": my_chain_commission,
+    }
 
 
 def get_cadastro_detail(db: Session, user: User, lead_id: str) -> dict:
     lead = get_lead_for_user(db, user, lead_id)
-    rows = list_cadastros(db, user, pipeline=PIPELINE_ALL)
-    row = next((r for r in rows if r["lead_id"] == lead_id), None)
+    profile = lead_marketplace_shortcut_profile(lead)
+    snap = _snapshot_from_lead(lead)
+
+    proposal = db.scalar(
+        select(Proposal)
+        .where(
+            Proposal.organization_id == user.organization_id,
+            Proposal.lead_id == lead_id,
+            Proposal.product == "MARKETPLACE",
+        )
+        .order_by(Proposal.created_at.desc())
+        .limit(1)
+    )
+    terms = seed_marketplace_lifecycle(_parse_json(proposal.terms_json)) if proposal else {}
+    contract = db.scalar(select(Contract).where(Contract.proposal_id == proposal.id)) if proposal else None
+    quota_ids = [str(x) for x in (terms.get("quota_ids") or [])]
+    for qrow in terms.get("quotas") or []:
+        if isinstance(qrow, dict) and qrow.get("quota_id"):
+            quota_ids.append(str(qrow["quota_id"]))
+    quota_ids = list(dict.fromkeys(quota_ids))
+    linked_quotas = (
+        list(db.scalars(select(Quota).where(Quota.id.in_(quota_ids)))) if quota_ids else []
+    )
+    bucket, situation = _classify(lead, proposal, contract, linked_quotas, terms)
+    life = _lifecycle(terms)
+    owners = owner_map(db, {lead.owner_id} if lead.owner_id else set())
+    owner = owners.get(lead.owner_id) if lead.owner_id else None
+    row = _cadastro_row_for_lead(
+        db,
+        user,
+        lead,
+        proposal,
+        terms=terms,
+        contract=contract,
+        linked_quotas=linked_quotas,
+        bucket=bucket,
+        situation=situation,
+        life=life,
+        owner=owner,
+        profile=profile,
+    )
     if not row:
-        owners = owner_map(db, {lead.owner_id} if lead.owner_id else set())
-        owner = owners.get(lead.owner_id) if lead.owner_id else None
         row = {
             "lead_id": lead.id,
             "created_at": lead.created_at,
             "name": lead.name,
-            "document": lead.document,
+            "document": profile.get("document") or lead.document,
             "phone": lead.phone,
-            "email": None,
+            "email": profile.get("email"),
             "source": lead.source,
             "lead_status": lead.status,
             "pipeline": PIPELINE_INCOMPLETO,
@@ -611,18 +692,12 @@ def get_cadastro_detail(db: Session, user: User, lead_id: str) -> dict:
             "quota_ids": [],
             "quota_codes": [],
             "supplier_sources": [],
-            "person_type": None,
+            "person_type": profile.get("person_type"),
             "supplier_transfer_confirmed": False,
             "commission_release_status": None,
             "paid_at": None,
             "lifecycle_editable": False,
         }
-    snap = _snapshot_from_lead(lead)
-    proposal = None
-    if row.get("proposal_id"):
-        proposal = db.get(Proposal, row["proposal_id"])
-    terms = seed_marketplace_lifecycle(_parse_json(proposal.terms_json)) if proposal else {}
-    life = _lifecycle(terms)
     boleto = None
     if proposal:
         from app.inter_boleto_service import boleto_view_from_terms
@@ -641,10 +716,17 @@ def get_cadastro_detail(db: Session, user: User, lead_id: str) -> dict:
     )
     return {
         **row,
+        "document": profile.get("document") or row.get("document"),
+        "email": profile.get("email") or row.get("email"),
+        "person_type": profile.get("person_type") or row.get("person_type"),
+        "occupation": profile.get("occupation") or snap.get("occupation"),
+        "monthly_income": profile.get("monthly_income") or snap.get("monthly_income"),
+        "asset_value": profile.get("asset_value") or snap.get("asset_value"),
+        "asset_year": profile.get("asset_year") or snap.get("asset_year"),
         "snapshot": snap,
         "terms": sanitize_marketplace_terms_for_user(terms, user),
         "my_chain_commission": my_chain_commission or row.get("my_chain_commission"),
-        "address": snap.get("address") or {},
+        "address": profile.get("address") or snap.get("address") or {},
         "purchase_readonly": {
             "credit_value": row.get("credit_value"),
             "entrada_value": row.get("entrada_value"),

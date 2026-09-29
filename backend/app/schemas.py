@@ -2616,6 +2616,7 @@ class VendaDiretaManualCadastroOption(BaseModel):
     category: str | None = None
     has_credit_restriction: bool | None = None
     asset_is_zero_km: bool | None = None
+    occupation: str | None = None
     label: str
     source: str
     status: str
