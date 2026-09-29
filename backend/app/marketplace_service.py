@@ -357,10 +357,19 @@ def _eligible_combo_candidate(
     as_of: date | None = None,
     suppliers: dict | None = None,
     affiliate_markup: dict[str, str] | None = None,
+    admin_cache: dict[str, Administrator | None] | None = None,
 ) -> dict | None:
     if len({q.administrator_id for q in quotas}) > 1:
         return None
-    admin = db.get(Administrator, quotas[0].administrator_id)
+
+    def _admin(admin_id: str) -> Administrator | None:
+        if admin_cache is not None:
+            if admin_id not in admin_cache:
+                admin_cache[admin_id] = db.get(Administrator, admin_id)
+            return admin_cache[admin_id]
+        return db.get(Administrator, admin_id)
+
+    admin = _admin(quotas[0].administrator_id)
     pricing = pricing_for_combo(list(quotas), as_of=as_of, suppliers=suppliers, affiliate_markup=affiliate_markup)
     blockers = admin_profile_blockers(
         admin,
@@ -384,7 +393,7 @@ def _eligible_combo_candidate(
         "quotas": [
             _quota_summary(
                 q,
-                db.get(Administrator, q.administrator_id),
+                _admin(q.administrator_id),
                 as_of=as_of,
                 suppliers=suppliers,
                 affiliate_markup=affiliate_markup,
@@ -427,20 +436,35 @@ def _rank_alternatives(
     band_percent: Decimal = ESTEIRA2_BAND_PERCENT,
     as_of: date | None = None,
     affiliate_markup: dict[str, str] | None = None,
+    max_combo_size: int = 3,
+    prefilter_band: bool = False,
+    require_nina_cleared: bool = False,
 ) -> list[dict]:
     """Candidatos na banda de crédito (e entrada, se informada)."""
     from app.quota_supplier_service import suppliers_index
 
     suppliers = suppliers_index(db, user.organization_id)
-    quotas = list(
-        db.scalars(
-            select(Quota).where(
-                Quota.organization_id == user.organization_id,
-                Quota.status == "AVAILABLE",
-                Quota.category == category,
+    filters = [
+        Quota.organization_id == user.organization_id,
+        Quota.status == "AVAILABLE",
+        Quota.category == category,
+    ]
+    if require_nina_cleared:
+        filters.append(Quota.nina_scan_status == "CLEARED")
+    quotas = list(db.scalars(select(Quota).where(*filters)))
+
+    if prefilter_band and target_entrada is not None and target_entrada > 0:
+        banded: list[Quota] = []
+        for q in quotas:
+            pricing = pricing_for_quota(
+                q, as_of=as_of, suppliers=suppliers, affiliate_markup=affiliate_markup
             )
-        )
-    )
+            credit_ok = _within_band(pricing["credit"], target_amount, band_percent)
+            entrada_ok = _within_band(pricing["entrada_final"], target_entrada, band_percent)
+            if credit_ok or entrada_ok:
+                banded.append(q)
+        quotas = banded
+
     if len(quotas) > MATCHING_QUOTA_POOL_LIMIT:
         scored: list[tuple[Decimal, Decimal, Quota]] = []
         for q in quotas:
@@ -456,8 +480,9 @@ def _rank_alternatives(
         quotas = [q for _, _, q in scored[:MATCHING_QUOTA_POOL_LIMIT]]
 
     candidates: list[dict] = []
-    max_combo_size = min(3, len(quotas))
-    for size in range(1, max_combo_size + 1):
+    combo_cap = min(max(1, max_combo_size), 3, len(quotas))
+    admin_cache: dict[str, Administrator | None] = {}
+    for size in range(1, combo_cap + 1):
         for combo in itertools.combinations(quotas, size):
             if exclude_quota_id and exclude_quota_id in {q.id for q in combo}:
                 continue
@@ -474,6 +499,7 @@ def _rank_alternatives(
                 as_of=as_of,
                 suppliers=suppliers,
                 affiliate_markup=affiliate_markup,
+                admin_cache=admin_cache,
             )
             if not item:
                 continue
@@ -774,6 +800,9 @@ def esteira2_nina_curated_match(
         band_percent=ESTEIRA2_BAND_PERCENT,
         as_of=as_of,
         affiliate_markup=affiliate_markup,
+        max_combo_size=1,
+        prefilter_band=True,
+        require_nina_cleared=True,
     )
 
     credit_lane: list[dict] = []
