@@ -110,6 +110,9 @@ from app.schemas import (
     VendaDiretaManualStoreRequest, VendaDiretaManualStoreResponse,
     CadastroListItem, CadastroDetailView, CadastroUpdateRequest, MarketplaceBlockedCommissionSummary,
     MarketplaceExtratoItem,
+    MarketplaceExtratoSummary,
+    MarketplaceExtratoProposalRow,
+    SupplierLedgerAdminItem,
     MarketplaceBoletoIssueResponse,
     MarketplaceInterMockWebhookRequest,
     MarketplaceZapSignRefreshResponse,
@@ -2990,12 +2993,47 @@ def marketplace_cadastro_update(lead_id: str, payload: CadastroUpdateRequest, us
 def marketplace_extrato(
     limit: int = 200,
     scope: str | None = None,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_any_scope("inventory:write", "wallet:read", "payments:review", "audit:read")),
     db: Session = Depends(get_db),
 ):
     from app.marketplace_commission_release_service import list_marketplace_extrato
 
     return list_marketplace_extrato(db, user, limit=limit, scope=scope)
+
+
+@router.get("/marketplace/extrato/summary", response_model=MarketplaceExtratoSummary)
+def marketplace_extrato_summary(
+    scope: str | None = None,
+    limit: int = 500,
+    user: User = Depends(require_any_scope("inventory:write", "wallet:read", "payments:review", "audit:read")),
+    db: Session = Depends(get_db),
+):
+    from app.marketplace_commission_release_service import marketplace_extrato_summary as build_summary
+
+    return build_summary(db, user, scope=scope, limit=limit)
+
+
+@router.get("/marketplace/extrato/platform-by-proposal", response_model=list[MarketplaceExtratoProposalRow])
+def marketplace_extrato_platform_by_proposal(
+    limit: int = 100,
+    user: User = Depends(require_any_scope("inventory:write", "wallet:read", "payments:review", "audit:read")),
+    db: Session = Depends(get_db),
+):
+    from app.marketplace_commission_release_service import marketplace_extrato_platform_by_proposal as platform_rows
+
+    return platform_rows(db, user, limit=limit)
+
+
+@router.get("/marketplace/extrato/supplier-ledger", response_model=list[SupplierLedgerAdminItem])
+def marketplace_extrato_supplier_ledger(
+    limit: int = 200,
+    supplier_id: str | None = None,
+    user: User = Depends(require_any_scope("inventory:write", "wallet:read", "payments:review", "audit:read")),
+    db: Session = Depends(get_db),
+):
+    from app.supplier_wallet_service import list_ledger_admin
+
+    return list_ledger_admin(db, user, supplier_id=supplier_id, limit=limit)
 
 
 @router.post("/marketplace/cadastros/{lead_id}/boleto", response_model=MarketplaceBoletoIssueResponse)

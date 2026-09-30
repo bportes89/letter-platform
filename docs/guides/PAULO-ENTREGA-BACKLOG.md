@@ -34,9 +34,9 @@
 | B3 | Parceiro: **extrato** linha a linha (comissão/saque) | 🟡 | `/wallet/me/legacy-statement` |
 | B4 | Parceiro: solicitação de saque | 🟡 | `partner_withdrawals` + PIX |
 | B5 | Saque bloqueado até **NF aprovada** (validador notas) | ✅ | Hold fiscal + gate saque legado |
-| B6 | Admin: extrato **fornecedor** | 🟡 |
-| B7 | Admin: extrato **parceiro/franquia** | 🟡 |
-| B8 | Admin: extrato **plataforma** (líquido após repasses) | ❌ |
+| B6 | Admin: extrato **fornecedor** | ✅ | Aba + ledger `/marketplace/extrato/supplier-ledger` |
+| B7 | Admin: extrato **parceiro/franquia** | ✅ | Aba parceiros + `scope=partner` |
+| B8 | Admin: extrato **plataforma** (líquido após repasses) | ✅ | Resumo + por venda (`platform_net`) |
 | B9 | Admin: fila **saques** fornecedor + parceiro | ✅ | Fornecedores + menu «Saques parceiros» |
 
 ---

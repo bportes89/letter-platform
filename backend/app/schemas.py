@@ -3067,6 +3067,34 @@ class MarketplaceExtratoItem(BaseModel):
     status: str | None = None
 
 
+class MarketplaceExtratoSummary(BaseModel):
+    scope: str
+    line_count: int
+    platform_fee_total: str
+    supplier_release_total: str
+    affiliate_total: str
+    platform_net_total: str
+    gross_total: str
+
+
+class MarketplaceExtratoProposalRow(BaseModel):
+    proposal_id: str
+    lead_id: str | None = None
+    released_at: str | None = None
+    reference: str | None = None
+    credit: str | None = None
+    platform_fee: str
+    supplier_release: str
+    affiliate_total: str
+    platform_net: str
+
+
+class SupplierLedgerAdminItem(SupplierLedgerItem):
+    supplier_id: str
+    supplier_name: str | None = None
+    supplier_source_key: str | None = None
+
+
 class CadastroUpdateRequest(BaseModel):
     name: str | None = Field(default=None, min_length=2, max_length=180)
     phone: str | None = Field(default=None, min_length=8, max_length=40)

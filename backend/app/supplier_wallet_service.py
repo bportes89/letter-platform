@@ -94,6 +94,45 @@ def portal_wallet(supplier: QuotaSupplier) -> dict:
     }
 
 
+def list_ledger_admin(
+    db: Session,
+    user: User,
+    *,
+    supplier_id: str | None = None,
+    limit: int = 200,
+) -> list[dict]:
+    """Extrato admin — todos os fornecedores ou um fornecedor (B6)."""
+    from app.models import QuotaSupplier
+
+    limit = max(1, min(int(limit or 200), 500))
+    q = select(SupplierLedgerEntry).where(SupplierLedgerEntry.organization_id == user.organization_id)
+    if supplier_id:
+        q = q.where(SupplierLedgerEntry.supplier_id == supplier_id)
+    rows = list(db.scalars(q.order_by(SupplierLedgerEntry.created_at.desc()).limit(limit)))
+    supplier_ids = {r.supplier_id for r in rows}
+    suppliers: dict[str, QuotaSupplier] = {}
+    if supplier_ids:
+        suppliers = {
+            s.id: s
+            for s in db.scalars(select(QuotaSupplier).where(QuotaSupplier.id.in_(list(supplier_ids))))
+        }
+    return [
+        {
+            "id": r.id,
+            "kind": r.kind,
+            "amount": str(money(Decimal(str(r.amount)))),
+            "reference": r.reference,
+            "proposal_id": r.proposal_id,
+            "description": r.description,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "supplier_id": r.supplier_id,
+            "supplier_name": suppliers.get(r.supplier_id).name if suppliers.get(r.supplier_id) else None,
+            "supplier_source_key": suppliers.get(r.supplier_id).source_key if suppliers.get(r.supplier_id) else None,
+        }
+        for r in rows
+    ]
+
+
 def list_ledger(db: Session, supplier: QuotaSupplier, *, limit: int = 100) -> list[dict]:
     limit = max(1, min(int(limit or 100), 300))
     rows = list(

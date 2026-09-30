@@ -441,3 +441,119 @@ def list_marketplace_extrato(
 
     rows.sort(key=lambda r: r.get("released_at") or "", reverse=True)
     return rows[:limit]
+
+
+def _sum_amounts(rows: list[dict], kind: str | None = None) -> Decimal:
+    total = Decimal("0")
+    for row in rows:
+        if kind is not None and str(row.get("kind") or "") != kind:
+            continue
+        total += Decimal(str(row.get("amount") or 0))
+    return money(total)
+
+
+def marketplace_extrato_summary(db: Session, user: User, *, scope: str | None = None, limit: int = 500) -> dict:
+    """Totais por escopo — B8 inclui líquido plataforma (taxa − comissão rede na mesma competência)."""
+    scope_norm = (scope or "all").strip().lower()
+    rows = list_marketplace_extrato(db, user, limit=limit, scope=scope_norm if scope_norm != "all" else None)
+    platform_fee = _sum_amounts(rows, "platform_fee")
+    supplier_release = _sum_amounts(rows, "supplier_release")
+    affiliate = _sum_amounts(rows, "affiliate")
+    if scope_norm in {"platform", "all"}:
+        affiliate_all = _sum_amounts(
+            list_marketplace_extrato(db, user, limit=limit, scope="partner"),
+            "affiliate",
+        )
+    else:
+        affiliate_all = affiliate
+    platform_net = money(max(Decimal("0.00"), platform_fee - affiliate_all if scope_norm == "platform" else platform_fee - affiliate))
+    return {
+        "scope": scope_norm,
+        "line_count": len(rows),
+        "platform_fee_total": str(platform_fee),
+        "supplier_release_total": str(supplier_release),
+        "affiliate_total": str(affiliate if scope_norm != "platform" else affiliate_all),
+        "platform_net_total": str(platform_net),
+        "gross_total": str(_sum_amounts(rows)),
+    }
+
+
+def marketplace_extrato_platform_by_proposal(db: Session, user: User, *, limit: int = 100) -> list[dict]:
+    """Uma linha por venda — taxa plataforma, repasse fornecedor e rede (B8)."""
+    limit = max(1, min(int(limit or 100), 300))
+    proposals = list(
+        db.scalars(
+            select(Proposal)
+            .where(
+                Proposal.organization_id == user.organization_id,
+                Proposal.product == "MARKETPLACE",
+            )
+            .order_by(Proposal.created_at.desc())
+            .limit(limit * 2)
+        )
+    )
+    proposal_ids = [p.id for p in proposals]
+    affiliate_by_proposal: dict[str, Decimal] = {}
+    if proposal_ids:
+        entries = list(
+            db.scalars(
+                select(CommissionEntry).where(
+                    CommissionEntry.organization_id == user.organization_id,
+                    CommissionEntry.product == "MARKETPLACE",
+                    CommissionEntry.proposal_id.in_(proposal_ids),
+                )
+            )
+        )
+        for entry in entries:
+            if not entry.proposal_id:
+                continue
+            affiliate_by_proposal[entry.proposal_id] = money(
+                affiliate_by_proposal.get(entry.proposal_id, Decimal("0"))
+                + Decimal(str(entry.amount or 0))
+            )
+
+    out: list[dict] = []
+    for proposal in proposals:
+        terms = _parse_json(proposal.terms_json)
+        life = terms.get("lifecycle") if isinstance(terms.get("lifecycle"), dict) else {}
+        snap = life.get("commission_release")
+        if not isinstance(snap, dict):
+            continue
+        platform_fee = Decimal("0")
+        supplier_release = Decimal("0")
+        credit_val = Decimal("0")
+        for line in snap.get("lines") or []:
+            if not isinstance(line, dict):
+                continue
+            amount = Decimal(str(line.get("amount") or 0))
+            credit_line = Decimal(str(line.get("credit") or 0))
+            if credit_line > credit_val:
+                credit_val = credit_line
+            kind = str(line.get("type") or "")
+            if kind == "platform_fee":
+                platform_fee += amount
+            elif kind == "supplier_release":
+                supplier_release += amount
+        if platform_fee <= 0 and supplier_release <= 0:
+            continue
+        affiliate = affiliate_by_proposal.get(proposal.id, Decimal("0"))
+        platform_fee = money(platform_fee)
+        supplier_release = money(supplier_release)
+        affiliate = money(affiliate)
+        platform_net = money(max(Decimal("0.00"), platform_fee - affiliate))
+        out.append(
+            {
+                "proposal_id": proposal.id,
+                "lead_id": proposal.lead_id,
+                "released_at": snap.get("released_at") or life.get("commission_released_at"),
+                "reference": snap.get("reference"),
+                "credit": str(money(credit_val)) if credit_val > 0 else None,
+                "platform_fee": str(platform_fee),
+                "supplier_release": str(supplier_release),
+                "affiliate_total": str(affiliate),
+                "platform_net": str(platform_net),
+            }
+        )
+        if len(out) >= limit:
+            break
+    return out
