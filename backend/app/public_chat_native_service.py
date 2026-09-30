@@ -1072,32 +1072,30 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
                 ],
                 lead_id=lead.id,
             )
+        from app.marketplace_option_display import chat_option_from_match_row
+
         options: list[dict] = []
+        seen_keys: set[str] = set()
         for lane_name, lane_rows in (
             ("Crédito", match.get("credit_matches") or []),
             ("Entrada", match.get("entrada_matches") or []),
-            ("Opções", match.get("matches") or []),
         ):
             for row in lane_rows:
                 qids = row.get("quota_ids") or []
-                key = "|".join(qids)
-                if any(o.get("id") == key for o in options):
+                key = "|".join(str(x) for x in qids)
+                if key in seen_keys:
                     continue
-                q0 = (row.get("quotas") or [{}])[0]
-                options.append(
-                    {
-                        "id": key,
-                        "name": f"{lane_name}: {_brl(row.get('total_credit'))} · entrada {_brl(row.get('total_entrada') or 0)}",
-                        "next": int(STEP_CONFIRM),
-                        "save": key,
-                        "administradora": row.get("administrator_name") or q0.get("administrator_name"),
-                        "tipo_credito": "Imóvel" if category == "REAL_ESTATE" else "Veículo",
-                        "price": _brl(row.get("total_credit")),
-                        "price_entrada": _brl(row.get("total_entrada") or 0),
-                        "parcelas": q0.get("remaining_installments"),
-                        "price_parcela": _brl(q0.get("installment_value") or 0),
-                    }
+                seen_keys.add(key)
+                opt = chat_option_from_match_row(
+                    db,
+                    org.id,
+                    row,
+                    lane_label=lane_name,
+                    category=category,
+                    brl_fn=_brl,
                 )
+                opt["next"] = int(STEP_CONFIRM)
+                options.append(opt)
         snap["match_options"] = {o["id"]: o["id"] for o in options}
         _save_lead_snapshot(lead, snap)
         db.flush()
@@ -1116,16 +1114,21 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
                 ],
                 lead_id=lead.id,
             )
-        return _wrap(
-            [
-                {
-                    "text": "Encontrei estas opções pelo robô Esteira 2 (régua 10%). Escolha uma:",
-                    "options": options,
-                    "options_quotas": True,
-                }
-            ],
-            lead_id=lead.id,
-        )
+        from app.org_settings_service import get_setting
+
+        video_url = (get_setting(db, org.id, "chat_robo_video_url") or "").strip()
+        options_item: dict[str, Any] = {
+            "text": (
+                "Encontrei estas opções para você! "
+                "Até 2 pelo valor do crédito e 2 pelo valor da entrada (régua 10%/20%). "
+                "Escolha uma:"
+            ),
+            "options": options,
+            "options_quotas": True,
+        }
+        if video_url:
+            options_item["video"] = video_url
+        return _wrap([options_item], lead_id=lead.id)
 
     if step == STEP_CONFIRM:
         if not lead:

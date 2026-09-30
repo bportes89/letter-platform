@@ -129,12 +129,25 @@ function QuotaCard({ quota }: { quota: ChatOption }) {
       ) : null}
       {quota.parcelas ? (
         <p>
-          <span>Prazo restante:</span> {quota.parcelas} meses
+          <span>Prazo restante em meses:</span> {quota.parcelas}
         </p>
       ) : null}
       {quota.price_parcela ? (
         <p>
-          <span>Valor da parcela:</span> {formatChatBrlDisplay(quota.price_parcela)}
+          <span>Valor da parcela:</span>{" "}
+          {String(quota.price_parcela).includes("x de") || String(quota.price_parcela).includes(" mais ")
+            ? quota.price_parcela
+            : formatChatBrlDisplay(quota.price_parcela)}
+        </p>
+      ) : null}
+      {quota.vencimento_dia ? (
+        <p>
+          <span>Dia de vencimento das parcelas:</span> {quota.vencimento_dia}
+        </p>
+      ) : null}
+      {quota.vencimento_proxima ? (
+        <p>
+          <span>Data de vencimento da próxima parcela:</span> {quota.vencimento_proxima}
         </p>
       ) : null}
     </div>

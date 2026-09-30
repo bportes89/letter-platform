@@ -103,6 +103,8 @@ from app.schemas import (
     SupplierPortalAdministratorOption, SupplierPortalQuotaItem,
     SupplierPortalQuotaCreate, SupplierPortalQuotaUpdate,
     SupplierLedgerItem, SupplierWithdrawalRequest, SupplierWithdrawalView, SupplierWithdrawalProcessRequest,
+    PartnerLegacyEarningsSummary, PartnerLegacyStatementItem, PartnerWithdrawalRequest, PartnerWithdrawalView,
+    BankDisplayModeView,
     MarketplaceChatFaqCreate, MarketplaceChatFaqUpdate, MarketplaceChatFaqView,
     VendaDiretaManualCotaOption, VendaDiretaManualCadastroOption, VendaDiretaManualPartnerOption,
     VendaDiretaManualStoreRequest, VendaDiretaManualStoreResponse,
@@ -1037,6 +1039,51 @@ def commission_allocate(payload: CommissionAllocate, user: User = Depends(requir
 @router.get("/wallet/commissions", response_model=list[CommissionEntryView])
 def commission_wallet(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     return list(db.scalars(select(CommissionEntry).where(CommissionEntry.organization_id==user.organization_id,CommissionEntry.beneficiary_id==user.id).order_by(CommissionEntry.created_at.desc())))
+
+
+@router.get("/wallet/me/bank-display-mode", response_model=BankDisplayModeView)
+def wallet_bank_display_mode(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.partner_legacy_wallet_service import bank_display_mode
+
+    return {"mode": bank_display_mode(db, user.organization_id)}
+
+
+@router.get("/wallet/me/legacy-earnings", response_model=PartnerLegacyEarningsSummary)
+def wallet_legacy_earnings(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.partner_legacy_wallet_service import partner_earnings_summary
+
+    return partner_earnings_summary(db, user)
+
+
+@router.get("/wallet/me/legacy-statement", response_model=list[PartnerLegacyStatementItem])
+def wallet_legacy_statement(
+    limit: int = 100,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.partner_legacy_wallet_service import list_partner_statement
+
+    return list_partner_statement(db, user, limit=limit)
+
+
+@router.post("/wallet/me/legacy-withdrawals", response_model=PartnerWithdrawalView, status_code=201)
+def wallet_legacy_withdrawal(
+    payload: PartnerWithdrawalRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.partner_legacy_wallet_service import request_partner_withdrawal
+
+    result = request_partner_withdrawal(
+        db,
+        user,
+        amount=payload.amount,
+        pix_key=payload.pix_key,
+        notes=payload.notes,
+    )
+    audit(db, user, "partner.withdrawal.requested", "partner_withdrawal", result["id"], {"amount": result["amount"]})
+    db.commit()
+    return result
 
 
 @router.get("/wallet/commissions/blocked-summary", response_model=MarketplaceBlockedCommissionSummary)
@@ -2534,6 +2581,33 @@ def marketplace_process_supplier_withdrawal(
     return result
 
 
+@router.get("/marketplace/partner-withdrawals", response_model=list[PartnerWithdrawalView])
+def marketplace_partner_withdrawals(
+    status: str | None = None,
+    limit: int = 100,
+    user: User = Depends(require_scope("inventory:write")),
+    db: Session = Depends(get_db),
+):
+    from app.partner_legacy_wallet_service import list_withdrawals_admin
+
+    return list_withdrawals_admin(db, user, status=status, limit=limit)
+
+
+@router.post("/marketplace/partner-withdrawals/{withdrawal_id}/process", response_model=PartnerWithdrawalView)
+def marketplace_process_partner_withdrawal(
+    withdrawal_id: str,
+    payload: SupplierWithdrawalProcessRequest,
+    user: User = Depends(require_scope("inventory:write")),
+    db: Session = Depends(get_db),
+):
+    from app.partner_legacy_wallet_service import process_partner_withdrawal
+
+    result = process_partner_withdrawal(db, user, withdrawal_id, action=payload.action, notes=payload.notes)
+    audit(db, user, "marketplace.partner_withdrawal.process", "partner_withdrawal", withdrawal_id, payload.model_dump())
+    db.commit()
+    return result
+
+
 @router.get("/marketplace/chat-faq", response_model=list[MarketplaceChatFaqView])
 def marketplace_chat_faq_list(
     active_only: bool = False,
@@ -2915,12 +2989,13 @@ def marketplace_cadastro_update(lead_id: str, payload: CadastroUpdateRequest, us
 @router.get("/marketplace/extrato", response_model=list[MarketplaceExtratoItem])
 def marketplace_extrato(
     limit: int = 200,
+    scope: str | None = None,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     from app.marketplace_commission_release_service import list_marketplace_extrato
 
-    return list_marketplace_extrato(db, user, limit=limit)
+    return list_marketplace_extrato(db, user, limit=limit, scope=scope)
 
 
 @router.post("/marketplace/cadastros/{lead_id}/boleto", response_model=MarketplaceBoletoIssueResponse)

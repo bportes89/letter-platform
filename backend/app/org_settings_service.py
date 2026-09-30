@@ -37,12 +37,17 @@ SETTING_GROUPS: dict[str, list[dict[str, str]]] = {
     "payments": [
         {"key": "platform_commission_percent", "label": "Comissão do site (%)"},
         {"key": "min_withdrawal_amount", "label": "Mínimo para saque (R$)"},
+        {
+            "key": "bank_display_mode",
+            "label": "Bank parceiro (asaas | legacy)",
+        },
     ],
     "templates": [
         {"key": "marketplace_contract_html", "label": "Contrato marketplace (chat/cadastros)"},
         {"key": "contract_template_html", "label": "Contrato (editor legado menu 87)"},
         {"key": "venda_direta_html", "label": "Texto venda direta"},
         {"key": "venda_direta_robo_html", "label": "Texto venda direta robô"},
+        {"key": "chat_robo_video_url", "label": "Vídeo explicativo (URL YouTube/Vimeo) — robô chat"},
         {"key": "sdc_flow_html", "label": "Texto fluxo SDC"},
     ],
     "meta": [

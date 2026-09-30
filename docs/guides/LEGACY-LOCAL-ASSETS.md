@@ -34,4 +34,6 @@ Material do sistema antigo disponível na máquina de desenvolvimento — **não
 - Import legado `texts` → slugs canônicos (ids 1001/1005/1007/1009/1013–1017/1019–1020); placeholders `{nome_cliente}` convertidos para `{{client_name}}` no envio
 - Gatilhos transacionais: boleto, pagamento, boas-vindas (conta chat), documento enviado (cliente), conclusão (cliente/fornecedor/parceiro/plataforma)
 
-Próximos blocos: e-mails de documento para fornecedor/plataforma (1010/1012); `platform_commission_percent` de org_settings na liberação de comissão.
+Próximos blocos: ver checklist completo em `docs/guides/PAULO-ENTREGA-BACKLOG.md`.
+
+Em andamento: cards detalhados robô chat (A5b), vídeo `chat_robo_video_url` (A6); depois Bank legado (B*) e `%` plataforma (A11).

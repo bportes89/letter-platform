@@ -2765,6 +2765,50 @@ class SupplierWithdrawalProcessRequest(BaseModel):
     notes: str | None = Field(default=None, max_length=500)
 
 
+class PartnerLegacyEarningsSummary(BaseModel):
+    mode: str
+    available_total: str
+    pending_fiscal_total: str
+    withdrawable: str
+    reserved_pending_withdrawal: str
+    min_withdrawal_amount: str
+
+
+class PartnerLegacyStatementItem(BaseModel):
+    id: str
+    kind: str
+    direction: str
+    amount: str
+    status: str | None = None
+    product: str | None = None
+    reference: str | None = None
+    created_at: str | None = None
+    label: str
+
+
+class PartnerWithdrawalRequest(BaseModel):
+    amount: Decimal = Field(gt=0)
+    pix_key: str = Field(min_length=5, max_length=180)
+    notes: str | None = Field(default=None, max_length=500)
+
+
+class PartnerWithdrawalView(BaseModel):
+    id: str
+    user_id: str
+    amount: str
+    status: str
+    pix_key: str
+    notes: str | None = None
+    processed_at: str | None = None
+    created_at: str | None = None
+    partner_name: str | None = None
+    partner_email: str | None = None
+
+
+class BankDisplayModeView(BaseModel):
+    mode: str
+
+
 class MarketplaceChatFaqCreate(BaseModel):
     name: str = Field(min_length=3, max_length=255)
     txt: str = Field(min_length=3)

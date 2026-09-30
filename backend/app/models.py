@@ -333,6 +333,21 @@ class SupplierWithdrawal(TimestampMixin, Base):
     processed_by_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"))
 
 
+class PartnerWithdrawal(TimestampMixin, Base):
+    """Pedido de saque do parceiro (comissões legado — sem Asaas)."""
+
+    __tablename__ = "partner_withdrawals"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    amount: Mapped[float] = mapped_column(Numeric(15, 2))
+    status: Mapped[str] = mapped_column(String(20), default="PENDING", index=True)  # PENDING | PAID | CANCELLED
+    pix_key: Mapped[str] = mapped_column(String(180))
+    notes: Mapped[str | None] = mapped_column(Text)
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    processed_by_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"))
+
+
 class MarketplaceChatFaq(TimestampMixin, Base):
     """FAQ do chat público Marketplace (lista 10039 / resposta 10040)."""
 

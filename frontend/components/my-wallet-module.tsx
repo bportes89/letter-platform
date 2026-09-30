@@ -12,6 +12,7 @@ import {
   walletActivationErrorMessage,
 } from "@/lib/wallet-activation";
 import { walletAccountReady } from "@/lib/wallet-onboarding";
+import { PartnerLegacyBankModule } from "@/components/partner-legacy-bank-module";
 
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
@@ -127,6 +128,7 @@ type Profile = {
 export function MyWalletModule() {
   const searchParams = useSearchParams();
   const onboarding = searchParams.get("onboarding") === "1" || searchParams.get("onboarding") === "kyc";
+  const [bankDisplayMode, setBankDisplayMode] = useState<"loading" | "legacy" | "asaas">("loading");
   const [wallet, setWallet] = useState<WalletView | null>(null);
   const [holderName, setHolderName] = useState("");
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -162,7 +164,17 @@ export function MyWalletModule() {
   const [pixLookupLoading, setPixLookupLoading] = useState(false);
   const [transferReceipt, setTransferReceipt] = useState<WalletTransferReceipt | null>(null);
 
+  useEffect(() => {
+    api<{ mode: string }>("/wallet/me/bank-display-mode")
+      .then((r) => setBankDisplayMode(r.mode === "legacy" ? "legacy" : "asaas"))
+      .catch(() => setBankDisplayMode("asaas"));
+  }, []);
+
   const load = useCallback(async (options?: { refreshFromProvider?: boolean }) => {
+    if (bankDisplayMode === "legacy") {
+      setLoading(false);
+      return;
+    }
     if (options?.refreshFromProvider) {
       try {
         const peek = await api<WalletView>("/wallet/me");
@@ -212,7 +224,7 @@ export function MyWalletModule() {
       setProfileCnpj(p.company_cnpj ?? "");
       setProfileCompany(p.company_name ?? "");
     }
-  }, []);
+  }, [bankDisplayMode]);
 
   const hasPendingIdentity = useMemo(
     () =>
@@ -225,10 +237,15 @@ export function MyWalletModule() {
   );
 
   useEffect(() => {
+    if (bankDisplayMode === "loading") return;
+    if (bankDisplayMode === "legacy") {
+      setLoading(false);
+      return;
+    }
     load({ refreshFromProvider: true })
       .catch((e) => setNotice(e instanceof Error ? e.message : "Falha ao carregar carteira"))
       .finally(() => setLoading(false));
-  }, [load]);
+  }, [load, bankDisplayMode]);
 
   useEffect(() => {
     if (onboarding && hasPendingIdentity) {
@@ -509,6 +526,10 @@ export function MyWalletModule() {
       hasPendingIdentity ||
       Boolean(documentsError) ||
       Boolean(documentsHint));
+
+  if (bankDisplayMode === "legacy") {
+    return <PartnerLegacyBankModule />;
+  }
 
   return (
     <>

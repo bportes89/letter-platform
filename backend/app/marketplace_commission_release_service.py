@@ -21,7 +21,11 @@ from app.affiliate_chain_commission_service import (
 )
 from app.models import CommissionEntry, CommissionRule, Lead, NetworkNode, Proposal, Quota, User
 from app.network_service import LEVEL_SHARES, allocate_commissions
-from app.quota_supplier_service import normalize_supplier_key, suppliers_index
+from app.quota_supplier_service import (
+    normalize_supplier_key,
+    resolve_platform_fee_percent_for_release,
+    suppliers_index,
+)
 from app.services import money
 
 COMM_RELEASED = "RELEASED"
@@ -109,11 +113,9 @@ def resolve_marketplace_originator(db: Session, proposal: Proposal, terms: dict)
     return None
 
 
-def _platform_pct_for_release(supplier) -> Decimal:
-    """Na liberação, usa platform_fee_percent do cadastro (sempre), não só se quem_paga=1."""
-    if supplier is None:
-        return Decimal("0.00")
-    return money(Decimal(str(supplier.platform_fee_percent or 0)))
+def _platform_pct_for_release(db: Session, organization_id: str, supplier) -> Decimal:
+    """Na liberação, usa platform_fee_percent do cadastro ou org-settings (`platform_commission_percent`)."""
+    return resolve_platform_fee_percent_for_release(db, organization_id, supplier)
 
 
 def compute_supplier_platform_lines(db: Session, proposal: Proposal) -> list[dict]:
@@ -169,7 +171,7 @@ def compute_supplier_platform_lines(db: Session, proposal: Proposal) -> list[dic
                 entrada_raw = pricing_for_quota(quota, suppliers=suppliers)["entrada_final"]
         entrada = money(Decimal(str(entrada_raw or 0)))
 
-        platform_pct = _platform_pct_for_release(supplier)
+        platform_pct = _platform_pct_for_release(db, proposal.organization_id, supplier)
         platform_amount = money(credit * platform_pct / Decimal("100")) if platform_pct > 0 else Decimal("0.00")
         supplier_amount = money(max(Decimal("0.00"), entrada - platform_amount))
 
@@ -340,9 +342,23 @@ def release_marketplace_commissions(db: Session, actor: User, proposal: Proposal
     return snapshot
 
 
-def list_marketplace_extrato(db: Session, user: User, *, limit: int = 200) -> list[dict]:
+def list_marketplace_extrato(
+    db: Session,
+    user: User,
+    *,
+    limit: int = 200,
+    scope: str | None = None,
+) -> list[dict]:
     """Extrato admin: linhas fornecedor/plataforma + CommissionEntry MARKETPLACE_RELEASE."""
     limit = max(1, min(int(limit or 200), 500))
+    scope_norm = (scope or "all").strip().lower()
+    kind_filter: set[str] | None = None
+    if scope_norm == "platform":
+        kind_filter = {"platform_fee"}
+    elif scope_norm == "supplier":
+        kind_filter = {"supplier_release"}
+    elif scope_norm == "partner":
+        kind_filter = {"affiliate"}
     rows: list[dict] = []
 
     proposals = list(
@@ -365,6 +381,9 @@ def list_marketplace_extrato(db: Session, user: User, *, limit: int = 200) -> li
         released_at = snap.get("released_at") or life.get("commission_released_at")
         for line in snap.get("lines") or []:
             if not isinstance(line, dict):
+                continue
+            line_kind = str(line.get("type") or "")
+            if kind_filter is not None and line_kind not in kind_filter:
                 continue
             rows.append(
                 {
@@ -401,6 +420,8 @@ def list_marketplace_extrato(db: Session, user: User, *, limit: int = 200) -> li
     if user_ids:
         users = {u.id: u for u in db.scalars(select(User).where(User.id.in_(list(user_ids))))}
     for entry in entries:
+        if kind_filter is not None and "affiliate" not in kind_filter:
+            continue
         beneficiary = users.get(entry.beneficiary_id)
         rows.append(
             {

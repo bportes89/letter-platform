@@ -14,6 +14,8 @@ MARKETPLACE_PAYMENT_CLIENT = "MARKETPLACE_PAYMENT_CLIENT"
 MARKETPLACE_PAYMENT_PARTNER = "MARKETPLACE_PAYMENT_PARTNER"
 MARKETPLACE_WELCOME_CLIENT = "MARKETPLACE_WELCOME_CLIENT"
 MARKETPLACE_DOCUMENT_CLIENT = "MARKETPLACE_DOCUMENT_CLIENT"
+MARKETPLACE_DOCUMENT_SUPPLIER = "MARKETPLACE_DOCUMENT_SUPPLIER"
+MARKETPLACE_DOCUMENT_PLATFORM = "MARKETPLACE_DOCUMENT_PLATFORM"
 MARKETPLACE_CONCLUDE_CLIENT = "MARKETPLACE_CONCLUDE_CLIENT"
 MARKETPLACE_CONCLUDE_SUPPLIER = "MARKETPLACE_CONCLUDE_SUPPLIER"
 MARKETPLACE_CONCLUDE_PARTNER = "MARKETPLACE_CONCLUDE_PARTNER"
@@ -25,6 +27,8 @@ CMS_SLUG_BY_COMM_KEY: dict[str, str] = {
     MARKETPLACE_PAYMENT_PARTNER: "email-marketplace-payment-partner",
     MARKETPLACE_WELCOME_CLIENT: "email-marketplace-welcome-client",
     MARKETPLACE_DOCUMENT_CLIENT: "email-marketplace-document-client",
+    MARKETPLACE_DOCUMENT_SUPPLIER: "email-marketplace-document-supplier",
+    MARKETPLACE_DOCUMENT_PLATFORM: "email-marketplace-document-platform",
     MARKETPLACE_CONCLUDE_CLIENT: "email-marketplace-conclude-client",
     MARKETPLACE_CONCLUDE_SUPPLIER: "email-marketplace-conclude-supplier",
     MARKETPLACE_CONCLUDE_PARTNER: "email-marketplace-conclude-partner",
@@ -37,6 +41,8 @@ LEGACY_TEXT_ID_TO_SLUG: dict[int, str] = {
     1005: "email-marketplace-payment-client",
     1007: "email-marketplace-payment-partner",
     1009: "email-marketplace-document-client",
+    1010: "email-marketplace-document-supplier",
+    1012: "email-marketplace-document-platform",
     1013: "email-marketplace-conclude-client",
     1014: "email-marketplace-conclude-supplier",
     1015: "email-marketplace-conclude-partner",

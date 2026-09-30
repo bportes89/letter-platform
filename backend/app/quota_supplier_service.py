@@ -438,6 +438,25 @@ def suppliers_index(db: Session, organization_id: str) -> dict[str, QuotaSupplie
     return {normalize_supplier_key(r.source_key): r for r in rows}
 
 
+def resolve_platform_fee_percent_for_release(
+    db: Session,
+    organization_id: str,
+    supplier: QuotaSupplier | None,
+) -> Decimal:
+    """% plataforma na liberação: cadastro do fornecedor ou fallback x_settings (`platform_commission_percent`)."""
+    if supplier is not None:
+        pct = money(Decimal(str(supplier.platform_fee_percent or 0)))
+        if pct > 0:
+            return pct
+    from app.org_settings_service import get_setting
+
+    raw = get_setting(db, organization_id, "platform_commission_percent", "0").strip().replace(",", ".")
+    try:
+        return money(Decimal(raw or "0"))
+    except Exception:
+        return Decimal("0.00")
+
+
 def resolve_supplier_fees(
     supplier_source: str | None,
     *,

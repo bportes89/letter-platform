@@ -21,6 +21,8 @@ from app.marketplace_cms_email_service import (
     MARKETPLACE_CONCLUDE_PLATFORM,
     MARKETPLACE_CONCLUDE_SUPPLIER,
     MARKETPLACE_DOCUMENT_CLIENT,
+    MARKETPLACE_DOCUMENT_PLATFORM,
+    MARKETPLACE_DOCUMENT_SUPPLIER,
     MARKETPLACE_PAYMENT_CLIENT as PAYMENT_CLIENT_KEY,
     MARKETPLACE_PAYMENT_PARTNER as PAYMENT_PARTNER_KEY,
     MARKETPLACE_WELCOME_CLIENT,
@@ -449,6 +451,66 @@ def dispatch_marketplace_document_uploaded_notification(
         variables=variables,
     )
     deliveries = [d for d in [delivery] if d]
+
+    platform_dest = (settings.company_email or "comercial@letter.app.br").strip().lower()
+    supplier_subject, supplier_body = resolve_marketplace_email_template(
+        db,
+        actor.organization_id,
+        MARKETPLACE_DOCUMENT_SUPPLIER,
+        default_subject="Documento do cliente — {{client_name}}",
+        default_body=(
+            "Olá {{supplier_name}},\n\n"
+            "O cliente {{client_name}} enviou o documento {{document_name}}.\n"
+            "Crédito: R$ {{credit_value}}\n\n"
+            "LETTER"
+        ),
+    )
+    supplier_tpl = _ensure_email_template(
+        db, actor, key=MARKETPLACE_DOCUMENT_SUPPLIER, subject=supplier_subject, body=supplier_body
+    )
+    for supplier_name, supplier_email in _supplier_contacts(db, actor.organization_id, terms):
+        extra = _queue_and_deliver(
+            db,
+            actor,
+            template=supplier_tpl,
+            subject_type="MARKETPLACE_DOCUMENT",
+            subject_id=document_id,
+            destination=supplier_email,
+            idempotency_key=f"mkt-doc-{document_id}-supplier-{supplier_email}",
+            variables={**variables, "supplier_name": supplier_name},
+        )
+        if extra:
+            deliveries.append(extra)
+
+    platform_subject, platform_body = resolve_marketplace_email_template(
+        db,
+        actor.organization_id,
+        MARKETPLACE_DOCUMENT_PLATFORM,
+        default_subject="Documento recebido — {{client_name}}",
+        default_body=(
+            "Novo documento na venda {{lead_id}}.\n"
+            "Cliente: {{client_name}}\n"
+            "Documento: {{document_name}}\n"
+            "Crédito: R$ {{credit_value}}\n\n"
+            "{{site_name}}"
+        ),
+    )
+    platform_tpl = _ensure_email_template(
+        db, actor, key=MARKETPLACE_DOCUMENT_PLATFORM, subject=platform_subject, body=platform_body
+    )
+    platform_delivery = _queue_and_deliver(
+        db,
+        actor,
+        template=platform_tpl,
+        subject_type="MARKETPLACE_DOCUMENT",
+        subject_id=document_id,
+        destination=platform_dest,
+        idempotency_key=f"mkt-doc-{document_id}-platform",
+        variables=variables,
+    )
+    if platform_delivery:
+        deliveries.append(platform_delivery)
+
     return {"trigger_email_automatico": "SENT_D+0" if deliveries else "SKIPPED", "deliveries": deliveries}
 
 
