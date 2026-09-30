@@ -92,7 +92,8 @@ from app.schemas import (
     VendaDiretaRoboSearchRequest, VendaDiretaRoboSearchResponse, VendaDiretaRoboConfirmRequest, VendaDiretaRoboConfirmResponse,
     QuotaSupplierCreate, QuotaSupplierUpdate, QuotaSupplierView, QuotaInventorySyncView,
     QuotaCategoryCreate, QuotaCategoryUpdate, QuotaCategoryView, QuotaCategoryImportResult,
-    CmsTextCreate, CmsTextUpdate, CmsTextView, CmsTextImportResult, PublicCmsPageView,
+    CmsTextCreate, CmsTextUpdate, CmsTextView, CmsTextImportResult, CmsTextMarketplaceEnsureResult,
+    PublicCmsPageView,
     PartnerQualificationTierCreate, PartnerQualificationTierUpdate, PartnerQualificationTierView,
     PartnerQualificationImportResult, PartnerQualificationAppraisalRequest,
     PartnerQualificationFranchiseAppraisalView, PartnerQualificationAppraisalApplyResult,
@@ -2069,6 +2070,19 @@ def update_cms_text_route(
     db.commit()
     db.refresh(item)
     return text_view(item)
+
+
+@router.post("/cms/texts/ensure-marketplace-emails", response_model=CmsTextMarketplaceEnsureResult)
+def ensure_marketplace_cms_emails_route(
+    user: User = Depends(require_scope("admin:users")),
+    db: Session = Depends(get_db),
+):
+    from app.marketplace_cms_email_service import ensure_marketplace_email_templates
+
+    result = ensure_marketplace_email_templates(db, user.organization_id)
+    audit(db, user, "cms.text.ensure_marketplace_emails", "cms_text", user.organization_id, result)
+    db.commit()
+    return result
 
 
 @router.post("/cms/texts/import-legacy", response_model=CmsTextImportResult)

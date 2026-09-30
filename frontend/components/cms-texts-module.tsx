@@ -37,6 +37,23 @@ export function CmsTextsModule() {
 
   const filtered = useMemo(() => items.filter((x) => x.kind === tab), [items, tab]);
 
+  async function ensureMarketplaceEmails() {
+    setError("");
+    setNotice("");
+    try {
+      const r = await api<{ created: number; skipped: number; total_slugs: number }>(
+        "/cms/texts/ensure-marketplace-emails",
+        { method: "POST" },
+      );
+      setNotice(
+        `Templates marketplace: ${r.created} criado(s), ${r.skipped} já existiam (${r.total_slugs} slugs email-marketplace-*).`,
+      );
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Falha ao criar templates");
+    }
+  }
+
   async function importLegacy() {
     setError("");
     setNotice("");
@@ -104,6 +121,9 @@ export function CmsTextsModule() {
       <div className="marketplace-subtabs">
         <button type="button" className={tab === "EMAIL" ? "active" : ""} onClick={() => setTab("EMAIL")}>E-mails</button>
         <button type="button" className={tab === "PAGE" ? "active" : ""} onClick={() => setTab("PAGE")}>Páginas</button>
+        <button type="button" className="table-action" onClick={() => void ensureMarketplaceEmails()}>
+          <Mail /> Criar e-mails marketplace (padrão)
+        </button>
         <button type="button" className="table-action" onClick={() => void importLegacy()}>
           <RefreshCw /> Importar SQL legado
         </button>

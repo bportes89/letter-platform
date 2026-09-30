@@ -5189,6 +5189,22 @@ def test_marketplace_client_office_bind_boleto_finalize(client, auth_headers):
     assert any(d["id"] == doc_id for d in docs.json())
 
 
+def test_ensure_marketplace_cms_email_templates(client, auth_headers):
+    first = client.post("/api/v1/cms/texts/ensure-marketplace-emails", headers=auth_headers)
+    assert first.status_code == 200, first.text
+    body = first.json()
+    assert body["total_slugs"] >= 11
+    assert body["created"] >= 1 or body["skipped"] >= 1
+    second = client.post("/api/v1/cms/texts/ensure-marketplace-emails", headers=auth_headers)
+    assert second.status_code == 200
+    assert second.json()["created"] == 0
+    assert second.json()["skipped"] == second.json()["total_slugs"]
+    texts = client.get("/api/v1/cms/texts", headers=auth_headers)
+    slugs = {t["slug"] for t in texts.json() if t.get("kind") == "EMAIL"}
+    assert "email-marketplace-document-supplier" in slugs
+    assert "email-marketplace-document-platform" in slugs
+
+
 def test_marketplace_chat_faq_admin_crud_reflects_in_chat(client, auth_headers):
     seeded = client.post("/api/v1/marketplace/chat-faq/ensure-defaults", headers=auth_headers)
     assert seeded.status_code == 200, seeded.text

@@ -117,3 +117,157 @@ def resolve_marketplace_email_template(
     body_src = _html_to_plain(raw) if "<" in raw else raw
     body = normalize_legacy_email_placeholders(body_src or default_body)
     return subject or default_subject, body or default_body
+
+
+_SLUG_TO_LEGACY_ID: dict[str, int] = {slug: lid for lid, slug in LEGACY_TEXT_ID_TO_SLUG.items()}
+
+# Corpo com placeholders legado `{nome_cliente}` — normalizados na leitura para `{{client_name}}`.
+MARKETPLACE_EMAIL_TEMPLATE_SEEDS: dict[str, dict[str, str | int]] = {
+    "email-marketplace-boleto": {
+        "name_main": "Marketplace — Boleto entrada (1001)",
+        "subject": "Boleto da entrada — {nome_do_site}",
+        "body_html": (
+            "<p>Olá {nome_cliente},</p>"
+            "<p>Segue o boleto/PIX da entrada da sua carta contemplada.</p>"
+            "<p>Entrada: {valor_entrada}<br>Crédito: {valor_credito}</p>"
+            "<p>Acesse seu escritório: {link_dashboard}</p><p>{nome_do_site}</p>"
+        ),
+        "sort_order": 1001,
+    },
+    "email-marketplace-payment-client": {
+        "name_main": "Marketplace — Pagamento confirmado cliente (1005)",
+        "subject": "Pagamento confirmado — {nome_do_site}",
+        "body_html": (
+            "<p>Olá {nome_cliente},</p>"
+            "<p>Confirmamos o pagamento da entrada.</p>"
+            "<p>Crédito: {valor_credito}</p>"
+            "<p>{link_dashboard}</p><p>{nome_do_site}</p>"
+        ),
+        "sort_order": 1005,
+    },
+    "email-marketplace-payment-partner": {
+        "name_main": "Marketplace — Pagamento confirmado parceiro (1007)",
+        "subject": "Entrada paga — cliente {nome_cliente}",
+        "body_html": (
+            "<p>Olá,</p>"
+            "<p>O cliente {nome_cliente} quitou a entrada.</p>"
+            "<p>Crédito: {valor_credito}</p><p>LETTER</p>"
+        ),
+        "sort_order": 1007,
+    },
+    "email-marketplace-welcome-client": {
+        "name_main": "Marketplace — Boas-vindas cliente (1017)",
+        "subject": "Bem-vindo — {nome_do_site}",
+        "body_html": (
+            "<p>Olá {nome_cliente},</p>"
+            "<p>Sua conta foi criada.</p>"
+            "<p>E-mail: {email_cliente}<br>Senha: {senha_cliente}</p>"
+            "<p>{link_dashboard}</p><p>{nome_do_site}</p>"
+        ),
+        "sort_order": 1017,
+    },
+    "email-marketplace-document-client": {
+        "name_main": "Marketplace — Documento recebido cliente (1009)",
+        "subject": "Documento recebido — {nome_do_site}",
+        "body_html": (
+            "<p>Olá {nome_cliente},</p>"
+            "<p>Recebemos o documento {nome_documento} da sua compra.</p>"
+            "<p>Crédito: {valor_credito}</p>"
+            "<p>{link_dashboard}</p><p>{nome_do_site}</p>"
+        ),
+        "sort_order": 1009,
+    },
+    "email-marketplace-document-supplier": {
+        "name_main": "Marketplace — Documento fornecedor (1010)",
+        "subject": "Documento do cliente — {nome_cliente}",
+        "body_html": (
+            "<p>Olá {fornecedor},</p>"
+            "<p>O cliente {nome_cliente} enviou o documento {nome_documento}.</p>"
+            "<p>Crédito: {valor_credito}</p><p>LETTER</p>"
+        ),
+        "sort_order": 1010,
+    },
+    "email-marketplace-document-platform": {
+        "name_main": "Marketplace — Documento plataforma (1012)",
+        "subject": "Documento recebido — {nome_cliente}",
+        "body_html": (
+            "<p>Novo documento na venda.</p>"
+            "<p>Cliente: {nome_cliente}<br>Documento: {nome_documento}<br>Crédito: {valor_credito}</p>"
+            "<p>{nome_do_site}</p>"
+        ),
+        "sort_order": 1012,
+    },
+    "email-marketplace-conclude-client": {
+        "name_main": "Marketplace — Conclusão cliente (1013)",
+        "subject": "Processo concluído — {nome_do_site}",
+        "body_html": (
+            "<p>Olá {nome_cliente},</p>"
+            "<p>Sua compra foi concluída com sucesso.</p>"
+            "<p>Crédito: {valor_credito}</p><p>{nome_do_site}</p>"
+        ),
+        "sort_order": 1013,
+    },
+    "email-marketplace-conclude-supplier": {
+        "name_main": "Marketplace — Conclusão fornecedor (1014)",
+        "subject": "Venda concluída — {nome_cliente}",
+        "body_html": (
+            "<p>Olá {fornecedor},</p>"
+            "<p>A venda vinculada foi concluída.</p>"
+            "<p>Cliente: {nome_cliente} · Crédito: {valor_credito}</p><p>LETTER</p>"
+        ),
+        "sort_order": 1014,
+    },
+    "email-marketplace-conclude-partner": {
+        "name_main": "Marketplace — Conclusão parceiro (1015)",
+        "subject": "Venda concluída — {nome_cliente}",
+        "body_html": (
+            "<p>Olá,</p>"
+            "<p>A venda do cliente {nome_cliente} foi concluída.</p>"
+            "<p>Crédito: {valor_credito}</p><p>LETTER</p>"
+        ),
+        "sort_order": 1015,
+    },
+    "email-marketplace-conclude-platform": {
+        "name_main": "Marketplace — Conclusão plataforma (1016)",
+        "subject": "Venda marketplace concluída — {nome_cliente}",
+        "body_html": (
+            "<p>Cadastro concluído.</p>"
+            "<p>Cliente: {nome_cliente}<br>Crédito: {valor_credito}</p>"
+        ),
+        "sort_order": 1016,
+    },
+}
+
+
+def ensure_marketplace_email_templates(db: Session, organization_id: str) -> dict[str, int]:
+    """Cria registros CMS faltantes (slug email-marketplace-*). Não sobrescreve textos já editados."""
+    created = 0
+    skipped = 0
+    for slug, meta in MARKETPLACE_EMAIL_TEMPLATE_SEEDS.items():
+        existing = db.scalar(
+            select(CmsText).where(
+                CmsText.organization_id == organization_id,
+                CmsText.slug == slug,
+                CmsText.kind == "EMAIL",
+            )
+        )
+        if existing:
+            skipped += 1
+            continue
+        legacy_id = _SLUG_TO_LEGACY_ID.get(slug)
+        db.add(
+            CmsText(
+                organization_id=organization_id,
+                legacy_id=legacy_id,
+                active=True,
+                kind="EMAIL",
+                name_main=str(meta["name_main"]),
+                subject=str(meta["subject"]),
+                slug=slug,
+                body_html=str(meta["body_html"]),
+                sort_order=int(meta["sort_order"]),
+            )
+        )
+        created += 1
+    db.flush()
+    return {"created": created, "skipped": skipped, "total_slugs": len(MARKETPLACE_EMAIL_TEMPLATE_SEEDS)}

@@ -36,4 +36,4 @@ Material do sistema antigo disponível na máquina de desenvolvimento — **não
 
 Próximos blocos: ver checklist completo em `docs/guides/PAULO-ENTREGA-BACKLOG.md`.
 
-A5b/A6: cards na escolha do chat + vídeo `chat_robo_video_url` (org-settings). Bank legado (B*) e `%` plataforma (A11) no código.
+A5b/A6: cards na escolha do chat + vídeo `chat_robo_video_url` (org-settings). A9: CMS **Textos e e-mails** → «Criar e-mails marketplace (padrão)» ou import SQL (`texts` 1001–1017).

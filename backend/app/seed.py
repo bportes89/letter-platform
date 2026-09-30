@@ -191,6 +191,9 @@ def seed():
                 ensure_quota_sell_commission_rule(db, org.id)
                 ensure_marketplace_commission_rule(db, org.id)
                 ensure_default_suppliers(db, org.id)
+                from app.marketplace_cms_email_service import ensure_marketplace_email_templates
+
+                ensure_marketplace_email_templates(db, org.id)
                 db.commit()
             _sync_headquarters_org(db)
             _sync_demo_phones(db)
@@ -265,6 +268,9 @@ def seed():
         from app.quota_supplier_service import ensure_default_suppliers
 
         ensure_default_suppliers(db, org.id)
+        from app.marketplace_cms_email_service import ensure_marketplace_email_templates
+
+        ensure_marketplace_email_templates(db, org.id)
         db.add_all([
             CommissionRule(
                 organization_id=org.id, product="FLASH_CREDIT", commission_type="SALES", version=1,

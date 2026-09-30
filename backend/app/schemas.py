@@ -2507,6 +2507,12 @@ class CmsTextImportResult(BaseModel):
     marketplace_slug_sync: int = 0
 
 
+class CmsTextMarketplaceEnsureResult(BaseModel):
+    created: int
+    skipped: int
+    total_slugs: int
+
+
 class PublicCmsPageView(BaseModel):
     slug: str
     title: str

@@ -18,7 +18,7 @@
 | A6 | Vídeo explicativo no fluxo do robô/chat | ✅ | `chat_robo_video_url` + embed YouTube/Vimeo |
 | A7 | Boleto entrada no fluxo | ✅ | Passo chat + Inter |
 | A8 | Contrato: aceite chat + ZapSign **após pagamento entrada** | ✅ código | Alinhar expectativa Paulo vs ordem legado |
-| A9 | E-mails personalizados (CMS + import texts) | 🟡 | 1010/1012 no código; conteúdo em prod |
+| A9 | E-mails personalizados (CMS + import texts) | ✅ | Slugs `email-marketplace-*`; `POST /cms/texts/ensure-marketplace-emails` + import legado |
 | A10 | Contrato HTML editável (org-settings / CMS) | ✅ | Jurídico + homologação |
 | A11 | `% plataforma` (x_settings) na liberação comissão | ✅ | Fallback `platform_commission_percent` |
 | A12 | Import dados prod (categorias, texts, admins, cotas) | 📋 | Dump/ETL no Render |
