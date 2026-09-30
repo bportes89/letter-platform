@@ -20,7 +20,7 @@ def upgrade() -> None:
         sa.Column("id", sa.String(length=36), nullable=False),
         sa.Column("organization_id", sa.String(length=36), nullable=False),
         sa.Column("legacy_id", sa.Integer(), nullable=True),
-        sa.Column("active", sa.Boolean(), nullable=False, server_default=sa.text("1")),
+        sa.Column("active", sa.Boolean(), nullable=False, server_default=sa.true()),
         sa.Column("kind", sa.String(length=20), nullable=False, server_default="PAGE"),
         sa.Column("name_main", sa.String(length=255), nullable=False),
         sa.Column("subject", sa.Text(), nullable=True),
