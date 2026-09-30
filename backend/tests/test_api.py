@@ -5110,8 +5110,8 @@ def test_marketplace_chat_faq_admin_crud_reflects_in_chat(client, auth_headers):
     assert deleted.status_code == 204
 
 
-def test_public_site_chat_native_sdc_flow(client, auth_headers):
-    """Chat nativo SDC: garantia → evaluate → solicitation na mesa."""
+def test_public_site_chat_external_only_marketplace_and_vmc(client):
+    """Robô externo: categorias só marketplace + vender cota; SDC/Flash/QuitCon na área logada."""
     email = client.post(
         "/api/v1/public/site/chat/home/10003",
         json={"name": "Ana Costa Sdc", "email": "ana.sdc.chat@letter.test"},
@@ -5124,241 +5124,50 @@ def test_public_site_chat_native_sdc_flow(client, auth_headers):
         json={"lead_id": lead_id, "phone": "31999887766", "email": "ana.sdc.chat@letter.test"},
     )
     assert phone.status_code == 200
-    assert any(o.get("save") == "SDC" for o in phone.json()["OBJ"]["chat_next"][0]["options"])
+    opts = phone.json()["OBJ"]["chat_next"][0]["options"]
+    saves = {o.get("save") for o in opts}
+    assert saves <= {"REAL_ESTATE", "VEHICLE", "open_page"}
+    assert not any(o.get("save") in {"SDC", "FLASH", "QUITCON"} for o in opts)
 
-    tipo = client.post(
+    gate = client.post(
         "/api/v1/public/site/chat/home/10020",
         json={"lead_id": lead_id, "option_id": "SDC", "option_save": "SDC"},
     )
-    assert tipo.status_code == 200
-
-    imovel = client.post(
-        "/api/v1/public/site/chat/home/10020",
-        json={"lead_id": lead_id, "option_id": "imovel", "option_save": "imovel"},
-    )
-    assert imovel.status_code == 200
-
-    valor = client.post(
-        "/api/v1/public/site/chat/home/10022",
-        json={"lead_id": lead_id, "asset_value": "500000"},
-    )
-    assert valor.status_code == 200
-
-    paid = client.post(
-        "/api/v1/public/site/chat/home/10024",
-        json={"lead_id": lead_id, "option_id": "paid_yes", "option_save": "1"},
-    )
-    assert paid.status_code == 200
-
-    lien = client.post(
-        "/api/v1/public/site/chat/home/10025",
-        json={"lead_id": lead_id, "option_id": "lien_no", "option_save": "0"},
-    )
-    assert lien.status_code == 200
-
-    eval_step = client.post(
-        "/api/v1/public/site/chat/home/10026",
-        json={"lead_id": lead_id, "option_id": "docs_yes", "option_save": "1"},
-    )
-    assert eval_step.status_code == 200, eval_step.text
-    card = eval_step.json()["OBJ"]["chat_next"][0]
-    assert card["sdc_result"]["viavel"] is True
-    assert card["next"] == 10027
-
-    confirm = client.post("/api/v1/public/site/chat/home/10027", json={"lead_id": lead_id})
-    assert confirm.status_code == 200, confirm.text
-    assert "mesa sdc" in confirm.json()["OBJ"]["chat_next"][0]["text"].lower()
-
-    listed = client.get("/api/v1/sdc/desk/solicitations", headers=auth_headers)
-    assert listed.status_code == 200
-    hit = next(r for r in listed.json() if r["contact_email"] == "ana.sdc.chat@letter.test")
-    assert hit["status"] == "AWAITING_DOCS"
-    assert hit["credit_estimated"] == "175000.00"
-    assert hit["source_channel"] == "SITE_CHAT"
-    assert hit["source_channel_label"] == "Site (chat)"
-    assert hit["lead_id"] == lead_id
-
-    leads = client.get("/api/v1/leads", headers=auth_headers).json()
-    lead = next(l for l in leads if l["id"] == lead_id)
-    assert lead["product_interest"] == "SDC"
-    assert lead["source"] == "SITE_CHAT"
+    assert gate.status_code == 200
+    gate_opts = gate.json()["OBJ"]["chat_next"][0]["options"]
+    assert any(o.get("link") == "/cadastro" for o in gate_opts)
+    assert any(o.get("link") == "/login" for o in gate_opts)
+    assert "área logada" in gate.json()["OBJ"]["chat_next"][0]["text"].lower()
 
 
-def test_public_site_chat_native_flash_flow(client, auth_headers):
-    """Chat nativo Flash Capital: garantia → prazo → evaluate → solicitation na mesa."""
+def test_public_site_chat_flash_step_redirects_to_logged_area(client):
     email = client.post(
         "/api/v1/public/site/chat/home/10003",
         json={"name": "Bruno Flash Chat", "email": "bruno.flash.chat@letter.test"},
     )
-    assert email.status_code == 200
     lead_id = email.json()["OBJ"]["lead_id"]
-
-    phone = client.post(
-        "/api/v1/public/site/chat/home/10004",
-        json={"lead_id": lead_id, "phone": "31988776655", "email": "bruno.flash.chat@letter.test"},
-    )
-    assert phone.status_code == 200
-    assert any(o.get("save") == "FLASH" for o in phone.json()["OBJ"]["chat_next"][0]["options"])
-
-    tipo = client.post(
+    gate = client.post(
         "/api/v1/public/site/chat/home/10050",
         json={"lead_id": lead_id, "option_id": "FLASH", "option_save": "FLASH"},
     )
-    assert tipo.status_code == 200
-
-    imovel = client.post(
-        "/api/v1/public/site/chat/home/10050",
-        json={"lead_id": lead_id, "option_id": "imovel", "option_save": "imovel"},
-    )
-    assert imovel.status_code == 200
-
-    valor = client.post(
-        "/api/v1/public/site/chat/home/10052",
-        json={"lead_id": lead_id, "asset_value": "500000"},
-    )
-    assert valor.status_code == 200
-
-    paid = client.post(
-        "/api/v1/public/site/chat/home/10054",
-        json={"lead_id": lead_id, "option_id": "paid_yes", "option_save": "1"},
-    )
-    assert paid.status_code == 200
-
-    lien = client.post(
-        "/api/v1/public/site/chat/home/10055",
-        json={"lead_id": lead_id, "option_id": "lien_no", "option_save": "0"},
-    )
-    assert lien.status_code == 200
-
-    docs = client.post(
-        "/api/v1/public/site/chat/home/10056",
-        json={"lead_id": lead_id, "option_id": "docs_yes", "option_save": "1"},
-    )
-    assert docs.status_code == 200
-    assert any(o.get("save") == "36" for o in (docs.json()["OBJ"]["chat_next"][0].get("options") or []))
-
-    eval_step = client.post(
-        "/api/v1/public/site/chat/home/10057",
-        json={"lead_id": lead_id, "option_id": "term_36", "option_save": "36"},
-    )
-    assert eval_step.status_code == 200, eval_step.text
-    card = eval_step.json()["OBJ"]["chat_next"][0]
-    assert card["flash_result"]["viavel"] is True
-    assert card["next"] == 10058
-    assert "200.000" in card["flash_result"]["principal_fmt"].replace("\xa0", " ") or "200000" in card["flash_result"]["principal_fmt"].replace(".", "").replace(",", "")
-
-    confirm = client.post("/api/v1/public/site/chat/home/10058", json={"lead_id": lead_id})
-    assert confirm.status_code == 200, confirm.text
-    assert "flash capital" in confirm.json()["OBJ"]["chat_next"][0]["text"].lower()
-
-    listed = client.get("/api/v1/flash/desk/solicitations", headers=auth_headers)
-    assert listed.status_code == 200
-    hit = next(r for r in listed.json() if r["contact_email"] == "bruno.flash.chat@letter.test")
-    assert hit["status"] == "AWAITING_DOCS"
-    assert hit["principal"] == "200000.00"
-    assert hit["term_months"] == 36
-    assert hit["source_channel"] == "SITE_CHAT"
-    assert hit["source_channel_label"] == "Site (chat)"
-    assert hit["lead_id"] == lead_id
-
-    leads = client.get("/api/v1/leads", headers=auth_headers).json()
-    lead = next(l for l in leads if l["id"] == lead_id)
-    assert lead["product_interest"] == "FLASH_CREDIT"
-    assert lead["source"] == "SITE_CHAT"
+    assert gate.status_code == 200
+    assert "flash capital" in gate.json()["OBJ"]["chat_next"][0]["text"].lower()
+    assert any(o.get("link") == "/login" for o in gate.json()["OBJ"]["chat_next"][0]["options"])
 
 
-def test_public_site_chat_native_quitcon_flow(client, auth_headers):
-    """Chat nativo QuitCon: cota → evaluate → solicitation na mesa."""
+def test_public_site_chat_quitcon_step_redirects_to_logged_area(client):
     email = client.post(
         "/api/v1/public/site/chat/home/10003",
         json={"name": "Carla Quitcon Chat", "email": "carla.quitcon.chat@letter.test"},
     )
-    assert email.status_code == 200
     lead_id = email.json()["OBJ"]["lead_id"]
-
-    phone = client.post(
-        "/api/v1/public/site/chat/home/10004",
-        json={"lead_id": lead_id, "phone": "31977665544", "email": "carla.quitcon.chat@letter.test"},
-    )
-    assert phone.status_code == 200
-    assert any(o.get("save") == "QUITCON" for o in phone.json()["OBJ"]["chat_next"][0]["options"])
-
-    saldo_prompt = client.post(
+    gate = client.post(
         "/api/v1/public/site/chat/home/10060",
         json={"lead_id": lead_id, "option_id": "QUITCON", "option_save": "QUITCON"},
     )
-    assert saldo_prompt.status_code == 200
-
-    saldo = client.post(
-        "/api/v1/public/site/chat/home/10060",
-        json={"lead_id": lead_id, "outstanding_balance": "100000"},
-    )
-    assert saldo.status_code == 200
-
-    meses = client.post(
-        "/api/v1/public/site/chat/home/10061",
-        json={"lead_id": lead_id, "meses_restantes": "48"},
-    )
-    assert meses.status_code == 200
-    assert any(o.get("save") == "Embracon" for o in (meses.json()["OBJ"]["chat_next"][0].get("options") or []))
-
-    registry_prompt = client.post(
-        "/api/v1/public/site/chat/home/10063",
-        json={"lead_id": lead_id, "option_id": "embracon", "option_save": "Embracon"},
-    )
-    assert registry_prompt.status_code == 200
-
-    registry = client.post(
-        "/api/v1/public/site/chat/home/10063",
-        json={"lead_id": lead_id, "registry_number": "G-1/C-1", "option_save": "Embracon"},
-    )
-    assert registry.status_code == 200
-
-    contemplada = client.post(
-        "/api/v1/public/site/chat/home/10065",
-        json={"lead_id": lead_id, "option_id": "contemplada_yes", "option_save": "1"},
-    )
-    assert contemplada.status_code == 200
-
-    bem = client.post(
-        "/api/v1/public/site/chat/home/10066",
-        json={"lead_id": lead_id, "option_id": "bem_yes", "option_save": "1"},
-    )
-    assert bem.status_code == 200
-
-    parcelas = client.post(
-        "/api/v1/public/site/chat/home/10067",
-        json={"lead_id": lead_id, "option_id": "parcelas_yes", "option_save": "1"},
-    )
-    assert parcelas.status_code == 200
-
-    eval_step = client.post(
-        "/api/v1/public/site/chat/home/10068",
-        json={"lead_id": lead_id, "option_id": "docs_yes", "option_save": "1"},
-    )
-    assert eval_step.status_code == 200, eval_step.text
-    card = eval_step.json()["OBJ"]["chat_next"][0]
-    assert card["quitcon_result"]["viavel"] is True
-    assert card["next"] == 10069
-
-    confirm = client.post("/api/v1/public/site/chat/home/10069", json={"lead_id": lead_id})
-    assert confirm.status_code == 200, confirm.text
-    assert "quitcon" in confirm.json()["OBJ"]["chat_next"][0]["text"].lower()
-
-    listed = client.get("/api/v1/quitcon/desk/solicitations", headers=auth_headers)
-    assert listed.status_code == 200
-    hit = next(r for r in listed.json() if r["contact_email"] == "carla.quitcon.chat@letter.test")
-    assert hit["status"] == "AWAITING_DOCS"
-    assert hit["registry_office"] == "Embracon"
-    assert Decimal(hit["quitacao_vp_amount"]) > 0
-    assert hit["source_channel"] == "SITE_CHAT"
-    assert hit["source_channel_label"] == "Site (chat)"
-    assert hit["lead_id"] == lead_id
-
-    leads = client.get("/api/v1/leads", headers=auth_headers).json()
-    lead = next(l for l in leads if l["id"] == lead_id)
-    assert lead["product_interest"] == "QUITCON"
-    assert lead["source"] == "SITE_CHAT"
+    assert gate.status_code == 200
+    assert "quitcon" in gate.json()["OBJ"]["chat_next"][0]["text"].lower()
+    assert any(o.get("link") == "/cadastro" for o in gate.json()["OBJ"]["chat_next"][0]["options"])
 
 
 def test_escrow_asaas_status_not_configured(client, auth_headers, monkeypatch):

@@ -384,6 +384,56 @@ def _full_name_ok(name: str) -> bool:
     return len(primeiro) > 2 and len(sobrenome) > 2
 
 
+_LOGGED_AREA_CHAT_STEPS: dict[str, str] = {
+    **{str(n): "SDC" for n in range(10020, 10029)},
+    **{str(n): "FLASH" for n in range(10050, 10059)},
+    **{str(n): "QUITCON" for n in range(10060, 10070)},
+}
+
+_LOGGED_AREA_PRODUCT_LABELS = {
+    "SDC": "Capital de Giro (SDC)",
+    "FLASH": "Flash Capital",
+    "QUITCON": "QuitCon",
+}
+
+
+def _external_marketplace_category_options(lead_id: str | None = None) -> dict:
+    return _wrap(
+        [
+            {
+                "text": "O que você deseja financiar?",
+                "options": [
+                    {"name": "Imóvel", "next": int(STEP_DIRTY), "save": "REAL_ESTATE", "id": "REAL_ESTATE"},
+                    {"name": "Veículo", "next": int(STEP_YEAR), "save": "VEHICLE", "id": "VEHICLE"},
+                    {"name": "Vender minha cota", "link": "/vender-minha-cota", "save": "open_page"},
+                ],
+            }
+        ],
+        lead_id=lead_id,
+    )
+
+
+def _logged_area_product_gate(product_key: str, lead_id: str | None = None) -> dict:
+    label = _LOGGED_AREA_PRODUCT_LABELS.get(product_key, product_key)
+    return _wrap(
+        [
+            {
+                "text": (
+                    f"{label} não é concluído neste chat público. "
+                    "Cadastre-se ou entre na sua conta LETTER para simular e enviar documentos na área logada."
+                ),
+                "options": [
+                    {"name": "Criar minha conta", "link": "/cadastro", "save": "open_page"},
+                    {"name": "Já tenho conta — entrar", "link": "/login", "save": "open_page"},
+                    {"name": "Comprar carta contemplada", "next": int(STEP_CATEGORY)},
+                    {"name": "Vender minha cota", "link": "/vender-minha-cota", "save": "open_page"},
+                ],
+            }
+        ],
+        lead_id=lead_id,
+    )
+
+
 def home_native() -> dict:
     return _wrap(
         [
@@ -563,22 +613,7 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
             snap["phone"] = phone
             _save_lead_snapshot(lead, snap)
             db.flush()
-        return _wrap(
-            [
-                {
-                    "text": "O que você deseja financiar?",
-                    "options": [
-                        {"name": "Imóvel", "next": int(STEP_DIRTY), "save": "REAL_ESTATE", "id": "REAL_ESTATE"},
-                        {"name": "Veículo", "next": int(STEP_YEAR), "save": "VEHICLE", "id": "VEHICLE"},
-                        {"name": "Capital de Giro (SDC)", "next": int(STEP_SDC_ASSET_TYPE), "save": "SDC", "id": "SDC"},
-                        {"name": "Flash Capital", "next": int(STEP_FLASH_ASSET_TYPE), "save": "FLASH", "id": "FLASH"},
-                        {"name": "QuitCon", "next": int(STEP_QUITCON_BALANCE), "save": "QUITCON", "id": "QUITCON"},
-                        {"name": "Vender minha cota", "link": "/vender-minha-cota", "save": "open_page"},
-                    ],
-                }
-            ],
-            lead_id=lead.id,
-        )
+        return _external_marketplace_category_options(lead.id)
 
     if step == STEP_YEAR:
         # category vehicle selected
@@ -1743,7 +1778,11 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
             lead_id=lead.id if lead else None,
         )
 
-    # --- Capital de Giro (SDC) ---
+    if step in _LOGGED_AREA_CHAT_STEPS:
+        gate_lead = lead.id if lead else data.get("lead_id")
+        return _logged_area_product_gate(_LOGGED_AREA_CHAT_STEPS[step], gate_lead)
+
+    # --- Capital de Giro (SDC) — legado (chat público redireciona à área logada) ---
     if step == STEP_SDC_ASSET_TYPE:
         if not lead:
             raise HTTPException(422, "Sessão do chat expirada. Recomece pelo início.")
@@ -1989,22 +2028,7 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
     if step == STEP_CATEGORY:
         if not lead:
             raise HTTPException(422, "Sessão do chat expirada. Recomece pelo início.")
-        return _wrap(
-            [
-                {
-                    "text": "O que você deseja financiar?",
-                    "options": [
-                        {"name": "Imóvel", "next": int(STEP_DIRTY), "save": "REAL_ESTATE", "id": "REAL_ESTATE"},
-                        {"name": "Veículo", "next": int(STEP_YEAR), "save": "VEHICLE", "id": "VEHICLE"},
-                        {"name": "Capital de Giro (SDC)", "next": int(STEP_SDC_ASSET_TYPE), "save": "SDC", "id": "SDC"},
-                        {"name": "Flash Capital", "next": int(STEP_FLASH_ASSET_TYPE), "save": "FLASH", "id": "FLASH"},
-                        {"name": "QuitCon", "next": int(STEP_QUITCON_BALANCE), "save": "QUITCON", "id": "QUITCON"},
-                        {"name": "Vender minha cota", "link": "/vender-minha-cota", "save": "open_page"},
-                    ],
-                }
-            ],
-            lead_id=lead.id,
-        )
+        return _external_marketplace_category_options(lead.id)
 
     if step == STEP_SDC_CONFIRM:
         if not lead:

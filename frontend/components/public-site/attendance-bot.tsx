@@ -401,11 +401,11 @@ export function AttendanceBotSection() {
     if (!isCurrent(flowIndex) || busy) return;
     const needsServer = !option.link && option.next !== undefined;
     if (needsServer && !(await requireApi())) return;
+    if (option.link && option.save === "open_page") {
+      window.location.href = mapLegacyLink(option.link);
+      return;
+    }
     if (option.link && isVenderCotaLink(option.link)) {
-      if (option.save === "open_page") {
-        window.location.href = mapLegacyLink(option.link);
-        return;
-      }
       recordEcho(flowIndex, itemIndex, optionLabel(option));
       pushFlow(venderCotaChatIntro());
       return;
@@ -506,7 +506,6 @@ export function AttendanceBotSection() {
 
   const renderOptions = (flowIndex: number, itemIndex: number, item: ChatItem) => {
     const options = item.options ?? [];
-    const serverLocked = !apiConnected || connecting;
     return (
       <div className="attendance-options">
         {options.map((option, optionIndex) => (
@@ -514,7 +513,7 @@ export function AttendanceBotSection() {
             key={`${option.id ?? optionIndex}-${optionLabel(option)}`}
             type="button"
             className="attendance-option"
-            disabled={busy || (serverLocked && !option.link)}
+            disabled={busy}
             onClick={() => void onOption(flowIndex, itemIndex, item, option)}
           >
             {optionLabel(option)}
@@ -610,7 +609,7 @@ export function AttendanceBotSection() {
                       <button
                         type="button"
                         className="attendance-primary"
-                        disabled={busy || connecting || !apiConnected}
+                        disabled={busy || connecting}
                         onClick={() => void onButton(flowIndex, itemIndex, item)}
                       >
                         {item.button}
