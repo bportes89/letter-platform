@@ -904,6 +904,23 @@ class AdministratorRulesUpdate(BaseModel):
     bump_version: bool = True
 
 
+class AdministratorAlienationItem(BaseModel):
+    quota_category_id: str
+    max_vehicle_age_years: int | None = Field(
+        default=None,
+        ge=0,
+        le=30,
+        description="None=sem restrição; 0=somente zero km",
+    )
+
+
+class AdministratorMarketplaceProfileUpdate(BaseModel):
+    is_bank: bool | None = None
+    requires_account_holder: bool | None = None
+    accepts_dirty_name: bool | None = None
+    alienations: list[AdministratorAlienationItem] | None = None
+
+
 class AdministratorHomologate(BaseModel):
     approved: bool
     notes: str | None = Field(default=None, max_length=2000)
@@ -2273,6 +2290,9 @@ class MarketplaceEsteira2Request(MarketplaceClientProfile):
     target_amount: Decimal = Field(gt=0)
     category: str
     target_entrada: Decimal | None = Field(default=None, gt=0)
+    quota_category_id: str | None = None
+    client_bank_administrator_ids: list[str] = Field(default_factory=list)
+    client_problem_bank_administrator_ids: list[str] = Field(default_factory=list)
 
 
 class MarketplaceEsteira2Response(BaseModel):
@@ -2298,6 +2318,9 @@ class VendaDiretaRoboSearchRequest(MarketplaceClientProfile):
     target_amount: Decimal = Field(gt=0)
     target_entrada: Decimal = Field(gt=0)
     category: str
+    quota_category_id: str | None = None
+    client_bank_administrator_ids: list[str] = Field(default_factory=list)
+    client_problem_bank_administrator_ids: list[str] = Field(default_factory=list)
     zipcode: str | None = Field(default=None, max_length=12)
     street: str | None = Field(default=None, max_length=200)
     number: str | None = Field(default=None, max_length=30)

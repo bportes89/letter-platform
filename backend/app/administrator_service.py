@@ -25,8 +25,11 @@ DEFAULT_RULES = {
     "max_asset_age_years": 15,
     "allowed_categories": ["REAL_ESTATE", "VEHICLE"],
     "min_commitment_margin": 0.30,
-    # Marketplace / robô interno (fonte = painel da administradora; Bacen só sincroniza se admin pedir)
+    # Marketplace / robô — espelho legado (banco, correntista, nome sujo)
+    "is_bank": False,
+    "requires_account_holder": False,
     "accepts_dirty_name": False,
+    "alienations": [],
     "accepts_zero_km": True,
     "min_income_to_installment_ratio": 3,
     "bacen_scr_required": True,
@@ -140,6 +143,19 @@ def create_administrator(db: Session, *, name: str, document: str, code: str | N
     )
     db.add(admin)
     db.flush()
+    return admin
+
+
+def update_marketplace_profile(db: Session, admin: Administrator, patch: dict) -> Administrator:
+    current = parse_rules(admin.rules_json)
+    for key in ("is_bank", "requires_account_holder", "accepts_dirty_name"):
+        if key in patch and patch[key] is not None:
+            current[key] = bool(patch[key])
+    if patch.get("alienations") is not None:
+        current["alienations"] = patch["alienations"]
+    admin.bacen_rules_version = int(admin.bacen_rules_version or 1) + 1
+    current["version"] = admin.bacen_rules_version
+    admin.rules_json = json.dumps(current, ensure_ascii=False)
     return admin
 
 

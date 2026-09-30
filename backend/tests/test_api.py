@@ -1600,6 +1600,65 @@ def test_quota_links_subcategory_on_create(client, auth_headers):
     assert body["quota_category_name"] == "Casa teste"
 
 
+def test_marketplace_esteira2_subcategory_filter(client, auth_headers):
+    parent = client.post(
+        "/api/v1/marketplace/quota-categories",
+        headers=auth_headers,
+        json={"name": "Veículos filtro", "title_sub": "Veículo", "legacy_type": 0, "asset_class": "VEHICLE"},
+    ).json()
+    sub_a = client.post(
+        "/api/v1/marketplace/quota-categories",
+        headers=auth_headers,
+        json={"name": "Carro A", "legacy_type": 1, "parent_id": parent["id"]},
+    ).json()
+    sub_b = client.post(
+        "/api/v1/marketplace/quota-categories",
+        headers=auth_headers,
+        json={"name": "Carro B", "legacy_type": 1, "parent_id": parent["id"]},
+    ).json()
+    admins = client.get("/api/v1/administrators", headers=auth_headers).json()
+    admin_id = admins[0]["id"]
+    for code, sub_id in (("SUBA1", sub_a["id"]), ("SUBB1", sub_b["id"])):
+        client.post(
+            "/api/v1/quotas",
+            headers=auth_headers,
+            json={
+                "administrator_id": admin_id,
+                "group_code": "SUBF",
+                "quota_code": code,
+                "category": "VEHICLE",
+                "quota_category_id": sub_id,
+                "credit_value": "400000",
+                "premium_value": "80000",
+                "installment_value": "2500",
+                "installment_due_date": "2027-03-01",
+                "remaining_installments": 48,
+            },
+        )
+    profile = {
+        "monthly_income": "50000",
+        "monthly_commitment": "0",
+        "asset_value": "900000",
+        "asset_year": 2020,
+        "target_amount": "400000",
+        "target_entrada": "80000",
+        "category": "VEHICLE",
+        "quota_category_id": sub_a["id"],
+    }
+    res = client.post("/api/v1/marketplace/esteira-2/match", headers=auth_headers, json=profile)
+    assert res.status_code == 200
+    body = res.json()
+    assert body["eligible"] is True, body.get("blockers")
+    for m in body.get("matches") or []:
+        for q in m.get("quotas") or []:
+            quota = next(
+                x
+                for x in client.get("/api/v1/quotas", headers=auth_headers).json()
+                if x["id"] == q["quota_id"]
+            )
+            assert quota["quota_category_id"] == sub_a["id"]
+
+
 def test_quota_categories_crud(client, auth_headers):
     parent = client.post(
         "/api/v1/marketplace/quota-categories",

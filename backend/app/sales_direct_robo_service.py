@@ -60,6 +60,9 @@ def search_cotas(
     neighborhood: str | None = None,
     city: str | None = None,
     uf: str | None = None,
+    quota_category_id: str | None = None,
+    client_bank_administrator_ids: list[str] | None = None,
+    client_problem_bank_administrator_ids: list[str] | None = None,
 ) -> dict:
     """Passo 1: cria pré-cadastro (Lead) e roda o robô Esteira 2. Sem match → apaga o lead."""
     person = (person_type or "PF").upper()
@@ -83,6 +86,9 @@ def search_cotas(
         has_credit_restriction=has_credit_restriction,
         asset_is_zero_km=asset_is_zero_km,
         target_entrada=target_entrada,
+        quota_category_id=quota_category_id,
+        client_bank_administrator_ids=client_bank_administrator_ids,
+        client_problem_bank_administrator_ids=client_problem_bank_administrator_ids,
     )
 
     has_options = bool(

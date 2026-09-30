@@ -18,4 +18,6 @@ Material do sistema antigo disponível na máquina de desenvolvimento — **não
 - Cotas: campo `quota_category_id` no inventário + export `legacy_quota_category_id` na migração
 - Robô Esteira 2: réguas **10% crédito / 20% entrada / 5% combo**, até **2+2** opções por lane
 
-Próximos blocos: filtro do robô por subcategoria, templates `texts`, qualificação de parceiros, UI administradoras (alienações).
+- Robô/Esteira 2: filtro `quota_category_id` + perfil admin (`is_bank`, correntista, nome sujo, alienações)
+
+Próximos blocos: editor visual de alienações, templates `texts`, qualificação de parceiros, bancos do cliente no robô admin.

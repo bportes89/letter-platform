@@ -88,6 +88,14 @@ export function VendaDiretaRoboModule() {
   const [targetAmount, setTargetAmount] = useState("");
   const [targetEntrada, setTargetEntrada] = useState("");
   const [category, setCategory] = useState("REAL_ESTATE");
+  const [quotaCategoryId, setQuotaCategoryId] = useState("");
+  const [quotaCategories, setQuotaCategories] = useState<
+    { id: string; name: string; legacy_type: number; parent_id: string | null; title_sub: string | null }[]
+  >([]);
+  type BankAdministrator = { id: string; name: string; rules: { is_bank?: boolean } };
+  const [bankAdministrators, setBankAdministrators] = useState<BankAdministrator[]>([]);
+  const [clientBankAdministratorIds, setClientBankAdministratorIds] = useState<string[]>([]);
+  const [clientProblemBankAdministratorIds, setClientProblemBankAdministratorIds] = useState<string[]>([]);
   const [income, setIncome] = useState("");
   const [assetValue, setAssetValue] = useState("");
   const [assetYear, setAssetYear] = useState("");
@@ -111,6 +119,23 @@ export function VendaDiretaRoboModule() {
   };
   const [cadastros, setCadastros] = useState<CadastroShortcut[]>([]);
   const [existingId, setExistingId] = useState("");
+
+  useEffect(() => {
+    api<{ id: string; name: string; legacy_type: number; parent_id: string | null; title_sub: string | null }[]>(
+      "/marketplace/quota-categories",
+    )
+      .then(setQuotaCategories)
+      .catch(() => setQuotaCategories([]));
+    api<{ id: string; name: string; rules: { is_bank?: boolean } }[]>("/administrators")
+      .then((rows) => setBankAdministrators(rows.filter((a) => Boolean(a.rules?.is_bank))))
+      .catch(() => setBankAdministrators([]));
+  }, []);
+
+  function toggleBankId(list: string[], id: string, checked: boolean, setter: (v: string[]) => void) {
+    setter(checked ? [...list, id] : list.filter((x) => x !== id));
+  }
+
+  const subcategories = quotaCategories.filter((c) => c.legacy_type === 1);
 
   const loadCadastros = useCallback(async () => {
     try {
@@ -220,6 +245,9 @@ export function VendaDiretaRoboModule() {
           target_amount: String(parseMoney(targetAmount)),
           target_entrada: String(parseMoney(targetEntrada)),
           category,
+          quota_category_id: quotaCategoryId || null,
+          client_bank_administrator_ids: clientBankAdministratorIds,
+          client_problem_bank_administrator_ids: clientProblemBankAdministratorIds,
           monthly_income: String(parseMoney(income)),
           monthly_commitment: "0",
           asset_value: String(parseMoney(assetValue)),
@@ -389,6 +417,21 @@ export function VendaDiretaRoboModule() {
                   <option value="VEHICLE">Veículo</option>
                 </select>
               </label>
+              <label className="marketplace-field marketplace-field-compact">
+                Subcategoria
+                <select value={quotaCategoryId} onChange={(e) => setQuotaCategoryId(e.target.value)}>
+                  <option value="">Todas</option>
+                  {subcategories.map((s) => {
+                    const p = quotaCategories.find((x) => x.id === s.parent_id);
+                    return (
+                      <option key={s.id} value={s.id}>
+                        {p ? `${p.title_sub || p.name} — ` : ""}
+                        {s.name}
+                      </option>
+                    );
+                  })}
+                </select>
+              </label>
               <label className="marketplace-field">
                 Renda mensal (R$)
                 <CurrencyInput value={income} onChange={setIncome} required />
@@ -412,6 +455,46 @@ export function VendaDiretaRoboModule() {
                 Bem zero km
               </label>
             </div>
+
+            {bankAdministrators.length > 0 && (
+              <div className="marketplace-form-row" style={{ flexDirection: "column", alignItems: "stretch", gap: 10 }}>
+                <small className="muted">
+                  Bancos administradores (legado): marque onde o cliente é correntista ou tem restrição com a administradora.
+                </small>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "12px 20px" }}>
+                  {bankAdministrators.map((adm) => (
+                    <div key={adm.id} style={{ minWidth: 200 }}>
+                      <b style={{ fontSize: 11 }}>{adm.name}</b>
+                      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, marginTop: 4 }}>
+                        <input
+                          type="checkbox"
+                          checked={clientBankAdministratorIds.includes(adm.id)}
+                          onChange={(e) =>
+                            toggleBankId(clientBankAdministratorIds, adm.id, e.target.checked, setClientBankAdministratorIds)
+                          }
+                        />
+                        Cliente correntista
+                      </label>
+                      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, marginTop: 2 }}>
+                        <input
+                          type="checkbox"
+                          checked={clientProblemBankAdministratorIds.includes(adm.id)}
+                          onChange={(e) =>
+                            toggleBankId(
+                              clientProblemBankAdministratorIds,
+                              adm.id,
+                              e.target.checked,
+                              setClientProblemBankAdministratorIds,
+                            )
+                          }
+                        />
+                        Restrição / inadimplência
+                      </label>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div className="marketplace-form-row">
               <label className="marketplace-field marketplace-field-compact">

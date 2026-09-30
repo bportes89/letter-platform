@@ -305,6 +305,8 @@ export function MarketplaceModule() {
   const [targetAmount,setTargetAmount]=useState("");
   const [targetEntrada,setTargetEntrada]=useState("");
   const [category,setCategory]=useState("REAL_ESTATE");
+  const [quotaCategories,setQuotaCategories]=useState<{id:string;name:string;legacy_type:number;parent_id:string|null;title_sub:string|null}[]>([]);
+  const [e2SubcategoryId,setE2SubcategoryId]=useState("");
   const [result1,setResult1]=useState<MarketplaceEsteira1Result|null>(null);
   const [result2,setResult2]=useState<MarketplaceEsteira2Result|null>(null);
   const [esteira1Busy,setEsteira1Busy]=useState(false);
@@ -313,6 +315,8 @@ export function MarketplaceModule() {
     `/marketplace/venda-direta-manual/cotas?category=${encodeURIComponent(cat)}&include_reserved=true`,
   ).then(setCatalog).catch(e=>setError(e.message));
   useEffect(()=>{void loadCatalog(e1Category)},[e1Category]);
+  useEffect(()=>{api<{id:string;name:string;legacy_type:number;parent_id:string|null;title_sub:string|null}[]>("/marketplace/quota-categories").then(setQuotaCategories).catch(()=>setQuotaCategories([]))},[]);
+  const e2Subcategories=useMemo(()=>quotaCategories.filter(c=>c.legacy_type===1),[quotaCategories]);
   const e1FilterActive = parseMoney(e1FilterCredit) > 0 || parseMoney(e1FilterEntrada) > 0 || !!e1FilterAdministratorId;
   const e1AdministratorOptions=useMemo(()=>{
     const map=new Map<string,string>();
@@ -370,7 +374,7 @@ export function MarketplaceModule() {
     };
   };
   async function assessEsteira1(e:FormEvent){e.preventDefault();setError("");setNotice("");const validation=profileValidationMessage("e1",e1Category,profile);if(validation){setError(validation);return}if(!selectedQuotaIds.length){setError("Selecione ao menos uma carta na lista.");return}setEsteira1Busy(true);try{const data=await api<MarketplaceEsteira1Result>("/marketplace/esteira-1/assess",{method:"POST",body:JSON.stringify({quota_ids:selectedQuotaIds,...profilePayload("e1",e1Category)})},{interactive:true});setResult1(data);setNotice(data.message)}catch(err){setError(err instanceof Error?err.message:"Falha na Esteira 1")}finally{setEsteira1Busy(false)}}
-  async function matchEsteira2(e:FormEvent){e.preventDefault();setError("");setNotice("");setResult2(null);const validation=profileValidationMessage("e2",category,profile);if(validation){setError(validation);return}if(!parseMoney(targetAmount)){setError("Informe o crédito desejado.");return}if(!parseMoney(targetEntrada)){setError("Informe a entrada desejada.");return}setEsteira2Busy(true);try{const data=await api<MarketplaceEsteira2Result>("/marketplace/esteira-2/match",{method:"POST",body:JSON.stringify({target_amount:String(parseMoney(targetAmount)),target_entrada:String(parseMoney(targetEntrada)),category,...profilePayload("e2",category)})},{interactive:true});setResult2(data);setNotice(data.message);if(!data.eligible&&data.blockers?.length)setError(data.blockers.join(" "))}catch(err){setError(err instanceof Error?err.message:"Falha na Esteira 2")}finally{setEsteira2Busy(false)}}
+  async function matchEsteira2(e:FormEvent){e.preventDefault();setError("");setNotice("");setResult2(null);const validation=profileValidationMessage("e2",category,profile);if(validation){setError(validation);return}if(!parseMoney(targetAmount)){setError("Informe o crédito desejado.");return}if(!parseMoney(targetEntrada)){setError("Informe a entrada desejada.");return}setEsteira2Busy(true);try{const data=await api<MarketplaceEsteira2Result>("/marketplace/esteira-2/match",{method:"POST",body:JSON.stringify({target_amount:String(parseMoney(targetAmount)),target_entrada:String(parseMoney(targetEntrada)),category,quota_category_id:e2SubcategoryId||null,...profilePayload("e2",category)})},{interactive:true});setResult2(data);setNotice(data.message);if(!data.eligible&&data.blockers?.length)setError(data.blockers.join(" "))}catch(err){setError(err instanceof Error?err.message:"Falha na Esteira 2")}finally{setEsteira2Busy(false)}}
   async function reserveQuota(quotaId:string){setError("");try{await api("/reservations",{method:"POST",body:JSON.stringify({quota_id:quotaId,ttl_minutes:60})});setNotice("Cota travada por 60 minutos. Prossiga em Propostas.");void loadCatalog(e1Category)}catch(err){setError(err instanceof Error?err.message:"Falha na trava")}}
   async function reserveSelectedQuotas(ids: string[]) {
     setError("");
@@ -525,6 +529,7 @@ export function MarketplaceModule() {
         <label className="marketplace-field">Crédito desejado (R$)<CurrencyInput value={targetAmount} onChange={setTargetAmount} required/></label>
         <label className="marketplace-field">Entrada desejada (R$)<CurrencyInput value={targetEntrada} onChange={setTargetEntrada} required/></label>
         <label className="marketplace-field marketplace-field-compact">Categoria<select value={category} onChange={e=>setCategory(e.target.value)}><option value="REAL_ESTATE">Imóvel</option><option value="VEHICLE">Veículo</option></select></label>
+        <label className="marketplace-field marketplace-field-compact">Subcategoria<select value={e2SubcategoryId} onChange={e=>setE2SubcategoryId(e.target.value)}><option value="">Todas (tipo de bem)</option>{e2Subcategories.map(s=>{const p=quotaCategories.find(x=>x.id===s.parent_id);return<option key={s.id} value={s.id}>{p?(p.title_sub||p.name)+" — ":""}{s.name}</option>})}</select></label>
         <ClientProfileFields prefix="e2" category={category} values={profile} flags={flags} onChange={(k,v)=>setProfile(p=>({...p,[k]:v}))} onFlag={(k,v)=>setFlags(p=>({...p,[k]:v}))}/>
         <button type="submit" className="marketplace-submit" disabled={esteira2Busy}><RefreshCw className={esteira2Busy?"spin":undefined}/>{esteira2Busy?"Buscando opções robô…":"Buscar opções robô"}</button>
       </div>

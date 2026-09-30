@@ -516,6 +516,38 @@ def _apply_administrators(
             db.flush()
             created["administrators"] = created.get("administrators", 0) + 1
 
+        flags = row.get("legacy_flags") or {}
+        alienations = row.get("alienations") or []
+        if flags or alienations:
+            from app.administrator_marketplace_profile import rules_patch_from_legacy_flags
+            from app.administrator_service import update_administrator_rules
+            from app.models import QuotaCategory
+
+            mapped_alienations: list[dict[str, Any]] = []
+            for item in alienations:
+                if not isinstance(item, dict):
+                    continue
+                legacy_cat = item.get("legacy_quota_category_id")
+                if legacy_cat is None:
+                    continue
+                cat_row = db.scalar(
+                    select(QuotaCategory).where(
+                        QuotaCategory.organization_id == actor.organization_id,
+                        QuotaCategory.legacy_id == int(legacy_cat),
+                    )
+                )
+                if not cat_row:
+                    continue
+                mapped_alienations.append(
+                    {
+                        "quota_category_id": cat_row.id,
+                        "legacy_quota_category_id": int(legacy_cat),
+                        "max_vehicle_age_years": item.get("max_vehicle_age_years"),
+                    }
+                )
+            patch = rules_patch_from_legacy_flags(flags, mapped_alienations or None)
+            update_administrator_rules(db, target, rules=patch, bump_version=False)
+
         _remember_map(
             db,
             organization_id=actor.organization_id,

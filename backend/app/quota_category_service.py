@@ -42,6 +42,32 @@ def asset_class_for_category(db: Session, category: QuotaCategory) -> str | None
     return None
 
 
+def quota_category_filter_ids(db: Session, organization_id: str, quota_category_id: str | None) -> set[str] | None:
+    """IDs de quota_categories aceitos no filtro (pai inclui subcategorias)."""
+    if not quota_category_id:
+        return None
+    row = db.scalar(
+        select(QuotaCategory).where(
+            QuotaCategory.id == quota_category_id,
+            QuotaCategory.organization_id == organization_id,
+            QuotaCategory.active.is_(True),
+        )
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Categoria de cota não encontrada")
+    if int(row.legacy_type or 0) == 1:
+        return {row.id}
+    children = db.scalars(
+        select(QuotaCategory.id).where(
+            QuotaCategory.organization_id == organization_id,
+            QuotaCategory.parent_id == row.id,
+            QuotaCategory.active.is_(True),
+        )
+    ).all()
+    ids = {row.id, *children}
+    return ids
+
+
 def resolve_quota_asset_class(db: Session, organization_id: str, quota_category_id: str | None) -> str | None:
     if not quota_category_id:
         return None

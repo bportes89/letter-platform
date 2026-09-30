@@ -34,13 +34,24 @@ export function AdministratorsModule() {
   const [error, setError] = useState("");
   const [selected, setSelected] = useState<Administrator | null>(null);
   const [rulesDraft, setRulesDraft] = useState("");
+  const [profileAdmin, setProfileAdmin] = useState<Administrator | null>(null);
+  const [isBank, setIsBank] = useState(false);
+  const [requiresHolder, setRequiresHolder] = useState(false);
+  const [acceptsDirty, setAcceptsDirty] = useState(false);
+  const [quotaCategories, setQuotaCategories] = useState<
+    { id: string; name: string; legacy_type: number; parent_id: string | null; title_sub: string | null }[]
+  >([]);
 
   const load = useCallback(async () => {
-    const [admins, status, user] = await Promise.all([
+    const [admins, status, user, categories] = await Promise.all([
       api<Administrator[]>("/administrators"),
       api<BacenStatus>("/integrations/bacen-scr/status"),
       api<User>("/auth/me"),
+      api<{ id: string; name: string; legacy_type: number; parent_id: string | null; title_sub: string | null }[]>(
+        "/marketplace/quota-categories",
+      ).catch(() => []),
     ]);
+    setQuotaCategories(categories);
     setItems(admins);
     setBacen(status);
     setMe(user);
@@ -107,6 +118,44 @@ export function AdministratorsModule() {
   function openRules(admin: Administrator) {
     setSelected(admin);
     setRulesDraft(JSON.stringify(admin.rules, null, 2));
+    setProfileAdmin(null);
+  }
+
+  function openProfile(admin: Administrator) {
+    setProfileAdmin(admin);
+    setSelected(null);
+    const r = admin.rules as Record<string, unknown>;
+    setIsBank(Boolean(r.is_bank));
+    setRequiresHolder(Boolean(r.requires_account_holder));
+    setAcceptsDirty(Boolean(r.accepts_dirty_name));
+  }
+
+  async function saveProfile(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!profileAdmin || !canAdmin) return;
+    const alienations = (profileAdmin.rules.alienations as { quota_category_id?: string; max_vehicle_age_years?: number | null }[]) || [];
+    await api(`/administrators/${profileAdmin.id}/marketplace-profile`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        is_bank: isBank,
+        requires_account_holder: requiresHolder,
+        accepts_dirty_name: acceptsDirty,
+        alienations: alienations
+          .filter((a) => a.quota_category_id)
+          .map((a) => ({
+            quota_category_id: a.quota_category_id,
+            max_vehicle_age_years: a.max_vehicle_age_years ?? null,
+          })),
+      }),
+    });
+    setMessage(`Perfil marketplace de ${profileAdmin.name} atualizado.`);
+    setProfileAdmin(null);
+    await load();
+  }
+
+  function flagLabel(admin: Administrator, key: string) {
+    const r = admin.rules as Record<string, unknown>;
+    return r[key] ? "Sim" : "Não";
   }
 
   return (
@@ -160,6 +209,9 @@ export function AdministratorsModule() {
               <tr>
                 <th>Administradora</th>
                 <th>Status</th>
+                <th>Banco</th>
+                <th>Correntista</th>
+                <th>Nome sujo</th>
                 <th>Regras</th>
                 <th>Última varredura Bacen</th>
                 <th>Homologação</th>
@@ -171,12 +223,16 @@ export function AdministratorsModule() {
                 <tr key={a.id}>
                   <td><b>{a.name}</b><small>{a.code} · {a.document}</small></td>
                   <td><span className={`pill pill-${a.authorization_status.toLowerCase()}`}>{a.authorization_status}</span></td>
+                  <td>{flagLabel(a, "is_bank")}</td>
+                  <td>{flagLabel(a, "requires_account_holder")}</td>
+                  <td>{flagLabel(a, "accepts_dirty_name")}</td>
                   <td>v{a.rules_version}</td>
                   <td>{date(a.bacen_rules_synced_at)}</td>
                   <td>{date(a.homologated_at)}</td>
                   {canAdmin && (
                     <td className="actions-cell">
-                      <button type="button" className="table-action" onClick={() => openRules(a)}>Regras</button>
+                      <button type="button" className="table-action" onClick={() => openProfile(a)}>Perfil</button>
+                      <button type="button" className="table-action" onClick={() => openRules(a)}>Regras JSON</button>
                       {a.authorization_status !== "AUTHORIZED" && (
                         <button type="button" className="table-action" onClick={() => homologate(a, true)}>Homologar</button>
                       )}
@@ -191,6 +247,35 @@ export function AdministratorsModule() {
           </table>
         </div>
       </section>
+
+      {profileAdmin && canAdmin && (
+        <section className="panel">
+          <h2>Perfil marketplace — {profileAdmin.name}</h2>
+          <p className="muted">Espelho do legado: banco, correntista, nome sujo. Alienções vêm da migração ou do JSON de regras.</p>
+          <form className="stack-form" onSubmit={saveProfile}>
+            <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input type="checkbox" checked={isBank} onChange={(e) => setIsBank(e.target.checked)} /> É banco (lista no chat)
+            </label>
+            <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input type="checkbox" checked={requiresHolder} onChange={(e) => setRequiresHolder(e.target.checked)} /> Exige ser correntista
+            </label>
+            <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input type="checkbox" checked={acceptsDirty} onChange={(e) => setAcceptsDirty(e.target.checked)} /> Aceita nome sujo (SPC/Serasa)
+            </label>
+            <button type="submit">Salvar perfil</button>
+            <button type="button" className="table-action" onClick={() => setProfileAdmin(null)}>Cancelar</button>
+          </form>
+          <p className="muted" style={{ marginTop: 12 }}>
+            Alienções cadastradas: {((profileAdmin.rules.alienations as unknown[]) || []).length}. Edite detalhes em Regras JSON ou reimporte do legado.
+          </p>
+          <ul className="muted" style={{ fontSize: 11 }}>
+            {quotaCategories.slice(0, 5).map((c) => (
+              <li key={c.id}>{c.name}</li>
+            ))}
+            {quotaCategories.length > 5 ? <li>…{quotaCategories.length} categorias no sistema</li> : null}
+          </ul>
+        </section>
+      )}
 
       {selected && canAdmin && (
         <section className="panel">

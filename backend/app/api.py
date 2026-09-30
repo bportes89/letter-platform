@@ -33,6 +33,7 @@ from app.models import (
 )
 from app.schemas import (
     AccountBalanceView, AdministratorCreate, AdministratorHomologate, AdministratorRulesUpdate,
+    AdministratorMarketplaceProfileUpdate,
     AdministratorView, BacenAdministratorRulesSyncView, BacenScrStatusView,
     AuctionBidCreate, AuctionBidView, AuctionLotCreate, AuctionLotView, BISummaryView,
     AuctionQualificationRequest, AuctionQualificationView, AuctionSettlementView,
@@ -217,6 +218,7 @@ from app.tapaf_constants import (
 from app.administrator_service import (
     administrator_view, create_administrator, homologate_administrator,
     homologated_codes, homologated_name_keys, list_administrators, update_administrator_rules,
+    update_marketplace_profile,
 )
 from app.bacen_scr_service import bacen_scr_client
 from app.bacen_administrator_rules_sync import (
@@ -1635,6 +1637,26 @@ def create_administrator_route(payload: AdministratorCreate, user: User = Depend
     return administrator_view(admin)
 
 
+@router.patch("/administrators/{administrator_id}/marketplace-profile", response_model=AdministratorView)
+def update_administrator_marketplace_profile_route(
+    administrator_id: str,
+    payload: AdministratorMarketplaceProfileUpdate,
+    user: User = Depends(require_scope("admin:users")),
+    db: Session = Depends(get_db),
+):
+    admin = db.get(Administrator, administrator_id)
+    if not admin:
+        raise HTTPException(status_code=404, detail="Administradora não encontrada")
+    patch = payload.model_dump(exclude_unset=True)
+    if patch.get("alienations") is not None:
+        patch["alienations"] = [a.model_dump() for a in payload.alienations or []]
+    update_marketplace_profile(db, admin, patch)
+    audit(db, user, "administrator.marketplace_profile", "administrator", admin.id, patch)
+    db.commit()
+    db.refresh(admin)
+    return administrator_view(admin)
+
+
 @router.patch("/administrators/{administrator_id}/rules", response_model=AdministratorView)
 def update_administrator_rules_route(
     administrator_id: str,
@@ -2451,6 +2473,9 @@ def marketplace_esteira2(payload: MarketplaceEsteira2Request, user: User = Depen
         has_credit_restriction=payload.has_credit_restriction,
         asset_is_zero_km=payload.asset_is_zero_km,
         target_entrada=payload.target_entrada,
+        quota_category_id=payload.quota_category_id,
+        client_bank_administrator_ids=payload.client_bank_administrator_ids,
+        client_problem_bank_administrator_ids=payload.client_problem_bank_administrator_ids,
     )
     audit(db, user, "marketplace.esteira2", "marketplace", "match", {"matches": len(result["matches"])})
     db.commit()
@@ -2494,6 +2519,9 @@ def venda_direta_robo_search(payload: VendaDiretaRoboSearchRequest, user: User =
         neighborhood=payload.neighborhood,
         city=payload.city,
         uf=payload.uf,
+        quota_category_id=payload.quota_category_id,
+        client_bank_administrator_ids=payload.client_bank_administrator_ids,
+        client_problem_bank_administrator_ids=payload.client_problem_bank_administrator_ids,
     )
     audit(db, user, "marketplace.venda_direta_robo.search", "lead", result["lead_id"], {"matches": len(result.get("matches") or [])})
     db.commit()

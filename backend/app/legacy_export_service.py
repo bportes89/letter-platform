@@ -9,6 +9,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
+from app.administrator_marketplace_profile import alienations_from_legacy_row
 from app.legacy_sql_parser import load_table
 
 DEFAULT_SQL = Path(__file__).resolve().parents[2] / "legacy" / "letter_banco_new.sql"
@@ -251,6 +252,7 @@ def export_legacy_bundle(
                     "correntista": int(row.get("correntista") or 0),
                     "nome_sujo": int(row.get("nome_sujo") or 0),
                 },
+                "alienations": alienations_from_legacy_row(row),
             }
         )
 

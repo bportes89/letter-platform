@@ -293,10 +293,13 @@ def admin_profile_blockers(
                 f"Bem com {age} anos — acima do limite de {max_age} anos nas regras de {admin.name}."
             )
 
-    if has_credit_restriction and not bool(rules.get("accepts_dirty_name", False)):
-        blockers.append(
-            f"Administradora {admin.name} não aceita cliente com restrição SPC/Serasa (regras internas)."
-        )
+    if has_credit_restriction:
+        from app.administrator_marketplace_profile import administrator_accepts_dirty_name
+
+        if not administrator_accepts_dirty_name(admin):
+            blockers.append(
+                f"Administradora {admin.name} não aceita cliente com restrição SPC/Serasa (regras internas)."
+            )
 
     ratio = Decimal(str(rules.get("min_income_to_installment_ratio") or DEFAULT_INCOME_RATIO))
     approval = rules.get("approval_rules") if isinstance(rules.get("approval_rules"), dict) else {}
@@ -388,6 +391,18 @@ def _eligible_combo_candidate(
         target_amount=target_amount,
         combo_size=len(quotas),
     )
+    for q in quotas:
+        from app.administrator_marketplace_profile import alienation_blockers
+
+        blockers.extend(
+            alienation_blockers(
+                admin,
+                q,
+                category=category,
+                asset_year=asset_year,
+                asset_is_zero_km=asset_is_zero_km,
+            )
+        )
     if blockers:
         return None
     credit_dev = _deviation_percent(pricing["credit"], target_amount)
@@ -452,6 +467,9 @@ def _rank_alternatives(
     max_combo_size: int = 3,
     prefilter_band: bool = False,
     require_nina_cleared: bool = False,
+    quota_category_ids: set[str] | None = None,
+    client_bank_administrator_ids: set[str] | None = None,
+    client_problem_bank_administrator_ids: set[str] | None = None,
 ) -> list[dict]:
     """Candidatos na banda de crédito (e entrada, se informada)."""
     credit_band = credit_band_percent if credit_band_percent is not None else band_percent
@@ -468,6 +486,23 @@ def _rank_alternatives(
     if require_nina_cleared:
         filters.append(Quota.nina_scan_status == "CLEARED")
     quotas = list(db.scalars(select(Quota).where(*filters)))
+
+    if quota_category_ids:
+        quotas = [q for q in quotas if q.quota_category_id and q.quota_category_id in quota_category_ids]
+
+    if client_bank_administrator_ids or client_problem_bank_administrator_ids:
+        from app.administrator_marketplace_profile import administrator_in_client_pool
+
+        filtered: list[Quota] = []
+        for q in quotas:
+            admin = db.get(Administrator, q.administrator_id)
+            if admin and administrator_in_client_pool(
+                admin,
+                client_bank_administrator_ids=client_bank_administrator_ids,
+                client_problem_bank_administrator_ids=client_problem_bank_administrator_ids,
+            ):
+                filtered.append(q)
+        quotas = filtered
 
     if prefilter_band and target_entrada is not None and target_entrada > 0:
         banded: list[Quota] = []
@@ -752,6 +787,9 @@ def esteira2_nina_curated_match(
     limit: int = 8,
     as_of: date | None = None,
     affiliate_markup: dict[str, str] | None = None,
+    quota_category_id: str | None = None,
+    client_bank_administrator_ids: list[str] | None = None,
+    client_problem_bank_administrator_ids: list[str] | None = None,
 ) -> dict:
     """Esteira 2 robô: banda 10%, lanes crédito/entrada, rollover 7d e markup fornecedor."""
     del monthly_commitment
@@ -805,6 +843,12 @@ def esteira2_nina_curated_match(
             "message": "Perfil incompleto para matching.",
         }
 
+    from app.quota_category_service import quota_category_filter_ids
+
+    category_ids = quota_category_filter_ids(db, user.organization_id, quota_category_id)
+    bank_ids = set(client_bank_administrator_ids or []) if client_bank_administrator_ids else None
+    problem_ids = set(client_problem_bank_administrator_ids or []) if client_problem_bank_administrator_ids else None
+
     pool = _rank_alternatives(
         db,
         user,
@@ -826,6 +870,9 @@ def esteira2_nina_curated_match(
         max_combo_size=3,
         prefilter_band=True,
         require_nina_cleared=True,
+        quota_category_ids=category_ids,
+        client_bank_administrator_ids=bank_ids,
+        client_problem_bank_administrator_ids=problem_ids,
     )
 
     credit_lane: list[dict] = []
