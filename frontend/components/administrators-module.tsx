@@ -38,9 +38,38 @@ export function AdministratorsModule() {
   const [isBank, setIsBank] = useState(false);
   const [requiresHolder, setRequiresHolder] = useState(false);
   const [acceptsDirty, setAcceptsDirty] = useState(false);
+  const [profileAlienations, setProfileAlienations] = useState<
+    { quota_category_id: string; max_vehicle_age_years: number | null }[]
+  >([]);
   const [quotaCategories, setQuotaCategories] = useState<
     { id: string; name: string; legacy_type: number; parent_id: string | null; title_sub: string | null }[]
   >([]);
+
+  const maxYearOptions = [
+    { value: "", label: "(sem restrição)" },
+    { value: "0", label: "Somente Zero KM" },
+    ...Array.from({ length: 30 }, (_, i) => ({ value: String(i + 1), label: `Até ${i + 1} ano(s)` })),
+  ];
+
+  function categorySelectOptions() {
+    const parents = quotaCategories.filter((c) => c.legacy_type === 0);
+    const subs = quotaCategories.filter((c) => c.legacy_type === 1);
+    const out: { id: string; label: string }[] = [];
+    for (const p of parents) {
+      out.push({ id: p.id, label: p.title_sub || p.name });
+      for (const s of subs.filter((x) => x.parent_id === p.id)) {
+        out.push({ id: s.id, label: `-- ${s.name}` });
+      }
+    }
+    const known = new Set(out.map((o) => o.id));
+    for (const row of profileAlienations) {
+      if (row.quota_category_id && !known.has(row.quota_category_id)) {
+        const c = quotaCategories.find((x) => x.id === row.quota_category_id);
+        out.push({ id: row.quota_category_id, label: c?.name || row.quota_category_id });
+      }
+    }
+    return out;
+  }
 
   const load = useCallback(async () => {
     const [admins, status, user, categories] = await Promise.all([
@@ -128,24 +157,46 @@ export function AdministratorsModule() {
     setIsBank(Boolean(r.is_bank));
     setRequiresHolder(Boolean(r.requires_account_holder));
     setAcceptsDirty(Boolean(r.accepts_dirty_name));
+    const raw = (r.alienations as { quota_category_id?: string; max_vehicle_age_years?: number | null }[]) || [];
+    setProfileAlienations(
+      raw.map((a) => ({
+        quota_category_id: a.quota_category_id || "",
+        max_vehicle_age_years:
+          a.max_vehicle_age_years === undefined || a.max_vehicle_age_years === null
+            ? null
+            : Number(a.max_vehicle_age_years),
+      })),
+    );
+  }
+
+  function addAlienationRow() {
+    setProfileAlienations((rows) => [...rows, { quota_category_id: "", max_vehicle_age_years: null }]);
+  }
+
+  function removeAlienationRow(index: number) {
+    setProfileAlienations((rows) => rows.filter((_, i) => i !== index));
+  }
+
+  function updateAlienationRow(index: number, patch: Partial<{ quota_category_id: string; max_vehicle_age_years: number | null }>) {
+    setProfileAlienations((rows) => rows.map((row, i) => (i === index ? { ...row, ...patch } : row)));
   }
 
   async function saveProfile(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!profileAdmin || !canAdmin) return;
-    const alienations = (profileAdmin.rules.alienations as { quota_category_id?: string; max_vehicle_age_years?: number | null }[]) || [];
+    const alienations = profileAlienations
+      .filter((a) => a.quota_category_id)
+      .map((a) => ({
+        quota_category_id: a.quota_category_id,
+        max_vehicle_age_years: a.max_vehicle_age_years,
+      }));
     await api(`/administrators/${profileAdmin.id}/marketplace-profile`, {
       method: "PATCH",
       body: JSON.stringify({
         is_bank: isBank,
         requires_account_holder: requiresHolder,
         accepts_dirty_name: acceptsDirty,
-        alienations: alienations
-          .filter((a) => a.quota_category_id)
-          .map((a) => ({
-            quota_category_id: a.quota_category_id,
-            max_vehicle_age_years: a.max_vehicle_age_years ?? null,
-          })),
+        alienations,
       }),
     });
     setMessage(`Perfil marketplace de ${profileAdmin.name} atualizado.`);
@@ -251,7 +302,7 @@ export function AdministratorsModule() {
       {profileAdmin && canAdmin && (
         <section className="panel">
           <h2>Perfil marketplace — {profileAdmin.name}</h2>
-          <p className="muted">Espelho do legado: banco, correntista, nome sujo. Alienções vêm da migração ou do JSON de regras.</p>
+          <p className="muted">Espelho do legado: banco, correntista, nome sujo e alienações (categoria + ano máx. para veículos).</p>
           <form className="stack-form" onSubmit={saveProfile}>
             <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
               <input type="checkbox" checked={isBank} onChange={(e) => setIsBank(e.target.checked)} /> É banco (lista no chat)
@@ -262,18 +313,57 @@ export function AdministratorsModule() {
             <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
               <input type="checkbox" checked={acceptsDirty} onChange={(e) => setAcceptsDirty(e.target.checked)} /> Aceita nome sujo (SPC/Serasa)
             </label>
+
+            <div style={{ marginTop: 8 }}>
+              <h3 style={{ fontSize: 13, marginBottom: 8 }}>Alienações</h3>
+              <p className="muted" style={{ fontSize: 11, marginBottom: 10 }}>
+                Tipos de bem que a administradora financia. Ano máximo vale para veículos; imóveis ignoram o ano.
+              </p>
+              {profileAlienations.length === 0 && (
+                <p className="muted" style={{ fontSize: 11 }}>Nenhuma alienação — todas as categorias de cota podem aparecer (salvo outras regras).</p>
+              )}
+              {profileAlienations.map((row, index) => (
+                <div key={index} style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "flex-end", marginBottom: 10 }}>
+                  <label style={{ flex: "1 1 220px", fontSize: 11 }}>
+                    Categoria / subcategoria
+                    <select
+                      value={row.quota_category_id}
+                      onChange={(e) => updateAlienationRow(index, { quota_category_id: e.target.value })}
+                      required
+                    >
+                      <option value="">Selecione…</option>
+                      {categorySelectOptions().map((o) => (
+                        <option key={o.id} value={o.id}>{o.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label style={{ flex: "1 1 180px", fontSize: 11 }}>
+                    Ano máx. fabricação
+                    <select
+                      value={row.max_vehicle_age_years === null ? "" : String(row.max_vehicle_age_years)}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        updateAlienationRow(index, {
+                          max_vehicle_age_years: v === "" ? null : Number(v),
+                        });
+                      }}
+                    >
+                      {maxYearOptions.map((o) => (
+                        <option key={o.value || "none"} value={o.value}>{o.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <button type="button" className="table-action" onClick={() => removeAlienationRow(index)} title="Remover alienação">
+                    Remover
+                  </button>
+                </div>
+              ))}
+              <button type="button" className="table-action" onClick={addAlienationRow}>+ Adicionar alienação</button>
+            </div>
+
             <button type="submit">Salvar perfil</button>
             <button type="button" className="table-action" onClick={() => setProfileAdmin(null)}>Cancelar</button>
           </form>
-          <p className="muted" style={{ marginTop: 12 }}>
-            Alienções cadastradas: {((profileAdmin.rules.alienations as unknown[]) || []).length}. Edite detalhes em Regras JSON ou reimporte do legado.
-          </p>
-          <ul className="muted" style={{ fontSize: 11 }}>
-            {quotaCategories.slice(0, 5).map((c) => (
-              <li key={c.id}>{c.name}</li>
-            ))}
-            {quotaCategories.length > 5 ? <li>…{quotaCategories.length} categorias no sistema</li> : null}
-          </ul>
         </section>
       )}
 

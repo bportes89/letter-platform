@@ -396,6 +396,7 @@ def _eligible_combo_candidate(
 
         blockers.extend(
             alienation_blockers(
+                db,
                 admin,
                 q,
                 category=category,

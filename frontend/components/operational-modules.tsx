@@ -307,6 +307,9 @@ export function MarketplaceModule() {
   const [category,setCategory]=useState("REAL_ESTATE");
   const [quotaCategories,setQuotaCategories]=useState<{id:string;name:string;legacy_type:number;parent_id:string|null;title_sub:string|null}[]>([]);
   const [e2SubcategoryId,setE2SubcategoryId]=useState("");
+  const [e2BankAdmins,setE2BankAdmins]=useState<{id:string;name:string;rules:{is_bank?:boolean}}[]>([]);
+  const [e2ClientBankIds,setE2ClientBankIds]=useState<string[]>([]);
+  const [e2ClientProblemBankIds,setE2ClientProblemBankIds]=useState<string[]>([]);
   const [result1,setResult1]=useState<MarketplaceEsteira1Result|null>(null);
   const [result2,setResult2]=useState<MarketplaceEsteira2Result|null>(null);
   const [esteira1Busy,setEsteira1Busy]=useState(false);
@@ -316,6 +319,8 @@ export function MarketplaceModule() {
   ).then(setCatalog).catch(e=>setError(e.message));
   useEffect(()=>{void loadCatalog(e1Category)},[e1Category]);
   useEffect(()=>{api<{id:string;name:string;legacy_type:number;parent_id:string|null;title_sub:string|null}[]>("/marketplace/quota-categories").then(setQuotaCategories).catch(()=>setQuotaCategories([]))},[]);
+  useEffect(()=>{api<{id:string;name:string;rules:{is_bank?:boolean}}[]>("/administrators").then(rows=>setE2BankAdmins(rows.filter(a=>Boolean(a.rules?.is_bank)))).catch(()=>setE2BankAdmins([]))},[]);
+  function toggleE2BankId(list:string[],id:string,checked:boolean,setter:(v:string[])=>void){setter(checked?[...list,id]:list.filter(x=>x!==id));}
   const e2Subcategories=useMemo(()=>quotaCategories.filter(c=>c.legacy_type===1),[quotaCategories]);
   const e1FilterActive = parseMoney(e1FilterCredit) > 0 || parseMoney(e1FilterEntrada) > 0 || !!e1FilterAdministratorId;
   const e1AdministratorOptions=useMemo(()=>{
@@ -374,7 +379,7 @@ export function MarketplaceModule() {
     };
   };
   async function assessEsteira1(e:FormEvent){e.preventDefault();setError("");setNotice("");const validation=profileValidationMessage("e1",e1Category,profile);if(validation){setError(validation);return}if(!selectedQuotaIds.length){setError("Selecione ao menos uma carta na lista.");return}setEsteira1Busy(true);try{const data=await api<MarketplaceEsteira1Result>("/marketplace/esteira-1/assess",{method:"POST",body:JSON.stringify({quota_ids:selectedQuotaIds,...profilePayload("e1",e1Category)})},{interactive:true});setResult1(data);setNotice(data.message)}catch(err){setError(err instanceof Error?err.message:"Falha na Esteira 1")}finally{setEsteira1Busy(false)}}
-  async function matchEsteira2(e:FormEvent){e.preventDefault();setError("");setNotice("");setResult2(null);const validation=profileValidationMessage("e2",category,profile);if(validation){setError(validation);return}if(!parseMoney(targetAmount)){setError("Informe o crédito desejado.");return}if(!parseMoney(targetEntrada)){setError("Informe a entrada desejada.");return}setEsteira2Busy(true);try{const data=await api<MarketplaceEsteira2Result>("/marketplace/esteira-2/match",{method:"POST",body:JSON.stringify({target_amount:String(parseMoney(targetAmount)),target_entrada:String(parseMoney(targetEntrada)),category,quota_category_id:e2SubcategoryId||null,...profilePayload("e2",category)})},{interactive:true});setResult2(data);setNotice(data.message);if(!data.eligible&&data.blockers?.length)setError(data.blockers.join(" "))}catch(err){setError(err instanceof Error?err.message:"Falha na Esteira 2")}finally{setEsteira2Busy(false)}}
+  async function matchEsteira2(e:FormEvent){e.preventDefault();setError("");setNotice("");setResult2(null);const validation=profileValidationMessage("e2",category,profile);if(validation){setError(validation);return}if(!parseMoney(targetAmount)){setError("Informe o crédito desejado.");return}if(!parseMoney(targetEntrada)){setError("Informe a entrada desejada.");return}setEsteira2Busy(true);try{const data=await api<MarketplaceEsteira2Result>("/marketplace/esteira-2/match",{method:"POST",body:JSON.stringify({target_amount:String(parseMoney(targetAmount)),target_entrada:String(parseMoney(targetEntrada)),category,quota_category_id:e2SubcategoryId||null,client_bank_administrator_ids:e2ClientBankIds,client_problem_bank_administrator_ids:e2ClientProblemBankIds,...profilePayload("e2",category)})},{interactive:true});setResult2(data);setNotice(data.message);if(!data.eligible&&data.blockers?.length)setError(data.blockers.join(" "))}catch(err){setError(err instanceof Error?err.message:"Falha na Esteira 2")}finally{setEsteira2Busy(false)}}
   async function reserveQuota(quotaId:string){setError("");try{await api("/reservations",{method:"POST",body:JSON.stringify({quota_id:quotaId,ttl_minutes:60})});setNotice("Cota travada por 60 minutos. Prossiga em Propostas.");void loadCatalog(e1Category)}catch(err){setError(err instanceof Error?err.message:"Falha na trava")}}
   async function reserveSelectedQuotas(ids: string[]) {
     setError("");
@@ -531,6 +536,7 @@ export function MarketplaceModule() {
         <label className="marketplace-field marketplace-field-compact">Categoria<select value={category} onChange={e=>setCategory(e.target.value)}><option value="REAL_ESTATE">Imóvel</option><option value="VEHICLE">Veículo</option></select></label>
         <label className="marketplace-field marketplace-field-compact">Subcategoria<select value={e2SubcategoryId} onChange={e=>setE2SubcategoryId(e.target.value)}><option value="">Todas (tipo de bem)</option>{e2Subcategories.map(s=>{const p=quotaCategories.find(x=>x.id===s.parent_id);return<option key={s.id} value={s.id}>{p?(p.title_sub||p.name)+" — ":""}{s.name}</option>})}</select></label>
         <ClientProfileFields prefix="e2" category={category} values={profile} flags={flags} onChange={(k,v)=>setProfile(p=>({...p,[k]:v}))} onFlag={(k,v)=>setFlags(p=>({...p,[k]:v}))}/>
+        {e2BankAdmins.length>0&&<div className="marketplace-form-row" style={{flexDirection:"column",alignItems:"stretch",gap:8}}><small className="muted">Bancos administradores: correntista ou restrição com a administradora.</small><div style={{display:"flex",flexWrap:"wrap",gap:"12px 20px"}}>{e2BankAdmins.map(adm=><div key={adm.id} style={{minWidth:200}}><b style={{fontSize:11}}>{adm.name}</b><label style={{display:"flex",alignItems:"center",gap:6,fontSize:11,marginTop:4}}><input type="checkbox" checked={e2ClientBankIds.includes(adm.id)} onChange={e=>toggleE2BankId(e2ClientBankIds,adm.id,e.target.checked,setE2ClientBankIds)}/>Cliente correntista</label><label style={{display:"flex",alignItems:"center",gap:6,fontSize:11,marginTop:2}}><input type="checkbox" checked={e2ClientProblemBankIds.includes(adm.id)} onChange={e=>toggleE2BankId(e2ClientProblemBankIds,adm.id,e.target.checked,setE2ClientProblemBankIds)}/>Restrição / inadimplência</label></div>)}</div></div>}
         <button type="submit" className="marketplace-submit" disabled={esteira2Busy}><RefreshCw className={esteira2Busy?"spin":undefined}/>{esteira2Busy?"Buscando opções robô…":"Buscar opções robô"}</button>
       </div>
     </form>}

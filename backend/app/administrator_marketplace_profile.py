@@ -6,8 +6,10 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
+from sqlalchemy.orm import Session
+
 from app.administrator_service import normalize_admin_key, parse_rules
-from app.models import Administrator, Quota
+from app.models import Administrator, Quota, QuotaCategory
 
 DIRTY_NAME_ADMIN_FALLBACK_KEYS = frozenset(
     {
@@ -97,7 +99,36 @@ def administrator_in_client_pool(
     return True
 
 
+def alienation_row_for_quota(
+    db: Session,
+    admin: Administrator | None,
+    quota: Quota,
+) -> dict | None:
+    """None = sem lista de alienações (sem restrição por categoria). dict = linha aplicável."""
+    if not admin:
+        return None
+    rules = parse_rules(admin.rules_json)
+    alienations = rules.get("alienations") or []
+    if not isinstance(alienations, list) or not alienations:
+        return None
+    if not quota.quota_category_id:
+        return None
+    by_id = {
+        str(a.get("quota_category_id")): a
+        for a in alienations
+        if isinstance(a, dict) and a.get("quota_category_id")
+    }
+    qid = str(quota.quota_category_id)
+    if qid in by_id:
+        return by_id[qid]
+    cat = db.get(QuotaCategory, quota.quota_category_id)
+    if cat and cat.parent_id and str(cat.parent_id) in by_id:
+        return by_id[str(cat.parent_id)]
+    return {}
+
+
 def alienation_blockers(
+    db: Session,
     admin: Administrator | None,
     quota: Quota,
     *,
@@ -105,18 +136,13 @@ def alienation_blockers(
     asset_year: int,
     asset_is_zero_km: bool,
 ) -> list[str]:
-    if not admin or not quota.quota_category_id:
+    if not admin:
         return []
-    rules = parse_rules(admin.rules_json)
-    alienations = rules.get("alienations") or []
-    if not isinstance(alienations, list):
+    row = alienation_row_for_quota(db, admin, quota)
+    if row is None:
         return []
-    row = next(
-        (a for a in alienations if isinstance(a, dict) and a.get("quota_category_id") == quota.quota_category_id),
-        None,
-    )
-    if not row:
-        return []
+    if row == {}:
+        return [f"{admin.name} não financia esta categoria/subcategoria (alienações)."]
     if category != "VEHICLE":
         return []
     max_age = row.get("max_vehicle_age_years")

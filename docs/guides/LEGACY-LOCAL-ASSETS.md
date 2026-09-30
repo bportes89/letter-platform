@@ -19,5 +19,6 @@ Material do sistema antigo disponível na máquina de desenvolvimento — **não
 - Robô Esteira 2: réguas **10% crédito / 20% entrada / 5% combo**, até **2+2** opções por lane
 
 - Robô/Esteira 2: filtro `quota_category_id` + perfil admin (`is_bank`, correntista, nome sujo, alienações)
+- UI Administradoras: alienações (categoria + ano máx.) e flags marketplace; Esteira 2 / Venda Direta Robô com subcategoria e bancos do cliente
 
-Próximos blocos: editor visual de alienações, templates `texts`, qualificação de parceiros, bancos do cliente no robô admin.
+Próximos blocos: templates `texts` (e-mails/contratos admin), qualificação de parceiros, chat público (bancos + subcategoria).
