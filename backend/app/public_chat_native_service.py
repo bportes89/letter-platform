@@ -559,25 +559,45 @@ def _continue_marketplace_qualification(db: Session, org, lead, snap: dict) -> d
     return _prompt_credit_step(lead_id)
 
 
-def _logged_area_product_gate(product_key: str, lead_id: str | None = None) -> dict:
+def _flow_html_for_product(db: Session, organization_id: str, product_key: str) -> str:
+    from app.org_settings_service import get_setting
+
+    setting_key = {
+        "SDC": "sdc_flow_html",
+        "FLASH_CREDIT": "venda_direta_html",
+        "QUITCON": "venda_direta_robo_html",
+    }.get(product_key)
+    if not setting_key:
+        return ""
+    return get_setting(db, organization_id, setting_key).strip()
+
+
+def _logged_area_product_gate(
+    db: Session,
+    organization_id: str,
+    product_key: str,
+    lead_id: str | None = None,
+) -> dict:
     label = _LOGGED_AREA_PRODUCT_LABELS.get(product_key, product_key)
-    return _wrap(
-        [
-            {
-                "text": (
-                    f"{label} não é concluído neste chat público. "
-                    "Cadastre-se ou entre na sua conta LETTER para simular e enviar documentos na área logada."
-                ),
-                "options": [
-                    {"name": "Criar minha conta", "link": "/cadastro", "save": "open_page"},
-                    {"name": "Já tenho conta — entrar", "link": "/login", "save": "open_page"},
-                    {"name": "Comprar carta contemplada", "next": int(STEP_CATEGORY)},
-                    {"name": "Vender minha cota", "link": "/vender-minha-cota", "save": "open_page"},
-                ],
-            }
-        ],
-        lead_id=lead_id,
+    items: list[dict] = []
+    info_html = _flow_html_for_product(db, organization_id, product_key)
+    if info_html:
+        items.append({"info_html": info_html})
+    items.append(
+        {
+            "text": (
+                f"{label} não é concluído neste chat público. "
+                "Cadastre-se ou entre na sua conta LETTER para simular e enviar documentos na área logada."
+            ),
+            "options": [
+                {"name": "Criar minha conta", "link": "/cadastro", "save": "open_page"},
+                {"name": "Já tenho conta — entrar", "link": "/login", "save": "open_page"},
+                {"name": "Comprar carta contemplada", "next": int(STEP_CATEGORY)},
+                {"name": "Vender minha cota", "link": "/vender-minha-cota", "save": "open_page"},
+            ],
+        }
     )
+    return _wrap(items, lead_id=lead_id)
 
 
 def home_native() -> dict:
@@ -1995,7 +2015,7 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
 
     if step in _LOGGED_AREA_CHAT_STEPS:
         gate_lead = lead.id if lead else data.get("lead_id")
-        return _logged_area_product_gate(_LOGGED_AREA_CHAT_STEPS[step], gate_lead)
+        return _logged_area_product_gate(db, org.id, _LOGGED_AREA_CHAT_STEPS[step], gate_lead)
 
     # --- Capital de Giro (SDC) — legado (chat público redireciona à área logada) ---
     if step == STEP_SDC_ASSET_TYPE:

@@ -28,4 +28,7 @@ Material do sistema antigo disponível na máquina de desenvolvimento — **não
 
 - Chat público: **multi-seleção de bancos** (conta corrente e banco com problema) no passo 10071/10073, padrão comprovação de renda
 
-Próximos blocos: e-mails marketplace via `cms_texts`, injetar templates SDC/VD (`org_settings`) no chat.
+- E-mails marketplace (boleto/pagamento): slugs CMS `email-marketplace-boleto`, `email-marketplace-payment-client`, `email-marketplace-payment-partner` (`kind=EMAIL`, placeholders `{{client_name}}`, etc.)
+- Chat público: HTML de `sdc_flow_html` / `venda_direta_*` em `org_settings` no gate de produtos logados (campo `info_html`)
+
+Próximos blocos: sincronizar import legado `texts` com esses slugs; mais gatilhos de e-mail no ciclo do cadastro.

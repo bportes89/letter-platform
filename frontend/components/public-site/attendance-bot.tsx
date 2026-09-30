@@ -636,6 +636,15 @@ export function AttendanceBotSection() {
                     </div>
                   ) : null}
 
+                  {item.info_html ? (
+                    <div className="attendance-bot-row" data-chat-item>
+                      <div
+                        className="attendance-bot-bubble attendance-bot-bubble-wide letter-contract-body"
+                        dangerouslySetInnerHTML={{ __html: item.info_html }}
+                      />
+                    </div>
+                  ) : null}
+
                   {item.video ? (
                     <div className="attendance-bot-row" data-chat-item>
                       <div className="attendance-bot-bubble attendance-bot-bubble-wide">

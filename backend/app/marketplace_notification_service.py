@@ -14,9 +14,12 @@ from app.models import CommunicationTemplate, Lead, Proposal, User
 from app.tax_communication_service import deliver_communication, queue_delivery
 
 
-BOLETO_CLIENT_KEY = "MARKETPLACE_BOLETO_CLIENT"
-PAYMENT_CLIENT_KEY = "MARKETPLACE_PAYMENT_CLIENT"
-PAYMENT_PARTNER_KEY = "MARKETPLACE_PAYMENT_PARTNER"
+from app.marketplace_cms_email_service import (
+    MARKETPLACE_BOLETO_CLIENT as BOLETO_CLIENT_KEY,
+    MARKETPLACE_PAYMENT_CLIENT as PAYMENT_CLIENT_KEY,
+    MARKETPLACE_PAYMENT_PARTNER as PAYMENT_PARTNER_KEY,
+    resolve_marketplace_email_template,
+)
 
 
 def _parse_json(raw: str | None) -> dict:
@@ -60,6 +63,8 @@ def _ensure_email_template(
         )
     )
     if item:
+        item.subject = subject
+        item.body = body
         return item
     current = db.scalar(
         select(CommunicationTemplate.version).where(
@@ -136,12 +141,12 @@ def dispatch_boleto_issued_notifications(
     email = _snapshot_email(lead, terms)
     amount = (boleto or {}).get("amount") or terms.get("total_entrada") or ""
     credit = terms.get("total_credit") or str(proposal.requested_amount or "")
-    template = _ensure_email_template(
+    boleto_subject, boleto_body = resolve_marketplace_email_template(
         db,
-        actor,
-        key=BOLETO_CLIENT_KEY,
-        subject="Boleto da entrada — LETTER Marketplace",
-        body=(
+        actor.organization_id,
+        BOLETO_CLIENT_KEY,
+        default_subject="Boleto da entrada — LETTER Marketplace",
+        default_body=(
             "Olá {{client_name}},\n\n"
             "Sua compra de carta contemplada está aguardando o pagamento da entrada.\n"
             "Valor da entrada: R$ {{entrada_amount}}\n"
@@ -150,6 +155,13 @@ def dispatch_boleto_issued_notifications(
             "Ou acesse sua conta em {{portal_hint}}.\n\n"
             "LETTER — {{site_name}}"
         ),
+    )
+    template = _ensure_email_template(
+        db,
+        actor,
+        key=BOLETO_CLIENT_KEY,
+        subject=boleto_subject,
+        body=boleto_body,
     )
     variables = {
         "client_name": lead.name,
@@ -196,12 +208,12 @@ def dispatch_payment_received_notifications(
     amount = terms.get("total_entrada") or ""
     credit = terms.get("total_credit") or str(proposal.requested_amount or "")
 
-    client_tpl = _ensure_email_template(
+    pay_client_subject, pay_client_body = resolve_marketplace_email_template(
         db,
-        actor,
-        key=PAYMENT_CLIENT_KEY,
-        subject="Pagamento confirmado — LETTER Marketplace",
-        body=(
+        actor.organization_id,
+        PAYMENT_CLIENT_KEY,
+        default_subject="Pagamento confirmado — LETTER Marketplace",
+        default_body=(
             "Olá {{client_name}},\n\n"
             "Recebemos o pagamento da entrada da sua compra.\n"
             "Valor: R$ {{entrada_amount}} · Crédito: R$ {{credit_value}}\n\n"
@@ -209,18 +221,32 @@ def dispatch_payment_received_notifications(
             "LETTER"
         ),
     )
-    partner_tpl = _ensure_email_template(
+    pay_partner_subject, pay_partner_body = resolve_marketplace_email_template(
         db,
-        actor,
-        key=PAYMENT_PARTNER_KEY,
-        subject="Cliente pagou entrada — {{client_name}}",
-        body=(
+        actor.organization_id,
+        PAYMENT_PARTNER_KEY,
+        default_subject="Cliente pagou entrada — {{client_name}}",
+        default_body=(
             "Olá {{partner_name}},\n\n"
             "O cliente {{client_name}} confirmou o pagamento da entrada (R$ {{entrada_amount}}).\n"
             "Crédito da operação: R$ {{credit_value}}.\n\n"
             "Cadastro: {{lead_id}}\n"
             "LETTER"
         ),
+    )
+    client_tpl = _ensure_email_template(
+        db,
+        actor,
+        key=PAYMENT_CLIENT_KEY,
+        subject=pay_client_subject,
+        body=pay_client_body,
+    )
+    partner_tpl = _ensure_email_template(
+        db,
+        actor,
+        key=PAYMENT_PARTNER_KEY,
+        subject=pay_partner_subject,
+        body=pay_partner_body,
     )
     base_vars = {
         "client_name": lead.name,

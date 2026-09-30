@@ -85,7 +85,10 @@ export function CmsTextsModule() {
         <div>
           <span className="eyebrow dark">CADASTRO</span>
           <h1>Textos e e-mails</h1>
-          <p>Páginas institucionais e templates de comunicação (legado texts + corpo HTML).</p>
+          <p>
+            Páginas institucionais e templates de comunicação (legado texts + corpo HTML).
+            E-mails marketplace: slugs email-marketplace-boleto, email-marketplace-payment-client, email-marketplace-payment-partner.
+          </p>
         </div>
         <div className="operational-icon">{tab === "EMAIL" ? <Mail /> : <FileText />}</div>
       </div>
