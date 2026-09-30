@@ -1,7 +1,7 @@
 "use client";
 
 import { CheckCircle2, FileUp, Plus, RefreshCw, ShoppingCart, Landmark, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { AdminDocumentPanel } from "@/components/admin-document-panel";
 import { api, apiForm, deleteApi, downloadApi, User } from "@/lib/api";
 import { canEditLetterFinOpsParams, isInternalProductRole } from "@/lib/product-nav";
@@ -141,13 +141,20 @@ const FLASH_OPERATION_OPTIONS = [
   { value: "IMOVEL_TERCEIRO", label: "Imóvel de terceiro" },
 ] as const;
 
-function FlashChecklistConfigPanel() {
+function FlashChecklistConfigPanel({
+  highlightKey,
+  editorAnchorRef,
+}: {
+  highlightKey?: string;
+  editorAnchorRef?: RefObject<HTMLDivElement | null>;
+}) {
   const [rows, setRows] = useState<FlashChecklistConfigRow[]>([]);
   const [selectedKey, setSelectedKey] = useState("");
   const [draftItems, setDraftItems] = useState<FlashChecklistItemDraft[]>([]);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   const selected = useMemo(
     () => rows.find((r) => r.operation_type === selectedKey) ?? null,
@@ -155,17 +162,25 @@ function FlashChecklistConfigPanel() {
   );
 
   useEffect(() => {
+    setLoading(true);
     api<FlashChecklistConfigRow[]>("/flash/desk/checklist-config")
       .then((list) => {
         setRows(list);
         if (!selectedKey && list[0]) setSelectedKey(list[0].operation_type);
       })
-      .catch((e) => setError(e instanceof Error ? e.message : "Falha ao carregar checklists"));
+      .catch((e) => setError(e instanceof Error ? e.message : "Falha ao carregar checklists"))
+      .finally(() => setLoading(false));
   }, []);
 
   useEffect(() => {
+    if (!highlightKey || !rows.length) return;
+    if (rows.some((r) => r.operation_type === highlightKey)) setSelectedKey(highlightKey);
+  }, [highlightKey, rows]);
+
+  useEffect(() => {
     if (!selected) return;
-    setDraftItems(selected.items.map((it) => ({ code: it.code, label: it.label })));
+    const items = selected.items.map((it) => ({ code: it.code, label: it.label }));
+    setDraftItems(items.length ? items : [{ code: "", label: "" }]);
   }, [selected?.operation_type, selected?.items]);
 
   function patchDraftItem(index: number, patch: Partial<FlashChecklistItemDraft>) {
@@ -206,24 +221,42 @@ function FlashChecklistConfigPanel() {
   }
 
   return (
-    <div style={{ marginTop: 12 }}>
+    <div style={{ marginTop: 12 }} ref={editorAnchorRef}>
       {error && <div className="error" style={{ marginBottom: 8 }}>{error}</div>}
       {notice && <div className="notice" style={{ marginBottom: 8 }}>{notice}</div>}
+      <p className="muted" style={{ fontSize: 11, margin: "0 0 10px", lineHeight: 1.45 }}>
+        <b>Passo 1:</b> escolha o tipo de operação (igual ao cadastro da solicitação).
+        <br />
+        <b>Passo 2:</b> cadastre cada documento (código + descrição).
+        <br />
+        <b>Passo 3:</b> salve — o checklist vale na esteira e nos anexos.
+      </p>
       <div style={{ display: "grid", gap: 10, gridTemplateColumns: "minmax(0,1fr) minmax(0,1.2fr)" }}>
-        <select value={selectedKey} onChange={(e) => setSelectedKey(e.target.value)} style={{ padding: 8, borderRadius: 8 }}>
-          {rows.map((r) => (
-            <option key={r.operation_type} value={r.operation_type}>
-              {r.operation_type_label}{r.customized ? " *" : ""}
-            </option>
-          ))}
-        </select>
+        <label style={{ fontSize: 11, fontWeight: 700 }}>
+          Tipo de operação
+          <select
+            value={selectedKey}
+            onChange={(e) => setSelectedKey(e.target.value)}
+            style={{ width: "100%", marginTop: 4, padding: 8, borderRadius: 8, fontWeight: 400 }}
+            disabled={loading || !rows.length}
+          >
+            {rows.map((r) => (
+              <option key={r.operation_type} value={r.operation_type}>
+                {r.operation_type_label}{r.customized ? " *" : ""}
+              </option>
+            ))}
+          </select>
+        </label>
         <button type="button" className="admin-button" disabled={busy || !selected} onClick={() => void saveConfig()}>
           Salvar itens obrigatórios
         </button>
       </div>
-      <p className="muted" style={{ fontSize: 10, margin: "8px 0" }}>
-        Documentos exigidos na esteira comercial (comprovantes, fotos, laudos). Itens emitidos por API não precisam ser anexados pelo parceiro. * = personalizado.
-      </p>
+      {loading && <p className="muted" style={{ fontSize: 11, margin: "10px 0 0" }}>Carregando checklists…</p>}
+      <div style={{ marginTop: 14, padding: 14, borderRadius: 10, border: "1px solid var(--line)", background: "#fff" }}>
+        <b style={{ fontSize: 12 }}>Documentos obrigatórios</b>
+        <p className="muted" style={{ fontSize: 10, margin: "6px 0 10px" }}>
+          Comprovantes, fotos e laudos. Documentos gerados por API não precisam ser anexados pelo parceiro.
+        </p>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {draftItems.map((it, idx) => (
           <div
@@ -256,8 +289,9 @@ function FlashChecklistConfigPanel() {
           onClick={() => setDraftItems((prev) => [...prev, { code: "", label: "" }])}
         >
           <Plus size={14} />
-          Adicionar item
+          Adicionar documento obrigatório
         </button>
+      </div>
       </div>
     </div>
   );
@@ -386,9 +420,15 @@ export function FlashDeskModule() {
   const [tapafCb1, setTapafCb1] = useState(false);
   const [tapafCb2, setTapafCb2] = useState(false);
   const tapafPanelRef = useRef<HTMLDivElement>(null);
+  const checklistEditorRef = useRef<HTMLDivElement>(null);
+  const [checklistCatalog, setChecklistCatalog] = useState<FlashChecklistConfigRow[]>([]);
 
   const isInternal = isInternalProductRole(user?.role);
   const canEditFinOpsRate = canEditLetterFinOpsParams(user?.role);
+  const formChecklistPreview = useMemo(() => {
+    const row = checklistCatalog.find((r) => r.operation_type === form.operation_type);
+    return row?.items ?? [];
+  }, [checklistCatalog, form.operation_type]);
 
   function patchProperties(updater: (rows: FlashPropertyRow[]) => FlashPropertyRow[]) {
     setProperties(updater);
@@ -533,6 +573,13 @@ export function FlashDeskModule() {
       .catch((e) => setError(e instanceof Error ? e.message : "Falha ao carregar mesa Flash"))
       .finally(() => setLoading(false));
   }, [load]);
+
+  useEffect(() => {
+    if (!isInternal) return;
+    api<FlashChecklistConfigRow[]>("/flash/desk/checklist-config")
+      .then(setChecklistCatalog)
+      .catch(() => setChecklistCatalog([]));
+  }, [isInternal, user?.role]);
 
   useEffect(() => {
     const handoff = loadFlashHandoff();
@@ -993,6 +1040,36 @@ export function FlashDeskModule() {
                     Imóvel próprio: garantia do tomador PJ. Imóvel de terceiro: o proprietário também assina o contrato.
                   </small>
                 </label>
+                {isInternal && (
+                  <div
+                    style={{
+                      gridColumn: "1 / -1",
+                      padding: 12,
+                      borderRadius: 10,
+                      border: "1px dashed var(--line)",
+                      background: "#f9fcfb",
+                      fontSize: 11,
+                    }}
+                  >
+                    <b>Checklist que será exigido nesta operação</b>
+                    {formChecklistPreview.length ? (
+                      <ul style={{ margin: "8px 0", paddingLeft: 18 }}>
+                        {formChecklistPreview.map((d) => (
+                          <li key={d.code}>{d.label}</li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="muted" style={{ margin: "8px 0 0" }}>Configure os documentos na seção INTERNO abaixo.</p>
+                    )}
+                    <button
+                      type="button"
+                      className="table-action"
+                      onClick={() => checklistEditorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                    >
+                      Ir para editor de documentos obrigatórios
+                    </button>
+                  </div>
+                )}
                 {form.operation_type === "IMOVEL_TERCEIRO" && (
                   <>
                     <div style={{ gridColumn: "1 / -1", marginTop: 4 }}>
@@ -1581,7 +1658,7 @@ export function FlashDeskModule() {
               </div>
             </div>
             <div style={{ padding: "0 18px 18px" }}>
-              <FlashChecklistConfigPanel />
+              <FlashChecklistConfigPanel highlightKey={form.operation_type} editorAnchorRef={checklistEditorRef} />
             </div>
           </section>
           <section className="panel operational-panel" style={{ marginTop: 16 }}>

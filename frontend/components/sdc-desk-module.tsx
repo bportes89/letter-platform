@@ -1,7 +1,7 @@
 "use client";
 
 import { CheckCircle2, FileUp, Plus, RefreshCw, ShoppingCart, ClipboardList, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { useRouter } from "next/navigation";
 import {
   clearFlashHandoff,
@@ -278,13 +278,20 @@ function mapLeadCategoryToSdcAsset(category: string | null | undefined): string 
   return undefined;
 }
 
-function SdcChecklistConfigPanel() {
+function SdcChecklistConfigPanel({
+  highlightKey,
+  editorAnchorRef,
+}: {
+  highlightKey?: string;
+  editorAnchorRef?: RefObject<HTMLDivElement | null>;
+}) {
   const [rows, setRows] = useState<ChecklistConfigRow[]>([]);
   const [selectedKey, setSelectedKey] = useState("");
   const [draftItems, setDraftItems] = useState<ChecklistItemDraft[]>([]);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   const selected = useMemo(
     () => rows.find((r) => `${r.asset_category}:${r.operation_type}` === selectedKey) ?? null,
@@ -292,17 +299,26 @@ function SdcChecklistConfigPanel() {
   );
 
   useEffect(() => {
+    setLoading(true);
     api<ChecklistConfigRow[]>("/sdc/desk/checklist-config")
       .then((list) => {
         setRows(list);
         if (!selectedKey && list[0]) setSelectedKey(`${list[0].asset_category}:${list[0].operation_type}`);
       })
-      .catch((e) => setError(e instanceof Error ? e.message : "Falha ao carregar checklists"));
+      .catch((e) => setError(e instanceof Error ? e.message : "Falha ao carregar checklists"))
+      .finally(() => setLoading(false));
   }, []);
 
   useEffect(() => {
+    if (!highlightKey || !rows.length) return;
+    const exists = rows.some((r) => `${r.asset_category}:${r.operation_type}` === highlightKey);
+    if (exists) setSelectedKey(highlightKey);
+  }, [highlightKey, rows]);
+
+  useEffect(() => {
     if (!selected) return;
-    setDraftItems(selected.items.map((it) => ({ code: it.code, label: it.label })));
+    const items = selected.items.map((it) => ({ code: it.code, label: it.label }));
+    setDraftItems(items.length ? items : [{ code: "", label: "" }]);
   }, [selected?.asset_category, selected?.operation_type, selected?.items]);
 
   function patchDraftItem(index: number, patch: Partial<ChecklistItemDraft>) {
@@ -344,24 +360,50 @@ function SdcChecklistConfigPanel() {
   }
 
   return (
-    <div style={{ marginTop: 12 }}>
+    <div style={{ marginTop: 12 }} ref={editorAnchorRef}>
       {error && <div className="error" style={{ marginBottom: 8 }}>{error}</div>}
       {notice && <div className="notice" style={{ marginBottom: 8 }}>{notice}</div>}
+      <p className="muted" style={{ fontSize: 11, margin: "0 0 10px", lineHeight: 1.45 }}>
+        <b>Passo 1:</b> escolha o tipo de bem e operação (igual ao formulário da solicitação).
+        <br />
+        <b>Passo 2:</b> cadastre abaixo cada documento obrigatório (código interno + descrição para o parceiro).
+        <br />
+        <b>Passo 3:</b> clique em <em>Salvar itens obrigatórios</em> — o checklist passa a valer na esteira e nos uploads.
+      </p>
       <div style={{ display: "grid", gap: 10, gridTemplateColumns: "minmax(0,1fr) minmax(0,1.2fr)" }}>
-        <select value={selectedKey} onChange={(e) => setSelectedKey(e.target.value)} style={{ padding: 8, borderRadius: 8 }}>
-          {rows.map((r) => (
-            <option key={`${r.asset_category}:${r.operation_type}`} value={`${r.asset_category}:${r.operation_type}`}>
-              {r.asset_category_label} — {r.operation_type_label}{r.customized ? " *" : ""}
-            </option>
-          ))}
-        </select>
+        <label style={{ fontSize: 11, fontWeight: 700 }}>
+          Combinação bem + operação
+          <select
+            value={selectedKey}
+            onChange={(e) => setSelectedKey(e.target.value)}
+            style={{ width: "100%", marginTop: 4, padding: 8, borderRadius: 8, fontWeight: 400 }}
+            disabled={loading || !rows.length}
+          >
+            {rows.map((r) => (
+              <option key={`${r.asset_category}:${r.operation_type}`} value={`${r.asset_category}:${r.operation_type}`}>
+                {r.asset_category_label} — {r.operation_type_label}{r.customized ? " *" : ""}
+              </option>
+            ))}
+          </select>
+        </label>
         <button type="button" className="admin-button" disabled={busy || !selected} onClick={() => void saveConfig()}>
           Salvar itens obrigatórios
         </button>
       </div>
-      <p className="muted" style={{ fontSize: 10, margin: "8px 0" }}>
-        Itens exigidos na esteira comercial para cada combinação de bem + operação. * = personalizado.
-      </p>
+      {loading && <p className="muted" style={{ fontSize: 11, margin: "10px 0 0" }}>Carregando checklists…</p>}
+      <div
+        style={{
+          marginTop: 14,
+          padding: 14,
+          borderRadius: 10,
+          border: "1px solid var(--line)",
+          background: "#fff",
+        }}
+      >
+        <b style={{ fontSize: 12 }}>Documentos obrigatórios desta combinação</b>
+        <p className="muted" style={{ fontSize: 10, margin: "6px 0 10px" }}>
+          * = checklist já personalizado para sua organização.
+        </p>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {draftItems.map((it, idx) => (
           <div
@@ -394,8 +436,9 @@ function SdcChecklistConfigPanel() {
           onClick={() => setDraftItems((prev) => [...prev, { code: "", label: "" }])}
         >
           <Plus size={14} />
-          Adicionar item
+          Adicionar documento obrigatório
         </button>
+      </div>
       </div>
     </div>
   );
@@ -443,8 +486,18 @@ export function SdcDeskModule() {
   const [partnerObsDraft, setPartnerObsDraft] = useState("");
   const [cadastros, setCadastros] = useState<SdcCadastroOption[]>([]);
   const [existingCadastroId, setExistingCadastroId] = useState("");
+  const [checklistCatalog, setChecklistCatalog] = useState<ChecklistConfigRow[]>([]);
+  const checklistEditorRef = useRef<HTMLDivElement>(null);
 
   const isInternal = isInternalProductRole(user?.role);
+  const formChecklistKey = useMemo(
+    () => `${form.asset_type}:${form.operation_type}`,
+    [form.asset_type, form.operation_type],
+  );
+  const formChecklistPreview = useMemo(() => {
+    const row = checklistCatalog.find((r) => `${r.asset_category}:${r.operation_type}` === formChecklistKey);
+    return row?.items ?? [];
+  }, [checklistCatalog, formChecklistKey]);
   const needsYear = ["veiculo", "veiculo_leve", "veiculo_pesado", "maquina", "maquina_agricola"].includes(form.asset_type);
   const isImovel = ["imovel", "imovel_urbano", "imovel_rural"].includes(form.asset_type);
   const isVeiculo = ["veiculo", "veiculo_leve", "veiculo_pesado"].includes(form.asset_type);
@@ -469,6 +522,13 @@ export function SdcDeskModule() {
       .catch((e) => setError(e instanceof Error ? e.message : "Falha ao carregar mesa SDC"))
       .finally(() => setLoading(false));
   }, [load]);
+
+  useEffect(() => {
+    if (!isInternal) return;
+    api<ChecklistConfigRow[]>("/sdc/desk/checklist-config")
+      .then(setChecklistCatalog)
+      .catch(() => setChecklistCatalog([]));
+  }, [isInternal, user?.role]);
 
   const filtered = useMemo(
     () => (statusFilter === "ALL" ? items : items.filter((i) => i.status === statusFilter)),
@@ -1214,6 +1274,40 @@ export function SdcDeskModule() {
                 >
                   {OPERATION_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
                 </select>
+                {isInternal && (
+                  <div
+                    style={{
+                      gridColumn: "1 / -1",
+                      padding: 12,
+                      borderRadius: 10,
+                      border: "1px dashed var(--line)",
+                      background: "#f9fcfb",
+                      fontSize: 11,
+                    }}
+                  >
+                    <b>Checklist que será exigido nesta combinação</b>
+                    {formChecklistPreview.length ? (
+                      <ul style={{ margin: "8px 0", paddingLeft: 18 }}>
+                        {formChecklistPreview.map((d) => (
+                          <li key={d.code}>{d.label}</li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="muted" style={{ margin: "8px 0 0" }}>
+                        Nenhum item carregado — configure na seção INTERNO abaixo.
+                      </p>
+                    )}
+                    <button
+                      type="button"
+                      className="table-action"
+                      onClick={() => {
+                        checklistEditorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                      }}
+                    >
+                      Ir para editor de documentos obrigatórios
+                    </button>
+                  </div>
+                )}
                 <textarea
                   placeholder="Observação do parceiro sobre esta proposta (opcional)"
                   value={form.partner_observation}
@@ -1980,7 +2074,7 @@ export function SdcDeskModule() {
             </div>
           </div>
           <div style={{ padding: "0 18px 18px" }}>
-            <SdcChecklistConfigPanel />
+            <SdcChecklistConfigPanel highlightKey={formChecklistKey} editorAnchorRef={checklistEditorRef} />
           </div>
         </section>
       ) : null}
