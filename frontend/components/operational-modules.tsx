@@ -27,9 +27,20 @@ const INVENTORY_STOCK_STATUSES = new Set(["AVAILABLE", "RESERVED", "PENDING_REVI
 
 type InventoryCategoryFilter = "ALL" | "REAL_ESTATE" | "VEHICLE";
 
+function inventorySupplierLabel(
+  sourceKey: string | null | undefined,
+  suppliers: { source_key: string; name: string }[],
+): string {
+  if (!sourceKey) return "Cadastro manual";
+  const row = suppliers.find((s) => s.source_key === sourceKey);
+  return row?.name ?? sourceKey;
+}
+
 export function InventoryModule() {
   const [items,setItems]=useState<Quota[]>([]);const [admins,setAdmins]=useState<Administrator[]>([]);const [reservations,setReservations]=useState<Reservation[]>([]);const [suppliers,setSuppliers]=useState<{source_key:string;name:string;markup_percent:string}[]>([]);const [error,setError]=useState("");const [notice,setNotice]=useState("");const [formKey,setFormKey]=useState(0);
   const [categoryFilter, setCategoryFilter] = useState<InventoryCategoryFilter>("ALL");
+  const [supplierFilter, setSupplierFilter] = useState("");
+  const [inventorySearch, setInventorySearch] = useState("");
   const load=()=>Promise.all([api<Quota[]>("/quotas"),api<Administrator[]>("/administrators"),api<Reservation[]>("/reservations"),api<{source_key:string;name:string;markup_percent:string;active:boolean}[]>("/marketplace/suppliers?active_only=true").catch(()=>[])]).then(([q,a,r,s])=>{setItems(q);setAdmins(a);setReservations(r);setSuppliers(s.filter(x=>x.active!==false))}).catch(e=>setError(e.message));useEffect(()=>{void load()},[]);
   async function submit(e:FormEvent<HTMLFormElement>){e.preventDefault();const form=e.currentTarget;const fd=new FormData(form);await api("/quotas",{method:"POST",body:JSON.stringify({administrator_id:fd.get("administrator_id"),group_code:fd.get("group_code"),quota_code:fd.get("quota_code"),category:fd.get("category"),credit_value:fd.get("credit_value"),outstanding_balance:fd.get("outstanding_balance")||"0",premium_value:fd.get("premium_value")||"0",installment_value:fd.get("installment_value")||"0",installment_due_date:fd.get("installment_due_date")||null,remaining_installments:fd.get("remaining_installments")?Number(fd.get("remaining_installments")):null,supplier_source:fd.get("supplier_source")||null})});form.reset();setFormKey(k=>k+1);setNotice("Cota cadastrada no inventário.");load()}
   async function ninaScan(quota:Quota){setError("");try{const result=await api<{message:string}>("/quotas/"+quota.id+"/nina-scan",{method:"POST"});setNotice(result.message);load()}catch(e){setError(e instanceof Error?e.message:"Varredura Nina reprovada.")}}
@@ -59,6 +70,26 @@ export function InventoryModule() {
   const fmtDate=(value?:string|null)=>value?new Date(value+"T12:00:00").toLocaleDateString("pt-BR"):"—";
   const categoryLabel =
     categoryFilter === "ALL" ? "Total" : categoryFilter === "REAL_ESTATE" ? "Imóveis" : "Veículos";
+  const supplierFilterOptions = useMemo(() => {
+    const keys = new Set<string>();
+    for (const row of items) {
+      if (row.supplier_source) keys.add(row.supplier_source);
+    }
+    for (const s of suppliers) keys.add(s.source_key);
+    return [...keys].sort();
+  }, [items, suppliers]);
+  const displayedItems = useMemo(() => {
+    const needle = inventorySearch.trim().toLowerCase();
+    return items.filter((x) => {
+      if (categoryFilter !== "ALL" && x.category !== categoryFilter) return false;
+      if (supplierFilter === "__manual__" && x.supplier_source) return false;
+      if (supplierFilter && supplierFilter !== "__manual__" && x.supplier_source !== supplierFilter) return false;
+      if (!needle) return true;
+      const supplierName = inventorySupplierLabel(x.supplier_source, suppliers);
+      const hay = `${x.group_code} ${x.quota_code} ${supplierName} ${x.supplier_source ?? ""}`.toLowerCase();
+      return hay.includes(needle);
+    });
+  }, [items, categoryFilter, supplierFilter, inventorySearch, suppliers]);
   return <OperationalLayout title="Inventário (admin)" subtitle="Cadastro interno de cotas, compliance de fornecedores (extrato), varredura Nina e trava de 60 min." icon={<WalletCards/>}>
     <div className="network-metrics" style={{ margin: "0 0 1rem" }}>
       <article>
@@ -89,12 +120,50 @@ export function InventoryModule() {
       ))}
     </div>
     <p className="muted" style={{ fontSize: 10, margin: "0 18px 0.75rem", lineHeight: 1.45 }}>
-      Totais consideram cotas <b>disponíveis, reservadas ou em revisão</b> (exclui inativas e vendidas). A tabela abaixo lista todo o inventário.
+      Totais consideram cotas <b>disponíveis, reservadas ou em revisão</b> (exclui inativas e vendidas). Use os filtros para localizar cotas por fornecedor, grupo ou número da cota.
     </p>
+    <div
+      className="quick-form"
+      style={{ margin: "0 18px 0.75rem", display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}
+    >
+      <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 11, fontWeight: 700, minWidth: 200 }}>
+        Fornecedor
+        <select value={supplierFilter} onChange={(e) => setSupplierFilter(e.target.value)} style={{ fontWeight: 400, padding: 8 }}>
+          <option value="">Todos</option>
+          <option value="__manual__">Cadastro manual (sem API)</option>
+          {supplierFilterOptions.map((key) => (
+            <option key={key} value={key}>{inventorySupplierLabel(key, suppliers)}</option>
+          ))}
+        </select>
+      </label>
+      <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 11, fontWeight: 700, flex: "1 1 220px" }}>
+        Buscar
+        <input
+          value={inventorySearch}
+          onChange={(e) => setInventorySearch(e.target.value)}
+          placeholder="Grupo, cota ou nome do fornecedor"
+          style={{ fontWeight: 400, padding: 8 }}
+        />
+      </label>
+      {(supplierFilter || inventorySearch || categoryFilter !== "ALL") && (
+        <button
+          type="button"
+          className="table-action"
+          onClick={() => {
+            setSupplierFilter("");
+            setInventorySearch("");
+            setCategoryFilter("ALL");
+          }}
+        >
+          Limpar filtros
+        </button>
+      )}
+      <small className="muted" style={{ alignSelf: "end" }}>{displayedItems.length} cota(s) na lista</small>
+    </div>
     <div className="notice"><Clock3/>Fluxo: <b>1.</b> Fornecedor ou admin cadastra cota + extrato · <b>2.</b> Compliance aprova em Inventário · <b>3.</b> Varredura Nina · <b>4.</b> Trava 60 min · <b>5.</b> Proposta · Ofertas do site em <b>Compliance — Vender cota</b></div>
     {pendingSupplier.length>0&&<div className="notice"><CheckCircle2/>{pendingSupplier.length} cota(s) de fornecedor aguardando compliance (revise o extrato antes de aprovar).</div>}
     <form key={formKey} className="quick-form quota-form" onSubmit={submit}><select name="administrator_id" required>{admins.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select><input name="group_code" placeholder="Grupo" required/><input name="quota_code" placeholder="Cota" required/><select name="category"><option value="REAL_ESTATE">Imóvel</option><option value="VEHICLE">Veículo</option></select><CurrencyFormField name="credit_value" placeholder="Crédito (R$)" required/><CurrencyFormField name="premium_value" placeholder="Entrada/ágio (R$)"/><CurrencyFormField name="installment_value" placeholder="Parcela (R$)"/><CurrencyFormField name="outstanding_balance" placeholder="Saldo devedor (R$)"/><input name="installment_due_date" type="date" placeholder="Vencimento parcela" required title="Vencimento da parcela"/><input name="remaining_installments" type="number" min="0" placeholder="Parcelas restantes"/><select name="supplier_source"><option value="">Fornecedor API</option>{suppliers.length?suppliers.map(s=><option key={s.source_key} value={s.source_key}>{s.name} (+{s.markup_percent}%)</option>):(<><option value="FRAGA">Fraga (+3%)</option><option value="BITTELO">Bittelo (+3%)</option><option value="LANCE">Lance (+3%)</option><option value="UNI_CONTEMPLADOS">Uni Contemplados (+10%)</option><option value="CONTEMPLADO_SP">Contemplado SP (+10%)</option><option value="LUME">Lume (+10%)</option></>)}</select><button><Plus/>Cadastrar cota</button></form>
-    {notice&&<div className="notice"><CheckCircle2/>{notice}</div>}{error&&<div className="error">{error}</div>}<DataTable headers={["Identificação","Categoria","Crédito","Parcela","Ágio","Vencimento","Extrato","Nina","Status","Ações"]}>{items.map(x=><tr key={x.id}><td><b>Grupo {x.group_code}</b><small>Cota {x.quota_code}{x.supplier_source?` · ${x.supplier_source}`:""}</small>{x.compliance_rejection_reason?<small style={{color:"#a33"}}>Recusa: {x.compliance_rejection_reason}</small>:null}</td><td>{x.category==="REAL_ESTATE"?"Imóvel":"Veículo"}</td><td>{brl.format(Number(x.credit_value))}</td><td>{brl.format(Number(x.installment_value||0))}</td><td>{brl.format(Number(x.premium_value))}</td><td>{fmtDate(x.installment_due_date)}</td><td>{x.statement_document_id?<button className="table-action" onClick={()=>void downloadQuotaStatement(x)}><Download/>{x.statement_filename||"Baixar"}</button>:<small className="muted">Pendente</small>}</td><td><Pill value={x.nina_scan_status??"PENDENTE"}/></td><td><Pill value={x.status}/></td><td className="actions-cell">{x.status==="PENDING_REVIEW"?<><button className="table-action" onClick={()=>approveQuota(x)} disabled={!x.statement_document_id}><Check/>Aprovar</button><button className="table-action" onClick={()=>rejectQuota(x)}><XCircle/>Recusar</button></>:x.status==="AVAILABLE"?<><button className="table-action" onClick={()=>ninaScan(x)} disabled={!x.installment_due_date}><RefreshCw/>Varredura Nina</button><button className="table-action lock" onClick={()=>reserve(x)} disabled={x.nina_scan_status!=="CLEARED"}><LockKeyhole/>Travar 60 min</button></>:x.status==="RESERVED"?<button className="table-action" onClick={()=>release(x)}><Unlock/>Liberar</button>:x.status==="SOLD"?"Vendida":"—"}</td></tr>)}</DataTable>
+    {notice&&<div className="notice"><CheckCircle2/>{notice}</div>}{error&&<div className="error">{error}</div>}<DataTable headers={["Identificação","Categoria","Crédito","Parcela","Ágio","Vencimento","Extrato","Nina","Status","Ações"]}>{displayedItems.map(x=><tr key={x.id}><td><b>Grupo {x.group_code}</b><small>Cota {x.quota_code} · {inventorySupplierLabel(x.supplier_source, suppliers)}</small>{x.compliance_rejection_reason?<small style={{color:"#a33"}}>Recusa: {x.compliance_rejection_reason}</small>:null}</td><td>{x.category==="REAL_ESTATE"?"Imóvel":"Veículo"}</td><td>{brl.format(Number(x.credit_value))}</td><td>{brl.format(Number(x.installment_value||0))}</td><td>{brl.format(Number(x.premium_value))}</td><td>{fmtDate(x.installment_due_date)}</td><td>{x.statement_document_id?<button className="table-action" onClick={()=>void downloadQuotaStatement(x)}><Download/>{x.statement_filename||"Baixar"}</button>:<small className="muted">Pendente</small>}</td><td><Pill value={x.nina_scan_status??"PENDENTE"}/></td><td><Pill value={x.status}/></td><td className="actions-cell">{x.status==="PENDING_REVIEW"?<><button className="table-action" onClick={()=>approveQuota(x)} disabled={!x.statement_document_id}><Check/>Aprovar</button><button className="table-action" onClick={()=>rejectQuota(x)}><XCircle/>Recusar</button></>:x.status==="AVAILABLE"?<><button className="table-action" onClick={()=>ninaScan(x)} disabled={!x.installment_due_date}><RefreshCw/>Varredura Nina</button><button className="table-action lock" onClick={()=>reserve(x)} disabled={x.nina_scan_status!=="CLEARED"}><LockKeyhole/>Travar 60 min</button></>:x.status==="RESERVED"?<button className="table-action" onClick={()=>release(x)}><Unlock/>Liberar</button>:x.status==="SOLD"?"Vendida":"—"}</td></tr>)}</DataTable>
   </OperationalLayout>
 }
 
@@ -974,4 +1043,28 @@ function CalculationResult({
 
 function OperationalLayout({title,subtitle,icon,children}:{title:string;subtitle:string;icon:React.ReactNode;children:React.ReactNode}){return <><div className="page-heading"><div><span className="eyebrow dark">OPERAÇÃO ATIVA</span><h1>{title}</h1><p>{subtitle}</p></div><div className="operational-icon">{icon}</div></div><section className="panel operational-panel">{children}</section></>}
 function DataTable({headers,children}:{headers:string[];children:React.ReactNode}){return <div className="table-wrap"><table className="data-table"><thead><tr>{headers.map(h=><th key={h}>{h}</th>)}</tr></thead><tbody>{children}</tbody></table></div>}
-function Pill({value}:{value:string}){return <span className={`pill pill-${value.toLowerCase()}`}>{value.replaceAll("_"," ")}</span>}
+const PILL_LABELS_PT: Record<string, string> = {
+  AVAILABLE: "Disponível",
+  RESERVED: "Reservada",
+  PENDING_REVIEW: "Em revisão",
+  SOLD: "Vendida",
+  INACTIVE: "Inativa",
+  CLEARED: "Aprovada (Nina)",
+  BLOCKED: "Bloqueada (Nina)",
+  PENDENTE: "Pendente",
+  NEW: "Novo",
+  CONTACTED: "Contatado",
+  QUALIFIED: "Qualificado",
+  PROPOSAL: "Proposta",
+  CONVERTED: "Convertido",
+  ACTIVE: "Ativa",
+  APPROVED: "Aprovado",
+  REJECTED: "Reprovado",
+};
+
+function pillLabelPt(value: string): string {
+  const key = value.trim().toUpperCase();
+  return PILL_LABELS_PT[key] ?? value.replaceAll("_", " ");
+}
+
+function Pill({value}:{value:string}){return <span className={`pill pill-${value.toLowerCase()}`}>{pillLabelPt(value)}</span>}
