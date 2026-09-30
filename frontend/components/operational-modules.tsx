@@ -470,6 +470,7 @@ export function ProposalsModule() {
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [clients, setClients] = useState<CommercialClient[]>([]);
   const [isCommercial, setIsCommercial] = useState(false);
+  const [isLetterOps, setIsLetterOps] = useState(false);
   const [activeProposalId, setActiveProposalId] = useState<string | null>(null);
   const [calculatedProposalIds, setCalculatedProposalIds] = useState<Set<string>>(() => new Set());
   const [notice, setNotice] = useState("");
@@ -540,6 +541,7 @@ export function ProposalsModule() {
       void refreshCalculatedFlags(flashOnly);
       const commercial = ["MASTER_FRANCHISEE", "MANAGER", "PARTNER", "QUOTA_SELLER"].includes(me.role);
       setIsCommercial(commercial);
+      setIsLetterOps(me.role === "PLATFORM_ADMIN" || me.role === "INTERNAL_STAFF");
       if (commercial) {
         try {
           setClients(await api<CommercialClient[]>("/commercial/clients"));
@@ -590,9 +592,13 @@ export function ProposalsModule() {
       setHighlightProposalId(created.id);
       setActiveProposalId(created.id);
       setRequestedAmount("");
-      setNotice(noticeAfterProposalCreated());
       await load();
-      proposalsTableRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      if (parseMoney(assetValue)) {
+        await calculate(created);
+      } else {
+        setNotice(noticeAfterProposalCreated());
+        proposalsTableRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
     } catch (err) {
       setProposalError(err instanceof Error ? err.message : "Não foi possível criar a proposta.");
     }
@@ -612,7 +618,7 @@ export function ProposalsModule() {
       return;
     }
     try {
-      const flashSource = isCommercial ? "RETAIL" : capitalSource;
+      const flashSource = isCommercial || isLetterOps ? "RETAIL" : capitalSource;
       const fundSource = flashSource === "INSTITUTIONAL";
       const payload: Record<string, unknown> = {
         asset_value: assetValue,
@@ -620,7 +626,7 @@ export function ProposalsModule() {
         term_months: term,
         ipca_annual_percent: fundSource ? flashIpcaAnnual : "0",
       };
-      if (flashSource === "RETAIL" && !isCommercial) {
+      if (flashSource === "RETAIL" && !isCommercial && !isLetterOps) {
         if (poolInvestmentAmount) payload.pool_investment_amount = poolInvestmentAmount;
         if (flashPoolInvestorRate) payload.pool_investor_rate_percent = flashPoolInvestorRate;
       }
@@ -638,7 +644,36 @@ export function ProposalsModule() {
       );
       void load();
     } catch (e) {
-      setNotice(e instanceof Error ? e.message : "Falha no cálculo");
+      const msg = e instanceof Error ? e.message : "Falha no cálculo";
+      setProposalError(msg);
+      setNotice("");
+    }
+  }
+
+  async function quickCreateLead() {
+    setProposalError("");
+    const name = window.prompt("Nome do cliente (obrigatório para simular):");
+    if (!name?.trim()) return;
+    const phone = window.prompt("WhatsApp do cliente:") || "";
+    if (!phone.trim() || phone.trim().length < 8) {
+      setProposalError("Informe um WhatsApp válido para cadastrar o cliente.");
+      return;
+    }
+    try {
+      const lead = await api<Lead>("/leads", {
+        method: "POST",
+        body: JSON.stringify({
+          name: name.trim(),
+          phone: phone.trim(),
+          product_interest: "FLASH_CREDIT",
+          source: "DASHBOARD",
+        }),
+      });
+      setSelectedLeadId(lead.id);
+      setNotice(`Cliente «${lead.name}» cadastrado. Agora informe o valor solicitado e adicione a simulação.`);
+      await load();
+    } catch (err) {
+      setProposalError(err instanceof Error ? err.message : "Não foi possível cadastrar o cliente.");
     }
   }
 
@@ -669,6 +704,8 @@ export function ProposalsModule() {
   const pageSubtitle = isCommercial
     ? "Simulação resumida para o cliente. Cartas contempladas: Venda Direta e Cadastros. SDC: mesa SDC — Capital de Giro."
     : "Apenas Flash Capital nesta tela. SDC e Marketplace têm módulos próprios; aqui simule, calcule memória e gere contrato.";
+  const showPoolCapitalParams = !isCommercial && !isLetterOps;
+  const assetReady = parseMoney(assetValue) > 0;
 
   return (
     <OperationalLayout title={pageTitle} subtitle={pageSubtitle} icon={<FileText />}>
@@ -728,7 +765,7 @@ export function ProposalsModule() {
           aria-label="Cadastro do cliente"
         >
           <option value="">
-            {leads.length ? "Selecione o cadastro do cliente" : "Nenhum cadastro — use CRM ou Cadastros"}
+            {leads.length ? "Selecione o cadastro do cliente *" : "Nenhum cadastro — cadastre o cliente abaixo"}
           </option>
           {leads.map((l) => (
             <option value={l.id} key={l.id}>
@@ -736,7 +773,19 @@ export function ProposalsModule() {
             </option>
           ))}
         </select>
-        <CurrencyInput value={requestedAmount} onChange={setRequestedAmount} placeholder="Valor solicitado (R$)" />
+        <button type="button" className="table-action" onClick={() => void quickCreateLead()}>
+          <Plus />
+          Cadastrar cliente
+        </button>
+        <Link href="/modules/crm" className="table-action" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+          CRM completo
+        </Link>
+        <CurrencyInput value={requestedAmount} onChange={setRequestedAmount} placeholder="Valor solicitado (R$) *" />
+        <CurrencyInput value={assetValue} onChange={setAssetValue} placeholder="Valor do bem (R$) *" />
+        <select value={term} onChange={(e) => setTerm(Number(e.target.value))} aria-label="Prazo">
+          <option value={36}>Prazo 36 meses</option>
+          <option value={60}>Prazo 60 meses + balão</option>
+        </select>
         <button type="submit">
           <Plus />
           Adicionar simulação
@@ -747,16 +796,19 @@ export function ProposalsModule() {
           <div>
             <b>Parâmetros — Flash Capital</b>
             <small>
-              {isCommercial
-                ? "Fruição 2,5% a.m. (Tabela Price). Origem do capital é definida pela matriz."
-                : "Fruição 2,5% a.m. (Tabela Price) · Pool: 1,6% a.m."}
+              {isCommercial || isLetterOps
+                ? "Operação LETTER: fruição 2,5% a.m. (Tabela Price). Origem do capital e pool são definidos pela matriz — use valor do bem e prazo no formulário acima."
+                : showPoolCapitalParams
+                  ? "Fruição 2,5% a.m. (Tabela Price) · Pool opcional abaixo."
+                  : "Fruição 2,5% a.m. (Tabela Price)."}
             </small>
           </div>
-              <label>
-                Valor do bem
-                <CurrencyInput value={assetValue} onChange={setAssetValue} />
-              </label>
-              {!isCommercial && (
+              {!assetReady && (
+                <div className="error" style={{ margin: 0, gridColumn: "1 / -1" }}>
+                  Informe o <b>valor do bem</b> no formulário acima para habilitar «Calcular memória» na tabela.
+                </div>
+              )}
+              {showPoolCapitalParams && (
                 <label>
                   Flash Capital — origem
                   <select value={capitalSource} onChange={(e) => setCapitalSource(e.target.value)}>
@@ -768,19 +820,19 @@ export function ProposalsModule() {
                   </select>
                 </label>
               )}
-              {!isCommercial && capitalSource === "INSTITUTIONAL" && (
+              {showPoolCapitalParams && capitalSource === "INSTITUTIONAL" && (
                 <div className="notice">
                   <small>
                     Origem fundo: IPCA anual projetado {flashIpcaAnnual}% na memória (fruição 2,5% a.m. inalterada).
                   </small>
                 </div>
               )}
-              {!isCommercial && capitalSource === "RETAIL" && (
+              {showPoolCapitalParams && capitalSource === "RETAIL" && (
                 <>
                   <label>
-                    Pool — valor aplicado (R$)
+                    Pool — valor aplicado (R$) — opcional
                     <CurrencyInput value={poolInvestmentAmount} onChange={setPoolInvestmentAmount} />
-                    <small>Rentabilidade pool: 1,6% a.m.</small>
+                    <small>Só para simular rentabilidade do pool (1,6% a.m.). Não é obrigatório para a memória Flash.</small>
                   </label>
                   {poolRatePreview && (
                     <div className="notice">
@@ -802,13 +854,6 @@ export function ProposalsModule() {
                   </label>
                 </>
               )}
-              <label>
-                Prazo
-                <select value={term} onChange={(e) => setTerm(Number(e.target.value))}>
-                  <option value={36}>36 meses</option>
-                  <option value={60}>60 meses + balão</option>
-                </select>
-              </label>
         </div>
       {notice && (
         <div className="notice">
@@ -852,7 +897,12 @@ export function ProposalsModule() {
                   <button
                     type="button"
                     className="table-action"
-                    title="Gera memória de cálculo Flash desta linha"
+                    disabled={!assetReady}
+                    title={
+                      assetReady
+                        ? "Gera memória de cálculo Flash desta linha"
+                        : "Informe o valor do bem no formulário superior"
+                    }
                     onClick={() => void calculate(p)}
                   >
                     Calcular memória
