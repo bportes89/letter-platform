@@ -60,6 +60,42 @@ function optionLabel(option: ChatOption) {
   return option.name ?? option.text ?? "Opção";
 }
 
+/** Produtos que só seguem na área logada (API antiga ainda pode listar no chat). */
+const LOGGED_AREA_PRODUCT_KEYS = new Set(["SDC", "FLASH", "QUITCON"]);
+
+function optionLoggedAreaProductKey(option: ChatOption): string | null {
+  const raw = option.save ?? option.id;
+  if (raw == null) return null;
+  const key = String(raw).toUpperCase();
+  return LOGGED_AREA_PRODUCT_KEYS.has(key) ? key : null;
+}
+
+function filterExternalBotOptions(options: ChatOption[]): ChatOption[] {
+  return options.filter((o) => !optionLoggedAreaProductKey(o));
+}
+
+function loggedAreaProductGateFlow(productKey: string): ChatItem[] {
+  const labels: Record<string, string> = {
+    SDC: "Capital de Giro (SDC)",
+    FLASH: "Flash Capital",
+    QUITCON: "QuitCon",
+  };
+  const label = labels[productKey] ?? productKey;
+  return [
+    {
+      text:
+        `${label} não é concluído neste chat público. ` +
+        "Cadastre-se ou entre na sua conta LETTER para simular e enviar documentos na área logada.",
+      options: [
+        { name: "Criar minha conta", link: "/cadastro", save: "open_page" },
+        { name: "Já tenho conta — entrar", link: "/login", save: "open_page" },
+        { name: "Comprar carta contemplada", next: 10005 },
+        { name: "Vender minha cota", link: "/vender-minha-cota", save: "open_page" },
+      ],
+    },
+  ];
+}
+
 function ChatUserEcho({ value }: { value: string }) {
   return (
     <div className="attendance-user-row">
@@ -399,6 +435,12 @@ export function AttendanceBotSection() {
 
   const onOption = async (flowIndex: number, itemIndex: number, item: ChatItem, option: ChatOption) => {
     if (!isCurrent(flowIndex) || busy) return;
+    const loggedProduct = optionLoggedAreaProductKey(option);
+    if (loggedProduct) {
+      recordEcho(flowIndex, itemIndex, optionLabel(option));
+      pushFlow(loggedAreaProductGateFlow(loggedProduct));
+      return;
+    }
     const needsServer = !option.link && option.next !== undefined;
     if (needsServer && !(await requireApi())) return;
     if (option.link && option.save === "open_page") {
@@ -505,7 +547,7 @@ export function AttendanceBotSection() {
   };
 
   const renderOptions = (flowIndex: number, itemIndex: number, item: ChatItem) => {
-    const options = item.options ?? [];
+    const options = filterExternalBotOptions(item.options ?? []);
     return (
       <div className="attendance-options">
         {options.map((option, optionIndex) => (
