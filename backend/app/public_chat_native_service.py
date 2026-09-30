@@ -265,6 +265,50 @@ def _income_proof_prompt(lead: Lead, selected: list[str]) -> dict:
     return _wrap([_income_proof_item(selected)], lead_id=lead.id)
 
 
+def _bank_pick_item(
+    *,
+    selected: list[str],
+    banks: list,
+    step: str,
+    prompt_text: str,
+) -> dict:
+    """Multi-seleção de administradoras-banco (mesmo padrão do income_proof)."""
+    by_id = {adm.id: adm for adm in banks}
+    marked = ", ".join(by_id[i].name for i in selected if i in by_id)
+    text = prompt_text
+    if marked:
+        text = f"{marked}. Pode marcar mais bancos ou tocar em Continuar."
+    options: list[dict] = [{"name": "Nenhum", "save": "none", "next": int(step)}]
+    for adm in banks[:12]:
+        if adm.id not in selected:
+            options.append({"name": adm.name, "save": adm.id, "next": int(step), "id": adm.id})
+    if selected:
+        options.append({"name": "Continuar", "save": "done", "next": int(step)})
+    return {"text": text, "options": options}
+
+
+def _bank_accounts_prompt(lead: Lead, snap: dict, banks: list) -> dict:
+    selected = [str(x) for x in (snap.get("client_bank_administrator_ids") or []) if str(x)]
+    item = _bank_pick_item(
+        selected=selected,
+        banks=banks,
+        step=STEP_BANK_ACCOUNTS,
+        prompt_text="Você tem conta em quais bancos? (pode marcar mais de um)",
+    )
+    return _wrap([item], lead_id=lead.id)
+
+
+def _bank_problem_prompt(lead: Lead, snap: dict, banks: list) -> dict:
+    selected = [str(x) for x in (snap.get("client_problem_bank_administrator_ids") or []) if str(x)]
+    item = _bank_pick_item(
+        selected=selected,
+        banks=banks,
+        step=STEP_BANK_PROBLEM_PICK,
+        prompt_text="Em quais bancos você já teve problema? (pode marcar mais de um)",
+    )
+    return _wrap([item], lead_id=lead.id)
+
+
 def _site_info() -> dict:
     return {
         "whatsapp": _digits(settings.company_phone),
@@ -482,14 +526,9 @@ def _continue_marketplace_qualification(db: Session, org, lead, snap: dict) -> d
             )
         snap["subcategory_skipped"] = True
     banks = _bank_administrators(db)
-    if banks and "client_bank_administrator_ids" not in snap:
-        options = [{"name": "Nenhum", "next": int(STEP_BANK_ACCOUNTS), "id": "none", "save": "none"}]
-        for adm in banks[:12]:
-            options.append(
-                {"name": adm.name, "next": int(STEP_BANK_ACCOUNTS), "id": adm.id, "save": adm.id},
-            )
-        return _wrap(
-            [{"text": "Você tem conta em algum desses bancos?", "options": options}],
+    if banks and not snap.get("bank_accounts_confirmed"):
+        return _bank_accounts_prompt(lead, snap, banks) if lead else _wrap(
+            [_bank_pick_item(selected=[], banks=banks, step=STEP_BANK_ACCOUNTS, prompt_text="Você tem conta em quais bancos? (pode marcar mais de um)")],
             lead_id=lead_id,
         )
     if banks and "bank_had_problem" not in snap:
@@ -505,14 +544,16 @@ def _continue_marketplace_qualification(db: Session, org, lead, snap: dict) -> d
             ],
             lead_id=lead_id,
         )
-    if banks and snap.get("bank_had_problem") and "client_problem_bank_administrator_ids" not in snap:
-        options = [{"name": "Nenhum", "next": int(STEP_BANK_PROBLEM_PICK), "id": "none", "save": "none"}]
-        for adm in banks[:12]:
-            options.append(
-                {"name": adm.name, "next": int(STEP_BANK_PROBLEM_PICK), "id": adm.id, "save": adm.id},
-            )
-        return _wrap(
-            [{"text": "Em qual banco você já teve problema?", "options": options}],
+    if banks and snap.get("bank_had_problem") and not snap.get("problem_banks_confirmed"):
+        return _bank_problem_prompt(lead, snap, banks) if lead else _wrap(
+            [
+                _bank_pick_item(
+                    selected=[],
+                    banks=banks,
+                    step=STEP_BANK_PROBLEM_PICK,
+                    prompt_text="Em quais bancos você já teve problema? (pode marcar mais de um)",
+                )
+            ],
             lead_id=lead_id,
         )
     return _prompt_credit_step(lead_id)
@@ -805,11 +846,32 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
 
     if step == STEP_BANK_ACCOUNTS and lead:
         snap = _lead_snapshot(lead)
-        save = str(data.get("option_save") or data.get("option_id") or "none")
-        snap["client_bank_administrator_ids"] = [] if save in {"none", "skip"} else [save]
-        _save_lead_snapshot(lead, snap)
-        db.flush()
-        return _continue_marketplace_qualification(db, org, lead, snap)
+        banks = _bank_administrators(db)
+        bank_ids = {adm.id for adm in banks}
+        selected = [str(x) for x in (snap.get("client_bank_administrator_ids") or []) if str(x) in bank_ids]
+        choice = str(data.get("option_save") or data.get("option_id") or "").strip()
+        if choice == "none":
+            snap["client_bank_administrator_ids"] = []
+            snap["bank_accounts_confirmed"] = True
+            _save_lead_snapshot(lead, snap)
+            db.flush()
+            return _continue_marketplace_qualification(db, org, lead, snap)
+        if choice == "done":
+            if not selected:
+                return _bank_accounts_prompt(lead, snap, banks)
+            snap["client_bank_administrator_ids"] = selected
+            snap["bank_accounts_confirmed"] = True
+            _save_lead_snapshot(lead, snap)
+            db.flush()
+            return _continue_marketplace_qualification(db, org, lead, snap)
+        if choice in bank_ids:
+            if choice not in selected:
+                selected.append(choice)
+            snap["client_bank_administrator_ids"] = selected
+            _save_lead_snapshot(lead, snap)
+            db.flush()
+            return _bank_accounts_prompt(lead, snap, banks)
+        return _bank_accounts_prompt(lead, snap, banks)
 
     if step == STEP_BANK_PROBLEM_YN and lead:
         snap = _lead_snapshot(lead)
@@ -817,17 +879,41 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
         snap["bank_had_problem"] = save in {"yes", "1", "dirty_yes"}
         if not snap["bank_had_problem"]:
             snap["client_problem_bank_administrator_ids"] = []
+            snap["problem_banks_confirmed"] = True
+        else:
+            snap.pop("problem_banks_confirmed", None)
         _save_lead_snapshot(lead, snap)
         db.flush()
         return _continue_marketplace_qualification(db, org, lead, snap)
 
     if step == STEP_BANK_PROBLEM_PICK and lead:
         snap = _lead_snapshot(lead)
-        save = str(data.get("option_save") or data.get("option_id") or "none")
-        snap["client_problem_bank_administrator_ids"] = [] if save in {"none", "skip"} else [save]
-        _save_lead_snapshot(lead, snap)
-        db.flush()
-        return _prompt_credit_step(lead.id)
+        banks = _bank_administrators(db)
+        bank_ids = {adm.id for adm in banks}
+        selected = [str(x) for x in (snap.get("client_problem_bank_administrator_ids") or []) if str(x) in bank_ids]
+        choice = str(data.get("option_save") or data.get("option_id") or "").strip()
+        if choice == "none":
+            snap["client_problem_bank_administrator_ids"] = []
+            snap["problem_banks_confirmed"] = True
+            _save_lead_snapshot(lead, snap)
+            db.flush()
+            return _prompt_credit_step(lead.id)
+        if choice == "done":
+            if not selected:
+                return _bank_problem_prompt(lead, snap, banks)
+            snap["client_problem_bank_administrator_ids"] = selected
+            snap["problem_banks_confirmed"] = True
+            _save_lead_snapshot(lead, snap)
+            db.flush()
+            return _prompt_credit_step(lead.id)
+        if choice in bank_ids:
+            if choice not in selected:
+                selected.append(choice)
+            snap["client_problem_bank_administrator_ids"] = selected
+            _save_lead_snapshot(lead, snap)
+            db.flush()
+            return _bank_problem_prompt(lead, snap, banks)
+        return _bank_problem_prompt(lead, snap, banks)
 
     if step == STEP_CREDIT:
         # May arrive from dirty options OR from amount input

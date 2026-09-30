@@ -26,4 +26,6 @@ Material do sistema antigo disponível na máquina de desenvolvimento — **não
 
 - **Configurações gerais** (`organization_settings` / legado `x_settings`): `/api/v1/admin/org-settings`, import legado, `GET /api/v1/public/site/org-info`; contrato marketplace prioriza `marketplace_contract_html`; UI `/modules/org-settings`
 
-Próximos blocos: multi-seleção de bancos no widget do chat, e-mails marketplace via `cms_texts`, uso dos templates SDC/VD no chat.
+- Chat público: **multi-seleção de bancos** (conta corrente e banco com problema) no passo 10071/10073, padrão comprovação de renda
+
+Próximos blocos: e-mails marketplace via `cms_texts`, injetar templates SDC/VD (`org_settings`) no chat.
