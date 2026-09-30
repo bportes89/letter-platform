@@ -37,7 +37,7 @@
 | B6 | Admin: extrato **fornecedor** | 🟡 |
 | B7 | Admin: extrato **parceiro/franquia** | 🟡 |
 | B8 | Admin: extrato **plataforma** (líquido após repasses) | ❌ |
-| B9 | Admin: fila **saques** fornecedor + parceiro | 🟡 |
+| B9 | Admin: fila **saques** fornecedor + parceiro | ✅ | Fornecedores + menu «Saques parceiros» |
 
 ---
 

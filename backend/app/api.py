@@ -2558,7 +2558,7 @@ def marketplace_quota_statement_download(
 def marketplace_supplier_withdrawals(
     status: str | None = None,
     limit: int = 100,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_any_scope("inventory:write", "payments:review")),
     db: Session = Depends(get_db),
 ):
     from app.supplier_wallet_service import list_withdrawals_admin
@@ -2570,7 +2570,7 @@ def marketplace_supplier_withdrawals(
 def marketplace_process_supplier_withdrawal(
     withdrawal_id: str,
     payload: SupplierWithdrawalProcessRequest,
-    user: User = Depends(require_scope("inventory:write")),
+    user: User = Depends(require_any_scope("inventory:write", "payments:review")),
     db: Session = Depends(get_db),
 ):
     from app.supplier_wallet_service import process_withdrawal
@@ -2585,7 +2585,7 @@ def marketplace_process_supplier_withdrawal(
 def marketplace_partner_withdrawals(
     status: str | None = None,
     limit: int = 100,
-    user: User = Depends(require_scope("inventory:write")),
+    user: User = Depends(require_any_scope("inventory:write", "payments:review")),
     db: Session = Depends(get_db),
 ):
     from app.partner_legacy_wallet_service import list_withdrawals_admin
@@ -2597,7 +2597,7 @@ def marketplace_partner_withdrawals(
 def marketplace_process_partner_withdrawal(
     withdrawal_id: str,
     payload: SupplierWithdrawalProcessRequest,
-    user: User = Depends(require_scope("inventory:write")),
+    user: User = Depends(require_any_scope("inventory:write", "payments:review")),
     db: Session = Depends(get_db),
 ):
     from app.partner_legacy_wallet_service import process_partner_withdrawal

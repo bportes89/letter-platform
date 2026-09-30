@@ -3,6 +3,7 @@
 import { CheckCircle2, Plus, RefreshCw, Truck } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
+import { PartnerWithdrawalsAdminPanel } from "@/components/partner-withdrawals-admin-panel";
 
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
@@ -801,6 +802,11 @@ export function FornecedoresModule() {
           </table>
         </div>
       </section>
+
+      <PartnerWithdrawalsAdminPanel
+        onNotice={setNotice}
+        onError={setError}
+      />
     </>
   );
 }

@@ -28,6 +28,7 @@ import { VendaDiretaManualModule } from "@/components/venda-direta-manual-module
 import { CadastroMarketplaceModule } from "@/components/cadastro-marketplace-module";
 import { ClientMarketplaceModule } from "@/components/client-marketplace-module";
 import { FornecedoresModule } from "@/components/fornecedores-module";
+import { PartnerWithdrawalsAdminModule } from "@/components/partner-withdrawals-admin-module";
 import { QuotaCategoriesModule } from "@/components/quota-categories-module";
 import { CmsTextsModule } from "@/components/cms-texts-module";
 import { OrgSettingsModule } from "@/components/org-settings-module";
@@ -108,6 +109,7 @@ export default function ModulePage() {
   if (routeKey === "cadastros") return <CadastroMarketplaceModule />;
   if (routeKey === "minhas-compras") return <ClientMarketplaceModule />;
   if (routeKey === "fornecedores") return <FornecedoresModule />;
+  if (routeKey === "partner-saques") return <PartnerWithdrawalsAdminModule />;
   if (routeKey === "quota-categories") return <QuotaCategoriesModule />;
   if (routeKey === "cms-texts") return <CmsTextsModule />;
   if (routeKey === "org-settings") return <OrgSettingsModule />;

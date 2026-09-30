@@ -38,7 +38,7 @@ const ROLE_PRODUCT_KEYS: Record<LetterRole, AccessList> = {
   PLATFORM_ADMIN: "*",
   INTERNAL_STAFF: "*",
   MASTER_FRANCHISEE: [
-    "marketplace", "venda-direta-robo", "venda-direta-manual", "cadastros", "fornecedores", "quota-categories", "chat-faq", "inventory", "vender-cota", "proposals", "sdc",
+    "marketplace", "venda-direta-robo", "venda-direta-manual", "cadastros", "fornecedores", "partner-saques", "quota-categories", "chat-faq", "inventory", "vender-cota", "proposals", "sdc",
     "flash-capital", "lease-equity", "flash-invest", "quitcon", "lss", "leilao",
   ],
   MANAGER: ["marketplace", "venda-direta-robo", "venda-direta-manual", "cadastros", "fornecedores", "quota-categories", "chat-faq", "inventory", "vender-cota", "proposals", "sdc", "flash-capital", "lease-equity", "quitcon", "lss"],
@@ -104,6 +104,7 @@ const PRODUCT_ROUTE_ALIASES: Record<string, string> = {
   cadastros: "cadastros",
   "minhas-compras": "minhas-compras",
   fornecedores: "fornecedores",
+  "partner-saques": "partner-saques",
   "quota-categories": "quota-categories",
   "chat-faq": "chat-faq",
   "cms-texts": "cms-texts",

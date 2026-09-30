@@ -89,7 +89,7 @@ PERMISSION_GROUPS: list[PermissionGroupDef] = [
             {"key": "financeiro.extrato_plataforma", "label": "Extrato (Plataforma)", "modules": ["wallet", "reports"], "scopes": ["wallet:read", "audit:read"]},
             {"key": "financeiro.extrato_parceiros", "label": "Extrato (Parceiros / Franq.)", "modules": ["mmn", "reports"], "scopes": ["network:read", "wallet:read"]},
             {"key": "financeiro.extrato_fornecedores", "label": "Extrato (Fornecedores)", "modules": ["fornecedores", "reports"], "scopes": ["inventory:write"]},
-            {"key": "financeiro.saques_parceiros", "label": "Saques (Parceiro / Franq.)", "modules": ["payments", "mmn"], "scopes": ["payments:review"]},
+            {"key": "financeiro.saques_parceiros", "label": "Saques (Parceiro / Franq.)", "modules": ["partner-saques", "payments", "mmn", "fornecedores"], "scopes": ["payments:review", "inventory:write"]},
             {"key": "financeiro.saques_fornecedores", "label": "Saques (Fornecedores)", "modules": ["payments", "fornecedores"], "scopes": ["payments:review"]},
             {"key": "financeiro.comissoes", "label": "Rede e comissões (MMN)", "modules": ["mmn"], "scopes": ["network:read"]},
             {"key": "financeiro.taxtech", "label": "TaxTech", "modules": ["taxtech"], "scopes": ["admin:users"]},
