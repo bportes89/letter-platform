@@ -54,6 +54,7 @@ PERMISSION_GROUPS: list[PermissionGroupDef] = [
     {
         "group": "Rede e parceiros",
         "items": [
+            {"key": "sdc.qualificacao_parceiros", "label": "Qualificação de parceiros (SDC)", "modules": ["sdc-partner-qualifications"], "scopes": ["admin:users"]},
             {"key": "rede.parceiro_franqueado", "label": "Parceiro / Franqueado", "modules": ["mmn", "crm"], "scopes": ["network:read", "network:invite"]},
             {"key": "rede.vendedores", "label": "Vendedores", "modules": ["mmn", "crm"], "scopes": ["network:read"]},
             {"key": "rede.regional", "label": "Regional", "modules": ["mmn", "crm"], "scopes": ["network:read"]},

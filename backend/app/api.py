@@ -93,6 +93,10 @@ from app.schemas import (
     QuotaSupplierCreate, QuotaSupplierUpdate, QuotaSupplierView, QuotaInventorySyncView,
     QuotaCategoryCreate, QuotaCategoryUpdate, QuotaCategoryView, QuotaCategoryImportResult,
     CmsTextCreate, CmsTextUpdate, CmsTextView, CmsTextImportResult, PublicCmsPageView,
+    PartnerQualificationTierCreate, PartnerQualificationTierUpdate, PartnerQualificationTierView,
+    PartnerQualificationImportResult, PartnerQualificationAppraisalRequest,
+    PartnerQualificationFranchiseAppraisalView, PartnerQualificationAppraisalApplyResult,
+    PartnerQualificationAppraisalHistoryView,
     SupplierInventoryQuotaAuditView,
     SupplierPortalTokenResponse, SupplierPortalMeView, SupplierPortalTransferItem,
     SupplierPortalAdministratorOption, SupplierPortalQuotaItem,
@@ -717,6 +721,22 @@ def admin_update_user(user_id:str,payload:UserUpdate,user:User=Depends(require_s
             if pct > 100:
                 raise HTTPException(status_code=422, detail=f"{pct_field} não pode exceder 100%.")
             setattr(target, pct_field, float(pct))
+    if "partner_qualification_tier_id" in data:
+        tier_id = data.pop("partner_qualification_tier_id")
+        if tier_id:
+            from app.models import PartnerQualificationTier
+
+            tier = db.scalar(
+                select(PartnerQualificationTier).where(
+                    PartnerQualificationTier.id == tier_id,
+                    PartnerQualificationTier.organization_id == user.organization_id,
+                )
+            )
+            if not tier:
+                raise HTTPException(status_code=404, detail="Faixa de qualificação não encontrada")
+            target.partner_qualification_tier_id = tier_id
+        else:
+            target.partner_qualification_tier_id = None
     access_all = data.pop("access_all", None)
     permissions = data.pop("permissions", None)
     for field, value in data.items():
@@ -2011,6 +2031,136 @@ def import_legacy_cms_texts_route(
     audit(db, user, "cms.text.import_legacy", "cms_text", user.organization_id, result)
     db.commit()
     return result
+
+
+@router.get("/sdc/partner-qualification-tiers", response_model=list[PartnerQualificationTierView])
+def list_partner_qualification_tiers_route(
+    user: User = Depends(require_scope("admin:users")),
+    db: Session = Depends(get_db),
+):
+    from app.partner_qualification_service import list_tiers, tier_view
+
+    return [tier_view(x) for x in list_tiers(db, user)]
+
+
+@router.post("/sdc/partner-qualification-tiers", response_model=PartnerQualificationTierView, status_code=201)
+def create_partner_qualification_tier_route(
+    payload: PartnerQualificationTierCreate,
+    user: User = Depends(require_scope("admin:users")),
+    db: Session = Depends(get_db),
+):
+    from app.partner_qualification_service import create_tier, tier_view
+
+    item = create_tier(db, user, payload.model_dump(mode="json"))
+    audit(db, user, "sdc.partner_qualification_tier.created", "partner_qualification_tier", item.id, {"name": item.name})
+    db.commit()
+    db.refresh(item)
+    return tier_view(item)
+
+
+@router.patch("/sdc/partner-qualification-tiers/{tier_id}", response_model=PartnerQualificationTierView)
+def update_partner_qualification_tier_route(
+    tier_id: str,
+    payload: PartnerQualificationTierUpdate,
+    user: User = Depends(require_scope("admin:users")),
+    db: Session = Depends(get_db),
+):
+    from app.partner_qualification_service import tier_view, update_tier
+
+    item = update_tier(db, user, tier_id, payload.model_dump(exclude_unset=True, mode="json"))
+    audit(db, user, "sdc.partner_qualification_tier.updated", "partner_qualification_tier", item.id, payload.model_dump(exclude_unset=True, mode="json"))
+    db.commit()
+    db.refresh(item)
+    return tier_view(item)
+
+
+@router.post("/sdc/partner-qualification-tiers/import-legacy", response_model=PartnerQualificationImportResult)
+def import_legacy_partner_qualification_tiers_route(
+    user: User = Depends(require_scope("admin:users")),
+    db: Session = Depends(get_db),
+):
+    from app.partner_qualification_service import import_legacy_tiers
+
+    result = import_legacy_tiers(db, user.organization_id)
+    audit(db, user, "sdc.partner_qualification.import_legacy", "partner_qualification_tier", user.organization_id, result)
+    db.commit()
+    return result
+
+
+@router.get("/sdc/partner-qualifications/appraisal/franchises", response_model=list[PartnerQualificationFranchiseAppraisalView])
+def list_partner_qualification_appraisal_franchises_route(
+    user: User = Depends(require_scope("admin:users")),
+    db: Session = Depends(get_db),
+):
+    from app.partner_qualification_service import list_franchise_appraisal_rows
+
+    return list_franchise_appraisal_rows(db, user)
+
+
+@router.post(
+    "/sdc/partner-qualifications/appraisal/preview",
+    response_model=list[PartnerQualificationFranchiseAppraisalView],
+)
+def preview_partner_qualification_appraisal_route(
+    payload: PartnerQualificationAppraisalRequest,
+    user: User = Depends(require_scope("admin:users")),
+    db: Session = Depends(get_db),
+):
+    from app.partner_qualification_service import run_appraisal_preview
+
+    rows = run_appraisal_preview(db, user.organization_id, payload.date_init, payload.date_final)
+    audit(
+        db,
+        user,
+        "sdc.partner_qualification.appraisal_preview",
+        "partner_qualification_appraisal",
+        user.organization_id,
+        {"date_init": payload.date_init.isoformat(), "date_final": payload.date_final.isoformat()},
+    )
+    db.commit()
+    return rows
+
+
+@router.post(
+    "/sdc/partner-qualifications/appraisal/apply",
+    response_model=PartnerQualificationAppraisalApplyResult,
+)
+def apply_partner_qualification_appraisal_route(
+    payload: PartnerQualificationAppraisalRequest,
+    user: User = Depends(require_scope("admin:users")),
+    db: Session = Depends(get_db),
+):
+    from app.partner_qualification_service import apply_appraisal
+
+    result = apply_appraisal(db, user, payload.date_init, payload.date_final)
+    audit(db, user, "sdc.partner_qualification.appraisal_apply", "partner_qualification_appraisal", result["run_id"], result)
+    db.commit()
+    return result
+
+
+@router.post("/sdc/partner-qualifications/appraisal/clear-preview")
+def clear_partner_qualification_appraisal_preview_route(
+    user: User = Depends(require_scope("admin:users")),
+    db: Session = Depends(get_db),
+):
+    from app.partner_qualification_service import clear_appraisal_preview
+
+    clear_appraisal_preview(db, user.organization_id)
+    db.commit()
+    return {"ok": True}
+
+
+@router.get(
+    "/sdc/partner-qualifications/appraisal/history",
+    response_model=list[PartnerQualificationAppraisalHistoryView],
+)
+def list_partner_qualification_appraisal_history_route(
+    user: User = Depends(require_scope("admin:users")),
+    db: Session = Depends(get_db),
+):
+    from app.partner_qualification_service import list_appraisal_history
+
+    return list_appraisal_history(db, user)
 
 
 @router.get("/public/site/cms/pages/{slug}", response_model=PublicCmsPageView)

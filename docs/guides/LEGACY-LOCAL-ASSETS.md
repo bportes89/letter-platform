@@ -22,5 +22,6 @@ Material do sistema antigo disponível na máquina de desenvolvimento — **não
 - UI Administradoras: alienações (categoria + ano máx.) e flags marketplace; Esteira 2 / Venda Direta Robô com subcategoria e bancos do cliente
 - CMS `cms_texts`: API `/api/v1/cms/texts`, import `.../import-legacy` (`texts` + `z_text`), UI **Textos e e-mails**; páginas públicas `GET /api/v1/public/site/cms/pages/{slug}`
 - Chat público: subcategoria + bancos do cliente antes do crédito; Esteira 2 usa os mesmos filtros do admin
+- **Qualificação SDC** (`partner_qualification_tiers`): API `/api/v1/sdc/partner-qualification-tiers`, import legado `affiliates_qualification`, apuração preview/apply; bônus `%` somado à franquia em comissões SDC; UI `/modules/sdc-partner-qualifications`
 
-Próximos blocos: qualificação de parceiros (SDC), contrato admin (x_settings id 11), multi-seleção de bancos no widget do chat.
+Próximos blocos: contrato admin (x_settings id 11), multi-seleção de bancos no widget do chat, e-mails marketplace via `cms_texts`.

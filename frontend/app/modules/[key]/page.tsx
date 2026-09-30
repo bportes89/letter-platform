@@ -32,6 +32,7 @@ import { QuotaCategoriesModule } from "@/components/quota-categories-module";
 import { CmsTextsModule } from "@/components/cms-texts-module";
 import { MarketplaceChatFaqModule } from "@/components/marketplace-chat-faq-module";
 import { SdcDeskModule } from "@/components/sdc-desk-module";
+import { SdcPartnerQualificationsModule } from "@/components/sdc-partner-qualifications-module";
 import { FlashDeskModule } from "@/components/flash-desk-module";
 import { FlashInvestDeskModule } from "@/components/flash-invest-desk-module";
 import { BankControlModule } from "@/components/bank-control-module";
@@ -113,6 +114,7 @@ export default function ModulePage() {
   if (routeKey === "vender-cota") return <VenderCotaAdminModule />;
   if (routeKey === "proposals") return <ProposalsModule />;
   if (routeKey === "sdc") return <SdcDeskModule />;
+  if (routeKey === "sdc-partner-qualifications") return <SdcPartnerQualificationsModule />;
   if (routeKey === "flash-capital" || routeKey === "finops") return <FlashDeskModule />;
   if (routeKey === "lease-equity") return <><LeaseEquityModule /><PreAnalysisModule /></>;
   if (routeKey === "flash-invest" || routeKey === "funding") return <FlashInvestDeskModule />;

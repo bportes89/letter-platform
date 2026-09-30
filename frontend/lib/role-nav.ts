@@ -54,7 +54,7 @@ const ROLE_PRODUCT_KEYS: Record<LetterRole, AccessList> = {
 const ROLE_PLATFORM_MODULE_KEYS: Record<LetterRole, AccessList> = {
   PLATFORM_ADMIN: "*",
   INTERNAL_STAFF: [
-    "identity", "rbac", "crm", "administrators", "cms-texts", "nina", "structured-properties",
+    "identity", "rbac", "crm", "administrators", "cms-texts", "sdc-partner-qualifications", "nina", "structured-properties",
     "contracts", "payments", "my-wallet", "wallet", "collections", "mmn", "taxtech",
     "communications", "reports", "operations", "admin",
   ],
@@ -107,6 +107,7 @@ const PRODUCT_ROUTE_ALIASES: Record<string, string> = {
   "quota-categories": "quota-categories",
   "chat-faq": "chat-faq",
   "cms-texts": "cms-texts",
+  "sdc-partner-qualifications": "sdc-partner-qualifications",
   inventory: "inventory",
   "vender-cota": "vender-cota",
   proposals: "proposals",

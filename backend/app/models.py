@@ -91,6 +91,14 @@ class User(TimestampMixin, Base):
     adicionar_comissao: Mapped[bool] = mapped_column(Boolean, default=False)
     porc: Mapped[float] = mapped_column(Numeric(8, 2), default=0)
     porc_capital_giro: Mapped[float] = mapped_column(Numeric(8, 2), default=0)
+    partner_qualification_tier_id: Mapped[str | None] = mapped_column(
+        ForeignKey("partner_qualification_tiers.id"), index=True
+    )
+    partner_qualification_appraisal_amount: Mapped[float] = mapped_column(Numeric(15, 2), default=0)
+    partner_qualification_appraisal_tier_id: Mapped[str | None] = mapped_column(
+        ForeignKey("partner_qualification_tiers.id"), index=True
+    )
+    partner_qualification_appraisal_tier_name: Mapped[str | None] = mapped_column(String(255))
     organization: Mapped[Organization] = relationship()
 
 
@@ -337,6 +345,33 @@ class MarketplaceChatFaq(TimestampMixin, Base):
     txt: Mapped[str] = mapped_column(Text)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class PartnerQualificationTier(TimestampMixin, Base):
+    """Faixas de qualificação SDC por faturamento (legado `affiliates_qualification`)."""
+
+    __tablename__ = "partner_qualification_tiers"
+    __table_args__ = (UniqueConstraint("organization_id", "legacy_id", name="uq_partner_qual_tier_org_legacy"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    legacy_id: Mapped[int | None] = mapped_column(Integer, index=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    name: Mapped[str] = mapped_column(String(255))
+    price_init: Mapped[float] = mapped_column(Numeric(15, 2), default=0)
+    price_final: Mapped[float] = mapped_column(Numeric(15, 2), default=0)
+    price_bonus: Mapped[float] = mapped_column(Numeric(8, 2), default=0)
+    sort_order: Mapped[int] = mapped_column(Integer, default=999)
+
+
+class PartnerQualificationAppraisalRun(TimestampMixin, Base):
+    """Histórico de apurações SDC aplicadas (legado `affiliates_qualification_historical`)."""
+
+    __tablename__ = "partner_qualification_appraisal_runs"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    date_init: Mapped[date] = mapped_column(Date)
+    date_final: Mapped[date] = mapped_column(Date)
+    applied_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"))
 
 
 class CmsText(TimestampMixin, Base):

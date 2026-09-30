@@ -248,6 +248,7 @@ class UserUpdate(BaseModel):
     adicionar_comissao: bool | None = None
     porc: Decimal | None = Field(default=None, ge=0, le=100)
     porc_capital_giro: Decimal | None = Field(default=None, ge=0, le=100)
+    partner_qualification_tier_id: str | None = None
 
 
 class ProfileSelfUpdate(BaseModel):
@@ -2504,6 +2505,75 @@ class PublicCmsPageView(BaseModel):
     slug: str
     title: str
     body_html: str
+
+
+class PartnerQualificationTierCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    price_init: Decimal = Field(default=Decimal("0"), ge=0)
+    price_final: Decimal = Field(default=Decimal("0"), ge=0)
+    price_bonus: Decimal = Field(default=Decimal("0"), ge=0, le=100)
+    sort_order: int = Field(default=999, ge=0)
+    active: bool = True
+
+
+class PartnerQualificationTierUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    price_init: Decimal | None = Field(default=None, ge=0)
+    price_final: Decimal | None = Field(default=None, ge=0)
+    price_bonus: Decimal | None = Field(default=None, ge=0, le=100)
+    sort_order: int | None = Field(default=None, ge=0)
+    active: bool | None = None
+
+
+class PartnerQualificationTierView(BaseModel):
+    id: str
+    legacy_id: int | None = None
+    active: bool
+    name: str
+    price_init: str
+    price_final: str
+    price_bonus: str
+    sort_order: int
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class PartnerQualificationImportResult(BaseModel):
+    created: int
+    updated: int
+    total_legacy: int
+
+
+class PartnerQualificationAppraisalRequest(BaseModel):
+    date_init: date
+    date_final: date
+
+
+class PartnerQualificationFranchiseAppraisalView(BaseModel):
+    user_id: str
+    name: str
+    email: str
+    document: str | None = None
+    phone: str | None = None
+    current_tier_id: str | None = None
+    appraisal_amount: str
+    appraisal_tier_id: str | None = None
+    appraisal_tier_name: str | None = None
+
+
+class PartnerQualificationAppraisalApplyResult(BaseModel):
+    run_id: str
+    date_init: str
+    date_final: str
+    franchises_updated: int
+
+
+class PartnerQualificationAppraisalHistoryView(BaseModel):
+    id: str
+    date_init: str
+    date_final: str
+    applied_by_id: str | None = None
+    created_at: datetime | None = None
 
 
 class QuotaSupplierView(BaseModel):

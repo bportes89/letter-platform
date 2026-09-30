@@ -140,6 +140,7 @@ def compute_chain_commissions(
             "chain_user_ids": {key: None for key in CHAIN_KEYS},
             "bolo_total_pct": "0",
             "porc_franquia_residual_pct": "0",
+            "porc_qualification_bonus_pct": "0",
         }
 
     ids = resolve_chain_user_ids(db, organization_id, partner_user_id)
@@ -150,6 +151,12 @@ def compute_chain_commissions(
     porc_supervisor = _resolve_porc_member(users["supervisor"], is_sdc=is_sdc)
     porc_vendedor = _resolve_porc_member(users["vendedor"], is_sdc=is_sdc)
     porc_franquia = _resolve_porc_member(users["franquia"], is_sdc=is_sdc)
+    qual_bonus = Decimal("0")
+    if is_sdc and users["franquia"]:
+        from app.partner_qualification_service import qualification_bonus_pct
+
+        qual_bonus = qualification_bonus_pct(db, organization_id, users["franquia"])
+        porc_franquia += qual_bonus
 
     markup_franquia = _pct(porc_a_mais_franquia) if not is_sdc else Decimal("0")
     markup_sellers = _pct(porc_a_mais_sellers) if not is_sdc else Decimal("0")
@@ -175,6 +182,7 @@ def compute_chain_commissions(
         "porc_franquia_residual_pct": str(porc_franquia_residual),
         "porc_a_mais_franquia": str(markup_franquia),
         "porc_a_mais_sellers": str(markup_sellers),
+        "porc_qualification_bonus_pct": str(qual_bonus),
     }
 
 
