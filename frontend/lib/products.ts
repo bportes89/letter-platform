@@ -12,16 +12,16 @@ const CONTRACT_TEMPLATE_LABELS: Record<string, string> = {
   "marketplace-v1": "MARKETPLACE",
   "sdc-bullet-v1": "SDC",
   "sdc-bullet-v2": "SDC",
-  "flash-credit-v1": "FLASH CAPITAL",
-  "flash-credit-v2": "FLASH CAPITAL",
-  "flash-capital-v1": "FLASH CAPITAL",
-  "flash-capital-v2": "FLASH CAPITAL",
-  "flash-capital-v3": "FLASH CAPITAL",
+  "flash-credit-v1": "Flash Capital",
+  "flash-credit-v2": "Flash Capital",
+  "flash-capital-v1": "Flash Capital",
+  "flash-capital-v2": "Flash Capital",
+  "flash-capital-v3": "Flash Capital",
 };
 
 export function contractTemplateLabel(version: string): string {
   if (CONTRACT_TEMPLATE_LABELS[version]) return CONTRACT_TEMPLATE_LABELS[version];
-  if (version.startsWith("flash-")) return "FLASH CAPITAL";
+  if (version.startsWith("flash-")) return "Flash Capital";
   if (version.startsWith("sdc-")) return "SDC";
   if (version.startsWith("marketplace")) return "MARKETPLACE";
   return version.replace(/-v\d+$/, "").replaceAll("-", " ").toUpperCase();
