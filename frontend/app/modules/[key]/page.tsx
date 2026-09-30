@@ -30,6 +30,7 @@ import { ClientMarketplaceModule } from "@/components/client-marketplace-module"
 import { FornecedoresModule } from "@/components/fornecedores-module";
 import { QuotaCategoriesModule } from "@/components/quota-categories-module";
 import { CmsTextsModule } from "@/components/cms-texts-module";
+import { OrgSettingsModule } from "@/components/org-settings-module";
 import { MarketplaceChatFaqModule } from "@/components/marketplace-chat-faq-module";
 import { SdcDeskModule } from "@/components/sdc-desk-module";
 import { SdcPartnerQualificationsModule } from "@/components/sdc-partner-qualifications-module";
@@ -109,6 +110,7 @@ export default function ModulePage() {
   if (routeKey === "fornecedores") return <FornecedoresModule />;
   if (routeKey === "quota-categories") return <QuotaCategoriesModule />;
   if (routeKey === "cms-texts") return <CmsTextsModule />;
+  if (routeKey === "org-settings") return <OrgSettingsModule />;
   if (routeKey === "chat-faq") return <MarketplaceChatFaqModule />;
   if (routeKey === "inventory") return <InventoryModule />;
   if (routeKey === "vender-cota") return <VenderCotaAdminModule />;

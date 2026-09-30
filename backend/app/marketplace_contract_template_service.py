@@ -82,6 +82,12 @@ def template_storage_key(organization_id: str) -> str:
 
 
 def load_organization_template(db: Session | None, organization_id: str) -> str:
+    if db is not None:
+        from app.org_settings_service import get_setting
+
+        stored = get_setting(db, organization_id, "marketplace_contract_html")
+        if stored.strip():
+            return stored.strip()
     key = template_storage_key(organization_id)
     try:
         raw = get_storage().get(key)
@@ -94,10 +100,18 @@ def load_organization_template(db: Session | None, organization_id: str) -> str:
     return DEFAULT_MARKETPLACE_CONTRACT_TEMPLATE
 
 
-def save_organization_template(organization_id: str, template_html: str) -> None:
+def save_organization_template(
+    organization_id: str,
+    template_html: str,
+    db: Session | None = None,
+) -> None:
     body = (template_html or "").strip()
     if not body:
         raise ValueError("Template vazio")
+    if db is not None:
+        from app.org_settings_service import set_settings
+
+        set_settings(db, organization_id, {"marketplace_contract_html": body})
     get_storage().put(template_storage_key(organization_id), body.encode("utf-8"), "text/html; charset=utf-8")
 
 

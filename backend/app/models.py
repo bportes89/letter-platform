@@ -363,6 +363,17 @@ class PartnerQualificationTier(TimestampMixin, Base):
     sort_order: Mapped[int] = mapped_column(Integer, default=999)
 
 
+class OrganizationSetting(TimestampMixin, Base):
+    """Configurações globais por organização (legado `x_settings`, chave → valor)."""
+
+    __tablename__ = "organization_settings"
+    __table_args__ = (UniqueConstraint("organization_id", "field_key", name="uq_org_setting_key"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    field_key: Mapped[str] = mapped_column(String(80), index=True)
+    value: Mapped[str] = mapped_column(Text, default="")
+
+
 class PartnerQualificationAppraisalRun(TimestampMixin, Base):
     """Histórico de apurações SDC aplicadas (legado `affiliates_qualification_historical`)."""
 

@@ -24,4 +24,6 @@ Material do sistema antigo disponível na máquina de desenvolvimento — **não
 - Chat público: subcategoria + bancos do cliente antes do crédito; Esteira 2 usa os mesmos filtros do admin
 - **Qualificação SDC** (`partner_qualification_tiers`): API `/api/v1/sdc/partner-qualification-tiers`, import legado `affiliates_qualification`, apuração preview/apply; bônus `%` somado à franquia em comissões SDC; UI `/modules/sdc-partner-qualifications`
 
-Próximos blocos: contrato admin (x_settings id 11), multi-seleção de bancos no widget do chat, e-mails marketplace via `cms_texts`.
+- **Configurações gerais** (`organization_settings` / legado `x_settings`): `/api/v1/admin/org-settings`, import legado, `GET /api/v1/public/site/org-info`; contrato marketplace prioriza `marketplace_contract_html`; UI `/modules/org-settings`
+
+Próximos blocos: multi-seleção de bancos no widget do chat, e-mails marketplace via `cms_texts`, uso dos templates SDC/VD no chat.

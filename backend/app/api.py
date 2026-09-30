@@ -97,6 +97,7 @@ from app.schemas import (
     PartnerQualificationImportResult, PartnerQualificationAppraisalRequest,
     PartnerQualificationFranchiseAppraisalView, PartnerQualificationAppraisalApplyResult,
     PartnerQualificationAppraisalHistoryView,
+    OrgSettingsView, OrgSettingsPatch, OrgSettingsImportResult, PublicSiteOrgInfoView,
     SupplierInventoryQuotaAuditView,
     SupplierPortalTokenResponse, SupplierPortalMeView, SupplierPortalTransferItem,
     SupplierPortalAdministratorOption, SupplierPortalQuotaItem,
@@ -2033,6 +2034,48 @@ def import_legacy_cms_texts_route(
     return result
 
 
+@router.get("/admin/org-settings", response_model=OrgSettingsView)
+def get_org_settings_route(user: User = Depends(require_scope("admin:users")), db: Session = Depends(get_db)):
+    from app.org_settings_service import admin_settings_view
+
+    return admin_settings_view(db, user)
+
+
+@router.patch("/admin/org-settings", response_model=OrgSettingsView)
+def patch_org_settings_route(
+    payload: OrgSettingsPatch,
+    user: User = Depends(require_scope("admin:users")),
+    db: Session = Depends(get_db),
+):
+    from app.org_settings_service import admin_settings_view, set_settings
+
+    set_settings(db, user.organization_id, payload.values)
+    audit(db, user, "org_settings.updated", "organization", user.organization_id, {"keys": list(payload.values.keys())})
+    db.commit()
+    return admin_settings_view(db, user)
+
+
+@router.post("/admin/org-settings/import-legacy", response_model=OrgSettingsImportResult)
+def import_legacy_org_settings_route(
+    user: User = Depends(require_scope("admin:users")),
+    db: Session = Depends(get_db),
+):
+    from app.org_settings_service import import_legacy_settings
+
+    result = import_legacy_settings(db, user.organization_id)
+    audit(db, user, "org_settings.import_legacy", "organization", user.organization_id, result)
+    db.commit()
+    return result
+
+
+@router.get("/public/site/org-info", response_model=PublicSiteOrgInfoView)
+def public_site_org_info(db: Session = Depends(get_db)):
+    from app.org_settings_service import public_site_info
+    from app.vender_cota_service import default_organization_id
+
+    return {"values": public_site_info(db, default_organization_id(db))}
+
+
 @router.get("/sdc/partner-qualification-tiers", response_model=list[PartnerQualificationTierView])
 def list_partner_qualification_tiers_route(
     user: User = Depends(require_scope("admin:users")),
@@ -2986,7 +3029,7 @@ def marketplace_contract_template_save(
 
     if user.role not in INTERNAL_CONTRACT_EDIT_ROLES:
         raise HTTPException(status_code=403, detail="Somente operação LETTER configura o template.")
-    save_organization_template(user.organization_id, payload.template_html)
+    save_organization_template(user.organization_id, payload.template_html, db=db)
     audit(db, user, "marketplace.contract_template_updated", "organization", user.organization_id, {})
     db.commit()
     template = load_organization_template(db, user.organization_id)

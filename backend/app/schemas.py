@@ -2576,6 +2576,25 @@ class PartnerQualificationAppraisalHistoryView(BaseModel):
     created_at: datetime | None = None
 
 
+class OrgSettingsView(BaseModel):
+    groups: dict[str, list[dict[str, str]]]
+    values: dict[str, str]
+
+
+class OrgSettingsPatch(BaseModel):
+    values: dict[str, str] = Field(default_factory=dict)
+
+
+class OrgSettingsImportResult(BaseModel):
+    created: int
+    updated: int
+    total_legacy: int
+
+
+class PublicSiteOrgInfoView(BaseModel):
+    values: dict[str, str]
+
+
 class QuotaSupplierView(BaseModel):
     id: str
     active: bool
