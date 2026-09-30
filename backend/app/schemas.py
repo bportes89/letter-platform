@@ -2776,31 +2776,6 @@ class SupplierWithdrawalProcessRequest(BaseModel):
     notes: str | None = Field(default=None, max_length=500)
 
 
-class PartnerLegacyEarningsSummary(BaseModel):
-    mode: str
-    available_total: str
-    pending_fiscal_total: str
-    pending_receipt_total: str = "0"
-    held_commission_total: str = "0"
-    withdrawable: str
-    reserved_pending_withdrawal: str
-    min_withdrawal_amount: str
-    can_withdraw: bool = False
-    withdrawal_blocked_reason: str | None = None
-
-
-class PartnerLegacyStatementItem(BaseModel):
-    id: str
-    kind: str
-    direction: str
-    amount: str
-    status: str | None = None
-    product: str | None = None
-    reference: str | None = None
-    created_at: str | None = None
-    label: str
-
-
 class PartnerWithdrawalRequest(BaseModel):
     amount: Decimal = Field(gt=0)
     pix_key: str = Field(min_length=5, max_length=180)
@@ -2812,12 +2787,42 @@ class PartnerWithdrawalView(BaseModel):
     user_id: str
     amount: str
     status: str
+    status_label: str | None = None
     pix_key: str
     notes: str | None = None
     processed_at: str | None = None
     created_at: str | None = None
     partner_name: str | None = None
     partner_email: str | None = None
+
+
+class PartnerLegacyEarningsSummary(BaseModel):
+    mode: str
+    total_earned: str = "0"
+    withdrawn_total: str = "0"
+    available_total: str
+    pending_fiscal_total: str
+    pending_receipt_total: str = "0"
+    held_commission_total: str = "0"
+    withdrawable: str
+    reserved_pending_withdrawal: str
+    min_withdrawal_amount: str
+    can_withdraw: bool = False
+    withdrawal_blocked_reason: str | None = None
+    pending_withdrawal: PartnerWithdrawalView | None = None
+
+
+class PartnerLegacyStatementItem(BaseModel):
+    id: str
+    kind: str
+    direction: str
+    amount: str
+    status: str | None = None
+    status_label: str | None = None
+    product: str | None = None
+    reference: str | None = None
+    created_at: str | None = None
+    label: str
 
 
 class BankDisplayModeView(BaseModel):

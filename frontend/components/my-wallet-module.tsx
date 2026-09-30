@@ -167,7 +167,7 @@ export function MyWalletModule() {
   useEffect(() => {
     api<{ mode: string }>("/wallet/me/bank-display-mode")
       .then((r) => setBankDisplayMode(r.mode === "legacy" ? "legacy" : "asaas"))
-      .catch(() => setBankDisplayMode("asaas"));
+      .catch(() => setBankDisplayMode("legacy"));
   }, []);
 
   const load = useCallback(async (options?: { refreshFromProvider?: boolean }) => {
@@ -511,6 +511,12 @@ export function MyWalletModule() {
     setNotice("Copiado para a área de transferência.");
   }
 
+  if (bankDisplayMode === "loading") {
+    return <div className="loading">Carregando BANK...</div>;
+  }
+  if (bankDisplayMode === "legacy") {
+    return <PartnerLegacyBankModule />;
+  }
   if (loading) return <div className="loading">Carregando BANK...</div>;
 
   const bankReady = wallet ? walletAccountReady(wallet) : false;
@@ -526,10 +532,6 @@ export function MyWalletModule() {
       hasPendingIdentity ||
       Boolean(documentsError) ||
       Boolean(documentsHint));
-
-  if (bankDisplayMode === "legacy") {
-    return <PartnerLegacyBankModule />;
-  }
 
   return (
     <>

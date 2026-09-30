@@ -39,7 +39,7 @@ SETTING_GROUPS: dict[str, list[dict[str, str]]] = {
         {"key": "min_withdrawal_amount", "label": "Mínimo para saque (R$)"},
         {
             "key": "bank_display_mode",
-            "label": "Bank parceiro (asaas | legacy)",
+            "label": "Bank parceiro: legacy (ganhos) ou asaas (conta digital)",
         },
     ],
     "templates": [

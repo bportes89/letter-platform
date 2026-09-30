@@ -19,6 +19,28 @@ WD_CANCELLED = "CANCELLED"
 WITHDRAWN_STATUS = "WITHDRAWN"
 HELD_STATUSES = frozenset({"PENDING_FISCAL", "PENDING_RECEIPT"})
 
+_COMMISSION_STATUS_LABELS = {
+    "AVAILABLE": "Liberada para saque",
+    "PENDING_FISCAL": "Aguardando NF-e",
+    "PENDING_RECEIPT": "Aguardando comprovante",
+    "WITHDRAWN": "Sacada",
+}
+_WITHDRAWAL_STATUS_LABELS = {
+    WD_PENDING: "Em análise",
+    WD_PAID: "Pago",
+    WD_CANCELLED: "Cancelado",
+}
+
+
+def commission_status_label(status: str | None) -> str:
+    key = (status or "").strip().upper()
+    return _COMMISSION_STATUS_LABELS.get(key, key or "—")
+
+
+def withdrawal_status_label(status: str | None) -> str:
+    key = (status or "").strip().upper()
+    return _WITHDRAWAL_STATUS_LABELS.get(key, key or "—")
+
 
 def _held_commission_total(db: Session, user: User) -> tuple[Decimal, Decimal, Decimal]:
     """Totais retidos (NF / comprovante) — saque legado só após liberação fiscal."""
@@ -66,8 +88,10 @@ def withdrawal_blocked_reason(
 
 
 def bank_display_mode(db: Session, organization_id: str) -> str:
-    mode = (get_setting(db, organization_id, "bank_display_mode", "asaas") or "asaas").strip().lower()
-    return "legacy" if mode in {"legacy", "legado", "1", "true", "yes"} else "asaas"
+    mode = (get_setting(db, organization_id, "bank_display_mode", "legacy") or "legacy").strip().lower()
+    if mode in {"asaas", "conta", "digital"}:
+        return "asaas"
+    return "legacy"
 
 
 def _pending_withdrawal_total(db: Session, user_id: str) -> Decimal:
@@ -91,8 +115,30 @@ def _available_commission_total(db: Session, user: User) -> Decimal:
     return money(Decimal(str(total or 0)))
 
 
+def _total_earned(db: Session, user: User) -> Decimal:
+    total = db.scalar(
+        select(func.coalesce(func.sum(CommissionEntry.amount), 0)).where(
+            CommissionEntry.organization_id == user.organization_id,
+            CommissionEntry.beneficiary_id == user.id,
+        )
+    )
+    return money(Decimal(str(total or 0)))
+
+
+def _withdrawn_paid_total(db: Session, user_id: str) -> Decimal:
+    total = db.scalar(
+        select(func.coalesce(func.sum(PartnerWithdrawal.amount), 0)).where(
+            PartnerWithdrawal.user_id == user_id,
+            PartnerWithdrawal.status == WD_PAID,
+        )
+    )
+    return money(Decimal(str(total or 0)))
+
+
 def partner_earnings_summary(db: Session, user: User) -> dict:
     available_entries = _available_commission_total(db, user)
+    total_earned = _total_earned(db, user)
+    withdrawn_total = _withdrawn_paid_total(db, user.id)
     pending_fiscal, pending_receipt, held_total = _held_commission_total(db, user)
     reserved = db.scalar(
         select(func.coalesce(func.sum(PartnerWithdrawal.amount), 0)).where(
@@ -123,8 +169,20 @@ def partner_earnings_summary(db: Session, user: User) -> dict:
     else:
         block_reason = None
     can_withdraw = block_reason is None
+    pending_wd = db.scalar(
+        select(PartnerWithdrawal).where(
+            PartnerWithdrawal.user_id == user.id,
+            PartnerWithdrawal.status == WD_PENDING,
+        )
+    )
+    pending_withdrawal = withdrawal_view(pending_wd) if pending_wd else None
+    if pending_wd and can_withdraw:
+        can_withdraw = False
+        block_reason = block_reason or "Já existe um saque em análise. Aguarde o processamento."
     return {
         "mode": "legacy",
+        "total_earned": str(total_earned),
+        "withdrawn_total": str(withdrawn_total),
         "available_total": str(available_entries),
         "pending_fiscal_total": str(pending_fiscal),
         "pending_receipt_total": str(pending_receipt),
@@ -134,6 +192,7 @@ def partner_earnings_summary(db: Session, user: User) -> dict:
         "min_withdrawal_amount": str(min_withdrawal),
         "can_withdraw": can_withdraw,
         "withdrawal_blocked_reason": block_reason,
+        "pending_withdrawal": pending_withdrawal,
     }
 
 
@@ -152,6 +211,7 @@ def list_partner_statement(db: Session, user: User, *, limit: int = 100) -> list
         )
     )
     for entry in entries:
+        product = (entry.product or "rede").replace("_", " ")
         rows.append(
             {
                 "id": entry.id,
@@ -159,10 +219,11 @@ def list_partner_statement(db: Session, user: User, *, limit: int = 100) -> list
                 "direction": "CREDIT",
                 "amount": str(money(Decimal(str(entry.amount)))),
                 "status": entry.status,
+                "status_label": commission_status_label(entry.status),
                 "product": entry.product,
                 "reference": entry.reference,
                 "created_at": entry.created_at.isoformat() if entry.created_at else None,
-                "label": f"Comissão {entry.product} — nível {entry.level}",
+                "label": f"Comissão · {product} (nível {entry.level})",
             }
         )
     withdrawals = list(
@@ -181,10 +242,11 @@ def list_partner_statement(db: Session, user: User, *, limit: int = 100) -> list
                 "direction": "DEBIT",
                 "amount": str(money(Decimal(str(wd.amount)))),
                 "status": wd.status,
+                "status_label": withdrawal_status_label(wd.status),
                 "product": None,
                 "reference": wd.id,
                 "created_at": wd.created_at.isoformat() if wd.created_at else None,
-                "label": f"Saque PIX ({wd.status})",
+                "label": "Saque via PIX",
             }
         )
     rows.sort(key=lambda r: r.get("created_at") or "", reverse=True)
@@ -247,11 +309,25 @@ def withdrawal_view(wd: PartnerWithdrawal) -> dict:
         "user_id": wd.user_id,
         "amount": str(money(Decimal(str(wd.amount)))),
         "status": wd.status,
+        "status_label": withdrawal_status_label(wd.status),
         "pix_key": wd.pix_key,
         "notes": wd.notes,
         "processed_at": wd.processed_at.isoformat() if wd.processed_at else None,
         "created_at": wd.created_at.isoformat() if wd.created_at else None,
     }
+
+
+def list_partner_withdrawals(db: Session, user: User, *, limit: int = 30) -> list[dict]:
+    limit = max(1, min(int(limit or 30), 100))
+    rows = list(
+        db.scalars(
+            select(PartnerWithdrawal)
+            .where(PartnerWithdrawal.user_id == user.id)
+            .order_by(PartnerWithdrawal.created_at.desc())
+            .limit(limit)
+        )
+    )
+    return [withdrawal_view(wd) for wd in rows]
 
 
 def _consume_available_entries(db: Session, user: User, amount: Decimal) -> None:

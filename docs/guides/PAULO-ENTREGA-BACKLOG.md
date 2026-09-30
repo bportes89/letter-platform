@@ -29,10 +29,10 @@
 
 | ID | Entrega | Status |
 |----|---------|--------|
-| B1 | Manter nome **Bank** sem wizard abertura conta / KYC Asaas | 🟡 | `bank_display_mode=legacy` |
-| B2 | Parceiro: **Meus ganhos** (disponível, total, sacar) | 🟡 | `/wallet/me/legacy-earnings` |
-| B3 | Parceiro: **extrato** linha a linha (comissão/saque) | 🟡 | `/wallet/me/legacy-statement` |
-| B4 | Parceiro: solicitação de saque | 🟡 | `partner_withdrawals` + PIX |
+| B1 | Manter nome **Bank** sem wizard abertura conta / KYC Asaas | ✅ | `bank_display_mode` default **legacy**; UI «BANK · Meus ganhos» |
+| B2 | Parceiro: **Meus ganhos** (disponível, total, sacar) | ✅ | `/wallet/me/legacy-earnings` (+ total sacado, saque pendente) |
+| B3 | Parceiro: **extrato** linha a linha (comissão/saque) | ✅ | `/wallet/me/legacy-statement` + status PT + filtro |
+| B4 | Parceiro: solicitação de saque | ✅ | `POST/GET /wallet/me/legacy-withdrawals`, PIX pré-preenchido |
 | B5 | Saque bloqueado até **NF aprovada** (validador notas) | ✅ | Hold fiscal + gate saque legado |
 | B6 | Admin: extrato **fornecedor** | ✅ | Aba + ledger `/marketplace/extrato/supplier-ledger` |
 | B7 | Admin: extrato **parceiro/franquia** | ✅ | Aba parceiros + `scope=partner` |

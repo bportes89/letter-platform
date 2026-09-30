@@ -1070,6 +1070,17 @@ def wallet_legacy_statement(
     return list_partner_statement(db, user, limit=limit)
 
 
+@router.get("/wallet/me/legacy-withdrawals", response_model=list[PartnerWithdrawalView])
+def wallet_legacy_withdrawals_list(
+    limit: int = 30,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.partner_legacy_wallet_service import list_partner_withdrawals
+
+    return list_partner_withdrawals(db, user, limit=limit)
+
+
 @router.post("/wallet/me/legacy-withdrawals", response_model=PartnerWithdrawalView, status_code=201)
 def wallet_legacy_withdrawal(
     payload: PartnerWithdrawalRequest,
