@@ -31,6 +31,7 @@ PERMISSION_GROUPS: list[PermissionGroupDef] = [
             {"key": "admin.administradoras", "label": "Administradoras", "modules": ["administrators"], "scopes": ["admin:users"]},
             {"key": "admin.operations", "label": "Operações e observabilidade", "modules": ["operations"], "scopes": ["operations:write"]},
             {"key": "admin.backoffice", "label": "Backoffice / configurações", "modules": ["admin"], "scopes": ["admin:users"]},
+            {"key": "admin.cms_texts", "label": "Textos e e-mails (CMS)", "modules": ["cms-texts"], "scopes": ["admin:users"]},
         ],
     },
     {

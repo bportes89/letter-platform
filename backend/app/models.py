@@ -339,6 +339,29 @@ class MarketplaceChatFaq(TimestampMixin, Base):
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
 
 
+class CmsText(TimestampMixin, Base):
+    """Páginas CMS e templates de e-mail (legado `texts` + corpo em `z_text`)."""
+
+    __tablename__ = "cms_texts"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "legacy_id", name="uq_cms_text_org_legacy"),
+        UniqueConstraint("organization_id", "slug", name="uq_cms_text_org_slug"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    legacy_id: Mapped[int | None] = mapped_column(Integer, index=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    kind: Mapped[str] = mapped_column(String(20), default="PAGE")  # PAGE | EMAIL
+    name_main: Mapped[str] = mapped_column(String(255))
+    subject: Mapped[str | None] = mapped_column(Text)
+    slug: Mapped[str | None] = mapped_column(String(80), index=True)
+    body_html: Mapped[str] = mapped_column(Text, default="")
+    whatsapp: Mapped[str | None] = mapped_column(Text)
+    sms: Mapped[str | None] = mapped_column(Text)
+    footer_place: Mapped[int] = mapped_column(Integer, default=0)
+    sort_order: Mapped[int] = mapped_column(Integer, default=999)
+
+
 class QuotaCategory(TimestampMixin, Base):
     """Categorias e subcategorias de cotas (espelho `quotas_categories` do legado)."""
 

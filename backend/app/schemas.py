@@ -2451,6 +2451,61 @@ class QuotaCategoryImportResult(BaseModel):
     total_legacy: int
 
 
+class CmsTextCreate(BaseModel):
+    kind: str = Field(default="PAGE", max_length=20)
+    name_main: str = Field(min_length=1, max_length=255)
+    subject: str | None = None
+    slug: str | None = Field(default=None, max_length=80)
+    body_html: str = ""
+    whatsapp: str | None = None
+    sms: str | None = None
+    footer_place: int = Field(default=0, ge=0, le=2)
+    sort_order: int = 999
+    active: bool = True
+
+
+class CmsTextUpdate(BaseModel):
+    kind: str | None = Field(default=None, max_length=20)
+    name_main: str | None = Field(default=None, max_length=255)
+    subject: str | None = None
+    slug: str | None = Field(default=None, max_length=80)
+    body_html: str | None = None
+    whatsapp: str | None = None
+    sms: str | None = None
+    footer_place: int | None = Field(default=None, ge=0, le=2)
+    sort_order: int | None = None
+    active: bool | None = None
+
+
+class CmsTextView(BaseModel):
+    id: str
+    legacy_id: int | None = None
+    active: bool
+    kind: str
+    name_main: str
+    subject: str | None = None
+    slug: str | None = None
+    body_html: str
+    whatsapp: str | None = None
+    sms: str | None = None
+    footer_place: int
+    sort_order: int
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class CmsTextImportResult(BaseModel):
+    created: int
+    updated: int
+    total_legacy: int
+
+
+class PublicCmsPageView(BaseModel):
+    slug: str
+    title: str
+    body_html: str
+
+
 class QuotaSupplierView(BaseModel):
     id: str
     active: bool

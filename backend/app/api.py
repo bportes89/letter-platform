@@ -92,6 +92,7 @@ from app.schemas import (
     VendaDiretaRoboSearchRequest, VendaDiretaRoboSearchResponse, VendaDiretaRoboConfirmRequest, VendaDiretaRoboConfirmResponse,
     QuotaSupplierCreate, QuotaSupplierUpdate, QuotaSupplierView, QuotaInventorySyncView,
     QuotaCategoryCreate, QuotaCategoryUpdate, QuotaCategoryView, QuotaCategoryImportResult,
+    CmsTextCreate, CmsTextUpdate, CmsTextView, CmsTextImportResult, PublicCmsPageView,
     SupplierInventoryQuotaAuditView,
     SupplierPortalTokenResponse, SupplierPortalMeView, SupplierPortalTransferItem,
     SupplierPortalAdministratorOption, SupplierPortalQuotaItem,
@@ -1955,6 +1956,75 @@ def import_legacy_quota_categories_route(
     audit(db, user, "marketplace.quota_category.import_legacy", "quota_category", user.organization_id, result)
     db.commit()
     return result
+
+
+@router.get("/cms/texts", response_model=list[CmsTextView])
+def list_cms_texts_route(
+    kind: str | None = None,
+    user: User = Depends(require_scope("admin:users")),
+    db: Session = Depends(get_db),
+):
+    from app.cms_text_service import list_texts, text_view
+
+    return [text_view(x) for x in list_texts(db, user, kind=kind)]
+
+
+@router.post("/cms/texts", response_model=CmsTextView, status_code=201)
+def create_cms_text_route(
+    payload: CmsTextCreate,
+    user: User = Depends(require_scope("admin:users")),
+    db: Session = Depends(get_db),
+):
+    from app.cms_text_service import create_text, text_view
+
+    item = create_text(db, user, payload.model_dump())
+    audit(db, user, "cms.text.created", "cms_text", item.id, {"kind": item.kind, "name_main": item.name_main})
+    db.commit()
+    db.refresh(item)
+    return text_view(item)
+
+
+@router.patch("/cms/texts/{text_id}", response_model=CmsTextView)
+def update_cms_text_route(
+    text_id: str,
+    payload: CmsTextUpdate,
+    user: User = Depends(require_scope("admin:users")),
+    db: Session = Depends(get_db),
+):
+    from app.cms_text_service import text_view, update_text
+
+    item = update_text(db, user, text_id, payload.model_dump(exclude_unset=True))
+    audit(db, user, "cms.text.updated", "cms_text", item.id, payload.model_dump(exclude_unset=True, mode="json"))
+    db.commit()
+    db.refresh(item)
+    return text_view(item)
+
+
+@router.post("/cms/texts/import-legacy", response_model=CmsTextImportResult)
+def import_legacy_cms_texts_route(
+    user: User = Depends(require_scope("admin:users")),
+    db: Session = Depends(get_db),
+):
+    from app.cms_text_service import import_legacy_texts
+
+    result = import_legacy_texts(db, user.organization_id)
+    audit(db, user, "cms.text.import_legacy", "cms_text", user.organization_id, result)
+    db.commit()
+    return result
+
+
+@router.get("/public/site/cms/pages/{slug}", response_model=PublicCmsPageView)
+def public_cms_page(slug: str, db: Session = Depends(get_db)):
+    from app.cms_text_service import get_public_page, text_view
+    from app.vender_cota_service import default_organization_id
+
+    row = get_public_page(db, default_organization_id(db), slug)
+    view = text_view(row)
+    return {
+        "slug": view["slug"] or slug,
+        "title": view["subject"] or view["name_main"],
+        "body_html": view["body_html"],
+    }
 
 
 @router.post("/marketplace/suppliers/{supplier_id}/portal-token", response_model=SupplierPortalTokenResponse)

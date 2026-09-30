@@ -29,6 +29,7 @@ import { CadastroMarketplaceModule } from "@/components/cadastro-marketplace-mod
 import { ClientMarketplaceModule } from "@/components/client-marketplace-module";
 import { FornecedoresModule } from "@/components/fornecedores-module";
 import { QuotaCategoriesModule } from "@/components/quota-categories-module";
+import { CmsTextsModule } from "@/components/cms-texts-module";
 import { MarketplaceChatFaqModule } from "@/components/marketplace-chat-faq-module";
 import { SdcDeskModule } from "@/components/sdc-desk-module";
 import { FlashDeskModule } from "@/components/flash-desk-module";
@@ -106,6 +107,7 @@ export default function ModulePage() {
   if (routeKey === "minhas-compras") return <ClientMarketplaceModule />;
   if (routeKey === "fornecedores") return <FornecedoresModule />;
   if (routeKey === "quota-categories") return <QuotaCategoriesModule />;
+  if (routeKey === "cms-texts") return <CmsTextsModule />;
   if (routeKey === "chat-faq") return <MarketplaceChatFaqModule />;
   if (routeKey === "inventory") return <InventoryModule />;
   if (routeKey === "vender-cota") return <VenderCotaAdminModule />;

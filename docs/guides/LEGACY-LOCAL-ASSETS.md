@@ -20,5 +20,7 @@ Material do sistema antigo disponível na máquina de desenvolvimento — **não
 
 - Robô/Esteira 2: filtro `quota_category_id` + perfil admin (`is_bank`, correntista, nome sujo, alienações)
 - UI Administradoras: alienações (categoria + ano máx.) e flags marketplace; Esteira 2 / Venda Direta Robô com subcategoria e bancos do cliente
+- CMS `cms_texts`: API `/api/v1/cms/texts`, import `.../import-legacy` (`texts` + `z_text`), UI **Textos e e-mails**; páginas públicas `GET /api/v1/public/site/cms/pages/{slug}`
+- Chat público: subcategoria + bancos do cliente antes do crédito; Esteira 2 usa os mesmos filtros do admin
 
-Próximos blocos: templates `texts` (e-mails/contratos admin), qualificação de parceiros, chat público (bancos + subcategoria).
+Próximos blocos: qualificação de parceiros (SDC), contrato admin (x_settings id 11), multi-seleção de bancos no widget do chat.

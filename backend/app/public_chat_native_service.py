@@ -99,6 +99,11 @@ STEP_QUITCON_PARCELAS = "10066"
 STEP_QUITCON_DOCS = "10067"
 STEP_QUITCON_EVAL = "10068"
 STEP_QUITCON_CONFIRM = "10069"
+# Marketplace — subcategoria e bancos (legado steps 22 / 32–34).
+STEP_SUBCATEGORY = "10070"
+STEP_BANK_ACCOUNTS = "10071"
+STEP_BANK_PROBLEM_YN = "10072"
+STEP_BANK_PROBLEM_PICK = "10073"
 
 QUITCON_ADMIN_OPTIONS = (
     ("Embracon", "Embracon"),
@@ -413,6 +418,106 @@ def _external_marketplace_category_options(lead_id: str | None = None) -> dict:
     )
 
 
+def _prompt_credit_step(lead_id: str | None) -> dict:
+    return _wrap(
+        [
+            {
+                "text": "Qual valor de crédito você precisa?",
+                "input": {"name": "target_amount", "label": "Crédito", "type": "text", "tags": 'placeholder="R$ 0,00"'},
+                "next": int(STEP_CREDIT),
+            }
+        ],
+        lead_id=lead_id,
+    )
+
+
+def _bank_administrators(db: Session) -> list:
+    from app.administrator_service import list_administrators, parse_rules
+
+    banks = []
+    for admin in list_administrators(db):
+        if parse_rules(admin.rules_json).get("is_bank"):
+            banks.append(admin)
+    return banks
+
+
+def _subcategories_for_asset(db: Session, organization_id: str, category: str) -> list:
+    from app.models import QuotaCategory
+    from app.quota_category_service import asset_class_for_category
+
+    asset = "REAL_ESTATE" if category == "REAL_ESTATE" else "VEHICLE"
+    rows = list(
+        db.scalars(
+            select(QuotaCategory).where(
+                QuotaCategory.organization_id == organization_id,
+                QuotaCategory.active.is_(True),
+                QuotaCategory.legacy_type == 1,
+            )
+        )
+    )
+    out = []
+    for row in rows:
+        if asset_class_for_category(db, row) == asset:
+            out.append(row)
+    out.sort(key=lambda r: (r.sort_order, r.name))
+    return out
+
+
+def _continue_marketplace_qualification(db: Session, org, lead, snap: dict) -> dict:
+    category = str(snap.get("category") or "REAL_ESTATE")
+    lead_id = lead.id if lead else None
+    if "subcategory_skipped" not in snap and "quota_category_id" not in snap:
+        subs = _subcategories_for_asset(db, org.id, category)
+        if subs:
+            options = [
+                {"name": "Todas / não sei", "next": int(STEP_SUBCATEGORY), "id": "skip", "save": "skip"},
+            ]
+            for sub in subs[:24]:
+                options.append(
+                    {"name": sub.name, "next": int(STEP_SUBCATEGORY), "id": sub.id, "save": sub.id},
+                )
+            return _wrap(
+                [{"text": "Qual o tipo específico de bem?", "options": options}],
+                lead_id=lead_id,
+            )
+        snap["subcategory_skipped"] = True
+    banks = _bank_administrators(db)
+    if banks and "client_bank_administrator_ids" not in snap:
+        options = [{"name": "Nenhum", "next": int(STEP_BANK_ACCOUNTS), "id": "none", "save": "none"}]
+        for adm in banks[:12]:
+            options.append(
+                {"name": adm.name, "next": int(STEP_BANK_ACCOUNTS), "id": adm.id, "save": adm.id},
+            )
+        return _wrap(
+            [{"text": "Você tem conta em algum desses bancos?", "options": options}],
+            lead_id=lead_id,
+        )
+    if banks and "bank_had_problem" not in snap:
+        return _wrap(
+            [
+                {
+                    "text": "Você já teve problema com algum banco (dívida, restrição)?",
+                    "options": [
+                        {"name": "Sim", "next": int(STEP_BANK_PROBLEM_YN), "id": "yes", "save": "yes"},
+                        {"name": "Não", "next": int(STEP_BANK_PROBLEM_YN), "id": "no", "save": "no"},
+                    ],
+                }
+            ],
+            lead_id=lead_id,
+        )
+    if banks and snap.get("bank_had_problem") and "client_problem_bank_administrator_ids" not in snap:
+        options = [{"name": "Nenhum", "next": int(STEP_BANK_PROBLEM_PICK), "id": "none", "save": "none"}]
+        for adm in banks[:12]:
+            options.append(
+                {"name": adm.name, "next": int(STEP_BANK_PROBLEM_PICK), "id": adm.id, "save": adm.id},
+            )
+        return _wrap(
+            [{"text": "Em qual banco você já teve problema?", "options": options}],
+            lead_id=lead_id,
+        )
+    return _prompt_credit_step(lead_id)
+
+
 def _logged_area_product_gate(product_key: str, lead_id: str | None = None) -> dict:
     label = _LOGGED_AREA_PRODUCT_LABELS.get(product_key, product_key)
     return _wrap(
@@ -671,16 +776,8 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
             if data.get("option_save") in {"1", "0"} or data.get("option_id") in {"dirty_yes", "dirty_no"}:
                 snap["has_credit_restriction"] = data.get("option_save") == "1" or data.get("option_id") == "dirty_yes"
                 _save_lead_snapshot(lead, snap)
-                return _wrap(
-                    [
-                        {
-                            "text": "Qual valor de crédito você precisa?",
-                            "input": {"name": "target_amount", "label": "Crédito", "type": "text", "tags": 'placeholder="R$ 0,00"'},
-                            "next": int(STEP_CREDIT),
-                        }
-                    ],
-                    lead_id=lead.id,
-                )
+                db.flush()
+                return _continue_marketplace_qualification(db, org, lead, snap)
             _save_lead_snapshot(lead, snap)
         return _wrap(
             [
@@ -695,23 +792,52 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
             lead_id=lead.id if lead else None,
         )
 
+    if step == STEP_SUBCATEGORY and lead:
+        snap = _lead_snapshot(lead)
+        save = data.get("option_save") or data.get("option_id")
+        if save == "skip":
+            snap["subcategory_skipped"] = True
+        elif save:
+            snap["quota_category_id"] = str(save)
+        _save_lead_snapshot(lead, snap)
+        db.flush()
+        return _continue_marketplace_qualification(db, org, lead, snap)
+
+    if step == STEP_BANK_ACCOUNTS and lead:
+        snap = _lead_snapshot(lead)
+        save = str(data.get("option_save") or data.get("option_id") or "none")
+        snap["client_bank_administrator_ids"] = [] if save in {"none", "skip"} else [save]
+        _save_lead_snapshot(lead, snap)
+        db.flush()
+        return _continue_marketplace_qualification(db, org, lead, snap)
+
+    if step == STEP_BANK_PROBLEM_YN and lead:
+        snap = _lead_snapshot(lead)
+        save = str(data.get("option_save") or data.get("option_id") or "no")
+        snap["bank_had_problem"] = save in {"yes", "1", "dirty_yes"}
+        if not snap["bank_had_problem"]:
+            snap["client_problem_bank_administrator_ids"] = []
+        _save_lead_snapshot(lead, snap)
+        db.flush()
+        return _continue_marketplace_qualification(db, org, lead, snap)
+
+    if step == STEP_BANK_PROBLEM_PICK and lead:
+        snap = _lead_snapshot(lead)
+        save = str(data.get("option_save") or data.get("option_id") or "none")
+        snap["client_problem_bank_administrator_ids"] = [] if save in {"none", "skip"} else [save]
+        _save_lead_snapshot(lead, snap)
+        db.flush()
+        return _prompt_credit_step(lead.id)
+
     if step == STEP_CREDIT:
         # May arrive from dirty options OR from amount input
         if lead and (data.get("option_save") in {"1", "0"} or data.get("option_id") in {"dirty_yes", "dirty_no"}):
             snap = _lead_snapshot(lead)
             snap["has_credit_restriction"] = data.get("option_save") == "1" or data.get("option_id") == "dirty_yes"
             _save_lead_snapshot(lead, snap)
+            db.flush()
             if "target_amount" not in data:
-                return _wrap(
-                    [
-                        {
-                            "text": "Qual valor de crédito você precisa?",
-                            "input": {"name": "target_amount", "label": "Crédito", "type": "text"},
-                            "next": int(STEP_CREDIT),
-                        }
-                    ],
-                    lead_id=lead.id,
-                )
+                return _continue_marketplace_qualification(db, org, lead, snap)
         try:
             credit = _money_input(data.get("target_amount"))
         except HTTPException:
@@ -816,6 +942,9 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
                 asset_is_zero_km=zero_km,
                 target_entrada=target_entrada if target_entrada and target_entrada > 0 else None,
                 affiliate_markup=affiliate_markup,
+                quota_category_id=snap.get("quota_category_id"),
+                client_bank_administrator_ids=list(snap.get("client_bank_administrator_ids") or []),
+                client_problem_bank_administrator_ids=list(snap.get("client_problem_bank_administrator_ids") or []),
             )
         except HTTPException:
             raise
