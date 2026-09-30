@@ -1,8 +1,38 @@
 "use client";
 
 import { CheckCircle2, Plus, RefreshCw, Truck } from "lucide-react";
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
+
+const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
+
+type InventoryQuotaFilter = "active" | "protected" | "inactive" | "all";
+
+type SupplierInventoryAudit = {
+  supplier_id: string;
+  source_key: string;
+  supplier_name: string;
+  filter: string;
+  summary: {
+    active_count: number;
+    active_credit_total: string;
+    protected_count: number;
+    inactive_count: number;
+    total_count: number;
+  };
+  quotas: Array<{
+    id: string;
+    group_code: string;
+    quota_code: string;
+    category: string;
+    credit_value: string;
+    premium_value: string;
+    entrada_final?: string | null;
+    status: string;
+    nina_scan_status?: string | null;
+    installment_due_date?: string | null;
+  }>;
+};
 
 type QuotaSupplier = {
   id: string;
@@ -95,10 +125,41 @@ export function FornecedoresModule() {
   const [editing, setEditing] = useState<QuotaSupplier | null>(null);
   const [formKey, setFormKey] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [inventorySupplierId, setInventorySupplierId] = useState("");
+  const [inventoryFilter, setInventoryFilter] = useState<InventoryQuotaFilter>("active");
+  const [inventoryAudit, setInventoryAudit] = useState<SupplierInventoryAudit | null>(null);
 
   const load = useCallback(async () => {
     setItems(await api<QuotaSupplier[]>("/marketplace/suppliers"));
   }, []);
+
+  const loadInventoryAudit = useCallback(async () => {
+    if (!inventorySupplierId) {
+      setInventoryAudit(null);
+      return;
+    }
+    setError("");
+    try {
+      const params = new URLSearchParams({ filter: inventoryFilter });
+      setInventoryAudit(
+        await api<SupplierInventoryAudit>(
+          `/marketplace/suppliers/${inventorySupplierId}/inventory-quotas?${params}`,
+        ),
+      );
+    } catch (e) {
+      setInventoryAudit(null);
+      setError(e instanceof Error ? e.message : "Falha ao carregar cotas do fornecedor");
+    }
+  }, [inventorySupplierId, inventoryFilter]);
+
+  useEffect(() => {
+    void loadInventoryAudit();
+  }, [loadInventoryAudit]);
+
+  const inventorySupplier = useMemo(
+    () => items.find((x) => x.id === inventorySupplierId) ?? null,
+    [items, inventorySupplierId],
+  );
 
   const loadWithdrawals = useCallback(async () => {
     setWithdrawals(await api<SupplierWithdrawal[]>("/marketplace/supplier-withdrawals?status=PENDING&limit=50"));
@@ -522,6 +583,19 @@ export function FornecedoresModule() {
                     )}
                   </td>
                   <td className="actions-cell">
+                    <button
+                      type="button"
+                      className="table-action"
+                      onClick={() => {
+                        setInventorySupplierId(x.id);
+                        setInventoryFilter("active");
+                        window.setTimeout(() => {
+                          document.getElementById("fornecedor-inventory-audit")?.scrollIntoView({ behavior: "smooth", block: "start" });
+                        }, 80);
+                      }}
+                    >
+                      Ver cotas
+                    </button>
                     <button type="button" className="table-action" onClick={() => setEditing(x)}>
                       Editar
                     </button>
@@ -546,6 +620,124 @@ export function FornecedoresModule() {
             </tbody>
           </table>
         </div>
+
+        <section id="fornecedor-inventory-audit" className="panel" style={{ margin: "1.25rem 18px 18px", padding: "1rem" }}>
+          <div className="page-heading" style={{ marginBottom: "0.75rem" }}>
+            <div>
+              <span className="eyebrow dark">CONFERÊNCIA</span>
+              <h2 style={{ margin: 0, fontSize: "1.05rem" }}>Cotas do fornecedor no inventário</h2>
+              <p style={{ margin: "0.35rem 0 0", fontSize: 10, color: "#6b7280", lineHeight: 1.45 }}>
+                O sync automático mantém apenas cotas <b>ativas</b> (disponíveis ou em revisão).{" "}
+                <b>Reservadas</b> e <b>vendidas</b> ficam protegidas — o sistema não sobrescreve nem reimporta.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="table-action"
+              disabled={!inventorySupplierId || busy}
+              onClick={() => void loadInventoryAudit()}
+            >
+              <RefreshCw /> Atualizar lista
+            </button>
+          </div>
+          <div className="marketplace-form-row" style={{ marginBottom: "0.75rem" }}>
+            <label className="marketplace-field marketplace-field-wide">
+              Fornecedor
+              <select
+                value={inventorySupplierId}
+                onChange={(e) => setInventorySupplierId(e.target.value)}
+              >
+                <option value="">Selecione o fornecedor para conferir</option>
+                {items.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name} ({s.source_key})
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          {inventoryAudit && (
+            <>
+              <div className="network-metrics" style={{ marginBottom: "0.75rem" }}>
+                <article>
+                  <small>Ativas (sync / venda)</small>
+                  <strong>{inventoryAudit.summary.active_count}</strong>
+                </article>
+                <article>
+                  <small>Crédito ativo</small>
+                  <strong>{brl.format(Number(inventoryAudit.summary.active_credit_total))}</strong>
+                </article>
+                <article>
+                  <small>Reservadas ou vendidas</small>
+                  <strong>{inventoryAudit.summary.protected_count}</strong>
+                </article>
+                <article>
+                  <small>Inativas (sumiram do site)</small>
+                  <strong>{inventoryAudit.summary.inactive_count}</strong>
+                </article>
+              </div>
+              <div className="marketplace-tabs" style={{ marginBottom: "0.75rem" }}>
+                {(
+                  [
+                    { key: "active" as const, label: "Ativas" },
+                    { key: "protected" as const, label: "Reservadas / vendidas" },
+                    { key: "inactive" as const, label: "Inativas" },
+                    { key: "all" as const, label: "Todas" },
+                  ] as const
+                ).map((tab) => (
+                  <button
+                    key={tab.key}
+                    type="button"
+                    className={`marketplace-tab${inventoryFilter === tab.key ? " active" : ""}`}
+                    onClick={() => setInventoryFilter(tab.key)}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+              <div className="table-wrap">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Grupo / cota</th>
+                      <th>Categoria</th>
+                      <th>Crédito</th>
+                      <th>Entrada</th>
+                      <th>Status</th>
+                      <th>Nina</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {inventoryAudit.quotas.map((q) => (
+                      <tr key={q.id}>
+                        <td>
+                          <b>{q.group_code}</b>
+                          <small>{q.quota_code}</small>
+                        </td>
+                        <td>{q.category === "REAL_ESTATE" ? "Imóvel" : "Veículo"}</td>
+                        <td>{brl.format(Number(q.credit_value))}</td>
+                        <td>{brl.format(Number(q.entrada_final ?? q.premium_value ?? 0))}</td>
+                        <td>
+                          <span className={`pill pill-${q.status.toLowerCase()}`}>{q.status}</span>
+                        </td>
+                        <td>{q.nina_scan_status || "—"}</td>
+                      </tr>
+                    ))}
+                    {!inventoryAudit.quotas.length && (
+                      <tr>
+                        <td colSpan={6}>
+                          Nenhuma cota neste filtro
+                          {inventorySupplier ? ` para ${inventorySupplier.name}.` : "."}
+                          {inventoryFilter === "active" ? " Rode «Sincronizar» no fornecedor se acabou de apontar a URL." : ""}
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </section>
       </section>
 
       <section className="panel operational-panel" style={{ marginTop: "1.25rem" }}>

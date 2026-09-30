@@ -90,6 +90,7 @@ from app.schemas import (
     MarketplaceEsteira1Request, MarketplaceEsteira1Response, MarketplaceEsteira2Request, MarketplaceEsteira2Response,
     VendaDiretaRoboSearchRequest, VendaDiretaRoboSearchResponse, VendaDiretaRoboConfirmRequest, VendaDiretaRoboConfirmResponse,
     QuotaSupplierCreate, QuotaSupplierUpdate, QuotaSupplierView, QuotaInventorySyncView,
+    SupplierInventoryQuotaAuditView,
     SupplierPortalTokenResponse, SupplierPortalMeView, SupplierPortalTransferItem,
     SupplierPortalAdministratorOption, SupplierPortalQuotaItem,
     SupplierPortalQuotaCreate, SupplierPortalQuotaUpdate,
@@ -1889,6 +1890,18 @@ def marketplace_supplier_issue_portal_token(
         "portal_url": f"/portal-fornecedor?token={raw}",
         "has_portal_token": True,
     }
+
+
+@router.get("/marketplace/suppliers/{supplier_id}/inventory-quotas", response_model=SupplierInventoryQuotaAuditView)
+def marketplace_supplier_inventory_quotas(
+    supplier_id: str,
+    filter: str = "active",
+    user: User = Depends(require_scope("inventory:write")),
+    db: Session = Depends(get_db),
+):
+    from app.quota_supplier_service import supplier_inventory_quota_audit
+
+    return supplier_inventory_quota_audit(db, user, supplier_id, filter=filter)
 
 
 @router.post("/marketplace/suppliers/{supplier_id}/sync", response_model=QuotaInventorySyncView)

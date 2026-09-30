@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.models import QuotaSupplier, User
+from app.models import Quota, QuotaSupplier, User
 from app.quota_scrape_service import normalized_scrape_config
 from app.services import money
 
@@ -484,4 +484,75 @@ def resolve_supplier_fees(
         "quem_paga_comissao": 0,
         "supplier_id": None,
         "supplier_name": None,
+    }
+
+
+SUPPLIER_SYNC_ACTIVE_STATUSES = frozenset({"AVAILABLE", "PENDING_REVIEW"})
+SUPPLIER_SYNC_PROTECTED_STATUSES = frozenset({"RESERVED", "SOLD"})
+
+
+def supplier_inventory_quota_audit(
+    db: Session,
+    user: User,
+    supplier_id: str,
+    *,
+    filter: str = "active",
+) -> dict:
+    """Lista cotas do fornecedor no inventário para conferência pós-sync."""
+    from app.marketplace_service import pricing_for_quota
+    from app.supplier_portal_quota_service import quota_admin_view
+
+    supplier = get_supplier(db, user, supplier_id)
+    key = normalize_supplier_key(supplier.source_key)
+    rows = list(
+        db.scalars(
+            select(Quota)
+            .where(
+                Quota.organization_id == user.organization_id,
+                Quota.supplier_source == key,
+            )
+            .order_by(Quota.credit_value.desc(), Quota.created_at.desc())
+        )
+    )
+
+    def _credit_total(quotas: list[Quota]) -> str:
+        total = Decimal("0")
+        for row in quotas:
+            total += Decimal(str(row.credit_value or 0))
+        return str(money(total))
+
+    active_rows = [q for q in rows if q.status in SUPPLIER_SYNC_ACTIVE_STATUSES]
+    protected_rows = [q for q in rows if q.status in SUPPLIER_SYNC_PROTECTED_STATUSES]
+    inactive_rows = [q for q in rows if q.status == "INACTIVE"]
+
+    filter_key = (filter or "active").strip().lower()
+    if filter_key == "protected":
+        selected = protected_rows
+    elif filter_key == "inactive":
+        selected = inactive_rows
+    elif filter_key == "all":
+        selected = rows
+    else:
+        filter_key = "active"
+        selected = active_rows
+
+    quotas: list[dict] = []
+    for row in selected:
+        payload = quota_admin_view(row)
+        payload["entrada_final"] = pricing_for_quota(row)["entrada_final"]
+        quotas.append(payload)
+
+    return {
+        "supplier_id": supplier.id,
+        "source_key": supplier.source_key,
+        "supplier_name": supplier.name,
+        "filter": filter_key,
+        "summary": {
+            "active_count": len(active_rows),
+            "active_credit_total": _credit_total(active_rows),
+            "protected_count": len(protected_rows),
+            "inactive_count": len(inactive_rows),
+            "total_count": len(rows),
+        },
+        "quotas": quotas,
     }

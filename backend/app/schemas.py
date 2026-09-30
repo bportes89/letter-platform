@@ -2410,6 +2410,23 @@ class QuotaSupplierView(BaseModel):
     updated_at: datetime | None = None
 
 
+class SupplierInventoryQuotaSummary(BaseModel):
+    active_count: int = 0
+    active_credit_total: str = "0.00"
+    protected_count: int = 0
+    inactive_count: int = 0
+    total_count: int = 0
+
+
+class SupplierInventoryQuotaAuditView(BaseModel):
+    supplier_id: str
+    source_key: str
+    supplier_name: str
+    filter: str
+    summary: SupplierInventoryQuotaSummary
+    quotas: list[QuotaView] = Field(default_factory=list)
+
+
 class SupplierPortalTokenResponse(BaseModel):
     supplier_id: str
     source_key: str
