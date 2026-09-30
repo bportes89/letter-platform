@@ -23,8 +23,13 @@ export function LeadsModule() {
   </OperationalLayout>
 }
 
+const INVENTORY_STOCK_STATUSES = new Set(["AVAILABLE", "RESERVED", "PENDING_REVIEW"]);
+
+type InventoryCategoryFilter = "ALL" | "REAL_ESTATE" | "VEHICLE";
+
 export function InventoryModule() {
   const [items,setItems]=useState<Quota[]>([]);const [admins,setAdmins]=useState<Administrator[]>([]);const [reservations,setReservations]=useState<Reservation[]>([]);const [suppliers,setSuppliers]=useState<{source_key:string;name:string;markup_percent:string}[]>([]);const [error,setError]=useState("");const [notice,setNotice]=useState("");const [formKey,setFormKey]=useState(0);
+  const [categoryFilter, setCategoryFilter] = useState<InventoryCategoryFilter>("ALL");
   const load=()=>Promise.all([api<Quota[]>("/quotas"),api<Administrator[]>("/administrators"),api<Reservation[]>("/reservations"),api<{source_key:string;name:string;markup_percent:string;active:boolean}[]>("/marketplace/suppliers?active_only=true").catch(()=>[])]).then(([q,a,r,s])=>{setItems(q);setAdmins(a);setReservations(r);setSuppliers(s.filter(x=>x.active!==false))}).catch(e=>setError(e.message));useEffect(()=>{void load()},[]);
   async function submit(e:FormEvent<HTMLFormElement>){e.preventDefault();const form=e.currentTarget;const fd=new FormData(form);await api("/quotas",{method:"POST",body:JSON.stringify({administrator_id:fd.get("administrator_id"),group_code:fd.get("group_code"),quota_code:fd.get("quota_code"),category:fd.get("category"),credit_value:fd.get("credit_value"),outstanding_balance:fd.get("outstanding_balance")||"0",premium_value:fd.get("premium_value")||"0",installment_value:fd.get("installment_value")||"0",installment_due_date:fd.get("installment_due_date")||null,remaining_installments:fd.get("remaining_installments")?Number(fd.get("remaining_installments")):null,supplier_source:fd.get("supplier_source")||null})});form.reset();setFormKey(k=>k+1);setNotice("Cota cadastrada no inventário.");load()}
   async function ninaScan(quota:Quota){setError("");try{const result=await api<{message:string}>("/quotas/"+quota.id+"/nina-scan",{method:"POST"});setNotice(result.message);load()}catch(e){setError(e instanceof Error?e.message:"Varredura Nina reprovada.")}}
@@ -34,8 +39,58 @@ export function InventoryModule() {
   async function rejectQuota(quota:Quota){const reason=window.prompt("Motivo da recusa (compliance):");if(!reason)return;setError("");try{await api(`/marketplace/quotas/${quota.id}/reject`,{method:"POST",body:JSON.stringify({reason})});setNotice(`Cota ${quota.group_code}/${quota.quota_code} recusada.`);load()}catch(e){setError(e instanceof Error?e.message:"Falha ao recusar cota")}}
   async function downloadQuotaStatement(quota:Quota){try{await downloadApi(`/marketplace/quotas/${quota.id}/statement`,quota.statement_filename||`extrato-${quota.group_code}-${quota.quota_code}.pdf`)}catch(e){setError(e instanceof Error?e.message:"Extrato indisponível")}}
   const pendingSupplier=items.filter(x=>x.status==="PENDING_REVIEW"&&Boolean(x.supplier_source));
+  const stockRows = useMemo(
+    () =>
+      items.filter(
+        (x) =>
+          INVENTORY_STOCK_STATUSES.has(x.status) &&
+          (categoryFilter === "ALL" || x.category === categoryFilter),
+      ),
+    [items, categoryFilter],
+  );
+  const stockSummary = useMemo(() => {
+    let credit = 0;
+    for (const row of stockRows) {
+      const value = Number(row.credit_value);
+      if (Number.isFinite(value)) credit += value;
+    }
+    return { count: stockRows.length, credit };
+  }, [stockRows]);
   const fmtDate=(value?:string|null)=>value?new Date(value+"T12:00:00").toLocaleDateString("pt-BR"):"—";
+  const categoryLabel =
+    categoryFilter === "ALL" ? "Total" : categoryFilter === "REAL_ESTATE" ? "Imóveis" : "Veículos";
   return <OperationalLayout title="Inventário (admin)" subtitle="Cadastro interno de cotas, compliance de fornecedores (extrato), varredura Nina e trava de 60 min." icon={<WalletCards/>}>
+    <div className="network-metrics" style={{ margin: "0 0 1rem" }}>
+      <article>
+        <small>Estoque ({categoryLabel}) — cotas</small>
+        <strong>{stockSummary.count}</strong>
+      </article>
+      <article>
+        <small>Crédito total ({categoryLabel})</small>
+        <strong>{brl.format(stockSummary.credit)}</strong>
+      </article>
+    </div>
+    <div className="marketplace-tabs" style={{ margin: "0 0 1rem", padding: "0 18px" }}>
+      {(
+        [
+          { key: "ALL" as const, label: "Total" },
+          { key: "REAL_ESTATE" as const, label: "Imóveis" },
+          { key: "VEHICLE" as const, label: "Veículos" },
+        ] as const
+      ).map((tab) => (
+        <button
+          key={tab.key}
+          type="button"
+          className={`marketplace-tab${categoryFilter === tab.key ? " active" : ""}`}
+          onClick={() => setCategoryFilter(tab.key)}
+        >
+          {tab.label}
+        </button>
+      ))}
+    </div>
+    <p className="muted" style={{ fontSize: 10, margin: "0 18px 0.75rem", lineHeight: 1.45 }}>
+      Totais consideram cotas <b>disponíveis, reservadas ou em revisão</b> (exclui inativas e vendidas). A tabela abaixo lista todo o inventário.
+    </p>
     <div className="notice"><Clock3/>Fluxo: <b>1.</b> Fornecedor ou admin cadastra cota + extrato · <b>2.</b> Compliance aprova em Inventário · <b>3.</b> Varredura Nina · <b>4.</b> Trava 60 min · <b>5.</b> Proposta · Ofertas do site em <b>Compliance — Vender cota</b></div>
     {pendingSupplier.length>0&&<div className="notice"><CheckCircle2/>{pendingSupplier.length} cota(s) de fornecedor aguardando compliance (revise o extrato antes de aprovar).</div>}
     <form key={formKey} className="quick-form quota-form" onSubmit={submit}><select name="administrator_id" required>{admins.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select><input name="group_code" placeholder="Grupo" required/><input name="quota_code" placeholder="Cota" required/><select name="category"><option value="REAL_ESTATE">Imóvel</option><option value="VEHICLE">Veículo</option></select><CurrencyFormField name="credit_value" placeholder="Crédito (R$)" required/><CurrencyFormField name="premium_value" placeholder="Entrada/ágio (R$)"/><CurrencyFormField name="installment_value" placeholder="Parcela (R$)"/><CurrencyFormField name="outstanding_balance" placeholder="Saldo devedor (R$)"/><input name="installment_due_date" type="date" placeholder="Vencimento parcela" required title="Vencimento da parcela"/><input name="remaining_installments" type="number" min="0" placeholder="Parcelas restantes"/><select name="supplier_source"><option value="">Fornecedor API</option>{suppliers.length?suppliers.map(s=><option key={s.source_key} value={s.source_key}>{s.name} (+{s.markup_percent}%)</option>):(<><option value="FRAGA">Fraga (+3%)</option><option value="BITTELO">Bittelo (+3%)</option><option value="LANCE">Lance (+3%)</option><option value="UNI_CONTEMPLADOS">Uni Contemplados (+10%)</option><option value="CONTEMPLADO_SP">Contemplado SP (+10%)</option><option value="LUME">Lume (+10%)</option></>)}</select><button><Plus/>Cadastrar cota</button></form>
