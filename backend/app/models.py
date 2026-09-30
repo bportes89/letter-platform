@@ -447,6 +447,20 @@ class SdcChecklistConfig(TimestampMixin, Base):
     items_json: Mapped[str] = mapped_column(Text, default="[]")
 
 
+class FlashChecklistConfig(TimestampMixin, Base):
+    """Itens obrigatórios Flash Capital por tipo de operação (configurável pela LETTER)."""
+
+    __tablename__ = "flash_checklist_configs"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "asset_category", "operation_type", name="uq_flash_checklist_org_cat_op"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    asset_category: Mapped[str] = mapped_column(String(40), index=True)
+    operation_type: Mapped[str] = mapped_column(String(30), index=True)
+    items_json: Mapped[str] = mapped_column(Text, default="[]")
+
+
 class FlashSolicitation(TimestampMixin, Base):
     """Mesa comercial Flash Capital: solicitação → docs → proposta + partes PJ."""
 
@@ -467,6 +481,7 @@ class FlashSolicitation(TimestampMixin, Base):
     income_value: Mapped[float] = mapped_column(Numeric(15, 2), default=0)
     asset_type: Mapped[str] = mapped_column(String(40), index=True)
     asset_category: Mapped[str] = mapped_column(String(20), default="REAL_ESTATE", index=True)
+    operation_type: Mapped[str | None] = mapped_column(String(30), index=True)
     asset_value: Mapped[float] = mapped_column(Numeric(15, 2))
     asset_year: Mapped[int | None] = mapped_column(Integer)
     asset_paid_off: Mapped[bool] = mapped_column(Boolean, default=True)

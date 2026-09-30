@@ -91,6 +91,11 @@ export function isInternalProductRole(role: string | undefined): boolean {
   return role === "PLATFORM_ADMIN" || role === "INTERNAL_STAFF" || role === "MASTER_FRANCHISEE";
 }
 
+/** Taxa de fruição Flash Capital — somente operação LETTER central. */
+export function canEditLetterFinOpsParams(role: string | undefined): boolean {
+  return role === "PLATFORM_ADMIN" || role === "INTERNAL_STAFF";
+}
+
 export function filterProductNavItem(
   item: ProductNavItem,
   allowedKeys: readonly string[] | "*",

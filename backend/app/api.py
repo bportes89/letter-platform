@@ -116,6 +116,7 @@ from app.schemas import (
     SdcDeskPartnerObservationUpdate,
     SdcChecklistConfigSave,
     FlashDeskEvaluateRequest, FlashDeskStoreRequest, FlashDeskStatusUpdate, FlashDeskSaleCreate,
+    FlashChecklistConfigSave,
     QuitConDeskEvaluateRequest, QuitConDeskStoreRequest, QuitConDeskStatusUpdate,
     ProposalView, QuotaCreate, QuotaUpdate, QuotaView, QuotaComplianceRejectRequest, NinaQuotaScanView, RecoveredAssetCreate, RecoveredAssetView, RefreshRequest,
     CommercialClientView,
@@ -3782,11 +3783,48 @@ def sdc_desk_create_sale(
 
 
 @router.post("/flash/desk/evaluate")
-def flash_desk_evaluate(payload: FlashDeskEvaluateRequest, user: User = Depends(get_current_user)):
+def flash_desk_evaluate(
+    payload: FlashDeskEvaluateRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     from app.flash_desk_service import assert_desk_access, evaluate_flash_desk
 
     assert_desk_access(user)
-    return {"result": evaluate_flash_desk(payload.model_dump())}
+    return {"result": evaluate_flash_desk(payload.model_dump(), db=db, organization_id=user.organization_id)}
+
+
+@router.get("/flash/desk/checklist-config")
+def flash_desk_list_checklist_config(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.flash_checklist_service import list_checklist_configs
+    from app.flash_desk_service import _is_admin, assert_desk_access
+
+    assert_desk_access(user)
+    if not _is_admin(user):
+        raise HTTPException(status_code=403, detail="Somente operação LETTER configura checklists")
+    return list_checklist_configs(db, user.organization_id)
+
+
+@router.put("/flash/desk/checklist-config")
+def flash_desk_save_checklist_config(
+    payload: FlashChecklistConfigSave,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.flash_checklist_service import list_checklist_configs, save_checklist_config
+    from app.flash_desk_service import _is_admin, assert_desk_access
+
+    assert_desk_access(user)
+    if not _is_admin(user):
+        raise HTTPException(status_code=403, detail="Somente operação LETTER configura checklists")
+    save_checklist_config(
+        db,
+        user.organization_id,
+        operation_type=payload.operation_type,
+        items=[i.model_dump() for i in payload.items],
+    )
+    db.commit()
+    return list_checklist_configs(db, user.organization_id)
 
 
 @router.post("/flash/desk/solicitations", status_code=201)
@@ -4084,6 +4122,8 @@ def finops_flash_capital_simulation_params_update(
     user: User = Depends(require_scope("admin:users")),
     db: Session = Depends(get_db),
 ):
+    if user.role not in {Role.PLATFORM_ADMIN, Role.INTERNAL_STAFF}:
+        raise HTTPException(status_code=403, detail="Somente operação LETTER central altera a taxa de fruição Flash Capital")
     save_flash_simulation_params(
         db,
         user,

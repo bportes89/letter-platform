@@ -2952,7 +2952,14 @@ class FlashDeskEvaluateRequest(BaseModel):
     term_months: int = Field(default=36)
     capital_source: str = "RETAIL"
     person_type: str = "PJ"
+    operation_type: str = Field(default="IMOVEL_PROPRIO", max_length=30)
+    third_party_signer: dict | None = None
     properties_json: list[dict] = Field(default_factory=list)
+
+
+class FlashChecklistConfigSave(BaseModel):
+    operation_type: str = Field(min_length=3, max_length=30)
+    items: list[SdcChecklistConfigItem] = Field(min_length=1)
 
 
 class FlashDeskStoreRequest(FlashDeskEvaluateRequest):

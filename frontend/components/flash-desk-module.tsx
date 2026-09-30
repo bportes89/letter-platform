@@ -4,7 +4,7 @@ import { CheckCircle2, FileUp, Plus, RefreshCw, ShoppingCart, Landmark, Trash2 }
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AdminDocumentPanel } from "@/components/admin-document-panel";
 import { api, apiForm, deleteApi, downloadApi, User } from "@/lib/api";
-import { isInternalProductRole } from "@/lib/product-nav";
+import { canEditLetterFinOpsParams, isInternalProductRole } from "@/lib/product-nav";
 import { FinOpsModule } from "@/components/finops-module";
 import { PreAnalysisModule } from "@/components/pre-analysis-module";
 import { DeskSourceMetaRow } from "@/lib/desk-source-meta";
@@ -118,7 +118,150 @@ const emptyForm = {
   term_months: "36",
   capital_source: "RETAIL",
   lien_payoff_value: "",
+  operation_type: "IMOVEL_PROPRIO" as "IMOVEL_PROPRIO" | "IMOVEL_TERCEIRO",
+  third_party_name: "",
+  third_party_document: "",
+  third_party_email: "",
+  third_party_phone: "",
 };
+
+type FlashChecklistConfigRow = {
+  asset_category: string;
+  asset_category_label: string;
+  operation_type: string;
+  operation_type_label: string;
+  items: Array<{ code: string; label: string }>;
+  customized?: boolean;
+};
+
+type FlashChecklistItemDraft = { code: string; label: string };
+
+const FLASH_OPERATION_OPTIONS = [
+  { value: "IMOVEL_PROPRIO", label: "Imóvel próprio" },
+  { value: "IMOVEL_TERCEIRO", label: "Imóvel de terceiro" },
+] as const;
+
+function FlashChecklistConfigPanel() {
+  const [rows, setRows] = useState<FlashChecklistConfigRow[]>([]);
+  const [selectedKey, setSelectedKey] = useState("");
+  const [draftItems, setDraftItems] = useState<FlashChecklistItemDraft[]>([]);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const selected = useMemo(
+    () => rows.find((r) => r.operation_type === selectedKey) ?? null,
+    [rows, selectedKey],
+  );
+
+  useEffect(() => {
+    api<FlashChecklistConfigRow[]>("/flash/desk/checklist-config")
+      .then((list) => {
+        setRows(list);
+        if (!selectedKey && list[0]) setSelectedKey(list[0].operation_type);
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : "Falha ao carregar checklists"));
+  }, []);
+
+  useEffect(() => {
+    if (!selected) return;
+    setDraftItems(selected.items.map((it) => ({ code: it.code, label: it.label })));
+  }, [selected?.operation_type, selected?.items]);
+
+  function patchDraftItem(index: number, patch: Partial<FlashChecklistItemDraft>) {
+    setDraftItems((prev) => {
+      const next = [...prev];
+      next[index] = { ...next[index], ...patch };
+      return next;
+    });
+  }
+
+  async function saveConfig() {
+    if (!selected) return;
+    setError("");
+    setNotice("");
+    const cleaned = draftItems
+      .map((it) => ({ code: it.code.trim(), label: it.label.trim() }))
+      .filter((it) => it.code && it.label);
+    if (!cleaned.length) {
+      setError("Informe ao menos um item com código e descrição.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const updated = await api<FlashChecklistConfigRow[]>("/flash/desk/checklist-config", {
+        method: "PUT",
+        body: JSON.stringify({
+          operation_type: selected.operation_type,
+          items: cleaned,
+        }),
+      });
+      setRows(updated);
+      setNotice("Checklist salvo.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Falha ao salvar checklist");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div style={{ marginTop: 12 }}>
+      {error && <div className="error" style={{ marginBottom: 8 }}>{error}</div>}
+      {notice && <div className="notice" style={{ marginBottom: 8 }}>{notice}</div>}
+      <div style={{ display: "grid", gap: 10, gridTemplateColumns: "minmax(0,1fr) minmax(0,1.2fr)" }}>
+        <select value={selectedKey} onChange={(e) => setSelectedKey(e.target.value)} style={{ padding: 8, borderRadius: 8 }}>
+          {rows.map((r) => (
+            <option key={r.operation_type} value={r.operation_type}>
+              {r.operation_type_label}{r.customized ? " *" : ""}
+            </option>
+          ))}
+        </select>
+        <button type="button" className="admin-button" disabled={busy || !selected} onClick={() => void saveConfig()}>
+          Salvar itens obrigatórios
+        </button>
+      </div>
+      <p className="muted" style={{ fontSize: 10, margin: "8px 0" }}>
+        Documentos exigidos na esteira comercial (comprovantes, fotos, laudos). Itens emitidos por API não precisam ser anexados pelo parceiro. * = personalizado.
+      </p>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {draftItems.map((it, idx) => (
+          <div
+            key={`${idx}-${it.code}`}
+            style={{ display: "grid", gap: 8, gridTemplateColumns: "minmax(120px,0.35fr) minmax(0,1fr) auto", alignItems: "end" }}
+          >
+            <label style={{ fontSize: 11 }}>
+              Código
+              <input value={it.code} onChange={(e) => patchDraftItem(idx, { code: e.target.value })} placeholder="RG_CPF" />
+            </label>
+            <label style={{ fontSize: 11 }}>
+              Documento / descrição
+              <input value={it.label} onChange={(e) => patchDraftItem(idx, { label: e.target.value })} placeholder="Comprovante de renda" />
+            </label>
+            <button
+              type="button"
+              className="table-action"
+              title="Remover item"
+              disabled={draftItems.length <= 1}
+              onClick={() => setDraftItems((prev) => prev.filter((_, i) => i !== idx))}
+            >
+              <Trash2 size={14} />
+            </button>
+          </div>
+        ))}
+        <button
+          type="button"
+          className="table-action"
+          style={{ alignSelf: "flex-start" }}
+          onClick={() => setDraftItems((prev) => [...prev, { code: "", label: "" }])}
+        >
+          <Plus size={14} />
+          Adicionar item
+        </button>
+      </div>
+    </div>
+  );
+}
 
 type PropertyOwner = { name: string; document: string; share_percent: string };
 
@@ -245,6 +388,7 @@ export function FlashDeskModule() {
   const tapafPanelRef = useRef<HTMLDivElement>(null);
 
   const isInternal = isInternalProductRole(user?.role);
+  const canEditFinOpsRate = canEditLetterFinOpsParams(user?.role);
 
   function patchProperties(updater: (rows: FlashPropertyRow[]) => FlashPropertyRow[]) {
     setProperties(updater);
@@ -254,16 +398,17 @@ export function FlashDeskModule() {
   function propertiesForPayload() {
     const borrowerName = form.contact_name.trim();
     const borrowerDoc = form.document.trim();
+    const isProprio = form.operation_type === "IMOVEL_PROPRIO";
     return properties.map((p) => {
-      const owners = p.owner_same_as_borrower
+      const owners = isProprio
         ? [{ name: borrowerName, document: borrowerDoc, share_percent: "100" }]
-        : p.owners
-            .filter((o) => o.name.trim() || o.document.trim())
-            .map((o) => ({
-              name: o.name.trim(),
-              document: o.document.trim(),
-              share_percent: o.share_percent.trim() || "0",
-            }));
+        : [
+            {
+              name: form.third_party_name.trim(),
+              document: form.third_party_document.trim(),
+              share_percent: "100",
+            },
+          ];
       return {
         zone: p.zone,
         street: p.street.trim(),
@@ -280,7 +425,7 @@ export function FlashDeskModule() {
           p.debt_answer === "SIM" && p.debt_type === "FINANCEIRA"
             ? moneyPayload(p.debt_payoff_value)
             : null,
-        owner_same_as_borrower: p.owner_same_as_borrower,
+        owner_same_as_borrower: isProprio,
         owners,
         full_address: composePropertyAddress(p),
       };
@@ -294,6 +439,11 @@ export function FlashDeskModule() {
   async function fillCepForProperty(index: number, cep: string) {
     const addr = await lookupCep(cep);
     if (!addr) return;
+    let population = "";
+    if (addr.ibge) {
+      const pop = await lookupMunicipalityPopulation(addr.ibge);
+      if (pop) population = String(pop);
+    }
     patchProperties((rows) => {
       const next = [...rows];
       const row = { ...next[index] };
@@ -301,19 +451,10 @@ export function FlashDeskModule() {
       row.city = addr.city;
       row.state = addr.uf;
       row.zip = addr.zipcode;
+      if (population) row.population = population;
       next[index] = row;
       return next;
     });
-    if (addr.ibge) {
-      const pop = await lookupMunicipalityPopulation(addr.ibge);
-      if (pop) {
-        patchProperties((rows) => {
-          const next = [...rows];
-          next[index] = { ...next[index], population: String(pop) };
-          return next;
-        });
-      }
-    }
   }
 
   function validatePropertyDebts(p: FlashPropertyRow, index: number): string | null {
@@ -365,14 +506,12 @@ export function FlashDeskModule() {
       if (!parseMoney(p.property_value)) return `Informe o valor do imóvel ${i + 1}.`;
       const debtErr = validatePropertyDebts(p, i);
       if (debtErr) return debtErr;
-      if (!p.owner_same_as_borrower) {
-        const active = p.owners.filter((o) => o.name.trim() || o.document.trim());
-        if (!active.length) return `Informe ao menos um titular do imóvel ${i + 1}.`;
-        const shareSum = active.reduce((s, o) => s + Number(o.share_percent.replace(",", ".") || 0), 0);
-        if (shareSum < 99.5 || shareSum > 100.5) {
-          return `A soma das participações dos titulares do imóvel ${i + 1} deve ser 100%.`;
-        }
-      }
+    }
+    if (form.operation_type === "IMOVEL_TERCEIRO") {
+      if (!form.third_party_name.trim()) return "Informe o nome do proprietário do imóvel (terceiro).";
+      if (!form.third_party_document.trim()) return "Informe o CPF/CNPJ do proprietário (terceiro).";
+      if (!form.third_party_email.trim()) return "Informe o e-mail do proprietário (terceiro).";
+      if (!form.third_party_phone.trim()) return "Informe o telefone do proprietário (terceiro).";
     }
     if (!totalPropertiesValue()) return "Informe o valor de pelo menos um imóvel.";
     if (!evalResult?.viable) return "Calcule a viabilidade antes de avançar.";
@@ -490,7 +629,28 @@ export function FlashDeskModule() {
       docs_complete: form.docs_complete,
       term_months: Number(form.term_months),
       capital_source: form.capital_source,
+      operation_type: form.operation_type,
+      third_party_signer:
+        form.operation_type === "IMOVEL_TERCEIRO"
+          ? {
+              name: form.third_party_name.trim(),
+              document: form.third_party_document.trim(),
+              email: form.third_party_email.trim(),
+              phone: form.third_party_phone.trim(),
+            }
+          : null,
     };
+  }
+
+  function setOperationType(op: "IMOVEL_PROPRIO" | "IMOVEL_TERCEIRO") {
+    setForm((prev) => ({ ...prev, operation_type: op }));
+    setEvalResult(null);
+    patchProperties((rows) =>
+      rows.map((r) => ({
+        ...r,
+        owner_same_as_borrower: op === "IMOVEL_PROPRIO",
+      })),
+    );
   }
 
   async function calculate() {
@@ -619,29 +779,19 @@ export function FlashDeskModule() {
     setError("");
     setBusy(true);
     try {
-      if (tapafCheckout?.checkout_url && tapafCheckout.checkout_mode === "ASAAS") {
-        window.open(tapafCheckout.checkout_url, "_blank", "noopener,noreferrer");
+      const mode = tapafCheckout?.checkout_mode || "";
+      const url = tapafCheckout?.checkout_url || "";
+      const isAsaas = mode === "ASAAS" && url.startsWith("http");
+      if (isAsaas) {
+        window.open(url, "_blank", "noopener,noreferrer");
         setNotice("Cobrança aberta — aguarde confirmação do pagamento.");
         return;
       }
-      await api("/finops/pre-analysis/tapaf-payment-webhook", {
-        method: "POST",
-        body: JSON.stringify({
-          proposal_id: tapafProposalId,
-          event_id: `flash-desk-tapaf-${Date.now()}`,
-          amount: tapafCheckout?.valor_nominal_taxa || "1500.00",
-        }),
-      });
-      setNotice("TAPAF confirmada. Acompanhe o status na aba Acompanhamento.");
-      setForm(emptyForm);
-      setSocios([]);
-      setProperties([newPropertyRow()]);
-      setEvalResult(null);
-      setTapafCheckout(null);
-      setTab("lista");
-      await load();
+      setNotice(
+        "A cobrança TAPAF será emitida pelo Banco Inter (integração em andamento). A equipe LETTER enviará o boleto ou Pix em breve — não utilize confirmação sandbox.",
+      );
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Falha ao gerar pagamento TAPAF");
+      setError(e instanceof Error ? e.message : "Falha ao abrir pagamento TAPAF");
     } finally {
       setBusy(false);
     }
@@ -828,6 +978,48 @@ export function FlashDeskModule() {
                   <small className="muted">Receita bruta média por mês da empresa.</small>
                 </label>
                 <input placeholder="Ramo de atividade" value={form.occupation} onChange={(e) => patchForm("occupation", e.target.value)} />
+                <label style={{ gridColumn: "1 / -1" }}>
+                  Tipo de operação
+                  <select
+                    value={form.operation_type}
+                    onChange={(e) => setOperationType(e.target.value as "IMOVEL_PROPRIO" | "IMOVEL_TERCEIRO")}
+                    style={{ width: "100%", marginTop: 4, padding: 8, borderRadius: 8 }}
+                  >
+                    {FLASH_OPERATION_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
+                  </select>
+                  <small className="muted">
+                    Imóvel próprio: garantia do tomador PJ. Imóvel de terceiro: o proprietário também assina o contrato.
+                  </small>
+                </label>
+                {form.operation_type === "IMOVEL_TERCEIRO" && (
+                  <>
+                    <div style={{ gridColumn: "1 / -1", marginTop: 4 }}>
+                      <b style={{ fontSize: 11 }}>Proprietário do imóvel (terceiro — assinatura do contrato)</b>
+                    </div>
+                    <input
+                      placeholder="Nome do proprietário"
+                      value={form.third_party_name}
+                      onChange={(e) => patchForm("third_party_name", e.target.value)}
+                    />
+                    <input
+                      placeholder="CPF/CNPJ do proprietário"
+                      value={form.third_party_document}
+                      onChange={(e) => patchForm("third_party_document", e.target.value)}
+                    />
+                    <input
+                      placeholder="E-mail do proprietário"
+                      value={form.third_party_email}
+                      onChange={(e) => patchForm("third_party_email", e.target.value)}
+                    />
+                    <input
+                      placeholder="Telefone do proprietário"
+                      value={form.third_party_phone}
+                      onChange={(e) => patchForm("third_party_phone", e.target.value)}
+                    />
+                  </>
+                )}
                 <div style={{ gridColumn: "1 / -1", marginTop: 4 }}>
                   <b style={{ fontSize: 11 }}>Endereço da sede (tomador)</b>
                   <small className="muted" style={{ display: "block" }}>
@@ -981,8 +1173,9 @@ export function FlashDeskModule() {
                             return next;
                           });
                         }}
-                        onBlur={() => {
-                          if (prop.zip.replace(/\D/g, "").length === 8) void fillCepForProperty(pIdx, prop.zip);
+                        onBlur={(e) => {
+                          const z = e.currentTarget.value;
+                          if (z.replace(/\D/g, "").length === 8) void fillCepForProperty(pIdx, z);
                         }}
                       />
                     </label>
@@ -1129,118 +1322,14 @@ export function FlashDeskModule() {
                     )}
                   </div>
 
-                  <label style={{ fontSize: 11, fontWeight: 700, display: "flex", alignItems: "flex-start", gap: 8, marginTop: 4 }}>
-                    <input
-                      type="checkbox"
-                      checked={prop.owner_same_as_borrower}
-                      onChange={(e) => {
-                        const checked = e.target.checked;
-                        patchProperties((rows) => {
-                          const next = [...rows];
-                          next[pIdx] = { ...next[pIdx], owner_same_as_borrower: checked };
-                          return next;
-                        });
-                      }}
-                    />
-                    O titular do imóvel é o mesmo tomador do crédito (espelhar dados do tomador PJ)
-                  </label>
-
-                  {!prop.owner_same_as_borrower && (
-                    <div className="desk-repeat-block" style={{ marginTop: 4 }}>
-                      <b style={{ fontSize: 11 }}>Titular(es) do imóvel</b>
-                      <small className="muted">Informe nome, CPF/CNPJ e % de participação (soma 100%).</small>
-                      {prop.owners.map((owner, oIdx) => (
-                        <div key={oIdx} className="desk-repeat-row">
-                          <label>
-                            Nome
-                            <input
-                              placeholder="Nome do titular"
-                              value={owner.name}
-                              onChange={(e) => {
-                                const v = e.target.value;
-                                patchProperties((rows) => {
-                                  const next = [...rows];
-                                  const owners = [...next[pIdx].owners];
-                                  owners[oIdx] = { ...owners[oIdx], name: v };
-                                  next[pIdx] = { ...next[pIdx], owners };
-                                  return next;
-                                });
-                              }}
-                            />
-                          </label>
-                          <label>
-                            CPF/CNPJ · %
-                            <div style={{ display: "grid", gridTemplateColumns: "1fr 72px", gap: 6 }}>
-                              <input
-                                placeholder="Documento"
-                                value={owner.document}
-                                onChange={(e) => {
-                                  const v = e.target.value;
-                                  patchProperties((rows) => {
-                                    const next = [...rows];
-                                    const owners = [...next[pIdx].owners];
-                                    owners[oIdx] = { ...owners[oIdx], document: v };
-                                    next[pIdx] = { ...next[pIdx], owners };
-                                    return next;
-                                  });
-                                }}
-                              />
-                              <input
-                                placeholder="%"
-                                inputMode="decimal"
-                                value={owner.share_percent}
-                                onChange={(e) => {
-                                  const v = e.target.value;
-                                  patchProperties((rows) => {
-                                    const next = [...rows];
-                                    const owners = [...next[pIdx].owners];
-                                    owners[oIdx] = { ...owners[oIdx], share_percent: v };
-                                    next[pIdx] = { ...next[pIdx], owners };
-                                    return next;
-                                  });
-                                }}
-                              />
-                            </div>
-                          </label>
-                          {prop.owners.length > 1 && (
-                            <button
-                              type="button"
-                              className="table-action"
-                              onClick={() => {
-                                patchProperties((rows) => {
-                                  const next = [...rows];
-                                  next[pIdx] = {
-                                    ...next[pIdx],
-                                    owners: next[pIdx].owners.filter((_, i) => i !== oIdx),
-                                  };
-                                  return next;
-                                });
-                              }}
-                              aria-label="Remover titular"
-                            >
-                              <Trash2 size={14} />
-                            </button>
-                          )}
-                        </div>
-                      ))}
-                      <button
-                        type="button"
-                        className="table-action"
-                        onClick={() => {
-                          patchProperties((rows) => {
-                            const next = [...rows];
-                            next[pIdx] = {
-                              ...next[pIdx],
-                              owners: [...next[pIdx].owners, { name: "", document: "", share_percent: "" }],
-                            };
-                            return next;
-                          });
-                        }}
-                      >
-                        <Plus size={14} />
-                        Adicionar outro titular
-                      </button>
-                    </div>
+                  {form.operation_type === "IMOVEL_PROPRIO" ? (
+                    <p className="muted" style={{ fontSize: 11, margin: "8px 0 0" }}>
+                      Titular do imóvel: mesmo tomador PJ informado acima.
+                    </p>
+                  ) : (
+                    <p className="muted" style={{ fontSize: 11, margin: "8px 0 0" }}>
+                      Titular: proprietário terceiro informado no início do cadastro (assinatura do contrato).
+                    </p>
                   )}
                 </div>
               ))}
@@ -1329,10 +1418,14 @@ export function FlashDeskModule() {
                     <button type="button" className="admin-button" disabled={busy || !tapafScroll || !tapafCb1 || !tapafCb2} onClick={() => void acceptTapaf()}>
                       Aceitar TAPAF e gerar boleto/Pix
                     </button>
-                    {(tapafCheckout.botao_habilitado || tapafCheckout.checkout_url) && (
+                    {tapafCheckout.checkout_mode === "ASAAS" && tapafCheckout.checkout_url?.startsWith("http") ? (
                       <button type="button" className="admin-button" disabled={busy} onClick={() => void payTapaf()}>
-                        {tapafCheckout.botao_label || "Gerar boleto / Pix TAPAF"}
+                        {tapafCheckout.botao_label || "Abrir boleto / Pix TAPAF"}
                       </button>
+                    ) : (
+                      <p className="muted" style={{ fontSize: 11, margin: 0, lineHeight: 1.45 }}>
+                        Cobrança real via Banco Inter em implantação. Após o aceite, a LETTER enviará o boleto ou Pix da TAPAF — não use confirmação sandbox.
+                      </p>
                     )}
                   </div>
                 </div>
@@ -1483,10 +1576,22 @@ export function FlashDeskModule() {
             <div className="page-heading" style={{ marginBottom: 8 }}>
               <div>
                 <span className="eyebrow dark">INTERNO</span>
+                <h2 style={{ fontSize: 18, margin: "6px 0" }}>Checklists Flash Capital</h2>
+                <p className="muted">Documentos obrigatórios por tipo de operação (próprio vs terceiro).</p>
+              </div>
+            </div>
+            <div style={{ padding: "0 18px 18px" }}>
+              <FlashChecklistConfigPanel />
+            </div>
+          </section>
+          <section className="panel operational-panel" style={{ marginTop: 16 }}>
+            <div className="page-heading" style={{ marginBottom: 8 }}>
+              <div>
+                <span className="eyebrow dark">INTERNO</span>
                 <h2 style={{ fontSize: 18, margin: "6px 0" }}>FinOps / parâmetros</h2>
               </div>
             </div>
-            <FinOpsModule />
+            <FinOpsModule allowRateEdit={canEditFinOpsRate} />
           </section>
           <section className="panel operational-panel" style={{ marginTop: 16 }}>
             <div className="page-heading" style={{ marginBottom: 8 }}>

@@ -15,6 +15,7 @@ from app.document_service import persist_upload, purge_document, purge_document_
 from app.flash_valid_lss_service import configure_flash_parties
 from app.models import Document, FlashSolicitation, FlashSolicitationDocument, Lead, Proposal, Role, User
 from app.network_service import PARTNER_NETWORK_ROLES
+from app.flash_checklist_service import normalize_flash_operation_type, resolve_required_docs
 from app.product_service import FLASH_CAPITAL_PRODUCT, calculate_flash_credit
 from app.services import money
 
@@ -150,12 +151,40 @@ def _apply_properties_asset_total(data: dict) -> dict:
     return data
 
 
-def evaluate_flash_desk(data: dict) -> dict:
+def _third_party_signer(data: dict) -> dict:
+    raw = data.get("third_party_signer")
+    if isinstance(raw, dict):
+        return raw
+    return {}
+
+
+def _validate_third_party_operation(data: dict, motivos: list[str]) -> str:
+    op = normalize_flash_operation_type(data.get("operation_type"))
+    if op != "IMOVEL_TERCEIRO":
+        return op
+    tp = _third_party_signer(data)
+    name = str(tp.get("name") or "").strip()
+    document = str(tp.get("document") or "").strip()
+    email = str(tp.get("email") or "").strip()
+    phone = str(tp.get("phone") or "").strip()
+    if not name:
+        motivos.append("Informe o nome do proprietário do imóvel (terceiro) para assinatura do contrato.")
+    if not document:
+        motivos.append("Informe o CPF/CNPJ do proprietário do imóvel (terceiro).")
+    if not email:
+        motivos.append("Informe o e-mail do proprietário (terceiro).")
+    if not phone:
+        motivos.append("Informe o telefone do proprietário (terceiro).")
+    return op
+
+
+def evaluate_flash_desk(data: dict, db: Session | None = None, organization_id: str | None = None) -> dict:
     data = _apply_properties_asset_total(dict(data))
     motivos: list[str] = []
     person_type = str(data.get("person_type") or "PJ").strip().upper()
     if person_type != "PJ":
         motivos.append("Flash Capital aceita apenas tomador Pessoa Jurídica (PJ).")
+    operation_type = _validate_third_party_operation(data, motivos)
     asset_type = str(data.get("asset_type") or "").strip()
     category = _category(asset_type)
     if not category:
@@ -193,12 +222,16 @@ def evaluate_flash_desk(data: dict) -> dict:
     if valor > 0 and principal > max_principal:
         motivos.append(f"LTV máximo de 40% excedido; limite {max_principal}.")
 
-    docs = _docs_for(category)
+    if db and organization_id:
+        docs = resolve_required_docs(db, organization_id, operation_type=operation_type, asset_category=category)
+    else:
+        docs = _docs_for(category)
     if motivos:
         return {
             "viable": False,
             "motivos": motivos,
             "category": category,
+            "operation_type": operation_type,
             "required_docs": docs,
             "principal": "0.00",
             "ltv_percent": "0.00",
@@ -231,6 +264,7 @@ def evaluate_flash_desk(data: dict) -> dict:
         "viable": True,
         "motivos": [],
         "category": category,
+        "operation_type": operation_type,
         "required_docs": docs,
         "principal": str(principal),
         "ltv_percent": str(ltv),
@@ -403,7 +437,7 @@ def store_solicitation(db: Session, user: User, payload: dict) -> FlashSolicitat
     assert_desk_access(user)
     payload = dict(payload)
     payload["person_type"] = "PJ"
-    result = evaluate_flash_desk(payload)
+    result = evaluate_flash_desk(payload, db=db, organization_id=user.organization_id)
     if not result["viable"]:
         raise HTTPException(
             status_code=422,
@@ -428,6 +462,7 @@ def store_solicitation(db: Session, user: User, payload: dict) -> FlashSolicitat
         income_value=money(_dec(payload.get("income_value") or 0)),
         asset_type=str(payload["asset_type"]).strip().lower(),
         asset_category=result["category"],
+        operation_type=result.get("operation_type") or normalize_flash_operation_type(payload.get("operation_type")),
         asset_value=money(_dec(payload["asset_value"])),
         asset_year=int(payload["asset_year"]) if payload.get("asset_year") else None,
         asset_paid_off=bool(payload.get("asset_paid_off", True)),
@@ -461,7 +496,11 @@ def store_solicitation(db: Session, user: User, payload: dict) -> FlashSolicitat
             lead_id=str(payload.get("lead_id") or "").strip() or None,
         ),
         parties_json=json_dumps(
-            {"partners_json": payload.get("partners_json") or []},
+            {
+                "partners_json": payload.get("partners_json") or [],
+                "operation_type": result.get("operation_type"),
+                "third_party_signer": _third_party_signer(payload),
+            },
             ensure_ascii=False,
         ),
     )
@@ -642,7 +681,25 @@ def solicitation_view(
     db: Session | None = None,
 ) -> dict:
     uploaded = {d.doc_type for d in (docs or [])}
-    required = _docs_for(item.asset_category)
+    op = item.operation_type
+    if not op and db:
+        try:
+            parties = json_loads(item.parties_json or "{}")
+            if isinstance(parties, dict):
+                op = parties.get("operation_type")
+        except (TypeError, ValueError):
+            op = None
+    if db:
+        required = resolve_required_docs(
+            db,
+            item.organization_id,
+            operation_type=op,
+            asset_category=item.asset_category,
+        )
+    else:
+        required = _docs_for(item.asset_category)
+    from app.flash_checklist_service import OPERATION_TYPE_LABELS
+
     return {
         "id": item.id,
         "status": item.status,
@@ -659,6 +716,10 @@ def solicitation_view(
         "income_value": str(money(_dec(item.income_value))),
         "asset_type": item.asset_type,
         "asset_category": item.asset_category,
+        "operation_type": op or normalize_flash_operation_type(None),
+        "operation_type_label": OPERATION_TYPE_LABELS.get(
+            normalize_flash_operation_type(op), normalize_flash_operation_type(op)
+        ),
         "asset_value": str(money(_dec(item.asset_value))),
         "asset_year": item.asset_year,
         "asset_paid_off": item.asset_paid_off,

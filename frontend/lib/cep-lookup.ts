@@ -31,15 +31,20 @@ export async function lookupCep(cep: string): Promise<CepAddress | null> {
   };
 }
 
-/** População municipal (estimativa IBGE via Brasil API), quando disponível. */
+/** População municipal estimada (SIDRA / IBGE), quando disponível. */
 export async function lookupMunicipalityPopulation(ibgeCode: string): Promise<number | null> {
   const code = ibgeCode.replace(/\D/g, "");
   if (code.length < 6) return null;
   try {
-    const res = await fetch(`https://brasilapi.com.br/api/ibge/municipios/v1/${code}`);
+    const res = await fetch(
+      `https://apisidra.ibge.gov.br/values/t/6579/n6/${code}/v/9324/p/last%201`,
+    );
     if (!res.ok) return null;
-    const data = (await res.json()) as { populacao?: number };
-    return typeof data.populacao === "number" && data.populacao > 0 ? data.populacao : null;
+    const rows = (await res.json()) as Array<{ V?: string }>;
+    if (!Array.isArray(rows) || rows.length < 2) return null;
+    const raw = String(rows[1]?.V ?? "").replace(/\D/g, "");
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? n : null;
   } catch {
     return null;
   }
