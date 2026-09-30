@@ -91,7 +91,7 @@ from app.schemas import (
     MarketplaceEsteira1Request, MarketplaceEsteira1Response, MarketplaceEsteira2Request, MarketplaceEsteira2Response,
     VendaDiretaRoboSearchRequest, VendaDiretaRoboSearchResponse, VendaDiretaRoboConfirmRequest, VendaDiretaRoboConfirmResponse,
     QuotaSupplierCreate, QuotaSupplierUpdate, QuotaSupplierView, QuotaInventorySyncView,
-    QuotaCategoryCreate, QuotaCategoryUpdate, QuotaCategoryView, QuotaCategoryImportResult,
+    QuotaCategoryCreate, QuotaCategoryUpdate, QuotaCategoryMoveRequest, QuotaCategoryView, QuotaCategoryImportResult,
     CmsTextCreate, CmsTextUpdate, CmsTextView, CmsTextImportResult, CmsTextMarketplaceEnsureResult,
     PublicCmsPageView,
     PartnerQualificationTierCreate, PartnerQualificationTierUpdate, PartnerQualificationTierView,
@@ -2023,6 +2023,29 @@ def update_quota_category_route(
 
     item = update_category(db, user, category_id, payload.model_dump(exclude_unset=True))
     audit(db, user, "marketplace.quota_category.updated", "quota_category", item.id, payload.model_dump(exclude_unset=True, mode="json"))
+    db.commit()
+    db.refresh(item)
+    return category_view(item)
+
+
+@router.post("/marketplace/quota-categories/{category_id}/move", response_model=QuotaCategoryView)
+def move_quota_category_route(
+    category_id: str,
+    payload: QuotaCategoryMoveRequest,
+    user: User = Depends(require_scope("inventory:write")),
+    db: Session = Depends(get_db),
+):
+    from app.quota_category_service import category_view, move_category_sort
+
+    item = move_category_sort(db, user, category_id, payload.direction)
+    audit(
+        db,
+        user,
+        "marketplace.quota_category.moved",
+        "quota_category",
+        item.id,
+        {"direction": payload.direction.strip().lower()},
+    )
     db.commit()
     db.refresh(item)
     return category_view(item)

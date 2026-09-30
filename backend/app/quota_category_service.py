@@ -149,6 +149,51 @@ def create_category(db: Session, user: User, payload: dict[str, Any]) -> QuotaCa
     return row
 
 
+def _ordered_siblings(db: Session, user: User, row: QuotaCategory) -> list[QuotaCategory]:
+    q = select(QuotaCategory).where(
+        QuotaCategory.organization_id == user.organization_id,
+        QuotaCategory.legacy_type == row.legacy_type,
+    )
+    if int(row.legacy_type or 0) == 1:
+        q = q.where(QuotaCategory.parent_id == row.parent_id)
+    return list(
+        db.scalars(
+            q.order_by(QuotaCategory.sort_order.asc(), QuotaCategory.name.asc(), QuotaCategory.id.asc())
+        )
+    )
+
+
+def _normalize_sibling_sort_orders(siblings: list[QuotaCategory]) -> None:
+    for index, item in enumerate(siblings):
+        item.sort_order = (index + 1) * 10
+
+
+def move_category_sort(db: Session, user: User, category_id: str, direction: str) -> QuotaCategory:
+    row = get_category(db, user, category_id)
+    move = (direction or "").strip().lower()
+    if move not in {"up", "down"}:
+        raise HTTPException(status_code=422, detail="Direção inválida. Use up ou down.")
+    siblings = _ordered_siblings(db, user, row)
+    if len(siblings) < 2:
+        raise HTTPException(status_code=409, detail="Não há outra categoria para reordenar.")
+    _normalize_sibling_sort_orders(siblings)
+    db.flush()
+    siblings = _ordered_siblings(db, user, row)
+    index = next((i for i, item in enumerate(siblings) if item.id == row.id), -1)
+    if index < 0:
+        raise HTTPException(status_code=404, detail="Categoria não encontrada na lista.")
+    if move == "up" and index == 0:
+        raise HTTPException(status_code=409, detail="A categoria já está no topo da lista.")
+    if move == "down" and index >= len(siblings) - 1:
+        raise HTTPException(status_code=409, detail="A categoria já está no final da lista.")
+    swap_index = index - 1 if move == "up" else index + 1
+    current = siblings[index]
+    other = siblings[swap_index]
+    current.sort_order, other.sort_order = other.sort_order, current.sort_order
+    db.flush()
+    return current
+
+
 def update_category(db: Session, user: User, category_id: str, payload: dict[str, Any]) -> QuotaCategory:
     row = get_category(db, user, category_id)
     if "name" in payload and payload["name"] is not None:

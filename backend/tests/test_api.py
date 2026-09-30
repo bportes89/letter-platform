@@ -1689,6 +1689,30 @@ def test_quota_categories_crud(client, auth_headers):
     assert patched.json()["active"] is False
 
 
+def test_quota_category_move_reorder(client, auth_headers):
+    a = client.post(
+        "/api/v1/marketplace/quota-categories",
+        headers=auth_headers,
+        json={"name": "Ordem A", "legacy_type": 0, "sort_order": 10},
+    ).json()
+    b = client.post(
+        "/api/v1/marketplace/quota-categories",
+        headers=auth_headers,
+        json={"name": "Ordem B", "legacy_type": 0, "sort_order": 20},
+    ).json()
+    moved = client.post(
+        f"/api/v1/marketplace/quota-categories/{b['id']}/move",
+        headers=auth_headers,
+        json={"direction": "up"},
+    )
+    assert moved.status_code == 200, moved.text
+    listed = client.get("/api/v1/marketplace/quota-categories", headers=auth_headers).json()
+    parents = [x for x in listed if x["legacy_type"] == 0 and x["name"] in {"Ordem A", "Ordem B"}]
+    parents.sort(key=lambda x: x["sort_order"])
+    assert parents[0]["name"] == "Ordem B"
+    assert parents[1]["name"] == "Ordem A"
+
+
 def test_marketplace_suppliers_crud_and_markup_override(client, auth_headers):
     """Fornecedores: CRUD + markup cadastrado prevalece; cliente embute % plataforma."""
     from decimal import Decimal

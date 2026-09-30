@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckCircle2, FolderTree, RefreshCw } from "lucide-react";
+import { ArrowDown, ArrowUp, CheckCircle2, FolderTree, RefreshCw } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 
@@ -27,6 +27,7 @@ export function QuotaCategoriesModule() {
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [tab, setTab] = useState<"parents" | "children">("parents");
+  const [movingId, setMovingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const rows = await api<QuotaCategory[]>("/marketplace/quota-categories");
@@ -37,12 +38,24 @@ export function QuotaCategoriesModule() {
     load().catch((e) => setError(e instanceof Error ? e.message : "Falha ao carregar categorias"));
   }, [load]);
 
-  const parents = useMemo(() => items.filter((x) => x.legacy_type === 0), [items]);
-  const children = useMemo(() => items.filter((x) => x.legacy_type === 1), [items]);
+  const sortRows = (rows: QuotaCategory[]) =>
+    [...rows].sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name, "pt-BR"));
+
+  const parents = useMemo(() => sortRows(items.filter((x) => x.legacy_type === 0)), [items]);
   const parentName = useMemo(() => {
     const map = new Map(parents.map((p) => [p.id, p.title_sub || p.name]));
     return (id: string | null) => (id ? map.get(id) ?? "—" : "—");
   }, [parents]);
+  const children = useMemo(() => {
+    const parentOrder = new Map(parents.map((p, i) => [p.id, i]));
+    const rows = items.filter((x) => x.legacy_type === 1);
+    return sortRows(rows).sort((a, b) => {
+      const oa = parentOrder.get(a.parent_id ?? "") ?? 999;
+      const ob = parentOrder.get(b.parent_id ?? "") ?? 999;
+      if (oa !== ob) return oa - ob;
+      return a.sort_order - b.sort_order || a.name.localeCompare(b.name, "pt-BR");
+    });
+  }, [items, parents]);
 
   async function importLegacy() {
     setError("");
@@ -70,7 +83,6 @@ export function QuotaCategoriesModule() {
           name: fd.get("name"),
           title_sub: fd.get("title_sub") || null,
           legacy_type: 0,
-          sort_order: Number(fd.get("sort_order") || 999),
           asset_class: fd.get("asset_class") || null,
           active: true,
         }),
@@ -94,7 +106,6 @@ export function QuotaCategoriesModule() {
           name: fd.get("name"),
           legacy_type: 1,
           parent_id: fd.get("parent_id"),
-          sort_order: Number(fd.get("sort_order") || 999),
           active: true,
         }),
       });
@@ -104,6 +115,47 @@ export function QuotaCategoriesModule() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Falha ao salvar");
     }
+  }
+
+  function siblingIndex(row: QuotaCategory, list: QuotaCategory[]) {
+    return list.findIndex((x) => x.id === row.id);
+  }
+
+  async function moveRow(row: QuotaCategory, direction: "up" | "down", list: QuotaCategory[]) {
+    const idx = siblingIndex(row, list);
+    if (direction === "up" && idx <= 0) return;
+    if (direction === "down" && (idx < 0 || idx >= list.length - 1)) return;
+    setError("");
+    setMovingId(row.id);
+    try {
+      await api(`/marketplace/quota-categories/${row.id}/move`, {
+        method: "POST",
+        body: JSON.stringify({ direction }),
+      });
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível reordenar.");
+    } finally {
+      setMovingId(null);
+    }
+  }
+
+  function canMoveUp(row: QuotaCategory, list: QuotaCategory[]) {
+    if (tab === "children") {
+      const idx = siblingIndex(row, list);
+      if (idx <= 0) return false;
+      return list[idx - 1]?.parent_id === row.parent_id;
+    }
+    return siblingIndex(row, list) > 0;
+  }
+
+  function canMoveDown(row: QuotaCategory, list: QuotaCategory[]) {
+    const idx = siblingIndex(row, list);
+    if (idx < 0 || idx >= list.length - 1) return false;
+    if (tab === "children") {
+      return list[idx + 1]?.parent_id === row.parent_id;
+    }
+    return true;
   }
 
   async function toggleActive(row: QuotaCategory) {
@@ -164,7 +216,6 @@ export function QuotaCategoriesModule() {
               <option value="VEHICLE">Veículo</option>
               <option value="OTHER">Outros</option>
             </select>
-            <input name="sort_order" type="number" min={0} placeholder="Ordem" defaultValue={999} />
             <button type="submit" className="primary-button">Adicionar categoria</button>
           </form>
         ) : (
@@ -178,7 +229,6 @@ export function QuotaCategoriesModule() {
               ))}
             </select>
             <input name="name" placeholder="Nome da subcategoria" required />
-            <input name="sort_order" type="number" min={0} placeholder="Ordem" defaultValue={999} />
             <button type="submit" className="primary-button">Adicionar subcategoria</button>
           </form>
         )}
@@ -186,7 +236,7 @@ export function QuotaCategoriesModule() {
         <table className="data-table">
           <thead>
             <tr>
-              <th>Ordem</th>
+              <th>Posição</th>
               <th>Nome</th>
               {tab === "parents" ? <th>Título</th> : <th>Pai</th>}
               <th>Classe</th>
@@ -196,9 +246,31 @@ export function QuotaCategoriesModule() {
             </tr>
           </thead>
           <tbody>
-            {displayed.map((row) => (
+            {displayed.map((row, index) => (
               <tr key={row.id}>
-                <td>{row.sort_order}</td>
+                <td>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span className="muted" style={{ minWidth: 18 }}>{index + 1}</span>
+                    <button
+                      type="button"
+                      className="table-action"
+                      title="Subir"
+                      disabled={movingId === row.id || !canMoveUp(row, displayed)}
+                      onClick={() => void moveRow(row, "up", displayed)}
+                    >
+                      <ArrowUp size={14} />
+                    </button>
+                    <button
+                      type="button"
+                      className="table-action"
+                      title="Descer"
+                      disabled={movingId === row.id || !canMoveDown(row, displayed)}
+                      onClick={() => void moveRow(row, "down", displayed)}
+                    >
+                      <ArrowDown size={14} />
+                    </button>
+                  </div>
+                </td>
                 <td>{row.name}</td>
                 {tab === "parents" ? <td>{row.title_sub || "—"}</td> : <td>{parentName(row.parent_id)}</td>}
                 <td>{row.asset_class ? ASSET_LABELS[row.asset_class] ?? row.asset_class : "—"}</td>

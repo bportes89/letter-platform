@@ -58,7 +58,7 @@
 | D1 | Homologação BaaS Asaas produção | 📋 |
 | D2 | Cláusulas jurídicas Asaas nos termos | 📋 |
 | D3 | App mobile iOS/Android | ❌ |
-| D4 | Categorias: reordenar estilo legado (setas) | ❌ | Hoje `sort_order` numérico |
+| D4 | Categorias: reordenar estilo legado (setas) | ✅ | `POST .../quota-categories/{id}/move` + setas na UI |
 
 ---
 
@@ -69,7 +69,7 @@
 3. **A9** — e-mails documento fornecedor/plataforma  
 4. **B1–B9** — modo Bank legado + extratos admin  
 5. **C2–C3** — após alinhamento escopo gratificação  
-6. **D4** — UX categorias  
+6. **D4** — UX categorias ✅  
 
 ---
 

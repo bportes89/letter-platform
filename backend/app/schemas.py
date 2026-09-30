@@ -2437,6 +2437,10 @@ class QuotaCategoryUpdate(BaseModel):
     asset_class: str | None = Field(default=None, max_length=30)
 
 
+class QuotaCategoryMoveRequest(BaseModel):
+    direction: str = Field(min_length=2, max_length=4)  # up | down
+
+
 class QuotaCategoryView(BaseModel):
     id: str
     legacy_id: int | None = None
