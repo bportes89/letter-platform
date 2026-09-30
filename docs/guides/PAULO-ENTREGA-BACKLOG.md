@@ -12,7 +12,7 @@
 | A1 | Categorias de cotas (CRUD + ativo/ordem) | ✅ | `/modules/quota-categories` |
 | A2 | Subcategorias (pai/filho) + import legado SQL | ✅ | `import-legacy` |
 | A3 | Administradoras: liberações categoria/sub + ano máx. | ✅ | UI alienações |
-| A4 | Mesmas regras em Venda Direta Manual + Robô + chat | 🟡 | Revalidar paridade checklist `VENDA-DIRETA-LEGADO` |
+| A4 | Mesmas regras em Venda Direta Manual + Robô + chat | ✅ | Filtros `venda_direta_filters`; robô com parceiro/markup; manual lista alienações/bancos |
 | A5 | Robô: **2 opções crédito + 2 entrada** (réguas 10/20/5) | ✅ backend | UI chat enriquecida (A5b) |
 | A5b | Cards opção: admin, tipo, parcelas “Nx … mais …”, vencimento | 🟡 | Em desenvolvimento |
 | A6 | Vídeo explicativo no fluxo do robô/chat | 🟡 | Campo org-settings + passo chat |

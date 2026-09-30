@@ -2319,6 +2319,7 @@ class VendaDiretaRoboSearchRequest(MarketplaceClientProfile):
     target_amount: Decimal = Field(gt=0)
     target_entrada: Decimal = Field(gt=0)
     category: str
+    partner_user_id: str | None = None
     quota_category_id: str | None = None
     client_bank_administrator_ids: list[str] = Field(default_factory=list)
     client_problem_bank_administrator_ids: list[str] = Field(default_factory=list)
@@ -2933,6 +2934,9 @@ class VendaDiretaManualStoreRequest(BaseModel):
     asset_year: int | None = Field(default=None, ge=1950, le=2100)
     has_credit_restriction: bool = False
     asset_is_zero_km: bool = False
+    quota_category_id: str | None = None
+    client_bank_administrator_ids: list[str] = Field(default_factory=list)
+    client_problem_bank_administrator_ids: list[str] = Field(default_factory=list)
 
 
 class VendaDiretaManualStoreResponse(BaseModel):

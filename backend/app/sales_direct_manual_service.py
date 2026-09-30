@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.cadastro_service import _snapshot_from_lead, seed_marketplace_lifecycle
 from app.commission_attribution import apply_proposal_attribution
-from app.marketplace_service import admin_profile_blockers, pricing_for_combo, pricing_for_quota
+from app.marketplace_service import pricing_for_combo, pricing_for_quota
 from app.models import Administrator, Lead, Proposal, Quota, Role, User
 from app.quota_inventory_service import run_nina_quota_scan
 from app.quota_supplier_service import suppliers_index
@@ -45,6 +45,12 @@ def list_cotas_options(
     *,
     category: str,
     include_reserved: bool = False,
+    quota_category_id: str | None = None,
+    asset_year: int | None = None,
+    asset_is_zero_km: bool = False,
+    has_credit_restriction: bool = False,
+    client_bank_administrator_ids: list[str] | None = None,
+    client_problem_bank_administrator_ids: list[str] | None = None,
 ) -> list[dict]:
     """Cotas comerciais da categoria — identificação mascarada (sem fornecedor/sync)."""
     if category not in {"REAL_ESTATE", "VEHICLE"}:
@@ -77,8 +83,25 @@ def list_cotas_options(
             due_touched = True
     if due_touched:
         db.flush()
+    from app.venda_direta_filters import quota_client_profile_blockers
+
     for q in quotas:
         admin = db.get(Administrator, q.administrator_id)
+        profile_blockers = quota_client_profile_blockers(
+            db,
+            user.organization_id,
+            q,
+            admin,
+            category=category,
+            asset_year=asset_year,
+            asset_is_zero_km=asset_is_zero_km,
+            has_credit_restriction=has_credit_restriction,
+            quota_category_id=quota_category_id,
+            client_bank_administrator_ids=client_bank_administrator_ids,
+            client_problem_bank_administrator_ids=client_problem_bank_administrator_ids,
+        )
+        if profile_blockers:
+            continue
         pricing = pricing_for_quota(q, suppliers=suppliers)
         masked = mask_quota_fields(
             {"group_code": q.group_code, "quota_code": q.quota_code},
@@ -208,6 +231,9 @@ def store_manual(
     asset_year: int | None = None,
     has_credit_restriction: bool = False,
     asset_is_zero_km: bool = False,
+    quota_category_id: str | None = None,
+    client_bank_administrator_ids: list[str] | None = None,
+    client_problem_bank_administrator_ids: list[str] | None = None,
 ) -> dict:
     """Grava venda manual em uma operação: lead + proposta + trava 60 min."""
     person = (person_type or "PF").upper()
@@ -278,18 +304,23 @@ def store_manual(
     total_credit = Decimal(str(combo_pricing["credit"]))
     installment_total = Decimal(str(combo_pricing["installment"]))
 
-    admin = db.get(Administrator, quotas[0].administrator_id)
-    blockers = admin_profile_blockers(
-        admin,
+    from app.venda_direta_filters import combo_client_profile_blockers
+
+    blockers = combo_client_profile_blockers(
+        db,
+        user.organization_id,
+        quotas,
         category=category,
         asset_year=year,
         asset_is_zero_km=asset_is_zero_km,
         has_credit_restriction=has_credit_restriction,
-        credit_total=total_credit,
-        installment_total=installment_total,
+        quota_category_id=quota_category_id,
+        client_bank_administrator_ids=client_bank_administrator_ids,
+        client_problem_bank_administrator_ids=client_problem_bank_administrator_ids,
         monthly_income=income,
         asset_value=collateral,
-        combo_size=len(quotas),
+        credit_total=total_credit,
+        installment_total=installment_total,
     )
     if blockers:
         raise HTTPException(status_code=422, detail="; ".join(blockers))

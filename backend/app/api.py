@@ -2862,6 +2862,7 @@ def venda_direta_robo_search(payload: VendaDiretaRoboSearchRequest, user: User =
         quota_category_id=payload.quota_category_id,
         client_bank_administrator_ids=payload.client_bank_administrator_ids,
         client_problem_bank_administrator_ids=payload.client_problem_bank_administrator_ids,
+        partner_user_id=payload.partner_user_id,
     )
     audit(db, user, "marketplace.venda_direta_robo.search", "lead", result["lead_id"], {"matches": len(result.get("matches") or [])})
     db.commit()
@@ -2890,12 +2891,35 @@ def venda_direta_robo_confirm(payload: VendaDiretaRoboConfirmRequest, user: User
 def venda_direta_manual_cotas(
     category: str = "REAL_ESTATE",
     include_reserved: bool = False,
+    quota_category_id: str | None = None,
+    asset_year: int | None = None,
+    asset_is_zero_km: bool = False,
+    has_credit_restriction: bool = False,
+    client_bank_administrator_ids: str | None = None,
+    client_problem_bank_administrator_ids: str | None = None,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     from app.sales_direct_manual_service import list_cotas_options
 
-    return list_cotas_options(db, user, category=category, include_reserved=include_reserved)
+    def _split_ids(raw: str | None) -> list[str] | None:
+        if not raw:
+            return None
+        parts = [p.strip() for p in raw.split(",") if p.strip()]
+        return parts or None
+
+    return list_cotas_options(
+        db,
+        user,
+        category=category,
+        include_reserved=include_reserved,
+        quota_category_id=quota_category_id,
+        asset_year=asset_year,
+        asset_is_zero_km=asset_is_zero_km,
+        has_credit_restriction=has_credit_restriction,
+        client_bank_administrator_ids=_split_ids(client_bank_administrator_ids),
+        client_problem_bank_administrator_ids=_split_ids(client_problem_bank_administrator_ids),
+    )
 
 
 @router.get("/marketplace/venda-direta-manual/cadastros", response_model=list[VendaDiretaManualCadastroOption])
@@ -2950,6 +2974,9 @@ def venda_direta_manual_store(payload: VendaDiretaManualStoreRequest, user: User
         asset_year=payload.asset_year,
         has_credit_restriction=payload.has_credit_restriction,
         asset_is_zero_km=payload.asset_is_zero_km,
+        quota_category_id=payload.quota_category_id,
+        client_bank_administrator_ids=payload.client_bank_administrator_ids,
+        client_problem_bank_administrator_ids=payload.client_problem_bank_administrator_ids,
     )
     audit(db, user, "marketplace.venda_direta_manual.store", "proposal", result["proposal_id"], {"quota_id": result["quota_id"]})
     db.commit()

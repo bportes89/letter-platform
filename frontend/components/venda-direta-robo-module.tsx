@@ -60,6 +60,9 @@ type SearchResult = {
   credit_matches?: MarketplaceMatch[];
   entrada_matches?: MarketplaceMatch[];
   band_percent?: string;
+  credit_band_percent?: string;
+  entrada_band_percent?: string;
+  combo_band_percent?: string;
   message: string;
 };
 
@@ -119,6 +122,9 @@ export function VendaDiretaRoboModule() {
   };
   const [cadastros, setCadastros] = useState<CadastroShortcut[]>([]);
   const [existingId, setExistingId] = useState("");
+  type PartnerOption = { id: string; name: string; role: string; email: string | null };
+  const [partners, setPartners] = useState<PartnerOption[]>([]);
+  const [partnerId, setPartnerId] = useState("");
 
   useEffect(() => {
     api<{ id: string; name: string; legacy_type: number; parent_id: string | null; title_sub: string | null }[]>(
@@ -139,9 +145,15 @@ export function VendaDiretaRoboModule() {
 
   const loadCadastros = useCallback(async () => {
     try {
-      setCadastros(await api("/marketplace/venda-direta-manual/cadastros"));
+      const [c, p] = await Promise.all([
+        api<CadastroShortcut[]>("/marketplace/venda-direta-manual/cadastros"),
+        api<PartnerOption[]>("/marketplace/venda-direta-manual/partners"),
+      ]);
+      setCadastros(c);
+      setPartners(p);
     } catch {
       setCadastros([]);
+      setPartners([]);
     }
   }, []);
 
@@ -248,6 +260,7 @@ export function VendaDiretaRoboModule() {
           quota_category_id: quotaCategoryId || null,
           client_bank_administrator_ids: clientBankAdministratorIds,
           client_problem_bank_administrator_ids: clientProblemBankAdministratorIds,
+          partner_user_id: partnerId || null,
           monthly_income: String(parseMoney(income)),
           monthly_commitment: "0",
           asset_value: String(parseMoney(assetValue)),
@@ -327,8 +340,9 @@ export function VendaDiretaRoboModule() {
           <span className="eyebrow dark">VENDAS</span>
           <h1>Venda Direta — Robô</h1>
           <p>
-            Preencha cliente e filtros; o robô Esteira 2 (régua 10%, lanes crédito/entrada, rollover e markup)
-            sugere cotas. Confirme para gravar lead + proposta e travar 60 minutos.
+            Preencha cliente e filtros; o robô Esteira 2 (10% crédito · 20% entrada · 5% combo · até 2+2 opções,
+            rollover e markup) sugere cotas. Com parceiro, aplica % a mais na entrada como no chat. Confirme para
+            gravar lead + proposta e travar 60 minutos.
           </p>
         </div>
         <div className="operational-icon">
@@ -373,6 +387,17 @@ export function VendaDiretaRoboModule() {
                   <option value="">Novo cliente</option>
                   {cadastros.map((c) => (
                     <option key={c.lead_id} value={c.lead_id}>{c.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="marketplace-field marketplace-field-wide">
+                Parceiro / franquia (opcional)
+                <select value={partnerId} onChange={(e) => setPartnerId(e.target.value)}>
+                  <option value="">Sem parceiro</option>
+                  {partners.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} ({p.role})
+                    </option>
                   ))}
                 </select>
               </label>
@@ -533,7 +558,8 @@ export function VendaDiretaRoboModule() {
         {step === 2 && result && (
           <div>
             <p>
-              Pré-cadastro <b>{result.client_name}</b> · régua {result.band_percent ?? "10"}% · lead{" "}
+              Pré-cadastro <b>{result.client_name}</b> · régua {result.credit_band_percent ?? result.band_percent ?? "10"}%/
+              {result.entrada_band_percent ?? "20"}%/{result.combo_band_percent ?? "5"}% · lead{" "}
               <code>{result.lead_id.slice(0, 8)}…</code>
             </p>
             {result.blockers.map((b) => (

@@ -441,7 +441,11 @@ def _eligible_combo_candidate(
             f"Nina selecionou {len(quotas)} cota(s) · crédito R$ {pricing['credit']} "
             f"(desvio {credit_dev}%) · entrada efetiva R$ {pricing['entrada_final']}."
         ),
-        "message": "Combinação compatível com perfil, Bacen/approval_rules e régua de 10%.",
+        "message": (
+            f"Combinação compatível com perfil, Bacen/approval_rules e régua "
+            f"({ESTEIRA2_CREDIT_BAND_PERCENT}% crédito / {ESTEIRA2_ENTRADA_BAND_PERCENT}% entrada / "
+            f"{ESTEIRA2_COMBO_BAND_PERCENT}% combo)."
+        ),
     }
 
 

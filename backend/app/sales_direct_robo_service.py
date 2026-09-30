@@ -11,10 +11,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.commission_attribution import apply_proposal_attribution
-from app.marketplace_service import esteira2_nina_curated_match
+from app.marketplace_service import esteira2_nina_curated_match, pricing_for_combo, pricing_for_quota
 from app.cadastro_service import seed_marketplace_lifecycle
-from app.models import Lead, Proposal, Quota, User
-from app.services import reserve_quota
+from app.models import Lead, Proposal, Quota, Role, User
+from app.quota_supplier_service import suppliers_index
+from app.services import money, reserve_quota
 
 SOURCE = "VENDA_DIRETA_ROBO"
 PRODUCT = "MARKETPLACE"
@@ -34,6 +35,30 @@ def _validate_document(person_type: str, document: str | None) -> str:
         if len(digits) != 11:
             raise HTTPException(status_code=422, detail="CPF inválido (informe 11 dígitos).")
     return digits
+
+
+def _resolve_partner(db: Session, user: User, partner_user_id: str | None) -> User | None:
+    if not partner_user_id:
+        return None
+    partner = db.scalar(
+        select(User).where(
+            User.id == partner_user_id,
+            User.organization_id == user.organization_id,
+            User.active.is_(True),
+            User.role.in_([Role.PARTNER, Role.MASTER_FRANCHISEE, Role.MANAGER]),
+        )
+    )
+    if not partner:
+        raise HTTPException(status_code=404, detail="Parceiro não encontrado.")
+    return partner
+
+
+def _affiliate_markup(db: Session, organization_id: str, partner: User | None) -> dict[str, str] | None:
+    if not partner:
+        return None
+    from app.affiliate_markup_service import resolve_affiliate_porc_a_mais
+
+    return resolve_affiliate_porc_a_mais(db, organization_id, partner.id, is_sdc=False)
 
 
 def search_cotas(
@@ -63,6 +88,7 @@ def search_cotas(
     quota_category_id: str | None = None,
     client_bank_administrator_ids: list[str] | None = None,
     client_problem_bank_administrator_ids: list[str] | None = None,
+    partner_user_id: str | None = None,
 ) -> dict:
     """Passo 1: cria pré-cadastro (Lead) e roda o robô Esteira 2. Sem match → apaga o lead."""
     person = (person_type or "PF").upper()
@@ -73,6 +99,9 @@ def search_cotas(
         raise HTTPException(status_code=422, detail="E-mail inválido.")
     if len((phone or "").strip()) < 8:
         raise HTTPException(status_code=422, detail="Telefone/WhatsApp obrigatório.")
+
+    partner = _resolve_partner(db, user, partner_user_id)
+    affiliate_markup = _affiliate_markup(db, user.organization_id, partner)
 
     match = esteira2_nina_curated_match(
         db,
@@ -89,6 +118,7 @@ def search_cotas(
         quota_category_id=quota_category_id,
         client_bank_administrator_ids=client_bank_administrator_ids,
         client_problem_bank_administrator_ids=client_problem_bank_administrator_ids,
+        affiliate_markup=affiliate_markup,
     )
 
     has_options = bool(
@@ -99,7 +129,7 @@ def search_cotas(
         if not blockers:
             blockers = [
                 match.get("message")
-                or "Não encontramos cota na régua de 10% para esses filtros. Ajuste crédito, entrada ou cadastre cotas no Inventário.",
+                or "Não encontramos cota nas réguas legado (10% crédito / 20% entrada / 5% combo) para esses filtros.",
             ]
         return {
             "lead_id": "",
@@ -126,6 +156,7 @@ def search_cotas(
         "asset_year": asset_year,
         "has_credit_restriction": has_credit_restriction,
         "asset_is_zero_km": asset_is_zero_km,
+        "partner_user_id": partner.id if partner else None,
         "address": {
             "zipcode": zipcode,
             "street": street,
@@ -138,7 +169,7 @@ def search_cotas(
 
     lead = Lead(
         organization_id=user.organization_id,
-        owner_id=user.id,
+        owner_id=partner.id if partner else user.id,
         name=name.strip(),
         document=doc,
         phone=phone.strip(),
@@ -217,8 +248,31 @@ def confirm_cota(
     except json.JSONDecodeError:
         snapshot = {}
 
-    total_credit = sum((Decimal(str(q.credit_value or 0)) for q in quotas), Decimal("0"))
-    total_entrada = sum((Decimal(str(q.premium_value or 0)) for q in quotas), Decimal("0"))
+    partner_id = snapshot.get("partner_user_id")
+    partner = _resolve_partner(db, user, str(partner_id) if partner_id else None)
+    affiliate_markup = _affiliate_markup(db, user.organization_id, partner)
+    suppliers = suppliers_index(db, user.organization_id)
+    combo_pricing = pricing_for_combo(quotas, suppliers=suppliers, affiliate_markup=affiliate_markup)
+    total_credit = Decimal(str(combo_pricing["credit"]))
+    total_entrada = Decimal(str(combo_pricing["entrada_final"]))
+    porcs = affiliate_markup or {"porc_a_mais": "0", "porc_a_mais_sellers": "0"}
+
+    quota_payloads = []
+    for q in quotas:
+        row = pricing_for_quota(q, suppliers=suppliers, affiliate_markup=affiliate_markup)
+        quota_payloads.append(
+            {
+                "quota_id": q.id,
+                "group_code": q.group_code,
+                "quota_code": q.quota_code,
+                "credit_value": str(row["credit"]),
+                "premium_value": str(q.premium_value),
+                "entrada_final": str(row["entrada_final"]),
+                "installment_value": str(q.installment_value or 0),
+                "supplier_source": q.supplier_source,
+                "administrator_id": q.administrator_id,
+            }
+        )
 
     proposal = Proposal(
         organization_id=user.organization_id,
@@ -233,23 +287,14 @@ def confirm_cota(
                     "match_lane": match_lane,
                     "quota_ids": ids,
                     "total_credit": str(total_credit),
-                    "total_entrada_base": str(total_entrada),
+                    "total_entrada": str(total_entrada),
                     "client_email": snapshot.get("email"),
                     "person_type": snapshot.get("person_type"),
+                    "partner_user_id": partner.id if partner else None,
+                    "porc_a_mais": porcs.get("porc_a_mais", "0"),
+                    "porc_a_mais_sellers": porcs.get("porc_a_mais_sellers", "0"),
                     "filters": snapshot,
-                    "quotas": [
-                        {
-                            "quota_id": q.id,
-                            "group_code": q.group_code,
-                            "quota_code": q.quota_code,
-                            "credit_value": str(q.credit_value),
-                            "premium_value": str(q.premium_value),
-                            "installment_value": str(q.installment_value or 0),
-                            "supplier_source": q.supplier_source,
-                            "administrator_id": q.administrator_id,
-                        }
-                        for q in quotas
-                    ],
+                    "quotas": quota_payloads,
                 }
             ),
             ensure_ascii=False,
@@ -257,9 +302,22 @@ def confirm_cota(
         sale_channel="PARTNER_OFFICE",
         served_by_user_id=user.id,
         created_by_user_id=user.id,
+        commission_originator_id=partner.id if partner else None,
     )
     db.add(proposal)
     db.flush()
+    if partner:
+        from app.affiliate_chain_commission_service import persist_chain_commissions_on_proposal
+
+        persist_chain_commissions_on_proposal(
+            db,
+            proposal,
+            partner_user_id=partner.id,
+            price_base=total_credit,
+            porc_a_mais_franquia=porcs.get("porc_a_mais", "0"),
+            porc_a_mais_sellers=porcs.get("porc_a_mais_sellers", "0"),
+            is_sdc=False,
+        )
     apply_proposal_attribution(
         db,
         user,
@@ -284,7 +342,7 @@ def confirm_cota(
         "proposal_id": proposal.id,
         "quota_ids": ids,
         "reservation_ids": [r.id for r in reservations],
-        "requested_amount": str(total_credit),
+        "requested_amount": str(money(total_credit)),
         "message": (
             f"Venda gravada. Cotas travadas por {RESERVE_TTL_MINUTES} min. "
             "Finalize o cálculo e o contrato em Propostas."

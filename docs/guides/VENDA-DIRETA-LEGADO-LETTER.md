@@ -42,17 +42,17 @@ Fonte legado: `chat.php` — `CRUZAMENTOS_PORC_1` (10), `CRUZAMENTOS_PORC_1_ENTR
 | # | Regra (legado) | LETTER hoje | Status | Onde ajustar (se Gap) |
 |---|----------------|-------------|--------|------------------------|
 | 1.1 | Tolerância **crédito** 10% | `ESTEIRA2_BAND_PERCENT = 10` | **OK** | `marketplace_service.py` |
-| 1.2 | Tolerância **entrada** 20% | Mesma régua 10% para crédito e entrada | **Gap** | `ESTEIRA2_BAND_PERCENT` ou constante separada `ENTRADA` |
-| 1.3 | Junção de cotas tolerância **5%** | Combo usa banda 10% | **Gap** | `_eligible_combo_candidate` / banda dedicada combo |
-| 1.4 | Até **2** opções lane crédito + **2** entrada | Limite **1** + **1** (`ESTEIRA2_*_LANE_LIMIT`) | **Gap** | `ESTEIRA2_CREDIT_LANE_LIMIT`, `ESTEIRA2_ENTRADA_LANE_LIMIT` |
+| 1.2 | Tolerância **entrada** 20% | `ESTEIRA2_ENTRADA_BAND_PERCENT = 20` | **OK** | `marketplace_service.py` |
+| 1.3 | Junção de cotas tolerância **5%** | `ESTEIRA2_COMBO_BAND_PERCENT = 5` | **OK** | `_eligible_combo_candidate` |
+| 1.4 | Até **2** opções lane crédito + **2** entrada | `ESTEIRA2_CREDIT_LANE_LIMIT` / `ENTRADA` = 2 | **OK** | `esteira2_nina_curated_match` |
 | 1.5 | Junção só **mesma administradora** | Mesma regra | **OK** | `marketplace_service.py` |
 | 1.6 | Máx cotas na junção (legado até 30 no pool) | Combo até 3 cotas | **Parcial** | `max_combo_size` |
 | 1.7 | Rollover parcela vencendo (7 dias) | `INSTALLMENT_ROLLOVER_DAYS = 7` | **OK** | `pricing_for_quota` |
 | 1.8 | Markup fornecedor (+3% / +10%) na entrada | `quota_supplier_service` + `pricing_for_quota` | **OK** | CRUD Fornecedores |
-| 1.9 | `porc_a_mais` afiliado na entrada (robô/chat) | Chat: `affiliate_markup_service`; **Robô admin: não aplica** | **Gap** | `sales_direct_robo_service.search` + `pricing_for_quota` |
+| 1.9 | `porc_a_mais` afiliado na entrada (robô/chat) | Chat + Robô admin com `partner_user_id` | **OK** | `sales_direct_robo_service` |
 | 1.10 | SDC zera markup afiliado | N/A em cartas contempladas | **N/A** | — |
 | 1.11 | Filtro administradoras por categoria/ano (`CHAT_FLOW_ROBOT__admins_categorias`) | Bacen `approval_rules` + categoria Imóvel/Veículo | **Parcial** | Espelhar matriz admin×categoria se cliente exigir paridade 1:1 |
-| 1.12 | Filtro bancos correntista / bancos problema | Não exposto na UI Robô LETTER | **Gap** | Front robo + payload + motor (se ainda usado no legado ativo) |
+| 1.12 | Filtro bancos correntista / bancos problema | UI Robô + Manual; motor `administrator_in_client_pool` | **OK** | `venda-direta-*-module.tsx` |
 | 1.13 | Nome sujo (Sim/Não) | `has_credit_restriction` + `accepts_dirty_name` / SCR | **Parcial** | UI já tem checkbox; alinhar mensagens com legado |
 | 1.14 | Renda comprovável (holerite, IR, …) | Robô LETTER: não coleta checkboxes | **Gap** | Só se cliente ainda exige no admin |
 | 1.15 | Perfil Bacen (renda × parcela, lastro, idade bem) | `admin_profile_blockers` | **LETTER+** | Já na Manual e no match Esteira 2 |
@@ -72,7 +72,7 @@ LETTER: `POST /marketplace/venda-direta-robo/search` e `/confirm`.
 | 2.3 | Com match: cria Lead antes de confirmar | Cria Lead no search | **OK** |
 | 2.4 | Confirmação trava cota 60 min + proposta | `reserve_quota` + `Proposal` MARKETPLACE | **OK** |
 | 2.5 | Mesmo motor que chat público | `esteira2_nina_curated_match` (chat usa o mesmo) | **Parcial** | Ver gaps §1 (10/20/5 e 2+2) |
-| 2.6 | Parceiro opcional (Franquia) | Não no form Robô LETTER | **Gap** | `venda-direta-robo-module.tsx` + store |
+| 2.6 | Parceiro opcional (Franquia) | Campo parceiro no Robô admin | **OK** | `venda-direta-robo-module.tsx` |
 | 2.7 | Atalho cadastros existentes | `GET .../venda-direta-manual/cadastros` | **OK** |
 | 2.8 | CPF/CNPJ validado | `br-validation` + API | **OK** |
 | 2.9 | E-mail template 1017 + senha cliente | Fluxo cadastro/conta LETTER (não template 1017) | **Parcial** | Produto/conta unificado |
@@ -90,7 +90,7 @@ LETTER: `GET /marketplace/venda-direta-manual/cotas`.
 | 3.1 | Subcategoria + ano (veículos) | Categoria `REAL_ESTATE` / `VEHICLE` + ano no form cliente | **Parcial** | Modelo simplificado |
 | 3.2 | `active`, status disponível, fornecedor ativo | `AVAILABLE` (+ reservada opcional); fornecedor via inventário | **Parcial** | Sem `status_api` legado |
 | 3.3 | Vencimento parcela válido | Exige `installment_due_date`; bloqueia venda se falta | **OK** | Inventário |
-| 3.4 | Administradora compatível categoria (`admins_categorias`) | Não filtra lista por matriz admin | **Gap** | `list_cotas_options` |
+| 3.4 | Administradora compatível categoria (`admins_categorias`) | Alienções + subcategoria em `list_cotas_options` | **OK** | `venda_direta_filters.py` |
 | 3.5 | `api > 0` ou admin na lista permitida | Não espelhado | **Gap** | Se ainda relevante com APIs fornecedor |
 | 3.6 | Ordenação por crédito crescente | Sim | **OK** |
 | 3.7 | Label com crédito, entrada, parcelas, admin | `commercialQuotaDisplay` / label API | **OK** |

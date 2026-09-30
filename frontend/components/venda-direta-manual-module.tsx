@@ -98,6 +98,14 @@ export function VendaDiretaManualModule() {
   const [quotaIds, setQuotaIds] = useState<string[]>([]);
   const [partnerId, setPartnerId] = useState("");
   const [existingId, setExistingId] = useState("");
+  const [quotaCategoryId, setQuotaCategoryId] = useState("");
+  const [quotaCategories, setQuotaCategories] = useState<
+    { id: string; name: string; legacy_type: number; parent_id: string | null; title_sub: string | null }[]
+  >([]);
+  type BankAdministrator = { id: string; name: string; rules: { is_bank?: boolean } };
+  const [bankAdministrators, setBankAdministrators] = useState<BankAdministrator[]>([]);
+  const [clientBankAdministratorIds, setClientBankAdministratorIds] = useState<string[]>([]);
+  const [clientProblemBankAdministratorIds, setClientProblemBankAdministratorIds] = useState<string[]>([]);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
@@ -121,9 +129,27 @@ export function VendaDiretaManualModule() {
   const [done, setDone] = useState<StoreResult | null>(null);
 
   const loadCotas = useCallback(async (cat: string) => {
-    const rows = await api<CotaOption[]>(`/marketplace/venda-direta-manual/cotas?category=${encodeURIComponent(cat)}`);
+    const params = new URLSearchParams({ category: cat });
+    if (quotaCategoryId) params.set("quota_category_id", quotaCategoryId);
+    if (cat === "VEHICLE" && assetYear.trim()) params.set("asset_year", assetYear.trim());
+    if (zeroKm) params.set("asset_is_zero_km", "true");
+    if (dirty) params.set("has_credit_restriction", "true");
+    if (clientBankAdministratorIds.length) {
+      params.set("client_bank_administrator_ids", clientBankAdministratorIds.join(","));
+    }
+    if (clientProblemBankAdministratorIds.length) {
+      params.set("client_problem_bank_administrator_ids", clientProblemBankAdministratorIds.join(","));
+    }
+    const rows = await api<CotaOption[]>(`/marketplace/venda-direta-manual/cotas?${params.toString()}`);
     setCotas(rows);
-  }, []);
+  }, [
+    quotaCategoryId,
+    assetYear,
+    zeroKm,
+    dirty,
+    clientBankAdministratorIds,
+    clientProblemBankAdministratorIds,
+  ]);
 
   const loadMeta = useCallback(async () => {
     const [c, p] = await Promise.all([
@@ -140,7 +166,21 @@ export function VendaDiretaManualModule() {
 
   useEffect(() => {
     loadMeta().catch(() => undefined);
+    api<{ id: string; name: string; legacy_type: number; parent_id: string | null; title_sub: string | null }[]>(
+      "/marketplace/quota-categories",
+    )
+      .then(setQuotaCategories)
+      .catch(() => setQuotaCategories([]));
+    api<BankAdministrator[]>("/administrators")
+      .then((rows) => setBankAdministrators(rows.filter((a) => Boolean(a.rules?.is_bank))))
+      .catch(() => setBankAdministrators([]));
   }, [loadMeta]);
+
+  const subcategories = quotaCategories.filter((c) => c.legacy_type === 1);
+
+  function toggleBankId(list: string[], id: string, checked: boolean, setter: (v: string[]) => void) {
+    setter(checked ? [...list, id] : list.filter((x) => x !== id));
+  }
 
   function fillCadastroFromRow(row: CadastroOption | CadastroDetail) {
     setName(row.name || "");
@@ -247,6 +287,9 @@ export function VendaDiretaManualModule() {
           asset_year: category === "VEHICLE" && assetYear ? Number(assetYear) : new Date().getFullYear(),
           has_credit_restriction: dirty,
           asset_is_zero_km: zeroKm,
+          quota_category_id: quotaCategoryId || null,
+          client_bank_administrator_ids: clientBankAdministratorIds,
+          client_problem_bank_administrator_ids: clientProblemBankAdministratorIds,
         }),
       },
         { interactive: true },
@@ -412,9 +455,62 @@ export function VendaDiretaManualModule() {
                 ))}
               </select>
             </label>
+            <label className="marketplace-field marketplace-field-compact">
+              Subcategoria
+              <select value={quotaCategoryId} onChange={(e) => setQuotaCategoryId(e.target.value)}>
+                <option value="">Todas</option>
+                {subcategories.map((s) => {
+                  const p = quotaCategories.find((x) => x.id === s.parent_id);
+                  return (
+                    <option key={s.id} value={s.id}>
+                      {p ? `${p.title_sub || p.name} — ` : ""}
+                      {s.name}
+                    </option>
+                  );
+                })}
+              </select>
+            </label>
             <small className="marketplace-hint">
-              Crédito e entrada: tolerância de ±10%. Só cotas com vencimento de parcela cadastrado podem ser vendidas.
+              Refino local ±10% crédito/entrada. Lista já respeita alienações admin×categoria, nome sujo e bancos (como
+              Robô/chat). Só cotas com vencimento de parcela podem ser vendidas.
             </small>
+            {bankAdministrators.length > 0 && (
+              <div className="marketplace-form-row" style={{ flexDirection: "column", alignItems: "stretch", gap: 8 }}>
+                <small className="muted">Bancos administradores (correntista / problema)</small>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "12px 20px" }}>
+                  {bankAdministrators.map((adm) => (
+                    <div key={adm.id} style={{ minWidth: 200 }}>
+                      <b style={{ fontSize: 11 }}>{adm.name}</b>
+                      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, marginTop: 4 }}>
+                        <input
+                          type="checkbox"
+                          checked={clientBankAdministratorIds.includes(adm.id)}
+                          onChange={(e) =>
+                            toggleBankId(clientBankAdministratorIds, adm.id, e.target.checked, setClientBankAdministratorIds)
+                          }
+                        />
+                        Cliente correntista
+                      </label>
+                      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, marginTop: 2 }}>
+                        <input
+                          type="checkbox"
+                          checked={clientProblemBankAdministratorIds.includes(adm.id)}
+                          onChange={(e) =>
+                            toggleBankId(
+                              clientProblemBankAdministratorIds,
+                              adm.id,
+                              e.target.checked,
+                              setClientProblemBankAdministratorIds,
+                            )
+                          }
+                        />
+                        Banco problema
+                      </label>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             <label className="marketplace-field marketplace-field-compact" style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <input
                 type="checkbox"
