@@ -41,10 +41,15 @@ export function CmsTextsModule() {
     setError("");
     setNotice("");
     try {
-      const r = await api<{ created: number; updated: number; total_legacy: number }>("/cms/texts/import-legacy", {
-        method: "POST",
-      });
-      setNotice(`Importação legado: ${r.created} criados, ${r.updated} atualizados (${r.total_legacy} no SQL).`);
+      const r = await api<{ created: number; updated: number; total_legacy: number; marketplace_slug_sync?: number }>(
+        "/cms/texts/import-legacy",
+        { method: "POST" },
+      );
+      const slugNote =
+        r.marketplace_slug_sync != null && r.marketplace_slug_sync > 0
+          ? ` · ${r.marketplace_slug_sync} e-mails marketplace com slug canônico.`
+          : "";
+      setNotice(`Importação legado: ${r.created} criados, ${r.updated} atualizados (${r.total_legacy} no SQL).${slugNote}`);
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Importação falhou");
@@ -87,7 +92,7 @@ export function CmsTextsModule() {
           <h1>Textos e e-mails</h1>
           <p>
             Páginas institucionais e templates de comunicação (legado texts + corpo HTML).
-            E-mails marketplace: slugs email-marketplace-boleto, email-marketplace-payment-client, email-marketplace-payment-partner.
+            E-mails marketplace: slugs email-marketplace-* (boleto, pagamento, boas-vindas, documento, conclusão). Import legado mapeia texts 1001+.
           </p>
         </div>
         <div className="operational-icon">{tab === "EMAIL" ? <Mail /> : <FileText />}</div>

@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.legacy_export_service import DEFAULT_SQL
 from app.legacy_sql_parser import load_table
+from app.marketplace_cms_email_service import LEGACY_TEXT_ID_TO_SLUG
 from app.models import CmsText, User
 
 DEFAULT_LEGACY_SQL = DEFAULT_SQL
@@ -109,6 +110,47 @@ def create_text(db: Session, user: User, payload: dict[str, Any]) -> CmsText:
     return row
 
 
+def _upsert_legacy_text_row(
+    db: Session,
+    organization_id: str,
+    legacy_id: int,
+    payload: dict[str, Any],
+) -> tuple[CmsText, bool]:
+    """Grava linha legado; slugs marketplace unificam por `slug` canônico."""
+    canonical_slug = LEGACY_TEXT_ID_TO_SLUG.get(legacy_id)
+    if canonical_slug:
+        payload = {**payload, "slug": canonical_slug}
+    by_legacy = db.scalar(
+        select(CmsText).where(
+            CmsText.organization_id == organization_id,
+            CmsText.legacy_id == legacy_id,
+        )
+    )
+    by_slug = None
+    if canonical_slug:
+        by_slug = db.scalar(
+            select(CmsText).where(
+                CmsText.organization_id == organization_id,
+                CmsText.slug == canonical_slug,
+            )
+        )
+    target = by_slug or by_legacy
+    created = False
+    if target:
+        for k, v in payload.items():
+            setattr(target, k, v)
+        if not target.legacy_id:
+            target.legacy_id = legacy_id
+    else:
+        target = CmsText(organization_id=organization_id, legacy_id=legacy_id, **payload)
+        db.add(target)
+        created = True
+    if by_legacy and by_slug and by_legacy.id != by_slug.id:
+        db.delete(by_legacy)
+    db.flush()
+    return target, created
+
+
 def update_text(db: Session, user: User, text_id: str, payload: dict[str, Any]) -> CmsText:
     row = get_text(db, user, text_id)
     for field in (
@@ -158,7 +200,7 @@ def import_legacy_texts(
             continue
         editor_by_id[legacy_id] = decode_z_text_value(z.get("value"))
 
-    created = updated = 0
+    created = updated = marketplace_slug_sync = 0
     for row in texts_rows:
         try:
             legacy_id = int(row.get("id") or 0)
@@ -169,12 +211,9 @@ def import_legacy_texts(
         legacy_type = str(row.get("type") or "text").lower()
         kind = "PAGE" if legacy_type == "text" else "EMAIL"
         slug_raw = str(row.get("url") or "").strip().lower() or None
-        existing = db.scalar(
-            select(CmsText).where(
-                CmsText.organization_id == organization_id,
-                CmsText.legacy_id == legacy_id,
-            )
-        )
+        if legacy_id in LEGACY_TEXT_ID_TO_SLUG:
+            slug_raw = LEGACY_TEXT_ID_TO_SLUG[legacy_id]
+            marketplace_slug_sync += 1
         body = editor_by_id.get(legacy_id, "")
         payload = {
             "name_main": str(row.get("name_main") or f"Legado {legacy_id}"),
@@ -188,6 +227,19 @@ def import_legacy_texts(
             "active": bool(int(row.get("active") or 0)),
             "kind": kind,
         }
+        if legacy_id in LEGACY_TEXT_ID_TO_SLUG:
+            _, was_created = _upsert_legacy_text_row(db, organization_id, legacy_id, payload)
+            if was_created:
+                created += 1
+            else:
+                updated += 1
+            continue
+        existing = db.scalar(
+            select(CmsText).where(
+                CmsText.organization_id == organization_id,
+                CmsText.legacy_id == legacy_id,
+            )
+        )
         if existing:
             for k, v in payload.items():
                 setattr(existing, k, v)
@@ -202,4 +254,9 @@ def import_legacy_texts(
             )
             created += 1
     db.flush()
-    return {"created": created, "updated": updated, "total_legacy": len(texts_rows)}
+    return {
+        "created": created,
+        "updated": updated,
+        "total_legacy": len(texts_rows),
+        "marketplace_slug_sync": marketplace_slug_sync,
+    }

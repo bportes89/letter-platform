@@ -2499,6 +2499,7 @@ class CmsTextImportResult(BaseModel):
     created: int
     updated: int
     total_legacy: int
+    marketplace_slug_sync: int = 0
 
 
 class PublicCmsPageView(BaseModel):

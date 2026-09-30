@@ -263,4 +263,14 @@ async def upload_my_document(
     document = await persist_upload(file, user, ENTITY_TYPE, lead_id, kind_norm)
     db.add(document)
     db.flush()
+    lead = get_lead_for_user(db, user, lead_id)
+    from app.marketplace_notification_service import dispatch_marketplace_document_uploaded_notification
+
+    dispatch_marketplace_document_uploaded_notification(
+        db,
+        user,
+        lead,
+        document_id=document.id,
+        document_kind=kind_norm,
+    )
     return document

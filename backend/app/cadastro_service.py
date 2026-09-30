@@ -375,6 +375,11 @@ def _on_concluir(db: Session, user: User, proposal: Proposal, life: dict, *, for
     from app.marketplace_commission_release_service import release_marketplace_commissions
 
     release_marketplace_commissions(db, user, proposal)
+    lead = db.get(Lead, proposal.lead_id) if proposal.lead_id else None
+    if lead:
+        from app.marketplace_notification_service import dispatch_marketplace_concluded_notifications
+
+        dispatch_marketplace_concluded_notifications(db, user, lead, proposal)
 
 
 def apply_situation_transition(

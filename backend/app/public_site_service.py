@@ -234,6 +234,14 @@ def register_public_client(
         if bound.get("bound"):
             bound_chat_lead_id = bound.get("lead_id")
             lead_id = bound_chat_lead_id or lead_id
+            if bound_chat_lead_id:
+                chat_lead = db.get(Lead, bound_chat_lead_id)
+                if chat_lead:
+                    from app.marketplace_notification_service import dispatch_marketplace_welcome_notification
+
+                    dispatch_marketplace_welcome_notification(
+                        db, user, chat_lead, client_password=password
+                    )
 
     access, refresh, _ = create_session_tokens(db, user, user_agent, ip_address)
     referrer = db.get(User, referrer_user_id) if referrer_user_id else None
