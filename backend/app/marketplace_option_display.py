@@ -96,6 +96,24 @@ def resolve_tipo_credito_label(
     return fallback or "Carta contemplada"
 
 
+def enrich_match_row_display(
+    db: Session,
+    organization_id: str,
+    row: dict[str, Any],
+    *,
+    category: str,
+) -> dict[str, Any]:
+    """Campos de card legado (parcelas, vencimento, tipo) para chat e admin."""
+    quotas = row.get("quotas") or []
+    out = dict(row)
+    out["parcela_legacy"] = format_parcela_legacy(quotas)
+    due_day, due_next = installment_due_hints(quotas)
+    out["vencimento_dia"] = due_day
+    out["vencimento_proxima"] = due_next
+    out["tipo_credito"] = resolve_tipo_credito_label(db, organization_id, quotas, fallback=category)
+    return out
+
+
 def chat_option_from_match_row(
     db: Session,
     organization_id: str,
@@ -105,11 +123,15 @@ def chat_option_from_match_row(
     category: str,
     brl_fn,
 ) -> dict[str, Any]:
-    quotas = row.get("quotas") or []
+    enriched = enrich_match_row_display(db, organization_id, row, category=category)
+    quotas = enriched.get("quotas") or []
     q0 = quotas[0] if quotas else {}
-    parcela_txt = format_parcela_legacy(quotas)
-    due_day, due_next = installment_due_hints(quotas)
-    tipo = resolve_tipo_credito_label(db, organization_id, quotas, fallback=category)
+    parcela_txt = enriched.get("parcela_legacy") or format_parcela_legacy(quotas)
+    due_day = enriched.get("vencimento_dia")
+    due_next = enriched.get("vencimento_proxima")
+    tipo = enriched.get("tipo_credito") or resolve_tipo_credito_label(
+        db, organization_id, quotas, fallback=category
+    )
     credit = row.get("total_credit")
     entrada = row.get("total_entrada") or 0
     qids = row.get("quota_ids") or []
@@ -120,7 +142,7 @@ def chat_option_from_match_row(
         "name": short,
         "next": None,  # caller sets STEP_CONFIRM
         "save": key,
-        "administradora": row.get("administrator_name") or q0.get("administrator_name"),
+        "administradora": enriched.get("administrator_name") or q0.get("administrator_name"),
         "tipo_credito": tipo,
         "price": brl_fn(credit),
         "price_entrada": brl_fn(entrada),

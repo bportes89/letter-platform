@@ -14,8 +14,8 @@
 | A3 | Administradoras: liberações categoria/sub + ano máx. | ✅ | UI alienações |
 | A4 | Mesmas regras em Venda Direta Manual + Robô + chat | ✅ | Filtros `venda_direta_filters`; robô com parceiro/markup; manual lista alienações/bancos |
 | A5 | Robô: **2 opções crédito + 2 entrada** (réguas 10/20/5) | ✅ backend | UI chat enriquecida (A5b) |
-| A5b | Cards opção: admin, tipo, parcelas “Nx … mais …”, vencimento | 🟡 | Em desenvolvimento |
-| A6 | Vídeo explicativo no fluxo do robô/chat | 🟡 | Campo org-settings + passo chat |
+| A5b | Cards opção: admin, tipo, parcelas “Nx … mais …”, vencimento | ✅ | Chat (cards na escolha) + admin robô |
+| A6 | Vídeo explicativo no fluxo do robô/chat | ✅ | `chat_robo_video_url` + embed YouTube/Vimeo |
 | A7 | Boleto entrada no fluxo | ✅ | Passo chat + Inter |
 | A8 | Contrato: aceite chat + ZapSign **após pagamento entrada** | ✅ código | Alinhar expectativa Paulo vs ordem legado |
 | A9 | E-mails personalizados (CMS + import texts) | 🟡 | 1010/1012 no código; conteúdo em prod |
@@ -78,7 +78,7 @@
 - [ ] Import categorias/subcategorias iguais ao menu legado  
 - [ ] 1 administradora com liberações como no print (Carro 15 anos, Imóvel sem restrição, …)  
 - [ ] Simulação chat: 4 opções (2 crédito + 2 entrada) com parcelas detalhadas  
-- [ ] Vídeo explicativo visível no fluxo  
+- [x] Vídeo explicativo visível no fluxo (configurar URL em Configurações gerais)  
 - [ ] Compra teste: boleto → pagamento → ZapSign → conclusão → e-mails  
 - [ ] Parceiro vê ganhos/extrato/saque (modo legado)  
 - [ ] Admin vê extratos 3 perfis + saques  

@@ -4457,8 +4457,13 @@ def test_public_site_chat_native_marketplace_flow(client, auth_headers):
         json={"lead_id": lead_id, "asset_value": "900000"},
     )
     assert match.status_code == 200, match.text
-    options = match.json()["OBJ"]["chat_next"][0].get("options") or []
+    match_item = match.json()["OBJ"]["chat_next"][0]
+    options = match_item.get("options") or []
     assert options, "chat nativo deveria retornar cotas da Esteira 2"
+    assert match_item.get("options_quotas") is True
+    first = options[0]
+    assert first.get("administradora")
+    assert first.get("price_parcela")
     chosen = options[0]
     quota_key = chosen["id"]
     for qid in str(quota_key).split("|"):

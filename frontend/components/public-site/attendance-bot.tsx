@@ -104,9 +104,47 @@ function ChatUserEcho({ value }: { value: string }) {
   );
 }
 
+function chatVideoEmbedUrl(url: string): string | null {
+  const trimmed = url.trim();
+  if (!trimmed) return null;
+  const yt =
+    trimmed.match(/(?:youtube\.com\/watch\?v=|youtube\.com\/embed\/|youtu\.be\/)([\w-]{6,})/i)?.[1] ??
+    trimmed.match(/youtube\.com\/shorts\/([\w-]{6,})/i)?.[1];
+  if (yt) return `https://www.youtube-nocookie.com/embed/${yt}`;
+  const vimeo = trimmed.match(/vimeo\.com\/(?:video\/)?(\d+)/i)?.[1];
+  if (vimeo) return `https://player.vimeo.com/video/${vimeo}`;
+  return null;
+}
+
+function ChatVideoBlock({ url }: { url: string }) {
+  const embed = chatVideoEmbedUrl(url);
+  if (embed) {
+    return (
+      <div className="attendance-video">
+        <iframe
+          src={embed}
+          title="Vídeo explicativo"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+          allowFullScreen
+        />
+      </div>
+    );
+  }
+  return (
+    <a className="text-link" href={url} target="_blank" rel="noreferrer">
+      Assistir vídeo explicativo →
+    </a>
+  );
+}
+
 function QuotaCard({ quota }: { quota: ChatOption }) {
   return (
     <div className="attendance-quota-card">
+      {quota.lane ? (
+        <p className="attendance-quota-lane">
+          <span>Opção:</span> {quota.lane}
+        </p>
+      ) : null}
       {quota.administradora ? (
         <p>
           <span>Administradora:</span> {quota.administradora}
@@ -561,6 +599,31 @@ export function AttendanceBotSection() {
 
   const renderOptions = (flowIndex: number, itemIndex: number, item: ChatItem) => {
     const options = filterExternalBotOptions(item.options ?? []);
+    if (item.options_quotas) {
+      return (
+        <div className="attendance-quota-options">
+          {options.map((option, optionIndex) => (
+            <div key={`${option.id ?? optionIndex}-${optionLabel(option)}`} className="attendance-quota-option-block">
+              <QuotaCard quota={option} />
+              <button
+                type="button"
+                className="attendance-primary attendance-quota-pick"
+                disabled={busy}
+                onClick={() => void onOption(flowIndex, itemIndex, item, option)}
+              >
+                Escolher esta opção
+              </button>
+            </div>
+          ))}
+          {item.options_empty ? <p className="attendance-empty">{item.options_empty}</p> : null}
+          {waLink ? (
+            <a className="attendance-option attendance-option-muted" href={waLink} target="_blank" rel="noreferrer">
+              Não encontrou, clique aqui. Atendimento sob medida
+            </a>
+          ) : null}
+        </div>
+      );
+    }
     return (
       <div className="attendance-options">
         {options.map((option, optionIndex) => (
@@ -575,11 +638,6 @@ export function AttendanceBotSection() {
           </button>
         ))}
         {item.options_empty ? <p className="attendance-empty">{item.options_empty}</p> : null}
-        {item.options_quotas && waLink ? (
-          <a className="attendance-option attendance-option-muted" href={waLink} target="_blank" rel="noreferrer">
-            Não encontrou, clique aqui. Atendimento sob medida
-          </a>
-        ) : null}
       </div>
     );
   };
@@ -661,9 +719,8 @@ export function AttendanceBotSection() {
                   {item.video ? (
                     <div className="attendance-bot-row" data-chat-item>
                       <div className="attendance-bot-bubble attendance-bot-bubble-wide">
-                        <Link href="#contato" className="text-link">
-                          Assistir vídeo institucional →
-                        </Link>
+                        <p style={{ marginTop: 0 }}>Antes de escolher, assista ao vídeo explicativo:</p>
+                        <ChatVideoBlock url={item.video} />
                       </div>
                     </div>
                   ) : null}

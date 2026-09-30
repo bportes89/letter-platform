@@ -36,4 +36,4 @@ Material do sistema antigo disponível na máquina de desenvolvimento — **não
 
 Próximos blocos: ver checklist completo em `docs/guides/PAULO-ENTREGA-BACKLOG.md`.
 
-Em andamento: cards detalhados robô chat (A5b), vídeo `chat_robo_video_url` (A6); depois Bank legado (B*) e `%` plataforma (A11).
+A5b/A6: cards na escolha do chat + vídeo `chat_robo_video_url` (org-settings). Bank legado (B*) e `%` plataforma (A11) no código.

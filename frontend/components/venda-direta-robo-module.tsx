@@ -47,6 +47,10 @@ type MarketplaceMatch = {
   lane?: string | null;
   rollover_applied?: boolean;
   markup_amount?: string | null;
+  parcela_legacy?: string | null;
+  tipo_credito?: string | null;
+  vencimento_dia?: string | null;
+  vencimento_proxima?: string | null;
   quotas: MatchQuota[];
 };
 
@@ -125,6 +129,13 @@ export function VendaDiretaRoboModule() {
   type PartnerOption = { id: string; name: string; role: string; email: string | null };
   const [partners, setPartners] = useState<PartnerOption[]>([]);
   const [partnerId, setPartnerId] = useState("");
+  const [roboVideoUrl, setRoboVideoUrl] = useState("");
+
+  useEffect(() => {
+    api<{ values?: Record<string, string> }>("/admin/org-settings")
+      .then((row) => setRoboVideoUrl((row.values?.chat_robo_video_url || "").trim()))
+      .catch(() => setRoboVideoUrl(""));
+  }, []);
 
   useEffect(() => {
     api<{ id: string; name: string; legacy_type: number; parent_id: string | null; title_sub: string | null }[]>(
@@ -557,6 +568,16 @@ export function VendaDiretaRoboModule() {
 
         {step === 2 && result && (
           <div>
+            {roboVideoUrl ? (
+              <div className="notice" style={{ marginBottom: "1rem" }}>
+                <p style={{ margin: "0 0 0.5rem" }}>
+                  Vídeo explicativo (mesmo do chat público — configure em Configurações gerais):
+                </p>
+                <a className="text-link" href={roboVideoUrl} target="_blank" rel="noreferrer">
+                  Abrir vídeo
+                </a>
+              </div>
+            ) : null}
             <p>
               Pré-cadastro <b>{result.client_name}</b> · régua {result.credit_band_percent ?? result.band_percent ?? "10"}%/
               {result.entrada_band_percent ?? "20"}%/{result.combo_band_percent ?? "5"}% · lead{" "}
@@ -616,6 +637,20 @@ function MatchCard({
 }) {
   return (
     <article className="marketplace-match-card">
+      {match.lane ? (
+        <p>
+          <b>Lane {match.lane}</b>
+          {match.tipo_credito ? ` · ${match.tipo_credito}` : ""}
+          {match.administrator_name ? ` · ${match.administrator_name}` : ""}
+        </p>
+      ) : null}
+      {match.parcela_legacy ? (
+        <p>
+          <b>Parcelas:</b> {match.parcela_legacy}
+          {match.vencimento_dia ? ` · venc. dia ${match.vencimento_dia}` : ""}
+          {match.vencimento_proxima ? ` · próxima ${match.vencimento_proxima}` : ""}
+        </p>
+      ) : null}
       <p>
         {match.explanation}
         {match.message ? ` — ${match.message}` : ""}

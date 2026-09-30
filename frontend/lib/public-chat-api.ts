@@ -18,6 +18,7 @@ export type ChatOption = {
   price_parcela?: string;
   vencimento_dia?: string;
   vencimento_proxima?: string;
+  lane?: string;
   sdc?: boolean;
 };
 

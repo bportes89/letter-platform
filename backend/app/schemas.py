@@ -2273,6 +2273,10 @@ class MarketplaceMatchView(BaseModel):
     rollover_applied: bool = False
     markup_amount: str | None = None
     remaining_installments: int | None = None
+    parcela_legacy: str | None = None
+    tipo_credito: str | None = None
+    vencimento_dia: str | None = None
+    vencimento_proxima: str | None = None
     quotas: list[MarketplaceQuotaBrief] = Field(default_factory=list)
 
 

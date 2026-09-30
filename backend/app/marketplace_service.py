@@ -880,13 +880,18 @@ def esteira2_nina_curated_match(
         client_problem_bank_administrator_ids=problem_ids,
     )
 
+    from app.marketplace_option_display import enrich_match_row_display
+
+    def _display(row: dict) -> dict:
+        return enrich_match_row_display(db, user.organization_id, row, category=category)
+
     credit_lane: list[dict] = []
     for item in sorted(pool, key=lambda x: (Decimal(x["deviation_percent"]), -x["score"])):
         is_combo = bool(item.get("is_combo")) or len(item.get("quota_ids") or []) > 1
         credit_cap = ESTEIRA2_COMBO_BAND_PERCENT if is_combo else ESTEIRA2_CREDIT_BAND_PERCENT
         if Decimal(item["deviation_percent"]) > credit_cap:
             continue
-        credit_lane.append({**item, "lane": "CREDIT"})
+        credit_lane.append({**_display(item), "lane": "CREDIT"})
         if len(credit_lane) >= ESTEIRA2_CREDIT_LANE_LIMIT:
             break
 
@@ -901,7 +906,7 @@ def esteira2_nina_curated_match(
         key=lambda x: (Decimal(x["entrada_deviation_percent"]), -x["score"]),
     )
     for item in ranked_entrada:
-        entrada_lane.append({**item, "lane": "ENTRADA"})
+        entrada_lane.append({**_display(item), "lane": "ENTRADA"})
         if len(entrada_lane) >= ESTEIRA2_ENTRADA_LANE_LIMIT:
             break
 
