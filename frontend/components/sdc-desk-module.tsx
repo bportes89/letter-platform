@@ -18,6 +18,7 @@ import { PartnerSociosFields, SocioPartner, sociosPayload } from "@/components/p
 import { CurrencyInput } from "@/components/currency-input";
 import { DESK_SIMULATION_NOTICE } from "@/lib/desk-simulation-notice";
 import { commercialQuotaDisplay } from "@/lib/commercial-quota-label";
+import { formatDocumentDigits } from "@/lib/br-validation";
 
 type RequiredDoc = { code: string; label: string; uploaded?: boolean };
 
@@ -251,10 +252,36 @@ type ChecklistConfigRow = {
   customized?: boolean;
 };
 
+type ChecklistItemDraft = { code: string; label: string };
+
+type SdcCadastroOption = {
+  lead_id: string;
+  name: string;
+  document: string | null;
+  phone: string;
+  email: string | null;
+  person_type: string;
+  address: Record<string, string>;
+  label: string;
+  monthly_income?: string | null;
+  asset_value?: string | null;
+  target_amount?: string | null;
+  category?: string | null;
+  has_credit_restriction?: boolean | null;
+  occupation?: string | null;
+};
+
+function mapLeadCategoryToSdcAsset(category: string | null | undefined): string | undefined {
+  if (!category) return undefined;
+  if (category === "REAL_ESTATE") return "imovel_urbano";
+  if (category === "VEHICLE") return "veiculo";
+  return undefined;
+}
+
 function SdcChecklistConfigPanel() {
   const [rows, setRows] = useState<ChecklistConfigRow[]>([]);
   const [selectedKey, setSelectedKey] = useState("");
-  const [draftItems, setDraftItems] = useState("");
+  const [draftItems, setDraftItems] = useState<ChecklistItemDraft[]>([]);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
@@ -275,29 +302,42 @@ function SdcChecklistConfigPanel() {
 
   useEffect(() => {
     if (!selected) return;
-    setDraftItems(JSON.stringify(selected.items, null, 2));
+    setDraftItems(selected.items.map((it) => ({ code: it.code, label: it.label })));
   }, [selected?.asset_category, selected?.operation_type, selected?.items]);
+
+  function patchDraftItem(index: number, patch: Partial<ChecklistItemDraft>) {
+    setDraftItems((prev) => {
+      const next = [...prev];
+      next[index] = { ...next[index], ...patch };
+      return next;
+    });
+  }
 
   async function saveConfig() {
     if (!selected) return;
     setError("");
     setNotice("");
+    const cleaned = draftItems
+      .map((it) => ({ code: it.code.trim(), label: it.label.trim() }))
+      .filter((it) => it.code && it.label);
+    if (!cleaned.length) {
+      setError("Informe ao menos um item com código e descrição.");
+      return;
+    }
     setBusy(true);
     try {
-      const parsed = JSON.parse(draftItems) as Array<{ code: string; label: string }>;
-      if (!Array.isArray(parsed) || !parsed.length) throw new Error("Informe ao menos um item.");
       const updated = await api<ChecklistConfigRow[]>("/sdc/desk/checklist-config", {
         method: "PUT",
         body: JSON.stringify({
           asset_category: selected.asset_category,
           operation_type: selected.operation_type,
-          items: parsed,
+          items: cleaned,
         }),
       });
       setRows(updated);
       setNotice("Checklist salvo.");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "JSON inválido ou falha ao salvar");
+      setError(e instanceof Error ? e.message : "Falha ao salvar checklist");
     } finally {
       setBusy(false);
     }
@@ -320,14 +360,43 @@ function SdcChecklistConfigPanel() {
         </button>
       </div>
       <p className="muted" style={{ fontSize: 10, margin: "8px 0" }}>
-        Edite o JSON (campos <code>code</code> e <code>label</code>) para cada combinação de bem + tipo de operação. * = personalizado.
+        Itens exigidos na esteira comercial para cada combinação de bem + operação. * = personalizado.
       </p>
-      <textarea
-        value={draftItems}
-        onChange={(e) => setDraftItems(e.target.value)}
-        rows={12}
-        style={{ width: "100%", fontFamily: "monospace", fontSize: 11 }}
-      />
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {draftItems.map((it, idx) => (
+          <div
+            key={`${idx}-${it.code}`}
+            style={{ display: "grid", gap: 8, gridTemplateColumns: "minmax(120px,0.35fr) minmax(0,1fr) auto", alignItems: "end" }}
+          >
+            <label style={{ fontSize: 11 }}>
+              Código
+              <input value={it.code} onChange={(e) => patchDraftItem(idx, { code: e.target.value })} placeholder="RG_CPF" />
+            </label>
+            <label style={{ fontSize: 11 }}>
+              Documento / descrição
+              <input value={it.label} onChange={(e) => patchDraftItem(idx, { label: e.target.value })} placeholder="RG e CPF do proponente" />
+            </label>
+            <button
+              type="button"
+              className="table-action"
+              title="Remover item"
+              disabled={draftItems.length <= 1}
+              onClick={() => setDraftItems((prev) => prev.filter((_, i) => i !== idx))}
+            >
+              <Trash2 size={14} />
+            </button>
+          </div>
+        ))}
+        <button
+          type="button"
+          className="table-action"
+          style={{ alignSelf: "flex-start" }}
+          onClick={() => setDraftItems((prev) => [...prev, { code: "", label: "" }])}
+        >
+          <Plus size={14} />
+          Adicionar item
+        </button>
+      </div>
     </div>
   );
 }
@@ -372,6 +441,8 @@ export function SdcDeskModule() {
   const [adminNotes, setAdminNotes] = useState("");
   const [adminPending, setAdminPending] = useState<string[]>([]);
   const [partnerObsDraft, setPartnerObsDraft] = useState("");
+  const [cadastros, setCadastros] = useState<SdcCadastroOption[]>([]);
+  const [existingCadastroId, setExistingCadastroId] = useState("");
 
   const isInternal = isInternalProductRole(user?.role);
   const needsYear = ["veiculo", "veiculo_leve", "veiculo_pesado", "maquina", "maquina_agricola"].includes(form.asset_type);
@@ -380,14 +451,16 @@ export function SdcDeskModule() {
   const isMaquina = ["maquina", "maquina_agricola"].includes(form.asset_type);
 
   const load = useCallback(async () => {
-    const [me, list, qs] = await Promise.all([
+    const [me, list, qs, cadastroRows] = await Promise.all([
       api<User>("/auth/me"),
       api<SdcSolicitation[]>("/sdc/desk/solicitations"),
       api<QuotaRow[]>("/quotas"),
+      api<SdcCadastroOption[]>("/marketplace/venda-direta-manual/cadastros").catch(() => [] as SdcCadastroOption[]),
     ]);
     setUser(me);
     setItems(list);
     setQuotas(qs.filter((q) => q.status === "AVAILABLE"));
+    setCadastros(cadastroRows);
   }, []);
 
   useEffect(() => {
@@ -440,6 +513,74 @@ export function SdcDeskModule() {
     setCreditChoice(null);
     setTapafCheckout(null);
     setTapafProposalId("");
+  }
+
+  function resetSimulationState() {
+    setEvalResult(null);
+    setCreditChoice(null);
+    setTapafCheckout(null);
+    setTapafProposalId("");
+  }
+
+  function fillCadastroFromRow(row: SdcCadastroOption) {
+    resetSimulationState();
+    const pt = row.person_type || "PF";
+    const addr = row.address || {};
+    const addressLine = [addr.street, addr.number, addr.neighborhood, addr.city, addr.uf].filter(Boolean).join(", ");
+    const assetFromCat = mapLeadCategoryToSdcAsset(row.category);
+    const restriction =
+      row.has_credit_restriction === true ? "SIM" : row.has_credit_restriction === false ? "NAO" : ("" as "" | "NAO" | "SIM");
+    setForm((prev) => ({
+      ...prev,
+      contact_name: row.name || "",
+      contact_email: row.email || "",
+      contact_phone: row.phone || "",
+      document: formatDocumentDigits(row.document, pt),
+      person_type: pt,
+      occupation: row.occupation ? String(row.occupation) : prev.occupation,
+      address: addressLine || prev.address,
+      income_value: row.monthly_income ? String(row.monthly_income) : prev.income_value,
+      requested_leverage_amount: row.target_amount ? String(row.target_amount) : prev.requested_leverage_amount,
+      client_credit_restriction: restriction || prev.client_credit_restriction,
+      ...(assetFromCat ? { asset_type: assetFromCat } : {}),
+    }));
+    if (pt === "PF") setSocios([]);
+    const imovelCat = assetFromCat && ["imovel", "imovel_urbano", "imovel_rural"].includes(assetFromCat);
+    if (imovelCat && (addr.street || addr.city)) {
+      setProperties((prev) => {
+        const next = prev.length ? [...prev] : [newSdcPropertyRow()];
+        next[0] = {
+          ...next[0],
+          street: addr.street || next[0].street,
+          number: addr.number || next[0].number,
+          city: addr.city || next[0].city,
+          state: addr.uf || next[0].state,
+          zip: addr.zipcode || next[0].zip,
+          ...(row.asset_value ? { property_value: String(row.asset_value) } : {}),
+        };
+        return next;
+      });
+    }
+    if (assetFromCat && ["veiculo", "veiculo_leve", "veiculo_pesado"].includes(assetFromCat) && row.asset_value) {
+      setVehicles((prev) => {
+        const next = prev.length ? [...prev] : [{ plate: "", renavam: "", year: "", vehicle_value: "" }];
+        next[0] = { ...next[0], vehicle_value: String(row.asset_value) };
+        return next;
+      });
+    }
+  }
+
+  function applyCadastro(id: string) {
+    setExistingCadastroId(id);
+    if (!id) return;
+    const row = cadastros.find((x) => x.lead_id === id);
+    if (!row) {
+      setError("Cadastro não encontrado. Clique em Atualizar e tente de novo.");
+      return;
+    }
+    setError("");
+    fillCadastroFromRow(row);
+    setNotice(`Dados de ${row.name} importados do cadastro na plataforma.`);
   }
 
   function totalPropertiesValue() {
@@ -650,14 +791,15 @@ export function SdcDeskModule() {
     }
   }
 
-  function validateBeforeStore(): string | null {
+  function validateBeforeStore(choiceOverride?: "limite" | "solicitada" | null): string | null {
+    const choice = choiceOverride ?? creditChoice;
     if (!form.contact_name.trim()) return "Informe o nome do cliente.";
     if (!form.contact_email.trim()) return "Informe o e-mail.";
     if (!form.contact_phone.trim()) return "Informe o telefone.";
     if (!form.document.trim()) return "Informe CPF/CNPJ.";
     if (!resolvedAssetValue()) return isImovel ? "Informe o valor de ao menos um imóvel." : isVeiculo ? "Informe o valor de ao menos um veículo." : "Informe o valor do bem.";
     if (!evalResult?.viable) return "Calcule a viabilidade antes de avançar.";
-    if (evalResult.show_choice && !creditChoice) {
+    if (evalResult.show_choice && !choice) {
       return "No resultado da análise, escolha o limite máximo ou o valor solicitado.";
     }
     if (isImovel) {
@@ -686,14 +828,21 @@ export function SdcDeskModule() {
     return Number.isFinite(n) && n > 0 ? n : 0;
   }
 
-  async function store() {
-    const validation = validateBeforeStore();
+  async function advanceToTapaf(choice: "limite" | "solicitada") {
+    setCreditChoice(choice);
+    await store(choice);
+  }
+
+  async function store(choiceOverride?: "limite" | "solicitada") {
+    const validation = validateBeforeStore(choiceOverride ?? creditChoice);
     if (validation) {
       setError(validation);
+      window.setTimeout(() => tapafPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
       return;
     }
     if (!evalResult) return;
-    const chosen = chosenCreditFromEval(evalResult, creditChoice);
+    const effectiveChoice = choiceOverride ?? creditChoice;
+    const chosen = chosenCreditFromEval(evalResult, effectiveChoice);
     setError("");
     setBusy(true);
     try {
@@ -991,6 +1140,19 @@ export function SdcDeskModule() {
           <div style={{ padding: "0 18px 18px", display: "grid", gap: 16, gridTemplateColumns: "minmax(0,1.2fr) minmax(0,0.8fr)" }}>
             <div className="stack-form">
               <div style={{ display: "grid", gap: 9, gridTemplateColumns: "1fr 1fr" }}>
+                <label style={{ gridColumn: "1 / -1", fontSize: 11, fontWeight: 700 }}>
+                  Cliente já cadastrado na plataforma
+                  <select
+                    value={existingCadastroId}
+                    onChange={(e) => applyCadastro(e.target.value)}
+                    style={{ width: "100%", marginTop: 4, padding: 8, borderRadius: 8, fontWeight: 400 }}
+                  >
+                    <option value="">Preencher manualmente</option>
+                    {cadastros.map((c) => (
+                      <option key={c.lead_id} value={c.lead_id}>{c.label}</option>
+                    ))}
+                  </select>
+                </label>
                 <input placeholder="Nome" value={form.contact_name} onChange={(e) => patchForm("contact_name", e.target.value)} />
                 <input placeholder="E-mail" value={form.contact_email} onChange={(e) => patchForm("contact_email", e.target.value)} />
                 <input placeholder="Telefone" value={form.contact_phone} onChange={(e) => patchForm("contact_phone", e.target.value)} />
@@ -1387,6 +1549,9 @@ export function SdcDeskModule() {
             </div>
             <div ref={tapafPanelRef} style={{ border: "1px solid var(--line)", borderRadius: 12, padding: 16, background: "#f7fbf9" }}>
               <b>Resultado da análise</b>
+              {error && evalResult && !tapafCheckout && (
+                <div className="error" style={{ marginTop: 10, fontSize: 12 }}>{error}</div>
+              )}
               {!evalResult && !tapafCheckout && <p className="muted" style={{ marginTop: 10 }}>Preencha e clique em Calcular viabilidade.</p>}
               {evalResult?.required_docs?.length && !tapafCheckout && (
                 <p className="muted" style={{ fontSize: 10, marginTop: 8 }}>
@@ -1414,8 +1579,8 @@ export function SdcDeskModule() {
                         <div><small>Taxa estimada</small><div><b>{evalResult.simulacao_limite.taxa_juros_mensal}% a.m.</b></div></div>
                       </div>
                       {evalResult.show_choice && (
-                        <button type="button" className="table-action" style={{ marginTop: 10 }} onClick={() => setCreditChoice("limite")}>
-                          Escolher limite máximo
+                        <button type="button" className="table-action" style={{ marginTop: 10 }} onClick={() => void advanceToTapaf("limite")}>
+                          Avançar com limite máximo → TAPAF
                         </button>
                       )}
                     </div>
@@ -1436,8 +1601,8 @@ export function SdcDeskModule() {
                         <div><small>Prazo estimado</small><div><b>{evalResult.simulacao_solicitada.prazo_meses} meses</b></div></div>
                         <div><small>Taxa estimada</small><div><b>{evalResult.simulacao_solicitada.taxa_juros_mensal}% a.m.</b></div></div>
                       </div>
-                      <button type="button" className="table-action" style={{ marginTop: 10 }} onClick={() => setCreditChoice("solicitada")}>
-                        Escolher valor solicitado
+                      <button type="button" className="table-action" style={{ marginTop: 10 }} onClick={() => void advanceToTapaf("solicitada")}>
+                        Avançar com valor solicitado → TAPAF
                       </button>
                     </div>
                   )}
@@ -1447,14 +1612,14 @@ export function SdcDeskModule() {
                   {!evalResult.requested_exceeds_limit && evalResult.message && (
                     <p style={{ color: "#067647", fontWeight: 700, fontSize: 11, margin: 0 }}>{evalResult.message}</p>
                   )}
-                  {evalResult.viable && creditChoice && (
+                  {evalResult.viable && creditChoice && !evalResult.show_choice && (
                     <button type="button" className="admin-button" disabled={busy} onClick={() => void store()}>
-                      Avançar com {creditChoice === "solicitada" ? "valor solicitado" : "limite máximo"} → TAPAF
+                      Avançar para TAPAF
                     </button>
                   )}
-                  {evalResult.show_choice && !creditChoice && (
+                  {evalResult.show_choice && (
                     <p className="muted" style={{ fontSize: 11, margin: 0 }}>
-                      Escolha uma das opções acima para habilitar o avanço até o TAPAF.
+                      Use um dos botões acima para gravar a solicitação e abrir o checkout TAPAF. Se nada acontecer, confira nome, e-mail, telefone, CPF/CNPJ e matrícula/endereço do bem no formulário à esquerda.
                     </p>
                   )}
                 </div>
