@@ -82,6 +82,7 @@ export type ChatItem = {
   items?: ChatOption[];
   contract?: boolean;
   html?: string;
+  info_html?: string;
   back?: number;
   video?: string;
   next_decline?: number;
