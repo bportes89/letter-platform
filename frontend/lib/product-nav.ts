@@ -58,7 +58,7 @@ export const PRODUCT_NAV: ProductNavItem[] = [
     commercial: true,
   },
   { key: "sdc", name: "SDC — Capital de Giro", commercial: true },
-  { key: "sdc-partner-qualifications", name: "SDC — Qualificação de parceiros", commercial: true, internalOnly: true },
+  { key: "sdc-partner-qualifications", name: "SDC — Qualificação (legado 1039–1041)", commercial: true, internalOnly: true },
   { key: "flash-capital", name: "Flash Capital", commercial: true },
   { key: "quitcon", name: "QuitCon", commercial: true },
   { key: "flash-invest", name: "Flash Invest", bank: true },

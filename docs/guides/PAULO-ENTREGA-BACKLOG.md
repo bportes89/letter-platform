@@ -41,13 +41,17 @@
 
 ---
 
-## Fase C — Qualificação / gratificação
+## Fase C — Qualificação SDC (legado 1039–1041)
 
-| ID | Entrega | Status |
-|----|---------|--------|
-| C1 | Qualificação SDC + apuração + import legado | ✅ |
-| C2 | Gratificação parceiros **marketplace** (menu legado) | ❌ | Escopo: confirmar se = SDC ou rede MMN |
-| C3 | Apuração vendas parceiros diretos (plataforma) | ❌ |
+| ID | Entrega | Status | Notas |
+|----|---------|--------|-------|
+| C1 | Menu **1039** — faixas `affiliates_qualification` | ✅ | `/modules/sdc-partner-qualifications` + import SQL |
+| C2 | Menu **1040** — apuração SDC por período | ✅ | Preview / aplicar / limpar preview |
+| C3 | Menu **1041** — histórico de apurações | ✅ | `appraisal/history` |
+| — | Bônus `%` na franquia **só em SDC** | ✅ | `affiliate_chain_commission_service` (`is_sdc`) |
+| — | “Gratificação marketplace” separada | ➖ | **Não existe no legado** — cartas usam comissão MMN sem bônus de qualificação |
+
+Ver mapa: `docs/guides/QUALIFICACAO-PARCEIROS-LEGADO-LETTER.md`
 
 ---
 
@@ -68,7 +72,7 @@
 2. **A11** — comissão plataforma na liberação  
 3. **A9** — e-mails documento fornecedor/plataforma  
 4. **B1–B9** — modo Bank legado + extratos admin  
-5. **C2–C3** — após alinhamento escopo gratificação  
+5. **C1–C3** — qualificação SDC (menus 1039–1041) ✅  
 6. **D4** — UX categorias ✅  
 
 ---

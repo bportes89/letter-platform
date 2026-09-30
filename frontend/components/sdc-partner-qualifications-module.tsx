@@ -55,9 +55,16 @@ export function SdcPartnerQualificationsModule() {
 
   useEffect(() => {
     loadTiers().catch((e) => setError(e instanceof Error ? e.message : "Falha ao carregar faixas"));
-    loadFranchises().catch(() => undefined);
     loadHistory().catch(() => undefined);
-  }, [loadTiers, loadFranchises, loadHistory]);
+  }, [loadTiers, loadHistory]);
+
+  useEffect(() => {
+    if (tab !== "appraisal") return;
+    if (dateInit || dateFinal) return;
+    void api("/sdc/partner-qualifications/appraisal/clear-preview", { method: "POST" })
+      .then(() => loadFranchises())
+      .catch(() => undefined);
+  }, [tab, dateInit, dateFinal, loadFranchises]);
 
   async function importLegacy() {
     setError("");

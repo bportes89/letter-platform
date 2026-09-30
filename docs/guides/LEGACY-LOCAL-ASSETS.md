@@ -22,7 +22,7 @@ Material do sistema antigo disponível na máquina de desenvolvimento — **não
 - UI Administradoras: alienações (categoria + ano máx.) e flags marketplace; Esteira 2 / Venda Direta Robô com subcategoria e bancos do cliente
 - CMS `cms_texts`: API `/api/v1/cms/texts`, import `.../import-legacy` (`texts` + `z_text`), UI **Textos e e-mails**; páginas públicas `GET /api/v1/public/site/cms/pages/{slug}`
 - Chat público: subcategoria + bancos do cliente antes do crédito; Esteira 2 usa os mesmos filtros do admin
-- **Qualificação SDC** (`partner_qualification_tiers`): API `/api/v1/sdc/partner-qualification-tiers`, import legado `affiliates_qualification`, apuração preview/apply; bônus `%` somado à franquia em comissões SDC; UI `/modules/sdc-partner-qualifications`
+- **Qualificação SDC** (legado menus **1039–1041**): API `/api/v1/sdc/partner-qualification-tiers`, import `affiliates_qualification`, apuração preview/apply/histórico; bônus `%` **somente** em comissões SDC; UI `/modules/sdc-partner-qualifications` — ver `docs/guides/QUALIFICACAO-PARCEIROS-LEGADO-LETTER.md`
 
 - **Configurações gerais** (`organization_settings` / legado `x_settings`): `/api/v1/admin/org-settings`, import legado, `GET /api/v1/public/site/org-info`; contrato marketplace prioriza `marketplace_contract_html`; UI `/modules/org-settings`
 
