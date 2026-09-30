@@ -946,6 +946,7 @@ class QuotaCreate(BaseModel):
     group_code: str
     quota_code: str
     category: str
+    quota_category_id: str | None = None
     credit_value: Decimal = Field(gt=0)
     outstanding_balance: Decimal = Field(ge=0, default=0)
     premium_value: Decimal = Field(ge=0, default=0)
@@ -963,6 +964,7 @@ class QuotaUpdate(BaseModel):
     installment_due_date: date | None = None
     remaining_installments: int | None = Field(default=None, ge=0)
     supplier_source: str | None = Field(default=None, max_length=80)
+    quota_category_id: str | None = None
     status: str | None = None
 
 
@@ -972,6 +974,8 @@ class QuotaView(ORMModel):
     group_code: str
     quota_code: str
     category: str
+    quota_category_id: str | None = None
+    quota_category_name: str | None = None
     credit_value: Decimal
     outstanding_balance: Decimal
     premium_value: Decimal
@@ -2279,6 +2283,9 @@ class MarketplaceEsteira2Response(BaseModel):
     credit_matches: list[MarketplaceMatchView] = Field(default_factory=list)
     entrada_matches: list[MarketplaceMatchView] = Field(default_factory=list)
     band_percent: str = "10"
+    credit_band_percent: str = "10"
+    entrada_band_percent: str = "20"
+    combo_band_percent: str = "5"
     message: str
 
 
@@ -2309,6 +2316,9 @@ class VendaDiretaRoboSearchResponse(BaseModel):
     credit_matches: list[MarketplaceMatchView] = Field(default_factory=list)
     entrada_matches: list[MarketplaceMatchView] = Field(default_factory=list)
     band_percent: str = "10"
+    credit_band_percent: str = "10"
+    entrada_band_percent: str = "20"
+    combo_band_percent: str = "5"
     message: str
 
 

@@ -404,6 +404,7 @@ def export_legacy_bundle(
             "group_code": group_code,
             "quota_code": quota_code,
             "category": _quota_category(row.get("quotas_categories"), categories),
+            "legacy_quota_category_id": int(row.get("quotas_categories") or 0) or None,
             "credit_value": _as_decimal(row.get("price")),
             "outstanding_balance": _as_decimal(outstanding),
             "premium_value": _as_decimal(row.get("price_entrada")),

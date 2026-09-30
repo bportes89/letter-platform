@@ -673,8 +673,9 @@ def test_marketplace_esteira2_robot_band_rollover_and_markup(client, auth_header
     body = res.json()
     assert body["band_percent"] == "10"
     assert body["eligible"] is True
-    assert len(body["credit_matches"]) <= 1
-    assert len(body["entrada_matches"]) <= 1
+    assert len(body["credit_matches"]) <= 2
+    assert len(body["entrada_matches"]) <= 2
+    assert body.get("entrada_band_percent") == "20"
     # Fraga: entrada base 80000 + parcela 2800 (rollover) + 3% de 400000 = 12000 → 94800
     fraga_match = next(
         (m for m in body["matches"] if fraga["id"] in m["quota_ids"] and len(m["quota_ids"]) == 1),
@@ -703,7 +704,12 @@ def test_marketplace_esteira2_robot_band_rollover_and_markup(client, auth_header
     )
     assert miss.status_code == 200
     for m in miss.json()["matches"]:
-        assert abs(Decimal(m["total_credit"]) - Decimal("1000000")) / Decimal("1000000") * 100 <= Decimal("10")
+        dev = abs(Decimal(m["total_credit"]) - Decimal("1000000")) / Decimal("1000000") * 100
+        if m.get("lane") == "ENTRADA":
+            assert Decimal(m.get("entrada_deviation_percent") or "100") <= Decimal("20")
+            continue
+        cap = Decimal("5") if len(m["quota_ids"]) > 1 else Decimal("10")
+        assert dev <= cap
 
 
 def test_venda_direta_robo_search_and_confirm(client, auth_headers):
@@ -1558,6 +1564,40 @@ def test_marketplace_conclude_allocates_affiliate_commission(client, auth_header
     aff = [r for r in extrato.json() if r.get("kind") == "affiliate" and r.get("reference") == release["reference"]]
     assert aff, extrato.json()[:5]
     assert all(r.get("status") == "AVAILABLE" for r in aff)
+
+
+def test_quota_links_subcategory_on_create(client, auth_headers):
+    parent = client.post(
+        "/api/v1/marketplace/quota-categories",
+        headers=auth_headers,
+        json={"name": "Imóvel teste", "title_sub": "Imóvel", "legacy_type": 0, "asset_class": "REAL_ESTATE"},
+    ).json()
+    child = client.post(
+        "/api/v1/marketplace/quota-categories",
+        headers=auth_headers,
+        json={"name": "Casa teste", "legacy_type": 1, "parent_id": parent["id"], "sort_order": 1},
+    ).json()
+    admins = client.get("/api/v1/administrators", headers=auth_headers).json()
+    created = client.post(
+        "/api/v1/quotas",
+        headers=auth_headers,
+        json={
+            "administrator_id": admins[0]["id"],
+            "group_code": "CAT01",
+            "quota_code": "001",
+            "category": "VEHICLE",
+            "quota_category_id": child["id"],
+            "credit_value": "300000",
+            "premium_value": "50000",
+            "installment_value": "2000",
+            "installment_due_date": "2027-06-01",
+        },
+    )
+    assert created.status_code == 201, created.text
+    body = created.json()
+    assert body["quota_category_id"] == child["id"]
+    assert body["category"] == "REAL_ESTATE"
+    assert body["quota_category_name"] == "Casa teste"
 
 
 def test_quota_categories_crud(client, auth_headers):

@@ -1820,7 +1820,16 @@ def list_quotas(user: User = Depends(get_current_user), db: Session = Depends(ge
     from app.marketplace_service import pricing_for_quota
     from app.supplier_portal_quota_service import quota_admin_view
 
-    rows = list(db.scalars(select(Quota).where(Quota.organization_id == user.organization_id).order_by(Quota.created_at.desc())))
+    from sqlalchemy.orm import selectinload
+
+    rows = list(
+        db.scalars(
+            select(Quota)
+            .where(Quota.organization_id == user.organization_id)
+            .options(selectinload(Quota.quota_category))
+            .order_by(Quota.created_at.desc())
+        )
+    )
     show_identity = user_sees_supplier_quota_identity(user)
     out: list[dict] = []
     for row in rows:
@@ -2326,11 +2335,18 @@ def cron_marketplace_quota_sync(request: Request, db: Session = Depends(get_db))
 
 @router.post("/quotas", response_model=QuotaView, status_code=201)
 def create_quota(payload: QuotaCreate, user: User = Depends(require_scope("inventory:write")), db: Session = Depends(get_db)):
-    if payload.category not in {"VEHICLE", "REAL_ESTATE"}:
+    from app.quota_category_service import resolve_quota_asset_class
+
+    data = payload.model_dump()
+    if data.get("quota_category_id"):
+        inferred = resolve_quota_asset_class(db, user.organization_id, data["quota_category_id"])
+        if inferred:
+            data["category"] = inferred
+    if data["category"] not in {"VEHICLE", "REAL_ESTATE"}:
         raise HTTPException(status_code=422, detail="Categoria deve ser VEHICLE ou REAL_ESTATE")
     if not db.get(Administrator, payload.administrator_id):
         raise HTTPException(status_code=404, detail="Administradora não encontrada")
-    quota = Quota(organization_id=user.organization_id, seller_id=user.id, **payload.model_dump())
+    quota = Quota(organization_id=user.organization_id, seller_id=user.id, **data)
     db.add(quota)
     db.flush()
     from app.quota_inventory_service import marketplace_ready_on_ingest
@@ -2339,7 +2355,15 @@ def create_quota(payload: QuotaCreate, user: User = Depends(require_scope("inven
     audit(db, user, "quota.created", "quota", quota.id)
     db.commit()
     db.refresh(quota)
-    return quota
+    from app.supplier_portal_quota_service import quota_admin_view
+    from sqlalchemy.orm import selectinload
+
+    quota = db.scalar(
+        select(Quota)
+        .where(Quota.id == quota.id)
+        .options(selectinload(Quota.quota_category))
+    )
+    return quota_admin_view(quota)
 
 
 @router.patch("/quotas/{quota_id}", response_model=QuotaView)
@@ -2348,15 +2372,29 @@ def update_quota(quota_id: str, payload: QuotaUpdate, user: User = Depends(requi
     if not quota: raise HTTPException(status_code=404, detail="Cota não encontrada")
     if quota.status in {"RESERVED", "SOLD"} and payload.status not in {None, quota.status}:
         raise HTTPException(status_code=409, detail="Status protegido por workflow de reserva/venda")
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    updates = payload.model_dump(exclude_unset=True)
+    if updates.get("quota_category_id"):
+        from app.quota_category_service import resolve_quota_asset_class
+
+        inferred = resolve_quota_asset_class(db, user.organization_id, updates["quota_category_id"])
+        if inferred:
+            updates["category"] = inferred
+    for field, value in updates.items():
         setattr(quota, field, value)
     from app.quota_inventory_service import marketplace_ready_on_ingest
 
     marketplace_ready_on_ingest(db, user, quota)
     audit(db, user, "quota.updated", "quota", quota.id, payload.model_dump(exclude_unset=True, mode="json"))
     db.commit()
-    db.refresh(quota)
-    return quota
+    from app.supplier_portal_quota_service import quota_admin_view
+    from sqlalchemy.orm import selectinload
+
+    quota = db.scalar(
+        select(Quota)
+        .where(Quota.id == quota.id)
+        .options(selectinload(Quota.quota_category))
+    )
+    return quota_admin_view(quota)
 
 
 @router.post("/marketplace/esteira-1/assess", response_model=MarketplaceEsteira1Response)

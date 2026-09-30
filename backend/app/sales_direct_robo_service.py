@@ -154,6 +154,9 @@ def search_cotas(
         "credit_matches": match.get("credit_matches") or [],
         "entrada_matches": match.get("entrada_matches") or [],
         "band_percent": match.get("band_percent") or "10",
+        "credit_band_percent": match.get("credit_band_percent") or "10",
+        "entrada_band_percent": match.get("entrada_band_percent") or "20",
+        "combo_band_percent": match.get("combo_band_percent") or "5",
         "message": match.get("message") or "Opções encontradas pelo robô. Escolha uma cota para confirmar.",
     }
 

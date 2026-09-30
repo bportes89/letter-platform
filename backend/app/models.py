@@ -238,6 +238,7 @@ class Quota(TimestampMixin, Base):
     group_code: Mapped[str] = mapped_column(String(60))
     quota_code: Mapped[str] = mapped_column(String(60))
     category: Mapped[str] = mapped_column(String(30))
+    quota_category_id: Mapped[str | None] = mapped_column(ForeignKey("quota_categories.id"), index=True)
     credit_value: Mapped[float] = mapped_column(Numeric(15, 2))
     outstanding_balance: Mapped[float] = mapped_column(Numeric(15, 2), default=0)
     premium_value: Mapped[float] = mapped_column(Numeric(15, 2), default=0)
@@ -254,6 +255,7 @@ class Quota(TimestampMixin, Base):
     nina_scan_detail_json: Mapped[str] = mapped_column(Text, default="{}")
     status: Mapped[str] = mapped_column(String(40), default="AVAILABLE")
     administrator: Mapped[Administrator] = relationship()
+    quota_category: Mapped["QuotaCategory | None"] = relationship()
 
 
 class QuotaSupplier(TimestampMixin, Base):

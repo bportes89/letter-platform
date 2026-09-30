@@ -32,6 +32,33 @@ def _asset_class_for_row(row: dict[str, Any], categories: dict[int, dict[str, An
     return _asset_class_for_row(parent, categories) if parent else None
 
 
+def asset_class_for_category(db: Session, category: QuotaCategory) -> str | None:
+    if category.asset_class in {"REAL_ESTATE", "VEHICLE", "OTHER"}:
+        return category.asset_class
+    if category.legacy_type == 1 and category.parent_id:
+        parent = db.get(QuotaCategory, category.parent_id)
+        if parent and parent.asset_class:
+            return parent.asset_class
+    return None
+
+
+def resolve_quota_asset_class(db: Session, organization_id: str, quota_category_id: str | None) -> str | None:
+    if not quota_category_id:
+        return None
+    row = db.scalar(
+        select(QuotaCategory).where(
+            QuotaCategory.id == quota_category_id,
+            QuotaCategory.organization_id == organization_id,
+        )
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Subcategoria/categoria de cota não encontrada")
+    asset = asset_class_for_category(db, row)
+    if asset in {"REAL_ESTATE", "VEHICLE"}:
+        return asset
+    return None
+
+
 def category_view(row: QuotaCategory) -> dict[str, Any]:
     return {
         "id": row.id,

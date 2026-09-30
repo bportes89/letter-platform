@@ -860,6 +860,20 @@ def _apply_quotas(
 
         status = str(row.get("status") or "AVAILABLE").strip().upper() or "AVAILABLE"
 
+        quota_category_id = None
+        legacy_cat = row.get("legacy_quota_category_id")
+        if legacy_cat:
+            from app.models import QuotaCategory
+
+            cat_row = db.scalar(
+                select(QuotaCategory).where(
+                    QuotaCategory.organization_id == actor.organization_id,
+                    QuotaCategory.legacy_id == int(legacy_cat),
+                )
+            )
+            if cat_row:
+                quota_category_id = cat_row.id
+
         item = Quota(
             organization_id=actor.organization_id,
             administrator_id=admin_id,
@@ -867,6 +881,7 @@ def _apply_quotas(
             group_code=group_code,
             quota_code=quota_code,
             category=category,
+            quota_category_id=quota_category_id,
             credit_value=credit_value,
             outstanding_balance=_parse_decimal(row.get("outstanding_balance")),
             premium_value=_parse_decimal(row.get("premium_value")),

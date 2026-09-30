@@ -15,4 +15,7 @@ Material do sistema antigo disponível na máquina de desenvolvimento — **não
 - UI: **Cartas contempladas → Categorias de cotas**
 - Import idempotente: `POST .../quota-categories/import-legacy` lê `legacy/letter_banco_new.sql` quando o arquivo existe no host da API
 
-Próximos blocos sugeridos: vínculo `quotas.legacy_category_id`, templates `texts`, qualificação de parceiros.
+- Cotas: campo `quota_category_id` no inventário + export `legacy_quota_category_id` na migração
+- Robô Esteira 2: réguas **10% crédito / 20% entrada / 5% combo**, até **2+2** opções por lane
+
+Próximos blocos: filtro do robô por subcategoria, templates `texts`, qualificação de parceiros, UI administradoras (alienações).

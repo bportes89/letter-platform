@@ -96,6 +96,8 @@ def quota_admin_view(quota: Quota) -> dict:
 
     payload = QuotaView.model_validate(quota).model_dump()
     payload.update(quota_compliance_detail(quota))
+    if getattr(quota, "quota_category", None):
+        payload["quota_category_name"] = quota.quota_category.name
     return payload
 
 

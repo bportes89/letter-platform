@@ -1,8 +1,8 @@
 """Marketplace cartas contempladas — Esteira 1 (parceiro) e Esteira 2 (robô Nina / Paulo).
 
-Esteira 2 (WhatsApp Paulo Stutz):
-- Régua de corte 10% em crédito e entrada
-- ~2 opções por crédito + ~2 por entrada (dedupe)
+Esteira 2 (WhatsApp Paulo Stutz / legado CHAT_FLOW_ROBOT):
+- Régua 10% no crédito (cota única), 20% na entrada, 5% em combinações
+- Até 2 opções por crédito + 2 por entrada (dedupe)
 - Parcela vencendo em ≤7 dias: −1 prazo + valor na entrada
 - Markup sobre crédito na entrada: Fraga/Bittelo/Lance +3%; Uni/Contemplado SP/Lume +10%
 - Regras Bacen via approval_rules já sincronizadas em Administrator.rules_json
@@ -24,9 +24,12 @@ from app.quota_inventory_service import run_nina_quota_scan
 from app.services import money
 
 DEFAULT_INCOME_RATIO = Decimal("3")
-ESTEIRA2_BAND_PERCENT = Decimal("10")
-ESTEIRA2_CREDIT_LANE_LIMIT = 1
-ESTEIRA2_ENTRADA_LANE_LIMIT = 1
+ESTEIRA2_BAND_PERCENT = Decimal("10")  # compat: crédito cota única
+ESTEIRA2_CREDIT_BAND_PERCENT = Decimal("10")
+ESTEIRA2_ENTRADA_BAND_PERCENT = Decimal("20")
+ESTEIRA2_COMBO_BAND_PERCENT = Decimal("5")
+ESTEIRA2_CREDIT_LANE_LIMIT = 2
+ESTEIRA2_ENTRADA_LANE_LIMIT = 2
 INSTALLMENT_ROLLOVER_DAYS = 7
 # Limite do pool antes de combinações (C(n,3) cresce rápido — inventário grande travava Esteira 2).
 MATCHING_QUOTA_POOL_LIMIT = 40
@@ -354,6 +357,7 @@ def _eligible_combo_candidate(
     has_credit_restriction: bool,
     asset_is_zero_km: bool,
     target_amount: Decimal,
+    target_entrada: Decimal | None = None,
     as_of: date | None = None,
     suppliers: dict | None = None,
     affiliate_markup: dict[str, str] | None = None,
@@ -387,6 +391,11 @@ def _eligible_combo_candidate(
     if blockers:
         return None
     credit_dev = _deviation_percent(pricing["credit"], target_amount)
+    entrada_dev = (
+        _deviation_percent(pricing["entrada_final"], target_entrada)
+        if target_entrada is not None and target_entrada > 0
+        else None
+    )
     score = max(0, 1000 - int(credit_dev * 20) - len(quotas) * 5)
     return {
         "quota_ids": [q.id for q in quotas],
@@ -403,7 +412,8 @@ def _eligible_combo_candidate(
         "total_credit": str(pricing["credit"]),
         "total_entrada": str(pricing["entrada_final"]),
         "deviation_percent": str(credit_dev),
-        "entrada_deviation_percent": None,
+        "entrada_deviation_percent": str(entrada_dev) if entrada_dev is not None else None,
+        "is_combo": len(quotas) > 1,
         "score": score,
         "administrator_id": quotas[0].administrator_id,
         "administrator_name": admin.name if admin else None,
@@ -434,6 +444,9 @@ def _rank_alternatives(
     limit: int = 5,
     target_entrada: Decimal | None = None,
     band_percent: Decimal = ESTEIRA2_BAND_PERCENT,
+    credit_band_percent: Decimal | None = None,
+    entrada_band_percent: Decimal | None = None,
+    combo_band_percent: Decimal | None = None,
     as_of: date | None = None,
     affiliate_markup: dict[str, str] | None = None,
     max_combo_size: int = 3,
@@ -441,6 +454,9 @@ def _rank_alternatives(
     require_nina_cleared: bool = False,
 ) -> list[dict]:
     """Candidatos na banda de crédito (e entrada, se informada)."""
+    credit_band = credit_band_percent if credit_band_percent is not None else band_percent
+    entrada_band = entrada_band_percent if entrada_band_percent is not None else band_percent
+    combo_band = combo_band_percent if combo_band_percent is not None else credit_band
     from app.quota_supplier_service import suppliers_index
 
     suppliers = suppliers_index(db, user.organization_id)
@@ -459,8 +475,12 @@ def _rank_alternatives(
             pricing = pricing_for_quota(
                 q, as_of=as_of, suppliers=suppliers, affiliate_markup=affiliate_markup
             )
-            credit_ok = _within_band(pricing["credit"], target_amount, band_percent)
-            entrada_ok = _within_band(pricing["entrada_final"], target_entrada, band_percent)
+            credit_ok = _within_band(pricing["credit"], target_amount, credit_band)
+            entrada_ok = (
+                _within_band(pricing["entrada_final"], target_entrada, entrada_band)
+                if target_entrada is not None and target_entrada > 0
+                else False
+            )
             if credit_ok or entrada_ok:
                 banded.append(q)
         quotas = banded
@@ -496,6 +516,7 @@ def _rank_alternatives(
                 has_credit_restriction=has_credit_restriction,
                 asset_is_zero_km=asset_is_zero_km,
                 target_amount=target_amount,
+                target_entrada=target_entrada,
                 as_of=as_of,
                 suppliers=suppliers,
                 affiliate_markup=affiliate_markup,
@@ -504,15 +525,14 @@ def _rank_alternatives(
             if not item:
                 continue
             credit = Decimal(item["total_credit"])
-            if not _within_band(credit, target_amount, band_percent):
-                continue
+            credit_band_use = combo_band if len(combo) > 1 else credit_band
+            credit_ok = _within_band(credit, target_amount, credit_band_use)
+            entrada_ok = False
             if target_entrada is not None and target_entrada > 0:
                 entrada = Decimal(item["total_entrada"])
-                if not _within_band(entrada, target_entrada, band_percent):
-                    # ainda pode servir na lane de crédito; marca desvio de entrada
-                    item["entrada_deviation_percent"] = str(_deviation_percent(entrada, target_entrada))
-                else:
-                    item["entrada_deviation_percent"] = str(_deviation_percent(entrada, target_entrada))
+                entrada_ok = _within_band(entrada, target_entrada, entrada_band)
+            if not credit_ok and not entrada_ok:
+                continue
             candidates.append(item)
     return sorted(candidates, key=lambda x: (-x["score"], Decimal(x["deviation_percent"])))[: max(limit * 4, 20)]
 
@@ -777,7 +797,7 @@ def esteira2_nina_curated_match(
         return {
             "esteira": "NINA_CURATED",
             "eligible": False,
-            "blockers": ["Informe a entrada desejada do cliente (lane entrada com régua de 10%)."],
+            "blockers": [f"Informe a entrada desejada do cliente (lane entrada com régua de {ESTEIRA2_ENTRADA_BAND_PERCENT}%)."],
             "matches": [],
             "credit_matches": [],
             "entrada_matches": [],
@@ -797,17 +817,22 @@ def esteira2_nina_curated_match(
         asset_is_zero_km=asset_is_zero_km,
         limit=max(limit, 12),
         target_entrada=target_entrada,
-        band_percent=ESTEIRA2_BAND_PERCENT,
+        band_percent=ESTEIRA2_CREDIT_BAND_PERCENT,
+        credit_band_percent=ESTEIRA2_CREDIT_BAND_PERCENT,
+        entrada_band_percent=ESTEIRA2_ENTRADA_BAND_PERCENT,
+        combo_band_percent=ESTEIRA2_COMBO_BAND_PERCENT,
         as_of=as_of,
         affiliate_markup=affiliate_markup,
-        max_combo_size=1,
+        max_combo_size=3,
         prefilter_band=True,
         require_nina_cleared=True,
     )
 
     credit_lane: list[dict] = []
     for item in sorted(pool, key=lambda x: (Decimal(x["deviation_percent"]), -x["score"])):
-        if Decimal(item["deviation_percent"]) > ESTEIRA2_BAND_PERCENT:
+        is_combo = bool(item.get("is_combo")) or len(item.get("quota_ids") or []) > 1
+        credit_cap = ESTEIRA2_COMBO_BAND_PERCENT if is_combo else ESTEIRA2_CREDIT_BAND_PERCENT
+        if Decimal(item["deviation_percent"]) > credit_cap:
             continue
         credit_lane.append({**item, "lane": "CREDIT"})
         if len(credit_lane) >= ESTEIRA2_CREDIT_LANE_LIMIT:
@@ -819,7 +844,7 @@ def esteira2_nina_curated_match(
             x
             for x in pool
             if x.get("entrada_deviation_percent") is not None
-            and Decimal(x["entrada_deviation_percent"]) <= ESTEIRA2_BAND_PERCENT
+            and Decimal(x["entrada_deviation_percent"]) <= ESTEIRA2_ENTRADA_BAND_PERCENT
         ],
         key=lambda x: (Decimal(x["entrada_deviation_percent"]), -x["score"]),
     )
@@ -841,17 +866,23 @@ def esteira2_nina_curated_match(
             break
 
     band_msg = (
-        f"régua {ESTEIRA2_BAND_PERCENT}% · 1 opção por crédito + 1 por entrada"
+        f"crédito {ESTEIRA2_CREDIT_BAND_PERCENT}% / entrada {ESTEIRA2_ENTRADA_BAND_PERCENT}% / combo {ESTEIRA2_COMBO_BAND_PERCENT}%"
+        f" · até {ESTEIRA2_CREDIT_LANE_LIMIT}+{ESTEIRA2_ENTRADA_LANE_LIMIT} opções"
         f" · rollover {INSTALLMENT_ROLLOVER_DAYS}d · markup fornecedor"
     )
     return {
         "esteira": "NINA_CURATED",
         "eligible": bool(matches),
-        "blockers": [] if matches else ["Nenhuma combinação na régua de 10% para o perfil e as regras Bacen/internas."],
+        "blockers": [] if matches else [
+            "Nenhuma combinação nas réguas legado (10% crédito / 20% entrada / 5% combo) para o perfil e regras Bacen."
+        ],
         "matches": matches,
         "credit_matches": credit_lane,
         "entrada_matches": entrada_lane,
-        "band_percent": str(ESTEIRA2_BAND_PERCENT),
+        "band_percent": str(ESTEIRA2_CREDIT_BAND_PERCENT),
+        "credit_band_percent": str(ESTEIRA2_CREDIT_BAND_PERCENT),
+        "entrada_band_percent": str(ESTEIRA2_ENTRADA_BAND_PERCENT),
+        "combo_band_percent": str(ESTEIRA2_COMBO_BAND_PERCENT),
         "message": (
             f"Robô Nina: {len(matches)} opção(ões) para crédito R$ {money(target_amount)}"
             + (f" / entrada R$ {money(target_entrada)}" if target_entrada else "")
