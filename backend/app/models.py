@@ -337,6 +337,23 @@ class MarketplaceChatFaq(TimestampMixin, Base):
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
 
 
+class QuotaCategory(TimestampMixin, Base):
+    """Categorias e subcategorias de cotas (espelho `quotas_categories` do legado)."""
+
+    __tablename__ = "quota_categories"
+    __table_args__ = (UniqueConstraint("organization_id", "legacy_id", name="uq_quota_category_org_legacy"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True)
+    legacy_id: Mapped[int | None] = mapped_column(Integer, index=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    name: Mapped[str] = mapped_column(String(255))
+    title_sub: Mapped[str | None] = mapped_column(String(120))
+    legacy_type: Mapped[int] = mapped_column(Integer, default=0)  # 0 = grupo, 1 = subcategoria
+    parent_id: Mapped[str | None] = mapped_column(ForeignKey("quota_categories.id"), index=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=999)
+    asset_class: Mapped[str | None] = mapped_column(String(30))  # REAL_ESTATE | VEHICLE | OTHER
+
+
 class QuotaOfferRange(TimestampMixin, Base):
     """Faixas editáveis do robô 'Vender minha cota' (tipo × prazo × % pago → % oferta)."""
 

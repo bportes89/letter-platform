@@ -1560,6 +1560,36 @@ def test_marketplace_conclude_allocates_affiliate_commission(client, auth_header
     assert all(r.get("status") == "AVAILABLE" for r in aff)
 
 
+def test_quota_categories_crud(client, auth_headers):
+    parent = client.post(
+        "/api/v1/marketplace/quota-categories",
+        headers=auth_headers,
+        json={"name": "Veículos teste", "title_sub": "Veículo", "legacy_type": 0, "sort_order": 1, "asset_class": "VEHICLE"},
+    )
+    assert parent.status_code == 201, parent.text
+    parent_id = parent.json()["id"]
+
+    child = client.post(
+        "/api/v1/marketplace/quota-categories",
+        headers=auth_headers,
+        json={"name": "Carro teste", "legacy_type": 1, "parent_id": parent_id, "sort_order": 1},
+    )
+    assert child.status_code == 201, child.text
+    assert child.json()["parent_id"] == parent_id
+
+    listed = client.get("/api/v1/marketplace/quota-categories", headers=auth_headers)
+    assert listed.status_code == 200
+    assert len(listed.json()) >= 2
+
+    patched = client.patch(
+        f"/api/v1/marketplace/quota-categories/{child.json()['id']}",
+        headers=auth_headers,
+        json={"active": False},
+    )
+    assert patched.status_code == 200
+    assert patched.json()["active"] is False
+
+
 def test_marketplace_suppliers_crud_and_markup_override(client, auth_headers):
     """Fornecedores: CRUD + markup cadastrado prevalece; cliente embute % plataforma."""
     from decimal import Decimal

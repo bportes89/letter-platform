@@ -42,6 +42,7 @@ export const PRODUCT_NAV: ProductNavItem[] = [
       { key: "cadastros", name: "Cadastros" },
       { key: "minhas-compras", name: "Minhas compras", clientOnly: true },
       { key: "fornecedores", name: "Fornecedores", internalOnly: true },
+      { key: "quota-categories", name: "Categorias de cotas", internalOnly: true },
       { key: "chat-faq", name: "FAQ do chat", internalOnly: true },
       { key: "inventory", name: "Inventário (admin)", internalOnly: true },
       { key: "vender-cota", name: "Compliance — Vender cota", internalOnly: true },

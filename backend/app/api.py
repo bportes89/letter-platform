@@ -90,6 +90,7 @@ from app.schemas import (
     MarketplaceEsteira1Request, MarketplaceEsteira1Response, MarketplaceEsteira2Request, MarketplaceEsteira2Response,
     VendaDiretaRoboSearchRequest, VendaDiretaRoboSearchResponse, VendaDiretaRoboConfirmRequest, VendaDiretaRoboConfirmResponse,
     QuotaSupplierCreate, QuotaSupplierUpdate, QuotaSupplierView, QuotaInventorySyncView,
+    QuotaCategoryCreate, QuotaCategoryUpdate, QuotaCategoryView, QuotaCategoryImportResult,
     SupplierInventoryQuotaAuditView,
     SupplierPortalTokenResponse, SupplierPortalMeView, SupplierPortalTransferItem,
     SupplierPortalAdministratorOption, SupplierPortalQuotaItem,
@@ -1868,6 +1869,61 @@ def ensure_quota_supplier_defaults(user: User = Depends(require_scope("inventory
     audit(db, user, "marketplace.supplier.ensure_defaults", "quota_supplier", user.organization_id)
     db.commit()
     return [supplier_view(x) for x in list_suppliers(db, user)]
+
+
+@router.get("/marketplace/quota-categories", response_model=list[QuotaCategoryView])
+def list_quota_categories_route(
+    parents_only: bool = False,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.quota_category_service import category_view, list_categories
+
+    return [category_view(x) for x in list_categories(db, user, parents_only=parents_only)]
+
+
+@router.post("/marketplace/quota-categories", response_model=QuotaCategoryView, status_code=201)
+def create_quota_category_route(
+    payload: QuotaCategoryCreate,
+    user: User = Depends(require_scope("inventory:write")),
+    db: Session = Depends(get_db),
+):
+    from app.quota_category_service import category_view, create_category
+
+    item = create_category(db, user, payload.model_dump())
+    audit(db, user, "marketplace.quota_category.created", "quota_category", item.id, {"name": item.name})
+    db.commit()
+    db.refresh(item)
+    return category_view(item)
+
+
+@router.patch("/marketplace/quota-categories/{category_id}", response_model=QuotaCategoryView)
+def update_quota_category_route(
+    category_id: str,
+    payload: QuotaCategoryUpdate,
+    user: User = Depends(require_scope("inventory:write")),
+    db: Session = Depends(get_db),
+):
+    from app.quota_category_service import category_view, update_category
+
+    item = update_category(db, user, category_id, payload.model_dump(exclude_unset=True))
+    audit(db, user, "marketplace.quota_category.updated", "quota_category", item.id, payload.model_dump(exclude_unset=True, mode="json"))
+    db.commit()
+    db.refresh(item)
+    return category_view(item)
+
+
+@router.post("/marketplace/quota-categories/import-legacy", response_model=QuotaCategoryImportResult)
+def import_legacy_quota_categories_route(
+    user: User = Depends(require_scope("inventory:write")),
+    db: Session = Depends(get_db),
+):
+    from app.quota_category_service import import_legacy_categories
+
+    result = import_legacy_categories(db, user.organization_id)
+    audit(db, user, "marketplace.quota_category.import_legacy", "quota_category", user.organization_id, result)
+    db.commit()
+    return result
 
 
 @router.post("/marketplace/suppliers/{supplier_id}/portal-token", response_model=SupplierPortalTokenResponse)

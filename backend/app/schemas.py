@@ -2379,6 +2379,45 @@ class QuotaSupplierUpdate(BaseModel):
     scrape_tls_ca: str | None = Field(default=None, max_length=80)
 
 
+class QuotaCategoryCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    title_sub: str | None = Field(default=None, max_length=120)
+    legacy_type: int = Field(default=0, ge=0, le=1)
+    parent_id: str | None = None
+    sort_order: int = Field(default=999, ge=0, le=9999)
+    active: bool = True
+    asset_class: str | None = Field(default=None, max_length=30)
+    legacy_id: int | None = None
+
+
+class QuotaCategoryUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    title_sub: str | None = Field(default=None, max_length=120)
+    sort_order: int | None = Field(default=None, ge=0, le=9999)
+    active: bool | None = None
+    asset_class: str | None = Field(default=None, max_length=30)
+
+
+class QuotaCategoryView(BaseModel):
+    id: str
+    legacy_id: int | None = None
+    active: bool
+    name: str
+    title_sub: str | None = None
+    legacy_type: int
+    parent_id: str | None = None
+    sort_order: int
+    asset_class: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class QuotaCategoryImportResult(BaseModel):
+    created: int
+    updated: int
+    total_legacy: int
+
+
 class QuotaSupplierView(BaseModel):
     id: str
     active: bool
