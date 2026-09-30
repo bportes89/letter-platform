@@ -2484,12 +2484,16 @@ def venda_direta_manual_store(payload: VendaDiretaManualStoreRequest, user: User
 def marketplace_cadastros(
     pipeline: str = "ALL",
     q: str | None = None,
+    limit: int = 200,
+    offset: int = 0,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     from app.cadastro_service import list_cadastros
 
-    return list_cadastros(db, user, pipeline=pipeline, q=q)
+    safe_limit = min(max(limit, 1), 500)
+    safe_offset = max(offset, 0)
+    return list_cadastros(db, user, pipeline=pipeline, q=q, limit=safe_limit, offset=safe_offset)
 
 
 @router.get("/marketplace/cadastros/{lead_id}", response_model=CadastroDetailView)

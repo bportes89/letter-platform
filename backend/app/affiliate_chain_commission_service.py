@@ -254,7 +254,7 @@ def marketplace_blocked_commission_summary(db: Session, user: User) -> dict:
     pipeline_total = Decimal("0")
     pipeline_count = 0
 
-    for row in list_cadastros(db, user):
+    for row in list_cadastros(db, user, limit=0):
         slice_ = row.get("my_chain_commission")
         if not isinstance(slice_, dict) or slice_.get("status") != "BLOCKED":
             continue

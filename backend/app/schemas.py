@@ -2716,6 +2716,7 @@ class CadastroDetailView(CadastroListItem):
     terms: dict = Field(default_factory=dict)
     address: dict = Field(default_factory=dict)
     purchase_readonly: dict = Field(default_factory=dict)
+    parties: dict = Field(default_factory=dict)
     can_conclude: bool = False
     commission_release: dict | None = None
     boleto: dict | None = None

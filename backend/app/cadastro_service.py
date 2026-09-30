@@ -433,7 +433,15 @@ def apply_situation_transition(
         return
 
 
-def list_cadastros(db: Session, user: User, *, pipeline: str = PIPELINE_ALL, q: str | None = None) -> list[dict]:
+def list_cadastros(
+    db: Session,
+    user: User,
+    *,
+    pipeline: str = PIPELINE_ALL,
+    q: str | None = None,
+    limit: int | None = 200,
+    offset: int = 0,
+) -> list[dict]:
     pipeline = (pipeline or PIPELINE_ALL).upper()
     leads = list_cadastros_leads(db, user)
     if not leads:
@@ -522,6 +530,21 @@ def list_cadastros(db: Session, user: User, *, pipeline: str = PIPELINE_ALL, q: 
         )
         if built:
             rows.append(built)
+
+    def _created_sort_key(row: dict) -> str:
+        created = row.get("created_at")
+        if created is None:
+            return ""
+        if hasattr(created, "isoformat"):
+            return created.isoformat()
+        return str(created)
+
+    rows.sort(key=_created_sort_key, reverse=True)
+    if limit is not None and limit > 0:
+        start = max(0, int(offset))
+        return rows[start : start + int(limit)]
+    if offset:
+        return rows[int(offset) :]
     return rows
 
 
@@ -601,7 +624,7 @@ def _cadastro_row_for_lead(
         "credit_value": str(money(Decimal(str(credit)))) if credit not in (None, "") else None,
         "entrada_value": str(money(Decimal(str(entrada)))) if entrada not in (None, "") else None,
         "partner_name": owner.name if owner else None,
-        "partner_role": owner.role if owner else None,
+        "partner_role": str(owner.role) if owner else None,
         "proposal_id": proposal.id if proposal else None,
         "proposal_status": proposal.status if proposal else None,
         "contract_id": contract.id if contract else None,
@@ -677,6 +700,7 @@ def get_cadastro_detail(db: Session, user: User, lead_id: str) -> dict:
             "phone": lead.phone,
             "email": profile.get("email"),
             "source": lead.source,
+            "source_label": cadastro_source_label(lead.source),
             "lead_status": lead.status,
             "pipeline": PIPELINE_INCOMPLETO,
             "situation": SIT_INCOMPLETO,
@@ -684,7 +708,7 @@ def get_cadastro_detail(db: Session, user: User, lead_id: str) -> dict:
             "credit_value": None,
             "entrada_value": None,
             "partner_name": owner.name if owner else None,
-            "partner_role": owner.role if owner else None,
+            "partner_role": str(owner.role) if owner else None,
             "proposal_id": None,
             "proposal_status": None,
             "contract_id": None,

@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckCircle2, ClipboardList, RefreshCw } from "lucide-react";
+import { CheckCircle2, ClipboardList, RefreshCw, X } from "lucide-react";
 import Link from "next/link";
 import { FormEvent, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { AdminDocumentPanel } from "@/components/admin-document-panel";
@@ -77,6 +77,8 @@ function partyText(value: unknown): string {
   return String(value);
 }
 
+const CADASTRO_LIST_PAGE = 200;
+
 type CadastroDetail = CadastroRow & {
   address: Record<string, string>;
   purchase_readonly: Record<string, unknown>;
@@ -133,6 +135,8 @@ export function CadastroMarketplaceModule() {
   const [contractEditorOpen, setContractEditorOpen] = useState(false);
   const [templateDraft, setTemplateDraft] = useState("");
   const [templateBusy, setTemplateBusy] = useState(false);
+  const [listLimit, setListLimit] = useState(CADASTRO_LIST_PAGE);
+  const [openingLeadId, setOpeningLeadId] = useState<string | null>(null);
   const partnerView = myRole === "PARTNER" || myRole === "QUOTA_SELLER";
   const canManageDocs = myRole !== "CLIENT";
   const canDeleteDocs = isInternalProductRole(myRole);
@@ -156,10 +160,14 @@ export function CadastroMarketplaceModule() {
 
   const load = useCallback(async () => {
     const pipeline = (tab || "ALL").toUpperCase();
-    const params = new URLSearchParams({ pipeline });
+    const params = new URLSearchParams({
+      pipeline,
+      limit: String(listLimit),
+      offset: "0",
+    });
     if (q.trim()) params.set("q", q.trim());
     setRows(await api<CadastroRow[]>(`/marketplace/cadastros?${params}`));
-  }, [tab, q]);
+  }, [tab, q, listLimit]);
 
   useEffect(() => {
     load().catch((e) => setError(e instanceof Error ? e.message : "Falha ao carregar cadastros"));
@@ -167,11 +175,22 @@ export function CadastroMarketplaceModule() {
 
   async function openDetail(leadId: string) {
     setError("");
+    setNotice("");
+    setOpeningLeadId(leadId);
     try {
-      setSelected(await api<CadastroDetail>(`/marketplace/cadastros/${leadId}`));
-      setDocs(await api(`/marketplace/cadastros/${leadId}/documents`));
+      const [detail, documentRows] = await Promise.all([
+        api<CadastroDetail>(`/marketplace/cadastros/${leadId}`),
+        api<Array<{ id: string; kind: string; filename: string; status: string }>>(
+          `/marketplace/cadastros/${leadId}/documents`,
+        ).catch(() => [] as Array<{ id: string; kind: string; filename: string; status: string }>),
+      ]);
+      setSelected(detail);
+      setDocs(documentRows);
     } catch (e) {
+      setSelected(null);
       setError(e instanceof Error ? e.message : "Falha ao abrir cadastro");
+    } finally {
+      setOpeningLeadId(null);
     }
   }
 
@@ -324,6 +343,7 @@ export function CadastroMarketplaceModule() {
               onClick={() => {
                 setTab(t.key);
                 setSelected(null);
+                setListLimit(CADASTRO_LIST_PAGE);
               }}
             >
               {t.label}
@@ -403,8 +423,13 @@ export function CadastroMarketplaceModule() {
                     <small>{row.source_label || row.source}</small>
                   </td>
                   <td>
-                    <button type="button" className="table-action" onClick={() => openDetail(row.lead_id)}>
-                      Abrir
+                    <button
+                      type="button"
+                      className="table-action"
+                      disabled={openingLeadId === row.lead_id}
+                      onClick={() => void openDetail(row.lead_id)}
+                    >
+                      {openingLeadId === row.lead_id ? "Abrindo…" : "Abrir"}
                     </button>
                   </td>
                 </tr>
@@ -418,16 +443,48 @@ export function CadastroMarketplaceModule() {
           </table>
         </div>
 
+        {rows.length >= listLimit && listLimit < 500 ? (
+          <div className="notice" style={{ margin: "1rem 18px" }}>
+            Mostrando os {rows.length} cadastros mais recentes desta etapa. Use a busca ou carregue mais linhas.
+            <button
+              type="button"
+              className="table-action"
+              style={{ marginLeft: "0.75rem" }}
+              onClick={() => setListLimit((n) => Math.min(n + CADASTRO_LIST_PAGE, 500))}
+            >
+              Carregar mais
+            </button>
+          </div>
+        ) : null}
+
         {selected && (
+          <div
+            className="kyc-wizard-overlay"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="cadastro-detail-title"
+            onClick={(e) => {
+              if (e.target === e.currentTarget) setSelected(null);
+            }}
+          >
+            <div className="kyc-wizard-panel" style={{ width: "min(960px, 100%)" }} onClick={(e) => e.stopPropagation()}>
+              <div className="kyc-wizard-header">
+                <div>
+                  <span className="eyebrow dark">CADASTRO</span>
+                  <h2 id="cadastro-detail-title">
+                    {selected.name} · {selected.situation_label}
+                  </h2>
+                </div>
+                <button type="button" className="kyc-wizard-close" aria-label="Fechar" onClick={() => setSelected(null)}>
+                  <X />
+                </button>
+              </div>
+              <div className="kyc-wizard-body">
           <form
             className="marketplace-form"
             onSubmit={saveDetail}
-            style={{ marginTop: "1.5rem" }}
             key={`${selected.lead_id}-${selected.email || ""}-${JSON.stringify(selected.address || {})}-${selected.situation}`}
           >
-            <h3>
-              {selected.name} · {selected.situation_label}
-            </h3>
             {selected.my_chain_commission ? (
               <div className="notice">
                 Sua comissão ({selected.my_chain_commission.level_label}):{" "}
@@ -776,6 +833,9 @@ export function CadastroMarketplaceModule() {
               Fechar
             </button>
           </form>
+              </div>
+            </div>
+          </div>
         )}
       </section>
     </>
