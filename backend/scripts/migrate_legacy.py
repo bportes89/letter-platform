@@ -1,4 +1,4 @@
-"""CLI de migração legado — dry-run e apply parcial (organizations/branches)."""
+"""CLI de migração legado — dry-run e apply do bundle (orgs, admins, cotas, rede, etc.)."""
 
 from __future__ import annotations
 
@@ -63,7 +63,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Migração de dados legados LETTER")
     parser.add_argument("--file", required=True, help="Caminho do bundle JSON exportado do sistema antigo")
     parser.add_argument("--dry-run", action="store_true", help="Validar lote sem gravar entidades de negócio")
-    parser.add_argument("--apply", action="store_true", help="Aplicar carga parcial (organizations e branches)")
+    parser.add_argument("--apply", action="store_true", help="Aplicar bundle no banco configurado em LETTER_DATABASE_URL")
     parser.add_argument("--actor-email", default="admin@letter.com.br", help="E-mail do admin executor")
     parser.add_argument("--rebuild-db", action="store_true", help="Recriar banco local de dry-run do zero")
     args = parser.parse_args()

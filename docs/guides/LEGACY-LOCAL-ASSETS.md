@@ -34,6 +34,12 @@ Material do sistema antigo disponível na máquina de desenvolvimento — **não
 - Import legado `texts` → slugs canônicos (ids 1001/1005/1007/1009/1013–1017/1019–1020); placeholders `{nome_cliente}` convertidos para `{{client_name}}` no envio
 - Gatilhos transacionais: boleto, pagamento, boas-vindas (conta chat), documento enviado (cliente), conclusão (cliente/fornecedor/parceiro/plataforma)
 
+## A12 — import em prod/staging
+
+Runbook: `docs/guides/A12-IMPORT-PROD-RENDER.md`  
+Script orquestrado (SQL no host da API): `backend/scripts/import_a12_prod.py`  
+Imports via HTTP: `deploy/import-a12-api.ps1`
+
 Próximos blocos: ver checklist completo em `docs/guides/PAULO-ENTREGA-BACKLOG.md`.
 
 A5b/A6: cards na escolha do chat + vídeo `chat_robo_video_url` (org-settings). A9: CMS **Textos e e-mails** → «Criar e-mails marketplace (padrão)» ou import SQL (`texts` 1001–1017).

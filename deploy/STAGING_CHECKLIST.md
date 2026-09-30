@@ -13,3 +13,4 @@
 - [ ] Fornecedores externos homologados.
 - [ ] `LETTER_FINANCIAL_TRANSACTIONS_ENABLED=false` até aprovação formal.
 - [ ] Cron `letter-marketplace-quota-sync` no Render com `LETTER_DATABASE_URL` (30 min) ou disparo manual do endpoint.
+- [ ] A12: dump `letter_banco_new.sql` no host da API + `python scripts/import_a12_prod.py` (ver `docs/guides/A12-IMPORT-PROD-RENDER.md`).

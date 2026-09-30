@@ -21,7 +21,7 @@
 | A9 | E-mails personalizados (CMS + import texts) | ✅ | Slugs `email-marketplace-*`; `POST /cms/texts/ensure-marketplace-emails` + import legado |
 | A10 | Contrato HTML editável (org-settings / CMS) | ✅ | Jurídico + homologação |
 | A11 | `% plataforma` (x_settings) na liberação comissão | ✅ | Fallback `platform_commission_percent` |
-| A12 | Import dados prod (categorias, texts, admins, cotas) | 📋 | Dump/ETL no Render |
+| A12 | Import dados prod (categorias, texts, admins, cotas) | 📋 | Runbook `A12-IMPORT-PROD-RENDER.md` + `scripts/import_a12_prod.py` + `deploy/import-a12-api.ps1` |
 
 ---
 
