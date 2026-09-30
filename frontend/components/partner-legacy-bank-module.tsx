@@ -1,6 +1,7 @@
 "use client";
 
 import { RefreshCw, Wallet } from "lucide-react";
+import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { CurrencyInput } from "@/components/currency-input";
@@ -11,9 +12,13 @@ type Summary = {
   mode: string;
   available_total: string;
   pending_fiscal_total: string;
+  pending_receipt_total?: string;
+  held_commission_total?: string;
   withdrawable: string;
   reserved_pending_withdrawal: string;
   min_withdrawal_amount: string;
+  can_withdraw?: boolean;
+  withdrawal_blocked_reason?: string | null;
 };
 
 type StatementRow = {
@@ -99,9 +104,15 @@ export function PartnerLegacyBankModule() {
             <strong>{brl.format(Number(summary.available_total))}</strong>
           </div>
           <div className="stat-card">
-            <small>Aguardando NF / fiscal</small>
+            <small>Aguardando NF-e (SEFAZ)</small>
             <strong>{brl.format(Number(summary.pending_fiscal_total))}</strong>
           </div>
+          {Number(summary.pending_receipt_total || 0) > 0 && (
+            <div className="stat-card">
+              <small>Aguardando comprovante</small>
+              <strong>{brl.format(Number(summary.pending_receipt_total))}</strong>
+            </div>
+          )}
           <div className="stat-card">
             <small>Reservado (saque pendente)</small>
             <strong>{brl.format(Number(summary.reserved_pending_withdrawal))}</strong>
@@ -109,10 +120,18 @@ export function PartnerLegacyBankModule() {
         </div>
       )}
 
+      {summary?.withdrawal_blocked_reason && (
+        <div className="notice" role="status">
+          {summary.withdrawal_blocked_reason}{" "}
+          <Link href="/modules/mmn">Ir para liberação fiscal (SEFAZ)</Link>
+        </div>
+      )}
+
       <form className="panel stack" onSubmit={onWithdraw}>
         <h2 className="subheading">Solicitar saque</h2>
         <p className="muted">
-          Mínimo: {summary ? brl.format(Number(summary.min_withdrawal_amount)) : "—"}. Informe a chave PIX de destino.
+          Saque só é liberado após validação da NF-e das comissões em hold. Mínimo:{" "}
+          {summary ? brl.format(Number(summary.min_withdrawal_amount)) : "—"}. Informe a chave PIX de destino.
         </p>
         <label>
           Valor (R$)
@@ -122,7 +141,11 @@ export function PartnerLegacyBankModule() {
           Chave PIX
           <input value={pixKey} onChange={(e) => setPixKey(e.target.value)} placeholder="CPF, e-mail, telefone ou aleatória" />
         </label>
-        <button type="submit" className="primary" disabled={loading}>
+        <button
+          type="submit"
+          className="primary"
+          disabled={loading || summary?.can_withdraw === false}
+        >
           Solicitar saque
         </button>
       </form>

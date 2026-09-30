@@ -327,7 +327,6 @@ def allocate_bolo_chain_commissions(
         return []
 
     pool_pct = Decimal(str(block.get("bolo_total_pct") or "0"))
-    now = datetime.now(UTC)
     entries: list[CommissionEntry] = []
 
     for level, chain_key, price_key in BOLO_RELEASE_LEVELS:
@@ -359,8 +358,8 @@ def allocate_bolo_chain_commissions(
                 pool_rate_percent=pool_pct,
                 level_share_percent=share_pct,
                 amount=amount,
-                status="AVAILABLE",
-                released_at=now,
+                status="PENDING_FISCAL",
+                released_at=None,
             )
         )
 

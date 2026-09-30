@@ -2769,9 +2769,13 @@ class PartnerLegacyEarningsSummary(BaseModel):
     mode: str
     available_total: str
     pending_fiscal_total: str
+    pending_receipt_total: str = "0"
+    held_commission_total: str = "0"
     withdrawable: str
     reserved_pending_withdrawal: str
     min_withdrawal_amount: str
+    can_withdraw: bool = False
+    withdrawal_blocked_reason: str | None = None
 
 
 class PartnerLegacyStatementItem(BaseModel):

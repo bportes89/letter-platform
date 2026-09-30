@@ -274,10 +274,6 @@ def release_marketplace_commissions(db: Session, actor: User, proposal: Proposal
                         "SALES",
                         base,
                     )
-                    now = datetime.now(UTC)
-                    for entry in entries:
-                        entry.status = "AVAILABLE"
-                        entry.released_at = now
                     db.flush()
                     affiliate_ids = [e.id for e in entries]
                     affiliate_total = money(sum((Decimal(str(e.amount)) for e in entries), Decimal("0")))

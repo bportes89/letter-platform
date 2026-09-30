@@ -17,6 +17,52 @@ WD_PENDING = "PENDING"
 WD_PAID = "PAID"
 WD_CANCELLED = "CANCELLED"
 WITHDRAWN_STATUS = "WITHDRAWN"
+HELD_STATUSES = frozenset({"PENDING_FISCAL", "PENDING_RECEIPT"})
+
+
+def _held_commission_total(db: Session, user: User) -> tuple[Decimal, Decimal, Decimal]:
+    """Totais retidos (NF / comprovante) — saque legado só após liberação fiscal."""
+    fiscal = db.scalar(
+        select(func.coalesce(func.sum(CommissionEntry.amount), 0)).where(
+            CommissionEntry.organization_id == user.organization_id,
+            CommissionEntry.beneficiary_id == user.id,
+            CommissionEntry.status == "PENDING_FISCAL",
+        )
+    )
+    receipt = db.scalar(
+        select(func.coalesce(func.sum(CommissionEntry.amount), 0)).where(
+            CommissionEntry.organization_id == user.organization_id,
+            CommissionEntry.beneficiary_id == user.id,
+            CommissionEntry.status == "PENDING_RECEIPT",
+        )
+    )
+    fiscal_m = money(Decimal(str(fiscal or 0)))
+    receipt_m = money(Decimal(str(receipt or 0)))
+    return fiscal_m, receipt_m, money(fiscal_m + receipt_m)
+
+
+def withdrawal_blocked_reason(
+    *,
+    pending_fiscal: Decimal,
+    pending_receipt: Decimal,
+    withdrawable: Decimal,
+    amount: Decimal,
+) -> str | None:
+    held = money(pending_fiscal + pending_receipt)
+    if held > 0:
+        parts: list[str] = []
+        if pending_fiscal > 0:
+            parts.append(f"NF-e (R$ {pending_fiscal})")
+        if pending_receipt > 0:
+            parts.append(f"comprovante (R$ {pending_receipt})")
+        detail = " e ".join(parts)
+        return (
+            f"Há comissões aguardando liberação fiscal: {detail}. "
+            "Valide a NF-e em Rede e comissões → Liberação fiscal SEFAZ antes de sacar."
+        )
+    if amount > withdrawable:
+        return "Saldo disponível insuficiente (aguarde processamento de saque pendente ou libere comissões)."
+    return None
 
 
 def bank_display_mode(db: Session, organization_id: str) -> str:
@@ -47,14 +93,7 @@ def _available_commission_total(db: Session, user: User) -> Decimal:
 
 def partner_earnings_summary(db: Session, user: User) -> dict:
     available_entries = _available_commission_total(db, user)
-    pending_fiscal = db.scalar(
-        select(func.coalesce(func.sum(CommissionEntry.amount), 0)).where(
-            CommissionEntry.organization_id == user.organization_id,
-            CommissionEntry.beneficiary_id == user.id,
-            CommissionEntry.status == "PENDING_FISCAL",
-        )
-    )
-    pending_fiscal = money(Decimal(str(pending_fiscal or 0)))
+    pending_fiscal, pending_receipt, held_total = _held_commission_total(db, user)
     reserved = db.scalar(
         select(func.coalesce(func.sum(PartnerWithdrawal.amount), 0)).where(
             PartnerWithdrawal.user_id == user.id,
@@ -63,18 +102,38 @@ def partner_earnings_summary(db: Session, user: User) -> dict:
     )
     reserved = money(Decimal(str(reserved or 0)))
     withdrawable = money(max(Decimal("0.00"), available_entries - reserved))
+    if held_total > 0:
+        withdrawable = Decimal("0.00")
     min_raw = get_setting(db, user.organization_id, "min_withdrawal_amount", "0").strip().replace(",", ".")
     try:
         min_withdrawal = money(Decimal(min_raw or "0"))
     except Exception:
         min_withdrawal = Decimal("0.00")
+    if held_total > 0:
+        block_reason = withdrawal_blocked_reason(
+            pending_fiscal=pending_fiscal,
+            pending_receipt=pending_receipt,
+            withdrawable=withdrawable,
+            amount=Decimal("0.01"),
+        )
+    elif withdrawable <= 0:
+        block_reason = "Não há saldo liberado para saque."
+    elif min_withdrawal > 0 and withdrawable < min_withdrawal:
+        block_reason = f"Valor mínimo para saque: R$ {min_withdrawal}."
+    else:
+        block_reason = None
+    can_withdraw = block_reason is None
     return {
         "mode": "legacy",
         "available_total": str(available_entries),
         "pending_fiscal_total": str(pending_fiscal),
+        "pending_receipt_total": str(pending_receipt),
+        "held_commission_total": str(held_total),
         "withdrawable": str(withdrawable),
         "reserved_pending_withdrawal": str(reserved),
         "min_withdrawal_amount": str(min_withdrawal),
+        "can_withdraw": can_withdraw,
+        "withdrawal_blocked_reason": block_reason,
     }
 
 
@@ -148,8 +207,15 @@ def request_partner_withdrawal(
     min_wd = money(Decimal(str(summary["min_withdrawal_amount"])))
     if min_wd > 0 and value < min_wd:
         raise HTTPException(422, f"Valor mínimo para saque: R$ {min_wd}.")
-    if value > withdrawable:
-        raise HTTPException(409, "Saldo disponível insuficiente (libere NF ou aguarde processamento de saque).")
+    pending_fiscal, pending_receipt, _held = _held_commission_total(db, user)
+    block = withdrawal_blocked_reason(
+        pending_fiscal=pending_fiscal,
+        pending_receipt=pending_receipt,
+        withdrawable=withdrawable,
+        amount=value,
+    )
+    if block:
+        raise HTTPException(409, block)
     key = (pix_key or "").strip()
     if len(key) < 5:
         raise HTTPException(422, "Informe uma chave PIX válida.")
@@ -161,16 +227,6 @@ def request_partner_withdrawal(
     )
     if pending:
         raise HTTPException(409, "Já existe um saque pendente. Aguarde o processamento.")
-    fiscal_pending = db.scalar(
-        select(func.count())
-        .select_from(CommissionEntry)
-        .where(
-            CommissionEntry.beneficiary_id == user.id,
-            CommissionEntry.status == "PENDING_FISCAL",
-        )
-    )
-    if fiscal_pending and int(fiscal_pending) > 0 and withdrawable <= 0:
-        raise HTTPException(409, "Comissões aguardando validação de NF antes do saque.")
 
     wd = PartnerWithdrawal(
         organization_id=user.organization_id,
