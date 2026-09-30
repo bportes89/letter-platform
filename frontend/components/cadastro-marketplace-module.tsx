@@ -3,6 +3,7 @@
 import { CheckCircle2, ClipboardList, RefreshCw, X } from "lucide-react";
 import Link from "next/link";
 import { FormEvent, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { AdminDocumentPanel } from "@/components/admin-document-panel";
 import { MarketplaceContractEditor } from "@/components/marketplace-contract-editor";
 import { api, API_URL, apiForm, deleteApi, downloadApi } from "@/lib/api";
@@ -137,6 +138,8 @@ export function CadastroMarketplaceModule() {
   const [templateBusy, setTemplateBusy] = useState(false);
   const [listLimit, setListLimit] = useState(CADASTRO_LIST_PAGE);
   const [openingLeadId, setOpeningLeadId] = useState<string | null>(null);
+  const [portalReady, setPortalReady] = useState(false);
+  const roleReady = myRole.length > 0;
   const partnerView = myRole === "PARTNER" || myRole === "QUOTA_SELLER";
   const canManageDocs = myRole !== "CLIENT";
   const canDeleteDocs = isInternalProductRole(myRole);
@@ -158,6 +161,33 @@ export function CadastroMarketplaceModule() {
       .catch(() => setMyRole(""));
   }, []);
 
+  useEffect(() => {
+    setPortalReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!selected) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [selected]);
+
+  useEffect(() => {
+    if (!selected || contractEditorOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setSelected(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selected, contractEditorOpen]);
+
+  const closeDetail = useCallback(() => {
+    setSelected(null);
+    setContractEditorOpen(false);
+  }, []);
+
   const load = useCallback(async () => {
     const pipeline = (tab || "ALL").toUpperCase();
     const params = new URLSearchParams({
@@ -170,8 +200,9 @@ export function CadastroMarketplaceModule() {
   }, [tab, q, listLimit]);
 
   useEffect(() => {
+    if (selected) return;
     load().catch((e) => setError(e instanceof Error ? e.message : "Falha ao carregar cadastros"));
-  }, [load]);
+  }, [load, selected]);
 
   async function openDetail(leadId: string) {
     setError("");
@@ -457,34 +488,34 @@ export function CadastroMarketplaceModule() {
           </div>
         ) : null}
 
-        {selected && (
-          <div
-            className="kyc-wizard-overlay"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="cadastro-detail-title"
-            onClick={(e) => {
-              if (e.target === e.currentTarget) setSelected(null);
-            }}
-          >
-            <div className="kyc-wizard-panel" style={{ width: "min(960px, 100%)" }} onClick={(e) => e.stopPropagation()}>
-              <div className="kyc-wizard-header">
-                <div>
-                  <span className="eyebrow dark">CADASTRO</span>
-                  <h2 id="cadastro-detail-title">
-                    {selected.name} · {selected.situation_label}
-                  </h2>
+      </section>
+
+      {portalReady && selected
+        ? createPortal(
+            <div
+              className="kyc-wizard-overlay"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="cadastro-detail-title"
+              style={{ zIndex: 1200 }}
+            >
+              <div className="kyc-wizard-panel" style={{ width: "min(960px, 100%)" }}>
+                <div className="kyc-wizard-header">
+                  <div>
+                    <span className="eyebrow dark">CADASTRO</span>
+                    <h2 id="cadastro-detail-title">
+                      {selected.name} · {selected.situation_label}
+                    </h2>
+                  </div>
+                  <button type="button" className="kyc-wizard-close" aria-label="Fechar" onClick={closeDetail}>
+                    <X />
+                  </button>
                 </div>
-                <button type="button" className="kyc-wizard-close" aria-label="Fechar" onClick={() => setSelected(null)}>
-                  <X />
-                </button>
-              </div>
-              <div className="kyc-wizard-body">
-          <form
-            className="marketplace-form"
-            onSubmit={saveDetail}
-            key={`${selected.lead_id}-${selected.email || ""}-${JSON.stringify(selected.address || {})}-${selected.situation}`}
-          >
+                <div className="kyc-wizard-body">
+                  {!roleReady ? (
+                    <div className="notice">Carregando permissões…</div>
+                  ) : (
+                    <form className="marketplace-form" onSubmit={saveDetail} key={selected.lead_id}>
             {selected.my_chain_commission ? (
               <div className="notice">
                 Sua comissão ({selected.my_chain_commission.level_label}):{" "}
@@ -829,15 +860,17 @@ export function CadastroMarketplaceModule() {
                 {busy ? "Salvando…" : "Salvar cadastro"}
               </button>
             ) : null}
-            <button type="button" className="table-action" style={{ marginLeft: "0.75rem" }} onClick={() => setSelected(null)}>
+            <button type="button" className="table-action" style={{ marginLeft: "0.75rem" }} onClick={closeDetail}>
               Fechar
             </button>
-          </form>
+                    </form>
+                  )}
+                </div>
               </div>
-            </div>
-          </div>
-        )}
-      </section>
+            </div>,
+            document.body,
+          )
+        : null}
     </>
   );
 }

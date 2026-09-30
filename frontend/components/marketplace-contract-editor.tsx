@@ -91,7 +91,7 @@ export function MarketplaceContractEditor({ leadId, open, onClose, onSaved, onOp
       style={{
         position: "fixed",
         inset: 0,
-        zIndex: 80,
+        zIndex: 1300,
         background: "rgba(0,0,0,0.45)",
         display: "flex",
         alignItems: "center",
