@@ -188,21 +188,24 @@ def validate_bundle(db: Session, organization_id: str, bundle: dict[str, Any]) -
                     report.ready = False
                 email = str(row.get("email") or "").strip().lower()
                 if email and db.scalar(select(User.id).where(User.email == email)):
-                    report.issues.append(
-                        MigrationIssue("ERROR", entity_type, legacy_id, f"E-mail já existe na plataforma: {email}")
-                    )
-                    report.ready = False
-                document = _digits(row.get("document"))
-                if document and db.scalar(select(User.id).where(User.document == document)):
-                    report.issues.append(
+                    report.warnings.append(
                         MigrationIssue(
-                            "ERROR",
+                            "WARNING",
                             entity_type,
                             legacy_id,
-                            f"Documento já existe na plataforma: {document}",
+                            f"E-mail já existe — será reutilizado via legacy_id_map: {email}",
                         )
                     )
-                    report.ready = False
+                document = _digits(row.get("document"))
+                if document and db.scalar(select(User.id).where(User.document == document)):
+                    report.warnings.append(
+                        MigrationIssue(
+                            "WARNING",
+                            entity_type,
+                            legacy_id,
+                            f"Documento já existe — apply ignora duplicata de CPF: {document}",
+                        )
+                    )
             if entity_type == "organizations":
                 document = _digits(row.get("document"))
                 if document and db.scalar(select(Organization.id).where(Organization.document == document)):
@@ -793,6 +796,8 @@ def _apply_quotas(
     skipped: dict[str, int],
 ) -> None:
     pending: list[tuple[str, dict[str, Any], Quota]] = []
+    processed = 0
+    total = len(rows)
 
     def flush_batch() -> None:
         nonlocal pending
@@ -813,8 +818,15 @@ def _apply_quotas(
             )
             created["quotas"] = created.get("quotas", 0) + 1
         pending.clear()
+        if total:
+            print(
+                f"  quotas: {processed}/{total} processadas, "
+                f"{created.get('quotas', 0)} criadas, {reused.get('quotas', 0)} reutilizadas",
+                flush=True,
+            )
 
     for row in rows:
+        processed += 1
         legacy_id = str(row["legacy_id"])
         if _resolve_mapped_id(
             db,
@@ -1251,8 +1263,17 @@ def apply_bundle(
     *,
     dry_run: bool = True,
 ) -> tuple[LegacyMigrationRun, MigrationReport]:
+    import sys
+
     bundle = normalize_bundle(bundle)
+    print("Validando bundle...", flush=True)
     report = validate_bundle(db, user.organization_id, bundle)
+    print(
+        f"Validação: ready={report.ready}, "
+        f"erros={sum(1 for i in report.issues if i.level == 'ERROR')}, "
+        f"avisos={len(report.warnings)}",
+        flush=True,
+    )
     blockers = [issue for issue in report.issues if issue.level == "ERROR"]
     mode = "DRY_RUN" if dry_run else "APPLY"
     run = LegacyMigrationRun(
@@ -1290,6 +1311,7 @@ def apply_bundle(
     skipped: dict[str, int] = {}
 
     try:
+        print("Apply: organizations/branches...", flush=True)
         for row in entities.get("organizations") or []:
             legacy_id = str(row["legacy_id"])
             existing = _resolve_mapped_id(
@@ -1372,6 +1394,7 @@ def apply_bundle(
             )
             created["branches"] = created.get("branches", 0) + 1
 
+        print("Apply: administrators...", flush=True)
         _apply_administrators(
             db,
             actor=user,
@@ -1382,6 +1405,7 @@ def apply_bundle(
             created=created,
             reused=reused,
         )
+        print("Apply: users...", flush=True)
         _apply_users(
             db,
             actor=user,
@@ -1392,6 +1416,7 @@ def apply_bundle(
             created=created,
             reused=reused,
         )
+        print("Apply: network_nodes...", flush=True)
         _apply_network_nodes(
             db,
             actor=user,
@@ -1403,6 +1428,7 @@ def apply_bundle(
             reused=reused,
             skipped=skipped,
         )
+        print("Apply: leads (~4k)...", flush=True)
         _apply_leads(
             db,
             actor=user,
@@ -1414,6 +1440,7 @@ def apply_bundle(
             reused=reused,
             skipped=skipped,
         )
+        print(f"Apply: quotas ({len(entities.get('quotas') or [])}) — etapa mais longa...", flush=True)
         _apply_quotas(
             db,
             actor=user,
@@ -1425,6 +1452,7 @@ def apply_bundle(
             reused=reused,
             skipped=skipped,
         )
+        print("Apply: proposals...", flush=True)
         _apply_proposals(
             db,
             actor=user,

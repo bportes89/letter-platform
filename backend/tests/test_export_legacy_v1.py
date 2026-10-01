@@ -43,6 +43,23 @@ def test_load_table_fixture():
     assert rows[0]["name"] == "Embracon"
 
 
+def test_load_table_semicolon_inside_string():
+    """HTML em x_settings contém ';' — não pode truncar o INSERT no primeiro ';'."""
+    sql = """
+INSERT INTO `x_settings` (`id`, `fields`, `value`, `created_at`, `updated_at`) VALUES
+(1, 'txt', '<style>body { margin:0; }</style>', NULL, NULL);
+"""
+    rows = load_table(sql, "x_settings")
+    assert len(rows) == 1
+    assert "margin:0" in rows[0]["value"]
+
+
+def test_load_table_from_path(tmp_path: Path):
+    path = tmp_path / "dump.sql"
+    path.write_text(FIXTURE_SQL, encoding="utf-8")
+    assert len(load_table(path, "administrators")) == 1
+
+
 def test_export_legacy_bundle_fixture(tmp_path: Path):
     sql_path = tmp_path / "fixture.sql"
     sql_path.write_text(FIXTURE_SQL, encoding="utf-8")

@@ -84,6 +84,13 @@ LEGACY_FIELD_ALIASES = {
 }
 
 
+def _merge_import_setting_value(current: str, incoming: str) -> str:
+    """Legado repete chaves (ex.: whatsapp_text + whatsapp_txt); prioriza valor não vazio."""
+    if incoming.strip():
+        return incoming
+    return current
+
+
 def _all_known_keys() -> set[str]:
     keys: set[str] = set()
     for items in SETTING_GROUPS.values():
@@ -168,6 +175,12 @@ def import_legacy_settings(
     template_keys_by_legacy_field = {
         "txt": "contract_template_html",
     }
+    by_key: dict[str, OrganizationSetting] = {
+        row.field_key: row
+        for row in db.scalars(
+            select(OrganizationSetting).where(OrganizationSetting.organization_id == organization_id)
+        )
+    }
     for row in rows:
         field = str(row.get("fields") or "").strip()
         if not field:
@@ -181,17 +194,14 @@ def import_legacy_settings(
         row_id = str(row.get("id") or "")
         if row_id in editor_html and editor_html[row_id]:
             value = editor_html[row_id]
-        existing = db.scalar(
-            select(OrganizationSetting).where(
-                OrganizationSetting.organization_id == organization_id,
-                OrganizationSetting.field_key == key,
-            )
-        )
+        existing = by_key.get(key)
         if existing:
-            existing.value = value
+            existing.value = _merge_import_setting_value(str(existing.value or ""), value)
             updated += 1
         else:
-            db.add(OrganizationSetting(organization_id=organization_id, field_key=key, value=value))
+            item = OrganizationSetting(organization_id=organization_id, field_key=key, value=value)
+            db.add(item)
+            by_key[key] = item
             created += 1
     db.flush()
     return {"created": created, "updated": updated, "total_legacy": len(rows)}

@@ -34,9 +34,12 @@ def test_legacy_migration_dry_run_detects_duplicate_email(client, auth_headers):
     response = client.post("/api/v1/admin/migration/dry-run", headers=auth_headers, json=payload)
     assert response.status_code == 200
     body = response.json()
-    assert body["status"] == "FAILED"
-    assert body["summary"]["ready"] is False
-    assert any("E-mail já existe" in issue["message"] for issue in body["summary"]["issues"])
+    assert body["status"] == "COMPLETED"
+    assert body["summary"]["ready"] is True
+    assert any(
+        "E-mail já existe" in issue["message"] and issue["level"] == "WARNING"
+        for issue in body["summary"]["warnings"]
+    )
 
 
 def test_legacy_migration_runs_list(client, auth_headers):

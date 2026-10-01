@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import Any, Iterator
 
 
@@ -88,6 +89,35 @@ def _parse_tuple(text: str, index: int) -> tuple[list[Any], int]:
         raise ValueError("Tupla SQL malformada")
 
 
+def _find_statement_end(sql: str, start: int) -> int:
+    """Índice do ';' que encerra o INSERT, ignorando ';' dentro de strings SQL."""
+    index = start
+    in_string = False
+    while index < len(sql):
+        ch = sql[index]
+        if not in_string:
+            if ch == "'":
+                in_string = True
+                index += 1
+                continue
+            if ch == ";":
+                return index
+            index += 1
+            continue
+        if ch == "\\":
+            index += 2
+            continue
+        if ch == "'":
+            if index + 1 < len(sql) and sql[index + 1] == "'":
+                index += 2
+                continue
+            in_string = False
+            index += 1
+            continue
+        index += 1
+    return len(sql)
+
+
 def parse_values_block(block: str) -> list[list[Any]]:
     rows: list[list[Any]] = []
     index = 0
@@ -112,9 +142,7 @@ def iter_table_rows(sql: str, table: str) -> Iterator[dict[str, Any]]:
             continue
         columns = _split_columns(match.group("columns"))
         start = match.end()
-        end = sql.find(";", start)
-        if end < 0:
-            end = len(sql)
+        end = _find_statement_end(sql, start)
         block = sql[start:end]
         for values in parse_values_block(block):
             if len(values) != len(columns):
@@ -124,5 +152,7 @@ def iter_table_rows(sql: str, table: str) -> Iterator[dict[str, Any]]:
             yield dict(zip(columns, values, strict=True))
 
 
-def load_table(sql: str, table: str) -> list[dict[str, Any]]:
+def load_table(sql: str | Path, table: str) -> list[dict[str, Any]]:
+    if not isinstance(sql, str):
+        sql = Path(sql).read_text(encoding="utf-8", errors="replace")
     return list(iter_table_rows(sql, table))
