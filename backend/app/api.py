@@ -4957,6 +4957,18 @@ def pre_analysis_tapaf_payment_webhook(payload: PreAnalysisTapafPaymentWebhook, 
     return PreAnalysisPautaView(**pauta_view(pauta))
 
 
+@router.get("/finops/pre-analysis/tapaf-boleto/{pauta_id}/{token}")
+def pre_analysis_tapaf_boleto_download(pauta_id: str, token: str, db: Session = Depends(get_db)):
+    from app.pre_analysis_service import read_tapaf_boleto_pdf_bytes
+
+    content, filename = read_tapaf_boleto_pdf_bytes(db, pauta_id, token)
+    return Response(
+        content=content,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
+
+
 @router.post("/finops/pre-analysis/run-engine")
 def pre_analysis_run_engine(payload: PreAnalysisEngineRequest, user: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
     proposal = _load_proposal(db, user, payload.proposal_id)

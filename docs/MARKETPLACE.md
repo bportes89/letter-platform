@@ -225,6 +225,10 @@ Persistência em `proposal.terms_json.boleto` (`codigo_solicitacao`, `amount`, `
 
 Env: `LETTER_INTER_CLIENT_ID`, `LETTER_INTER_CLIENT_SECRET`, `LETTER_INTER_CONTA_CORRENTE`, `LETTER_INTER_CERT_PATH`, `LETTER_INTER_KEY_PATH`, `LETTER_INTER_WEBHOOK_ACCESS_TOKEN`, `LETTER_INTER_BOLETO_VENCIMENTO_DIAS`.
 
+### TAPAF (pré-análise FinOps)
+
+Com Inter configurado, o aceite do checkout TAPAF (`tapaf-checkout-accept`) emite cobrança **INTER** (R$ 1.500) em vez de Asaas/sandbox. O mesmo `POST /api/v1/webhooks/inter` com `RECEBIDO` marca a pauta como `TAPAF_PAID` quando o `codigoSolicitacao` bate com a cobrança. PDF: `GET /api/v1/finops/pre-analysis/tapaf-boleto/{pauta_id}/{token}`. Cadastro do webhook no Inter: `python scripts/register_inter_webhook.py` (PC com cert).
+
 ### E-mails transacionais (D+0)
 
 Disparo automático via `CommunicationTemplate` + `queue_delivery` (sandbox: `mock_deliver`):

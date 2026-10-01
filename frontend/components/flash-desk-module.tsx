@@ -828,14 +828,18 @@ export function FlashDeskModule() {
     try {
       const mode = tapafCheckout?.checkout_mode || "";
       const url = tapafCheckout?.checkout_url || "";
-      const isAsaas = mode === "ASAAS" && url.startsWith("http");
-      if (isAsaas) {
+      const isGateway = (mode === "ASAAS" || mode === "INTER") && url.startsWith("http");
+      if (isGateway) {
         window.open(url, "_blank", "noopener,noreferrer");
-        setNotice("Cobrança aberta — aguarde confirmação do pagamento.");
+        setNotice(
+          mode === "INTER"
+            ? "Boleto Inter aberto — após pagar, TAPAF confirma via webhook."
+            : "Cobrança aberta — aguarde confirmação do pagamento.",
+        );
         return;
       }
       setNotice(
-        "A cobrança TAPAF será emitida pelo Banco Inter (integração em andamento). A equipe LETTER enviará o boleto ou Pix em breve — não utilize confirmação sandbox.",
+        "Checkout sandbox — use a confirmação manual apenas em ambiente de teste.",
       );
     } catch (e) {
       setError(e instanceof Error ? e.message : "Falha ao abrir pagamento TAPAF");

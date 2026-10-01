@@ -131,3 +131,18 @@ class InterClient:
                     last_detail = resp.text[:200]
                 time.sleep(0.6 * (attempt + 1))
         raise HTTPException(status_code=502, detail=f"Inter PDF indisponível: {last_detail}")
+
+    def get_cobranca(self, codigo_solicitacao: str) -> dict:
+        token = self.access_token()
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "x-conta-corrente": (settings.inter_conta_corrente or "").strip(),
+        }
+        with self._client() as client:
+            resp = client.get(
+                f"{self.base}/cobranca/v3/cobrancas/{codigo_solicitacao}",
+                headers=headers,
+            )
+        if resp.status_code >= 400:
+            raise HTTPException(status_code=502, detail=f"Inter consulta cobrança falhou ({resp.status_code})")
+        return resp.json() if resp.content else {}

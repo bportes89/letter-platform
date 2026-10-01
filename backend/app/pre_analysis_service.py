@@ -39,6 +39,48 @@ def _inventory_plate_from_pauta(pauta: PreAnalysisPauta) -> str | None:
     return None
 
 
+def provision_tapaf_inter_payment(db: Session, user: User, pauta: PreAnalysisPauta) -> dict:
+    """Cobrança TAPAF no Banco Inter (boleto + PIX)."""
+    from app.core.config import settings
+    from app.inter_cobranca_helpers import issue_inter_charge, tapaf_boleto_public_token
+
+    amount = TAPAF_NOMINAL
+    ref = pauta.external_reference or f"tapaf_pre_analysis_{pauta.id}"
+    seu = f"{pauta.id.replace('-', '')[:11]}T"[:15]
+    issued = issue_inter_charge(
+        user=user,
+        amount=amount,
+        seu_numero=seu,
+        mensagem_linhas=[f"TAPAF {pauta.pauta_code}", "LETTER pre-analise"],
+        pdf_filename_prefix=f"TAPAF_{pauta.id[:8]}",
+    )
+    token = tapaf_boleto_public_token(pauta.id)
+    public = (settings.api_public_url or "").rstrip("/")
+    boleto_url = f"{public}/finops/pre-analysis/tapaf-boleto/{pauta.id}/{token}" if public else None
+
+    pauta.external_reference = ref
+    pauta.asaas_payment_id = issued["codigo_solicitacao"]
+    pauta.checkout_url = boleto_url
+    pauta.pix_copy_paste = issued.get("pix_copy_paste") or boleto_url
+    pauta.pix_qr_code = issued.get("pix_txid")
+    pauta.checkout_status = "PENDING"
+    pauta.checkout_mode = "INTER"
+    meta = {
+        "inter_local_pdf": issued.get("local_pdf_path"),
+        "inter_seu_numero": issued.get("seu_numero"),
+    }
+    pauta.client_result_json = json.dumps({"inter_checkout": meta}, ensure_ascii=False)
+    db.flush()
+    return {
+        "mode": "INTER",
+        "codigo_solicitacao": issued["codigo_solicitacao"],
+        "checkout_url": boleto_url,
+        "pix_copy_paste": pauta.pix_copy_paste,
+        "pix_qr_code": pauta.pix_qr_code,
+        "asaas_payment_id": pauta.asaas_payment_id,
+    }
+
+
 def provision_tapaf_asaas_payment(db: Session, user: User, pauta: PreAnalysisPauta) -> dict:
     """Gera cobrança Pix Asaas (se configurado) ou checkout sandbox após aceite."""
     from app.core.config import settings
@@ -118,6 +160,18 @@ def provision_tapaf_asaas_payment(db: Session, user: User, pauta: PreAnalysisPau
         "pix_copy_paste": pix_copy,
         "pix_qr_code": pix_qr,
     }
+
+
+def provision_tapaf_payment(db: Session, user: User, pauta: PreAnalysisPauta) -> dict:
+    """Inter (prioridade) → Asaas → sandbox."""
+    from app.inter_common import inter_configured
+
+    if inter_configured():
+        try:
+            return provision_tapaf_inter_payment(db, user, pauta)
+        except Exception:
+            pass
+    return provision_tapaf_asaas_payment(db, user, pauta)
 
 
 HUNDRED = Decimal("100")
@@ -337,6 +391,9 @@ def generate_tapaf_checkout(pauta: PreAnalysisPauta) -> dict:
             "checkout_mode": pauta.checkout_mode or "SANDBOX",
             "checkout_status": pauta.checkout_status,
             "asaas_payment_id": pauta.asaas_payment_id,
+            "inter_codigo_solicitacao": (
+                pauta.asaas_payment_id if (pauta.checkout_mode or "").upper() == "INTER" else None
+            ),
             "asset_type": pauta.asset_type or "REAL_ESTATE",
             "texto_explicativo_tooltip_interrogacao": TAPAF_TOOLTIP,
             "checkbox_obrigatorio_01": TAPAF_CHECKBOX_01,
@@ -346,7 +403,11 @@ def generate_tapaf_checkout(pauta: PreAnalysisPauta) -> dict:
             "botao_label": (
                 "CONFIRMAR PAGAMENTO SANDBOX"
                 if (pauta.checkout_mode or "SANDBOX") == "SANDBOX"
-                else "AGUARDAR CONFIRMAÇÃO PIX"
+                else (
+                    "ABRIR BOLETO / PIX INTER"
+                    if (pauta.checkout_mode or "").upper() == "INTER"
+                    else "AGUARDAR CONFIRMAÇÃO PIX"
+                )
             ),
         },
     }
@@ -370,7 +431,7 @@ def accept_tapaf_checkout(
     pauta.tapaf_checkbox_1 = True
     pauta.tapaf_checkbox_2 = True
     pauta.status = "TAPAF_CHECKOUT_ACCEPTED"
-    provision_tapaf_asaas_payment(db, user, pauta)
+    provision_tapaf_payment(db, user, pauta)
     return pauta
 
 
@@ -432,6 +493,67 @@ def confirm_tapaf_payment(db: Session, user: User, pauta: PreAnalysisPauta, even
 
         send_zapsign_after_tapaf_paid(db, proposal)
     return pauta
+
+
+def confirm_tapaf_payment_from_inter(
+    db: Session,
+    *,
+    codigo_solicitacao: str,
+    amount: Decimal | str | float,
+    event_id: str | None = None,
+) -> PreAnalysisPauta | None:
+    codigo = str(codigo_solicitacao or "").strip()
+    if not codigo:
+        return None
+    item = db.scalar(
+        select(PreAnalysisPauta).where(
+            PreAnalysisPauta.asaas_payment_id == codigo,
+            PreAnalysisPauta.checkout_mode == "INTER",
+        )
+    )
+    if not item:
+        return None
+    if item.status == "TAPAF_PAID":
+        return item
+    actor = db.scalar(select(User).where(User.organization_id == item.organization_id).limit(1))
+    if not actor:
+        return None
+    pay_amount = Decimal(str(amount)) if amount is not None else TAPAF_NOMINAL
+    ref = event_id or f"inter-{codigo}"
+    return confirm_tapaf_payment(db, actor, item, str(ref), pay_amount)
+
+
+def read_tapaf_boleto_pdf_bytes(db: Session, pauta_id: str, token: str) -> tuple[bytes, str]:
+    from app.inter_cobranca_helpers import verify_tapaf_boleto_token
+    from pathlib import Path
+
+    if not verify_tapaf_boleto_token(pauta_id, token):
+        raise HTTPException(status_code=403, detail="Token de boleto TAPAF inválido")
+    pauta = db.get(PreAnalysisPauta, pauta_id)
+    if not pauta or (pauta.checkout_mode or "").upper() != "INTER":
+        raise HTTPException(status_code=404, detail="Cobrança TAPAF não encontrada")
+    path: Path | None = None
+    try:
+        meta = json.loads(pauta.client_result_json or "{}").get("inter_checkout") or {}
+        if meta.get("inter_local_pdf"):
+            path = Path(str(meta["inter_local_pdf"]))
+    except json.JSONDecodeError:
+        path = None
+    if path and path.is_file():
+        return path.read_bytes(), f"tapaf-{pauta.pauta_code}.pdf"
+    codigo = (pauta.asaas_payment_id or "").strip()
+    if codigo:
+        from app.inter_common import inter_configured
+        from app.inter_client import InterClient
+        import base64
+
+        if not inter_configured():
+            raise HTTPException(status_code=404, detail="PDF TAPAF indisponível")
+
+        client = InterClient()
+        pdf_b64 = client.download_pdf_base64(codigo)
+        return base64.b64decode(pdf_b64), f"tapaf-{pauta.pauta_code}.pdf"
+    raise HTTPException(status_code=404, detail="PDF TAPAF indisponível")
 
 
 def confirm_tapaf_payment_from_asaas(

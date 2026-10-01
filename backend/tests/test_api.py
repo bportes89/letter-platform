@@ -3772,6 +3772,67 @@ def _sample_extratos(monthly_credit=50000):
     return {f"2026-{m:02d}": [{"valor": monthly_credit, "tipo_credito": "PIX_RECEBIDO", "mesmo_titular_TED_bool": False}] for m in range(1, 7)}
 
 
+def test_tapaf_inter_webhook_after_checkout(client, auth_headers, monkeypatch):
+    monkeypatch.setattr("app.core.config.settings.inter_webhook_access_token", "inter-test-token")
+    inter_codigo = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+
+    def fake_issue(**_kwargs):
+        return {
+            "codigo_solicitacao": inter_codigo,
+            "seu_numero": "pauta123T",
+            "amount": "1500.00",
+            "pix_copy_paste": "pix-tapaf-test",
+            "pix_txid": "tx",
+            "local_pdf_path": "/tmp/tapaf.pdf",
+            "duplicated": False,
+        }
+
+    monkeypatch.setattr("app.inter_common.inter_configured", lambda: True)
+    monkeypatch.setattr("app.inter_cobranca_helpers.issue_inter_charge", fake_issue)
+
+    lead = client.get("/api/v1/leads", headers=auth_headers).json()[0]
+    proposal = client.post(
+        "/api/v1/proposals",
+        headers=auth_headers,
+        json={"lead_id": lead["id"], "product": "SDC", "requested_amount": "150000", "terms": {}},
+    ).json()
+    client.post(
+        "/api/v1/finops/pre-analysis/validate-documents",
+        headers=auth_headers,
+        json={"proposal_id": proposal["id"], "documents": _valid_pre_analysis_documents()},
+    )
+    accepted = client.post(
+        "/api/v1/finops/pre-analysis/tapaf-checkout-accept",
+        headers=auth_headers,
+        json={
+            "proposal_id": proposal["id"],
+            "scroll_completed": True,
+            "checkbox_1": True,
+            "checkbox_2": True,
+        },
+    )
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["checkout_mode"] == "INTER"
+    assert accepted.json()["asaas_payment_id"] == inter_codigo
+
+    paid = client.post(
+        "/api/v1/webhooks/inter",
+        headers={"x-inter-webhook-token": "inter-test-token"},
+        json={
+            "situacao": "RECEBIDO",
+            "codigoSolicitacao": inter_codigo,
+            "seuNumero": "pauta123T",
+            "valorTotalRecebido": 1500.0,
+        },
+    )
+    assert paid.status_code == 200, paid.text
+    assert paid.json()["paid"] == 1
+
+    pauta = client.get(f"/api/v1/finops/pre-analysis/{proposal['id']}", headers=auth_headers)
+    assert pauta.status_code == 200, pauta.text
+    assert pauta.json()["status"] == "TAPAF_PAID"
+
+
 def test_pre_analysis_v6_documents_tapaf_and_engine(client, auth_headers):
     lead = client.get("/api/v1/leads", headers=auth_headers).json()[0]
     proposal = client.post("/api/v1/proposals", headers=auth_headers, json={

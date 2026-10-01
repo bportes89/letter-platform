@@ -189,8 +189,30 @@ def handle_inter_webhook(db: Session, payload: object) -> dict:
         )
         if result.get("processed"):
             stats["paid"] += 1
-        else:
-            stats["skipped"] += 1
+            stats["results"].append(result)
+            continue
+
+        from app.pre_analysis_service import confirm_tapaf_payment_from_inter
+
+        tapaf = confirm_tapaf_payment_from_inter(
+            db,
+            codigo_solicitacao=codigo,
+            amount=valor or 0,
+            event_id=f"inter-webhook-{codigo}",
+        )
+        if tapaf and tapaf.status == "TAPAF_PAID":
+            stats["paid"] += 1
+            stats["results"].append(
+                {
+                    "processed": True,
+                    "kind": "tapaf",
+                    "pauta_id": tapaf.id,
+                    "codigo_solicitacao": codigo,
+                }
+            )
+            continue
+
+        stats["skipped"] += 1
         stats["results"].append(result)
         logger.info("[InterWebhook] item resultado=%s", result)
     return stats

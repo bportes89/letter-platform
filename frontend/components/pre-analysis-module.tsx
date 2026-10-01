@@ -236,9 +236,11 @@ export function PreAnalysisModule({ variant = "sdc" }: { variant?: "sdc" | "flas
       setPauta(result);
       await loadTapafCheckout(true);
       setMessage(
-        result.checkout_mode === "ASAAS"
-          ? "Aceite registrado — Pix Asaas gerado. Aguarde o webhook ou use o link de cobrança."
-          : "Aceite registrado — checkout sandbox. Confirme o pagamento abaixo.",
+        result.checkout_mode === "INTER"
+          ? "Aceite registrado — boleto/PIX Banco Inter gerado. Abra o boleto ou pague o PIX; confirmação via webhook Inter."
+          : result.checkout_mode === "ASAAS"
+            ? "Aceite registrado — Pix Asaas gerado. Aguarde o webhook ou use o link de cobrança."
+            : "Aceite registrado — checkout sandbox. Confirme o pagamento abaixo.",
       );
     } catch (x) {
       setMessage(x instanceof Error ? x.message : "Falha no aceite TAPAF");
@@ -247,9 +249,16 @@ export function PreAnalysisModule({ variant = "sdc" }: { variant?: "sdc" | "flas
 
   async function payTapaf() {
     try {
-      if (pauta?.checkout_mode === "ASAAS" && pauta.checkout_url) {
+      if (
+        (pauta?.checkout_mode === "ASAAS" || pauta?.checkout_mode === "INTER")
+        && pauta.checkout_url
+      ) {
         window.open(pauta.checkout_url, "_blank", "noopener,noreferrer");
-        setMessage("Cobrança Asaas aberta — a confirmação chega via webhook PAYMENT_CONFIRMED.");
+        setMessage(
+          pauta.checkout_mode === "INTER"
+            ? "Boleto Inter aberto — após pagar, o status TAPAF atualiza pelo webhook."
+            : "Cobrança Asaas aberta — a confirmação chega via webhook PAYMENT_CONFIRMED.",
+        );
         return;
       }
       const result = await api<Pauta>("/finops/pre-analysis/tapaf-payment-webhook", {

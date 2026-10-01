@@ -995,9 +995,16 @@ export function SdcDeskModule() {
     setError("");
     setBusy(true);
     try {
-      if (tapafCheckout?.checkout_url && tapafCheckout.checkout_mode === "ASAAS") {
+      if (
+        tapafCheckout?.checkout_url
+        && (tapafCheckout.checkout_mode === "ASAAS" || tapafCheckout.checkout_mode === "INTER")
+      ) {
         window.open(tapafCheckout.checkout_url, "_blank", "noopener,noreferrer");
-        setNotice("Cobrança aberta — aguarde confirmação do pagamento.");
+        setNotice(
+          tapafCheckout.checkout_mode === "INTER"
+            ? "Boleto Inter aberto — após pagar, TAPAF confirma via webhook."
+            : "Cobrança aberta — aguarde confirmação do pagamento.",
+        );
         return;
       }
       await api("/finops/pre-analysis/tapaf-payment-webhook", {
