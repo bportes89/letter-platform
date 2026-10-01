@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.asaas_client import AsaasClient
 from app.asaas_common import asaas_api_available
 from app.core.config import settings
+from app.inter_common import inter_configured
 from app.models import SaaSPlan, SaaSSubscription, SaaSAcceptance
 
 LSS_BILLING_TYPES = {"BOLETO", "PIX", "CREDIT_CARD", "UNDEFINED"}
@@ -25,8 +26,54 @@ def _aware(value: datetime) -> datetime:
     return value.astimezone(UTC)
 
 
+def lss_billing_provider() -> str | None:
+    if not settings.lss_billing_enabled:
+        return None
+    if inter_configured():
+        return "INTER"
+    if asaas_api_available():
+        return "ASAAS"
+    return None
+
+
 def lss_billing_live() -> bool:
-    return settings.lss_billing_enabled and asaas_api_available()
+    return lss_billing_provider() is not None
+
+
+def provision_lss_billing(
+    db: Session,
+    item: SaaSSubscription,
+    plan: SaaSPlan,
+    *,
+    company_cnpj: str,
+    subscriber_email: str,
+    subscriber_phone: str | None,
+    billing_type: str | None,
+) -> SaaSSubscription:
+    provider = lss_billing_provider()
+    if provider == "INTER":
+        from app.lss_inter_billing import provision_inter_lss_invoice
+
+        return provision_inter_lss_invoice(
+            db,
+            item,
+            plan,
+            company_cnpj=company_cnpj,
+            subscriber_email=subscriber_email,
+            subscriber_phone=subscriber_phone,
+        )
+    if provider == "ASAAS":
+        return provision_asaas_subscription(
+            db,
+            item,
+            plan,
+            company_cnpj=company_cnpj,
+            subscriber_email=subscriber_email,
+            subscriber_phone=subscriber_phone,
+            billing_type=billing_type,
+        )
+    item.status = "ACTIVE_SANDBOX"
+    return item
 
 
 def _resolve_billing_type(value: str | None) -> str:
@@ -220,6 +267,13 @@ def evaluate_subscription_billing(item: SaaSSubscription, as_of: datetime | None
         cancel_asaas_subscription(item)
         return item
 
+    if item.payment_method_reference == "INTER":
+        if item.status in {"ACTIVE", "PAST_DUE", "PENDING_PAYMENT"} and now > period_end + grace:
+            item.status = "SUSPENDED"
+        elif item.status == "ACTIVE" and now > period_end:
+            item.status = "PAST_DUE"
+        return item
+
     if item.asaas_subscription_id:
         if item.status in {"ACTIVE", "PAST_DUE", "PENDING_PAYMENT"} and now > period_end + grace:
             item.status = "SUSPENDED"
@@ -235,11 +289,17 @@ def evaluate_subscription_billing(item: SaaSSubscription, as_of: datetime | None
 
 
 def run_lss_billing_evaluation_job(db: Session) -> dict:
+    from app.lss_inter_billing import maybe_issue_inter_lss_renewal
+
     items = list(db.scalars(select(SaaSSubscription).order_by(SaaSSubscription.created_at.desc())))
     processed: list[dict] = []
     for item in items:
         before = item.status
         evaluate_subscription_billing(item)
+        if item.payment_method_reference == "INTER" and item.status == "PAST_DUE":
+            plan = db.get(SaaSPlan, item.plan_id)
+            if plan and maybe_issue_inter_lss_renewal(db, item, plan):
+                processed.append({"subscription_id": item.id, "action": "inter_renewal_issued"})
         if before != item.status:
             processed.append({"subscription_id": item.id, "from": before, "to": item.status})
     return {

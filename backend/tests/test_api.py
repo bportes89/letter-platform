@@ -3358,6 +3358,96 @@ def test_lss_clickwrap_subscription_allocation_and_cancellation(client,auth_head
     assert entitlement["entitled"] is True and entitlement["subscription_status"]=="CANCELLATION_SCHEDULED" and entitlement["reason"]=="OK"
 
 
+def test_lss_inter_subscription_and_payment_webhook(client, auth_headers, monkeypatch):
+    inter_codigo = "lss-test-1111-2222-3333-444455556666"
+
+    def fake_issue(**_kwargs):
+        return {
+            "codigo_solicitacao": inter_codigo,
+            "seu_numero": "sub123L",
+            "amount": "199.90",
+            "pix_copy_paste": "pix-lss",
+            "local_pdf_path": "/tmp/lss.pdf",
+            "duplicated": False,
+        }
+
+    monkeypatch.setattr("app.core.config.settings.inter_webhook_access_token", "inter-test-token")
+    monkeypatch.setattr("app.core.config.settings.lss_billing_enabled", True)
+    monkeypatch.setattr("app.core.config.settings.api_public_url", "http://testserver/api/v1")
+    monkeypatch.setattr("app.inter_common.inter_configured", lambda: True)
+    monkeypatch.setattr("app.lss_billing_service.inter_configured", lambda: True)
+    monkeypatch.setattr("app.inter_cobranca_helpers.issue_inter_charge", fake_issue)
+
+    terms = client.post(
+        "/api/v1/lss/terms",
+        headers=auth_headers,
+        json={
+            "code": "LSS-INTER",
+            "version": 1,
+            "title": "Termos LSS Inter",
+            "body": "Termos empresariais com cobrança via Banco Inter e trilha de aceite auditável para homologação.",
+        },
+    ).json()
+    plan = client.post(
+        "/api/v1/lss/plans",
+        headers=auth_headers,
+        json={
+            "code": "LSS-INTER-PLAN",
+            "name": "LSS Inter",
+            "monthly_price": "199.90",
+            "central_share_percent": "70",
+            "network_pool_percent": "30",
+        },
+    ).json()
+    assert client.post("/api/v1/auth/step-up", headers=auth_headers, json={"password": "Letter@123"}).status_code == 200
+    assert client.post(f"/api/v1/lss/terms/{terms['id']}/approve", headers=auth_headers).json()["legal_review_status"] == "APPROVED"
+
+    subscribed = client.post(
+        "/api/v1/lss/subscriptions",
+        headers=auth_headers,
+        json={
+            "plan_id": plan["id"],
+            "terms_template_id": terms["id"],
+            "company_name": "Empresa Inter Ltda",
+            "company_cnpj": "12345678000199",
+            "representative_name": "Representante Teste",
+            "representative_document": "12345678901",
+            "subscriber_email": "financeiro@empresa.test",
+            "billing_type": "BOLETO",
+            "scroll_completed": True,
+            "terms_accepted": True,
+            "recurring_authorized": True,
+            "verification_reference": "otp-inter-001",
+        },
+    )
+    assert subscribed.status_code == 201, subscribed.text
+    body = subscribed.json()
+    assert body["status"] == "PENDING_PAYMENT"
+    assert body["billing_type"] == "INTER"
+    assert body["last_payment_id"] == inter_codigo
+    assert body["payment_checkout_url"] and "/lss/subscriptions/" in body["payment_checkout_url"]
+
+    allocation = client.get(f"/api/v1/lss/plans/{plan['id']}/allocation-preview", headers=auth_headers).json()
+    assert allocation["execution"] == "INTER_MONTHLY"
+
+    paid = client.post(
+        "/api/v1/webhooks/inter",
+        headers={"x-inter-webhook-token": "inter-test-token"},
+        json={
+            "situacao": "RECEBIDO",
+            "codigoSolicitacao": inter_codigo,
+            "seuNumero": "sub123L",
+            "valorTotalRecebido": 199.90,
+        },
+    )
+    assert paid.status_code == 200, paid.text
+    assert paid.json()["paid"] == 1
+
+    listed = client.get("/api/v1/lss/subscriptions", headers=auth_headers).json()
+    active = next(item for item in listed if item["id"] == body["id"])
+    assert active["status"] == "ACTIVE"
+
+
 def test_lss_asaas_subscription_and_payment_webhook(client, auth_headers, monkeypatch):
     class FakeAsaasClient:
         def __init__(self, *args, **kwargs):
@@ -3394,6 +3484,7 @@ def test_lss_asaas_subscription_and_payment_webhook(client, auth_headers, monkey
 
     monkeypatch.setattr("app.core.config.settings.asaas_api_key", "test-key")
     monkeypatch.setattr("app.core.config.settings.lss_billing_enabled", True)
+    monkeypatch.setattr("app.lss_billing_service.inter_configured", lambda: False)
 
     terms = client.post(
         "/api/v1/lss/terms",

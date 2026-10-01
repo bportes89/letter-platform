@@ -19,6 +19,36 @@ def _digits(value: str | None) -> str:
     return re.sub(r"\D+", "", str(value or ""))
 
 
+def pagador_from_pj(
+    *,
+    company_name: str,
+    cnpj: str,
+    email: str,
+    phone: str | None = None,
+) -> dict:
+    doc = _digits(cnpj)
+    if len(doc) != 14:
+        doc = doc.zfill(14)[:14] if doc else "00000000000191"
+    phone_digits = _digits(phone)
+    ddd = phone_digits[:2] if len(phone_digits) >= 10 else "11"
+    tel = phone_digits[2:] if len(phone_digits) >= 10 else "999999999"
+    return {
+        "cpfCnpj": doc,
+        "tipoPessoa": "JURIDICA",
+        "nome": (company_name or "Empresa LETTER")[:100],
+        "email": (email or "noreply@letter.app.br")[:80],
+        "ddd": ddd,
+        "telefone": tel[:9],
+        "cep": "29090130",
+        "numero": "0",
+        "complemento": "",
+        "bairro": "Centro",
+        "cidade": (settings.company_city or "Vitoria")[:60],
+        "uf": (settings.company_state or "ES")[:2].upper(),
+        "endereco": (settings.company_street or "Rua")[:90],
+    }
+
+
 def pagador_from_user(user: User) -> dict:
     doc = _digits(getattr(user, "document", None) or "")
     if len(doc) not in {11, 14}:
@@ -63,7 +93,8 @@ def _pix_from_cobranca_body(body: dict) -> tuple[str | None, str | None]:
 
 def issue_inter_charge(
     *,
-    user: User,
+    user: User | None = None,
+    pagador: dict | None = None,
     amount: Decimal,
     seu_numero: str,
     mensagem_linhas: list[str],
@@ -71,13 +102,17 @@ def issue_inter_charge(
 ) -> dict:
     if not inter_configured():
         raise RuntimeError("Inter não configurado")
+    if not pagador:
+        if not user:
+            raise ValueError("issue_inter_charge exige user ou pagador")
+        pagador = pagador_from_user(user)
     from app.inter_client import InterClient
 
     client = InterClient()
     cobranca = client.create_cobranca(
         seu_numero=seu_numero[:15],
         valor=money(amount),
-        pagador=pagador_from_user(user),
+        pagador=pagador,
         mensagem_linhas=mensagem_linhas,
     )
     codigo = str(cobranca["codigoSolicitacao"])
@@ -120,3 +155,16 @@ def tapaf_boleto_public_token(pauta_id: str) -> str:
 
 def verify_tapaf_boleto_token(pauta_id: str, token: str) -> bool:
     return hmac.compare_digest(tapaf_boleto_public_token(pauta_id), (token or "").strip())
+
+
+def lss_boleto_public_token(subscription_id: str) -> str:
+    digest = hmac.new(
+        settings.secret_key.encode("utf-8"),
+        f"lss-boleto-{subscription_id}".encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    return digest[:32]
+
+
+def verify_lss_boleto_token(subscription_id: str, token: str) -> bool:
+    return hmac.compare_digest(lss_boleto_public_token(subscription_id), (token or "").strip())

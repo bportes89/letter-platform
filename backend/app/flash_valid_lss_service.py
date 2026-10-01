@@ -135,14 +135,22 @@ def subscribe(db:Session,user:User,plan:SaaSPlan,terms:SaaSTermsTemplate,*,compa
     if not all([scroll_completed,terms_accepted,recurring_authorized,verification_reference]):raise HTTPException(422,"Rolagem, aceite, autorização recorrente e verificação são obrigatórios")
     if not terms.active or terms.legal_review_status!="APPROVED":raise HTTPException(409,"Termos LSS não possuem versão jurídica ativa")
     now=datetime.now(UTC);evidence={"plan":plan.code,"price":str(plan.monthly_price),"terms_id":terms.id,"terms_version":terms.version,"terms_hash":terms.body_hash,"company":mask_doc(company_cnpj),"representative":mask_doc(representative_document),"scroll_completed":True,"terms_accepted":True,"recurring_authorized":True,"verification_reference":verification_reference,"ip":ip_address,"user_agent":user_agent,"accepted_at":now.isoformat()};evidence_hash=digest(evidence)
-    from app.lss_billing_service import lss_billing_live, provision_asaas_subscription
+    from app.lss_billing_service import lss_billing_live, provision_lss_billing
 
     initial_status = "PENDING_PAYMENT" if lss_billing_live() else "ACTIVE_SANDBOX"
     item=SaaSSubscription(organization_id=user.organization_id,plan_id=plan.id,terms_template_id=terms.id,subscriber_company_name=company_name,subscriber_document_masked=mask_doc(company_cnpj),legal_representative_name=representative_name,legal_representative_document_masked=mask_doc(representative_document),status=initial_status,current_period_start=now,current_period_end=now+timedelta(days=30),payment_method_reference=payment_method_reference,recurring_authorized=True,acceptance_hash=evidence_hash,subscriber_email=(subscriber_email or user.email).strip())
     db.add(item);db.flush();db.add(SaaSAcceptance(organization_id=user.organization_id,subscription_id=item.id,user_id=user.id,terms_template_id=terms.id,ip_address=ip_address,user_agent=user_agent,verification_reference=verification_reference,evidence_json=json.dumps(evidence,ensure_ascii=False,sort_keys=True),evidence_hash=evidence_hash))
     issue_stamp(db,user,entity_type="saas_subscription",entity_id=item.id,purpose="LSS_CLICKWRAP_ACCEPTANCE",payload=evidence)
     if lss_billing_live():
-        provision_asaas_subscription(db,item,plan,company_cnpj=company_cnpj,subscriber_email=item.subscriber_email or user.email,subscriber_phone=subscriber_phone,billing_type=billing_type)
+        provision_lss_billing(
+            db,
+            item,
+            plan,
+            company_cnpj=company_cnpj,
+            subscriber_email=item.subscriber_email or user.email,
+            subscriber_phone=subscriber_phone,
+            billing_type=billing_type,
+        )
     return item
 
 
@@ -164,9 +172,14 @@ def evaluate_subscription(item:SaaSSubscription,as_of:datetime|None=None)->SaaSS
 
 def subscription_allocation(plan:SaaSPlan)->dict:
     price=Decimal(str(plan.monthly_price));central=(price*Decimal(str(plan.central_share_percent))/Decimal(100)).quantize(Decimal(".01"),rounding=ROUND_HALF_UP);network=price-central
-    from app.lss_billing_service import lss_billing_live
+    from app.lss_billing_service import lss_billing_live, lss_billing_provider
 
-    execution = "ASAAS_RECURRING" if lss_billing_live() else "PREVIEW_ONLY"
+    provider = lss_billing_provider()
+    execution = (
+        "INTER_MONTHLY"
+        if provider == "INTER"
+        else ("ASAAS_RECURRING" if provider == "ASAAS" else "PREVIEW_ONLY")
+    )
     return {"monthly_price":str(price.quantize(Decimal('.01'))),"central_share":str(central),"network_pool":str(network),"execution":execution}
 
 

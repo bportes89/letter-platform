@@ -212,6 +212,25 @@ def handle_inter_webhook(db: Session, payload: object) -> dict:
             )
             continue
 
+        from app.lss_inter_billing import handle_lss_inter_payment_webhook
+
+        lss = handle_lss_inter_payment_webhook(
+            db,
+            codigo_solicitacao=codigo,
+            valor_recebido=valor or 0,
+        )
+        if lss and lss.status == "ACTIVE":
+            stats["paid"] += 1
+            stats["results"].append(
+                {
+                    "processed": True,
+                    "kind": "lss",
+                    "subscription_id": lss.id,
+                    "codigo_solicitacao": codigo,
+                }
+            )
+            continue
+
         stats["skipped"] += 1
         stats["results"].append(result)
         logger.info("[InterWebhook] item resultado=%s", result)

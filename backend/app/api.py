@@ -5696,6 +5696,18 @@ def lss_subscriptions(user:User=Depends(get_current_user),db:Session=Depends(get
     return list(db.scalars(select(SaaSSubscription).where(SaaSSubscription.organization_id==user.organization_id).order_by(SaaSSubscription.created_at.desc())))
 
 
+@router.get("/lss/subscriptions/{subscription_id}/boleto/{token}")
+def lss_subscription_boleto_download(subscription_id: str, token: str, db: Session = Depends(get_db)):
+    from app.lss_inter_billing import read_lss_boleto_pdf_bytes
+
+    content, filename = read_lss_boleto_pdf_bytes(db, subscription_id, token)
+    return Response(
+        content=content,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
+
+
 @router.post("/lss/subscriptions/{subscription_id}/cancel",response_model=SaaSSubscriptionView)
 def lss_cancel(subscription_id:str,user:User=Depends(require_step_up),db:Session=Depends(get_db)):
     item=db.scalar(select(SaaSSubscription).where(SaaSSubscription.id==subscription_id,SaaSSubscription.organization_id==user.organization_id))
