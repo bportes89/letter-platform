@@ -166,6 +166,65 @@ def _write_mock_pdf(proposal_id: str, amount: Decimal, seu_numero: str) -> str:
     return str(path)
 
 
+def _inter_pdf_path(codigo: str) -> Path:
+    root = Path(settings.storage_path) / "boleto"
+    root.mkdir(parents=True, exist_ok=True)
+    return root / f"INTER_{codigo}.pdf"
+
+
+def _fetch_and_store_inter_pdf(codigo: str) -> Path:
+    import base64
+
+    from app.inter_client import InterClient
+
+    pdf_path = _inter_pdf_path(codigo)
+    client = InterClient()
+    pdf_b64 = client.download_pdf_base64(codigo)
+    pdf_path.write_bytes(base64.b64decode(pdf_b64))
+    return pdf_path
+
+
+def _ensure_boleto_pdf_file(
+    db: Session,
+    proposal: Proposal,
+    terms: dict,
+    boleto: dict,
+) -> Path | None:
+    """Garante PDF no storage local; no Render o disco é efêmero — rebaixa do Inter se necessário."""
+    local = str(boleto.get("local_path") or "").strip()
+    path = Path(local) if local else None
+    if path and path.is_file():
+        return path
+
+    provider = str(boleto.get("provider") or "").upper()
+    codigo = str(boleto.get("codigo_solicitacao") or "").strip()
+
+    if provider == "INTER" and codigo and inter_configured():
+        pdf_path = _fetch_and_store_inter_pdf(codigo)
+        boleto["local_path"] = str(pdf_path)
+        terms["boleto"] = boleto
+        proposal.terms_json = json.dumps(terms, ensure_ascii=False)
+        db.flush()
+        return pdf_path
+
+    if provider == "MOCK" and codigo.startswith("DEV-"):
+        proposal_id = codigo.removeprefix("DEV-")
+        try:
+            amount = money(Decimal(str(boleto.get("amount") or "0")))
+        except (InvalidOperation, ValueError):
+            amount = Decimal("0")
+        seu = str(boleto.get("seu_numero") or "")
+        if proposal_id and amount > 0:
+            mock_path = Path(_write_mock_pdf(proposal_id, amount, seu))
+            boleto["local_path"] = str(mock_path)
+            terms["boleto"] = boleto
+            proposal.terms_json = json.dumps(terms, ensure_ascii=False)
+            db.flush()
+            return mock_path
+
+    return path if path and path.is_file() else None
+
+
 def boleto_view_from_terms(terms: dict, *, lead_id: str | None = None) -> dict | None:
     boleto = terms.get("boleto")
     if not isinstance(boleto, dict) or not boleto.get("codigo_solicitacao"):
@@ -312,10 +371,10 @@ def read_boleto_pdf_bytes(db: Session, lead_id: str, token: str) -> tuple[bytes,
         db.flush()
         terms = seed_marketplace_lifecycle(_parse_json(proposal.terms_json))
         boleto = terms.get("boleto") if isinstance(terms.get("boleto"), dict) else None
-    if not boleto or not boleto.get("local_path"):
+    if not boleto or not boleto.get("codigo_solicitacao"):
         raise HTTPException(status_code=404, detail="PDF do boleto indisponível")
-    path = Path(str(boleto["local_path"]))
-    if not path.is_file():
+    path = _ensure_boleto_pdf_file(db, proposal, terms, boleto)
+    if not path or not path.is_file():
         raise HTTPException(status_code=404, detail="Arquivo do boleto não encontrado")
     filename = f"boleto-{lead_id[:8]}.pdf"
     return path.read_bytes(), filename
