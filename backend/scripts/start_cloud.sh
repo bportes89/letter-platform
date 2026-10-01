@@ -3,6 +3,9 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+echo "[letter] materializing Inter mTLS certs (if LETTER_INTER_*_BASE64 set)..."
+python scripts/materialize_inter_certs.py
+
 echo "[letter] running migrations..."
 python -m alembic upgrade head
 echo "[letter] migrations complete"
