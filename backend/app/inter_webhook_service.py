@@ -1,4 +1,8 @@
-"""Webhook Banco Inter — RECEBIDO → situação PAGO no Cadastro Marketplace."""
+"""Webhook Banco Inter — qualquer cobrança comercial (RECEBIDO → baixa no produto).
+
+Encadeamento: marketplace PAGO → TAPAF pré-análise → LSS → QuitCon → Lease Equity.
+Ver ``inter_platform_charge.INTER_WEBHOOK_RESOLUTION_ORDER`` e ``docs/guides/INTER-COBRANCA-PLATAFORMA.md``.
+"""
 
 from __future__ import annotations
 
@@ -228,6 +232,36 @@ def handle_inter_webhook(db: Session, payload: object) -> dict:
                     "subscription_id": lss.id,
                     "codigo_solicitacao": codigo,
                 }
+            )
+            continue
+
+        from app.quitcon_service import confirm_quitcon_tapaf_from_inter
+
+        quitcon = confirm_quitcon_tapaf_from_inter(
+            db,
+            codigo_solicitacao=codigo,
+            amount=valor or 0,
+            event_id=f"inter-webhook-{codigo}",
+        )
+        if quitcon and quitcon.status == "TAPAF_LIQUIDADA":
+            stats["paid"] += 1
+            stats["results"].append(
+                {"processed": True, "kind": "quitcon", "operacao_id": quitcon.id, "codigo_solicitacao": codigo}
+            )
+            continue
+
+        from app.lease_equity_service import confirm_lease_tapaf_from_inter
+
+        lease = confirm_lease_tapaf_from_inter(
+            db,
+            codigo_solicitacao=codigo,
+            amount=valor or 0,
+            event_id=f"inter-webhook-{codigo}",
+        )
+        if lease and lease.status == "TAPAF_LIQUIDADA":
+            stats["paid"] += 1
+            stats["results"].append(
+                {"processed": True, "kind": "lease_equity", "pauta_id": lease.id, "codigo_solicitacao": codigo}
             )
             continue
 

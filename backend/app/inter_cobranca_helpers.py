@@ -1,4 +1,4 @@
-"""Emissão de cobrança Inter (boleto + PIX) reutilizável — TAPAF, LSS, etc."""
+"""Emissão de cobrança Inter (boleto + PIX) — núcleo de toda cobrança comercial da plataforma."""
 
 from __future__ import annotations
 

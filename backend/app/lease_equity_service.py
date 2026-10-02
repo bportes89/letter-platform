@@ -10,13 +10,19 @@ from sqlalchemy.orm import Session
 
 from app.lease_equity_engine import EngineLeaseEquityLetter, money
 from app.models import LeaseEquityPauta, LeaseEquityStatusLog, Proposal, User
+from app.pre_analysis_constants import (
+    TAPAF_CHECKBOX_01,
+    TAPAF_CHECKBOX_02,
+    TAPAF_MANIFESTO_HTML,
+)
 from app.storage_service import get_storage
-from app.tapaf_constants import resolve_tapaf_track
+from app.tapaf_constants import LEASE_EQUITY_TAPAF_NOMINAL, resolve_tapaf_track
 from app.tapaf_settlement_service import settle_tapaf_payment
 
 
 VALID_TRANSITIONS = {
-    "AGUARDANDO_TAPAF": {"TAPAF_LIQUIDADA"},
+    "AGUARDANDO_TAPAF": {"TAPAF_CHECKOUT_ACCEPTED"},
+    "TAPAF_CHECKOUT_ACCEPTED": {"TAPAF_LIQUIDADA"},
     "TAPAF_LIQUIDADA": {"EM_AUDITORIA_RISCO"},
     "EM_AUDITORIA_RISCO": {"REPROVADO_COMPLIANCE", "AGUARDANDO_ASSINATURA"},
     "AGUARDANDO_ASSINATURA": {"PRONTO_PARA_CARTORIO"},
@@ -72,6 +78,9 @@ def pauta_view(item: LeaseEquityPauta) -> dict:
         "appraisal_value": str(item.appraisal_value),
         "registry_number": item.registry_number,
         "registry_office": item.registry_office,
+        "tapaf_scroll_completed": item.tapaf_scroll_completed,
+        "tapaf_checkbox_1": item.tapaf_checkbox_1,
+        "tapaf_checkbox_2": item.tapaf_checkbox_2,
         "tapaf_payment_reference": item.tapaf_payment_reference,
         "tapaf_paid_at": item.tapaf_paid_at,
         "compliance_dossier_uri": item.compliance_dossier_uri,
@@ -131,26 +140,116 @@ def create_pauta(
     return item
 
 
+def provision_lease_tapaf_inter(db: Session, user: User, pauta: LeaseEquityPauta) -> dict:
+    from app.inter_common import inter_configured
+    from app.tapaf_inter_service import issue_tapaf_inter, lease_inter_block, save_lease_inter_block
+
+    existing = lease_inter_block(pauta)
+    if existing.get("codigo_solicitacao"):
+        return existing
+    if not inter_configured():
+        return {}
+    owner = db.get(User, pauta.owner_user_id) or user
+    try:
+        block = issue_tapaf_inter(
+            user=owner,
+            amount=LEASE_EQUITY_TAPAF_NOMINAL,
+            entity_id=pauta.id,
+            scope="lease-equity",
+            mensagem=["TAPAF Lease Equity", pauta.pauta_code],
+        )
+    except HTTPException:
+        return existing or {}
+    save_lease_inter_block(pauta, block)
+    db.flush()
+    return block
+
+
 def generate_tapaf_checkout(pauta: LeaseEquityPauta) -> dict:
-    if pauta.status != "AGUARDANDO_TAPAF":
-        raise HTTPException(status_code=409, detail="TAPAF disponível apenas em AGUARDANDO_TAPAF")
+    if pauta.status not in {"AGUARDANDO_TAPAF", "TAPAF_CHECKOUT_ACCEPTED", "TAPAF_LIQUIDADA"}:
+        raise HTTPException(status_code=409, detail="TAPAF disponível apenas em AGUARDANDO_TAPAF / pós-aceite")
     amount = EngineLeaseEquityLetter.taxa_tapaf_nominal
+    from app.tapaf_inter_service import lease_inter_block
+
+    inter_ui = lease_inter_block(pauta)
+    pix_fallback = f"00020101021126580014br.gov.bcb.pix0136letter-lease-tapaf-{pauta.id[:8]}"
+    pix = inter_ui.get("pix_copy_paste") or inter_ui.get("gateway_baas_pix_qrcode") or pix_fallback
     return {
         "endpoint": "/api/v1/finops/lease-equity/tapaf-checkout",
         "status": "READY",
         "valor_tapaf_brl": str(amount),
-        "gateway_baas_pix_qrcode": f"00020101021126580014br.gov.bcb.pix0136letter-lease-tapaf-{pauta.id[:8]}",
-        "status_imovel_db": "AGUARDANDO_TAPAF",
+        "gateway_baas_pix_qrcode": pix if inter_ui.get("checkout_mode") == "INTER" else pix_fallback,
+        "status_imovel_db": pauta.status,
         "texto_tooltip": (
             "TAPAF Lease Equity R$ 750,00 — taxa não reembolsável que cobre infraestrutura de compliance "
             "e montagem automática do dossiê de certidões."
         ),
+        "checkbox_obrigatorio_01": TAPAF_CHECKBOX_01,
+        "checkbox_obrigatorio_02": TAPAF_CHECKBOX_02,
+        "manifesto_html": TAPAF_MANIFESTO_HTML,
+        "tapaf_scroll_completed": pauta.tapaf_scroll_completed,
+        "tapaf_checkbox_1": pauta.tapaf_checkbox_1,
+        "tapaf_checkbox_2": pauta.tapaf_checkbox_2,
+        "botao_habilitado": pauta.status == "TAPAF_CHECKOUT_ACCEPTED",
+        "checkout_mode": inter_ui.get("checkout_mode") or "SANDBOX",
+        "payment_checkout_url": inter_ui.get("payment_checkout_url"),
+        "inter_codigo_solicitacao": inter_ui.get("codigo_solicitacao"),
+        "pix_copy_paste": inter_ui.get("pix_copy_paste"),
     }
 
 
-def confirm_tapaf_payment(db: Session, user: User, pauta: LeaseEquityPauta, event_id: str, amount) -> LeaseEquityPauta:
+def accept_tapaf_checkout(
+    db: Session,
+    user: User,
+    pauta: LeaseEquityPauta,
+    *,
+    scroll_completed: bool,
+    checkbox_1: bool,
+    checkbox_2: bool,
+) -> LeaseEquityPauta:
     if pauta.status != "AGUARDANDO_TAPAF":
-        raise HTTPException(status_code=409, detail="TAPAF já liquidada ou indisponível")
+        raise HTTPException(status_code=409, detail="Aceite TAPAF disponível apenas em AGUARDANDO_TAPAF")
+    if not all([scroll_completed, checkbox_1, checkbox_2]):
+        raise HTTPException(status_code=422, detail="Rolagem do manifesto e duas caixas de aceite são obrigatórias")
+    pauta.tapaf_scroll_completed = True
+    pauta.tapaf_checkbox_1 = True
+    pauta.tapaf_checkbox_2 = True
+    _transition(db, pauta, user, "TAPAF_CHECKOUT_ACCEPTED", "Manifesto TAPAF aceito — pagamento liberado")
+    provision_lease_tapaf_inter(db, user, pauta)
+    db.flush()
+    return pauta
+
+
+def confirm_lease_tapaf_from_inter(
+    db: Session,
+    *,
+    codigo_solicitacao: str,
+    amount,
+    event_id: str | None = None,
+) -> LeaseEquityPauta | None:
+    from app.tapaf_inter_service import find_lease_by_inter_codigo
+
+    pauta = find_lease_by_inter_codigo(db, codigo_solicitacao)
+    if not pauta:
+        return None
+    if pauta.status == "TAPAF_LIQUIDADA":
+        return pauta
+    if pauta.status != "TAPAF_CHECKOUT_ACCEPTED":
+        return None
+    actor = db.get(User, pauta.owner_user_id)
+    if not actor:
+        actor = db.scalar(select(User).where(User.organization_id == pauta.organization_id).limit(1))
+    if not actor:
+        return None
+    ref = event_id or f"inter-{codigo_solicitacao}"
+    return confirm_tapaf_payment(db, actor, pauta, ref, amount)
+
+
+def confirm_tapaf_payment(db: Session, user: User, pauta: LeaseEquityPauta, event_id: str, amount) -> LeaseEquityPauta:
+    if pauta.status == "TAPAF_LIQUIDADA":
+        return pauta
+    if pauta.status != "TAPAF_CHECKOUT_ACCEPTED":
+        raise HTTPException(status_code=409, detail="Aceite do manifesto TAPAF é obrigatório antes do pagamento")
     if money(amount) != EngineLeaseEquityLetter.taxa_tapaf_nominal:
         raise HTTPException(status_code=422, detail="Valor TAPAF deve ser exatamente R$ 750,00")
     pauta.tapaf_payment_reference = event_id

@@ -4176,7 +4176,8 @@ def test_lease_equity_engine_canonical_doc251():
     )
 
 
-def test_lease_equity_full_pipeline_and_tokenization(client, auth_headers):
+def test_lease_equity_full_pipeline_and_tokenization(client, auth_headers, monkeypatch):
+    monkeypatch.setattr("app.inter_common.inter_configured", lambda: False)
     lead = client.get("/api/v1/leads", headers=auth_headers).json()[0]
     proposal = client.post("/api/v1/proposals", headers=auth_headers, json={
         "lead_id": lead["id"], "product": "SDC", "requested_amount": "600000", "terms": {},
@@ -4192,6 +4193,16 @@ def test_lease_equity_full_pipeline_and_tokenization(client, auth_headers):
     pauta = created.json()
     assert pauta["status"] == "AGUARDANDO_TAPAF"
     assert pauta["credit_matrix"]["aluguel_mensal_recorrente_bruto_dono"] == "1600.00"
+
+    blocked_pay = client.post("/api/v1/finops/lease-equity/tapaf-payment-webhook", headers=auth_headers, json={
+        "pauta_id": pauta["id"], "event_id": "tapaf-le-early", "amount": "750.00",
+    })
+    assert blocked_pay.status_code == 409
+
+    accepted = client.post("/api/v1/finops/lease-equity/tapaf-checkout-accept", headers=auth_headers, json={
+        "pauta_id": pauta["id"], "scroll_completed": True, "checkbox_1": True, "checkbox_2": True,
+    })
+    assert accepted.status_code == 200 and accepted.json()["status"] == "TAPAF_CHECKOUT_ACCEPTED"
 
     paid = client.post("/api/v1/finops/lease-equity/tapaf-payment-webhook", headers=auth_headers, json={
         "pauta_id": pauta["id"], "event_id": "tapaf-le-001", "amount": "750.00",
@@ -4360,7 +4371,8 @@ def test_quitcon_engine_canonical_doc253():
     assert escrow == Decimal("22321.43")
 
 
-def test_quitcon_full_pipeline_penalties_and_tokenization(client, auth_headers):
+def test_quitcon_full_pipeline_penalties_and_tokenization(client, auth_headers, monkeypatch):
+    monkeypatch.setattr("app.inter_common.inter_configured", lambda: False)
     lead = client.get("/api/v1/leads", headers=auth_headers).json()[0]
     proposal = client.post("/api/v1/proposals", headers=auth_headers, json={
         "lead_id": lead["id"], "product": "SDC", "requested_amount": "600000", "terms": {},

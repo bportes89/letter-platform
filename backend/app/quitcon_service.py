@@ -16,7 +16,7 @@ from app.pre_analysis_constants import (
 )
 from app.quitcon_engine import EngineQuitConLetter, money
 from app.storage_service import get_storage
-from app.tapaf_constants import resolve_tapaf_track
+from app.tapaf_constants import TAPAF_NOMINAL, resolve_tapaf_track
 from app.tapaf_settlement_service import settle_tapaf_payment
 
 
@@ -216,10 +216,38 @@ def create_operacao(
     return item
 
 
+def provision_quitcon_tapaf_inter(db: Session, user: User, operacao: QuitConOperacao) -> dict:
+    from app.inter_common import inter_configured
+    from app.tapaf_inter_service import issue_tapaf_inter, quitcon_inter_block, save_quitcon_inter_block
+
+    existing = quitcon_inter_block(operacao)
+    if existing.get("codigo_solicitacao"):
+        return existing
+    if not inter_configured():
+        return {}
+    owner = db.get(User, operacao.owner_user_id) or user
+    try:
+        block = issue_tapaf_inter(
+            user=owner,
+            amount=TAPAF_NOMINAL,
+            entity_id=operacao.id,
+            scope="quitcon",
+            mensagem=["TAPAF QuitCon", operacao.operacao_code],
+        )
+    except HTTPException:
+        return existing or {}
+    save_quitcon_inter_block(operacao, block)
+    db.flush()
+    return block
+
+
 def generate_tapaf_checkout(operacao: QuitConOperacao) -> dict:
     if operacao.status not in {"AGUARDANDO_TAPAF", "TAPAF_CHECKOUT_ACCEPTED", "TAPAF_LIQUIDADA"}:
         raise HTTPException(status_code=409, detail="TAPAF disponível apenas em AGUARDANDO_TAPAF / pós-aceite")
     amount = EngineQuitConLetter.taxa_tapaf_nominal
+    from app.tapaf_inter_service import quitcon_inter_block
+
+    inter_ui = quitcon_inter_block(operacao)
     engine = EngineQuitConLetter()
     vp = money(operacao.quitacao_vp_amount or operacao.outstanding_balance)
     custos_entrada = engine.montar_custos_entrada(
@@ -230,7 +258,11 @@ def generate_tapaf_checkout(operacao: QuitConOperacao) -> dict:
         "status": "READY",
         "valor_tapaf_brl": str(amount),
         "custos_entrada": custos_entrada,
-        "gateway_baas_pix_qrcode": f"00020101021126580014br.gov.bcb.pix0136letter-quitcon-tapaf-{operacao.id[:8]}",
+        "gateway_baas_pix_qrcode": (
+            inter_ui.get("pix_copy_paste")
+            or inter_ui.get("gateway_baas_pix_qrcode")
+            or f"00020101021126580014br.gov.bcb.pix0136letter-quitcon-tapaf-{operacao.id[:8]}"
+        ),
         "status_operacao_db": operacao.status,
         "texto_tooltip": (
             "TAPAF QuitCon R$ 1.500,00 — taxa não reembolsável que cobre certidões, ONR e laudo AVM."
@@ -242,6 +274,10 @@ def generate_tapaf_checkout(operacao: QuitConOperacao) -> dict:
         "tapaf_checkbox_1": operacao.tapaf_checkbox_1,
         "tapaf_checkbox_2": operacao.tapaf_checkbox_2,
         "botao_habilitado": operacao.status == "TAPAF_CHECKOUT_ACCEPTED",
+        "checkout_mode": inter_ui.get("checkout_mode") or "SANDBOX",
+        "payment_checkout_url": inter_ui.get("payment_checkout_url"),
+        "inter_codigo_solicitacao": inter_ui.get("codigo_solicitacao"),
+        "pix_copy_paste": inter_ui.get("pix_copy_paste"),
     }
 
 
@@ -262,8 +298,36 @@ def accept_tapaf_checkout(
     operacao.tapaf_checkbox_1 = True
     operacao.tapaf_checkbox_2 = True
     _transition(db, operacao, user, "TAPAF_CHECKOUT_ACCEPTED", "Manifesto TAPAF aceito — pagamento liberado")
+    provision_quitcon_tapaf_inter(db, user, operacao)
     db.flush()
     return operacao
+
+
+def confirm_quitcon_tapaf_from_inter(
+    db: Session,
+    *,
+    codigo_solicitacao: str,
+    amount,
+    event_id: str | None = None,
+) -> QuitConOperacao | None:
+    from app.tapaf_inter_service import find_quitcon_by_inter_codigo
+
+    operacao = find_quitcon_by_inter_codigo(db, codigo_solicitacao)
+    if not operacao:
+        return None
+    if operacao.status == "TAPAF_LIQUIDADA":
+        return operacao
+    if operacao.status != "TAPAF_CHECKOUT_ACCEPTED":
+        return None
+    actor = db.get(User, operacao.owner_user_id)
+    if not actor:
+        actor = db.scalar(
+            select(User).where(User.organization_id == operacao.organization_id).limit(1)
+        )
+    if not actor:
+        return None
+    ref = event_id or f"inter-{codigo_solicitacao}"
+    return confirm_tapaf_payment(db, actor, operacao, ref, amount)
 
 
 def confirm_tapaf_payment(db: Session, user: User, operacao: QuitConOperacao, event_id: str, amount) -> QuitConOperacao:

@@ -65,7 +65,8 @@ from app.schemas import (
     ManualInvestmentCreate, ManualRentabilityCreate, MutuoAcceptSignRequest, MutuoContractCreate, MutuoInterestPostRequest, RentabilityCreditView,
     PaymentReceiptView, PreAnalysisEngineRequest, PreAnalysisPautaView, PreAnalysisProposalRequest,
     PreAnalysisTapafCheckoutAcceptRequest, PreAnalysisTapafPaymentWebhook, PreAnalysisValidateDocumentsRequest,
-    LeaseEquityPautaCreate, LeaseEquityPautaView, LeaseEquityTapafWebhook, LeaseEquityInspectionRequest,
+    LeaseEquityPautaCreate, LeaseEquityPautaView, LeaseEquityTapafCheckoutAcceptRequest,
+    LeaseEquityTapafWebhook, LeaseEquityInspectionRequest,
     LeaseEquityComplianceReview, LeaseEquityFundingCapture, LeaseEquityActivateRequest,
     LeaseEquityAnticipationRequest, LeaseEquityMonthsRequest, LeaseEquityLtvSimulateRequest,
     LeaseEquityTokenizationRequest,
@@ -192,7 +193,10 @@ from app.collateral_native_inspection_service import (
 from app.lease_equity_engine import EngineLeaseEquityLetter
 from app.lease_equity_service import (
     activate_ok, complete_gravame, confirm_tapaf_payment as confirm_lease_tapaf,
-    create_pauta, generate_tapaf_checkout as generate_lease_tapaf, pauta_view as lease_pauta_view,
+    accept_tapaf_checkout as accept_lease_tapaf,
+    create_pauta,
+    generate_tapaf_checkout as generate_lease_tapaf,
+    pauta_view as lease_pauta_view,
     process_tokenization, record_funding_capture, refresh_anticipation_eligibility,
     register_inspection_photos, run_compliance_review, sign_contract, simulate_anticipation,
     submit_registry_protocol,
@@ -5024,6 +5028,27 @@ def lease_equity_tapaf_checkout(pauta_id: str, user: User = Depends(get_current_
     return generate_lease_tapaf(pauta)
 
 
+@router.post("/finops/lease-equity/tapaf-checkout-accept", response_model=LeaseEquityPautaView)
+def lease_equity_tapaf_checkout_accept(
+    payload: LeaseEquityTapafCheckoutAcceptRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    pauta = _load_lease_pauta(db, user, payload.pauta_id)
+    accept_lease_tapaf(
+        db,
+        user,
+        pauta,
+        scroll_completed=payload.scroll_completed,
+        checkbox_1=payload.checkbox_1,
+        checkbox_2=payload.checkbox_2,
+    )
+    audit(db, user, "finops.lease_equity.tapaf_checkout", "lease_equity_pauta", pauta.id)
+    db.commit()
+    db.refresh(pauta)
+    return LeaseEquityPautaView(**lease_pauta_view(pauta))
+
+
 @router.post("/finops/lease-equity/tapaf-payment-webhook", response_model=LeaseEquityPautaView)
 def lease_equity_tapaf_webhook(payload: LeaseEquityTapafWebhook, user: User = Depends(require_scope("payments:review")), db: Session = Depends(get_db)):
     pauta = _load_lease_pauta(db, user, payload.pauta_id)
@@ -5198,6 +5223,38 @@ def quitcon_tapaf_checkout_accept(payload: QuitConTapafCheckoutAcceptRequest, us
     db.commit()
     db.refresh(operacao)
     return QuitConOperacaoView(**quitcon_operacao_view(operacao))
+
+
+@router.get("/finops/quitcon/tapaf-boleto/{operacao_id}/{token}")
+def quitcon_tapaf_boleto_download(operacao_id: str, token: str, db: Session = Depends(get_db)):
+    from app.tapaf_inter_service import quitcon_inter_block, read_tapaf_boleto_pdf
+
+    operacao = db.get(QuitConOperacao, operacao_id)
+    if not operacao:
+        raise HTTPException(status_code=404, detail="Operação não encontrada")
+    codigo = str(quitcon_inter_block(operacao).get("codigo_solicitacao") or "")
+    content, filename = read_tapaf_boleto_pdf("quitcon", operacao_id, token, codigo)
+    return Response(
+        content=content,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
+
+
+@router.get("/finops/lease-equity/tapaf-boleto/{pauta_id}/{token}")
+def lease_equity_tapaf_boleto_download(pauta_id: str, token: str, db: Session = Depends(get_db)):
+    from app.tapaf_inter_service import lease_inter_block, read_tapaf_boleto_pdf
+
+    pauta = db.get(LeaseEquityPauta, pauta_id)
+    if not pauta:
+        raise HTTPException(status_code=404, detail="Pauta não encontrada")
+    codigo = str(lease_inter_block(pauta).get("codigo_solicitacao") or "")
+    content, filename = read_tapaf_boleto_pdf("lease-equity", pauta_id, token, codigo)
+    return Response(
+        content=content,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
 
 
 @router.post("/finops/quitcon/tapaf-payment-webhook", response_model=QuitConOperacaoView)

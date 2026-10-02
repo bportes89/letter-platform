@@ -88,6 +88,9 @@ type QuitConTapafCheckout = {
   gateway_baas_pix_qrcode: string;
   botao_habilitado?: boolean;
   texto_tooltip?: string;
+  checkout_mode?: string | null;
+  payment_checkout_url?: string | null;
+  pix_copy_paste?: string | null;
 };
 
 export function QuitConModule() {
@@ -229,7 +232,16 @@ export function QuitConModule() {
         }),
       });
       setSelected(item);
-      setMessage("Aceite TAPAF registrado — pagamento liberado.");
+      const refreshed = await api<QuitConTapafCheckout>(
+        `/finops/quitcon/tapaf-checkout?operacao_id=${item.id}`,
+        { method: "POST", body: "{}" },
+      );
+      setTapafCheckout(refreshed);
+      setMessage(
+        refreshed.checkout_mode === "INTER"
+          ? "Aceite registrado — boleto/PIX Banco Inter gerado. Use o botão de pagamento para abrir o boleto."
+          : "Aceite TAPAF registrado — pagamento liberado (sandbox).",
+      );
       await load();
     } catch (x) {
       setMessage(x instanceof Error ? x.message : "Falha no aceite TAPAF");
@@ -239,6 +251,11 @@ export function QuitConModule() {
   async function payTapaf() {
     if (!selected) return;
     try {
+      if (tapafCheckout?.checkout_mode === "INTER" && tapafCheckout.payment_checkout_url) {
+        window.open(tapafCheckout.payment_checkout_url, "_blank", "noopener,noreferrer");
+        setMessage("Boleto Inter aberto — após pagar, o status atualiza pelo webhook Banco Inter.");
+        return;
+      }
       const item = await api<QuitConOperacao>("/finops/quitcon/tapaf-payment-webhook", {
         method: "POST",
         body: JSON.stringify({ operacao_id: selected.id, event_id: `tapaf-qc-${Date.now()}`, amount: "1500.00" }),
@@ -591,8 +608,13 @@ export function QuitConModule() {
                 Registrar aceite TAPAF
               </button>
               <button type="button" disabled={selected.status !== "TAPAF_CHECKOUT_ACCEPTED"} onClick={() => void payTapaf()}>
-                Pagar TAPAF R$ 1.500
+                {tapafCheckout?.checkout_mode === "INTER" ? "Abrir boleto / PIX Inter" : "Pagar TAPAF R$ 1.500"}
               </button>
+              {selected.status === "TAPAF_CHECKOUT_ACCEPTED" && tapafCheckout?.checkout_mode === "INTER" && (
+                <small className="form-help">
+                  Pix: {(tapafCheckout.pix_copy_paste || tapafCheckout.gateway_baas_pix_qrcode || "").slice(0, 48)}…
+                </small>
+              )}
               <button type="button" disabled={!selected.operational_service_enabled || selected.status !== "TAPAF_LIQUIDADA" || !!selected.operational_service_paid_at} onClick={() => void payOperationalService()}>Pagar taxa serviço 2% (abertura)</button>
               <button type="button" disabled={selected.status !== "TAPAF_LIQUIDADA" || !!selected.success_fee_escrow_paid_at || (selected.operational_service_enabled && !selected.operational_service_paid_at)} onClick={() => void paySuccessFee()}>Depositar taxa sucesso Escrow 10%</button>
               <button type="button" disabled={!selected.administrator_approved_at || !!selected.cedente_payment_escrow_reference} onClick={() => void payCedenteEscrow()}>Pagar quitação cedente (Escrow)</button>

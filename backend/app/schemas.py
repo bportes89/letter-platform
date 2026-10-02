@@ -3471,6 +3471,13 @@ class LeaseEquityPautaCreate(BaseModel):
     owner_user_id: str | None = None
 
 
+class LeaseEquityTapafCheckoutAcceptRequest(BaseModel):
+    pauta_id: str
+    scroll_completed: bool
+    checkbox_1: bool
+    checkbox_2: bool
+
+
 class LeaseEquityTapafWebhook(BaseModel):
     pauta_id: str
     event_id: str = Field(min_length=4, max_length=120)
@@ -3561,6 +3568,9 @@ class LeaseEquityPautaView(BaseModel):
     appraisal_value: str
     registry_number: str
     registry_office: str
+    tapaf_scroll_completed: bool
+    tapaf_checkbox_1: bool
+    tapaf_checkbox_2: bool
     tapaf_payment_reference: str | None
     tapaf_paid_at: datetime | None
     compliance_dossier_uri: str | None

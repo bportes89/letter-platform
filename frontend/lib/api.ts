@@ -165,6 +165,7 @@ export type CommercialClient = { id: string; name: string; email: string; phone?
 export type LeaseEquityPauta = {
   id: string; proposal_id: string; pauta_code: string; status: string; property_type: string;
   appraisal_value: string; registry_number: string; registry_office: string;
+  tapaf_scroll_completed?: boolean; tapaf_checkbox_1?: boolean; tapaf_checkbox_2?: boolean;
   tapaf_payment_reference: string | null; tapaf_paid_at: string | null;
   compliance_dossier_uri: string | null; inspection_photos_count: number;
   funding_captured_amount: string; funding_target_amount: string; funding_capture_percent: string;
