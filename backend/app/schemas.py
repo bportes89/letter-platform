@@ -2794,6 +2794,9 @@ class PartnerWithdrawalView(BaseModel):
     status_label: str | None = None
     pix_key: str
     notes: str | None = None
+    inter_codigo_solicitacao: str | None = None
+    inter_end_to_end_id: str | None = None
+    payment_error: str | None = None
     processed_at: str | None = None
     created_at: str | None = None
     partner_name: str | None = None

@@ -3440,6 +3440,32 @@ async def inter_webhook(request: Request, db: Session = Depends(get_db)):
     return {"status": "ok", **result}
 
 
+@router.post("/webhooks/inter-payout")
+async def inter_payout_webhook(request: Request, db: Session = Depends(get_db)):
+    from app.inter_payout_common import inter_payout_webhook_token
+    from app.inter_payout_webhook_service import handle_inter_payout_webhook
+
+    expected = inter_payout_webhook_token()
+    token = (
+        request.headers.get("x-inter-webhook-token")
+        or request.headers.get("inter-access-token")
+        or request.query_params.get("token")
+        or ""
+    )
+    auth = request.headers.get("authorization") or ""
+    if auth.lower().startswith("bearer "):
+        token = token or auth[7:].strip()
+    if expected and token != expected:
+        raise HTTPException(status_code=401, detail="Webhook Inter pagamentos não autorizado")
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = []
+    result = handle_inter_payout_webhook(db, payload)
+    db.commit()
+    return {"status": "ok", **result}
+
+
 @router.post("/marketplace/cadastros/{lead_id}/mock-inter-webhook")
 def marketplace_mock_inter_webhook(
     lead_id: str,

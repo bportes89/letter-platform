@@ -14,8 +14,10 @@ from app.org_settings_service import get_setting
 from app.services import money
 
 WD_PENDING = "PENDING"
+WD_PROCESSING = "PROCESSING"
 WD_PAID = "PAID"
 WD_CANCELLED = "CANCELLED"
+WD_FAILED = "FAILED"
 WITHDRAWN_STATUS = "WITHDRAWN"
 HELD_STATUSES = frozenset({"PENDING_FISCAL", "PENDING_RECEIPT"})
 
@@ -27,8 +29,10 @@ _COMMISSION_STATUS_LABELS = {
 }
 _WITHDRAWAL_STATUS_LABELS = {
     WD_PENDING: "Em análise",
+    WD_PROCESSING: "PIX em processamento (Inter)",
     WD_PAID: "Pago",
     WD_CANCELLED: "Cancelado",
+    WD_FAILED: "Erro no pagamento PIX",
 }
 
 
@@ -143,7 +147,7 @@ def partner_earnings_summary(db: Session, user: User) -> dict:
     reserved = db.scalar(
         select(func.coalesce(func.sum(PartnerWithdrawal.amount), 0)).where(
             PartnerWithdrawal.user_id == user.id,
-            PartnerWithdrawal.status == WD_PENDING,
+            PartnerWithdrawal.status.in_([WD_PENDING, WD_PROCESSING]),
         )
     )
     reserved = money(Decimal(str(reserved or 0)))
@@ -172,7 +176,7 @@ def partner_earnings_summary(db: Session, user: User) -> dict:
     pending_wd = db.scalar(
         select(PartnerWithdrawal).where(
             PartnerWithdrawal.user_id == user.id,
-            PartnerWithdrawal.status == WD_PENDING,
+            PartnerWithdrawal.status.in_([WD_PENDING, WD_PROCESSING]),
         )
     )
     pending_withdrawal = withdrawal_view(pending_wd) if pending_wd else None
@@ -284,7 +288,7 @@ def request_partner_withdrawal(
     pending = db.scalar(
         select(PartnerWithdrawal).where(
             PartnerWithdrawal.user_id == user.id,
-            PartnerWithdrawal.status == WD_PENDING,
+            PartnerWithdrawal.status.in_([WD_PENDING, WD_PROCESSING]),
         )
     )
     if pending:
@@ -300,7 +304,9 @@ def request_partner_withdrawal(
     )
     db.add(wd)
     db.flush()
-    return withdrawal_view(wd)
+    from app.inter_payout_service import try_auto_partner_withdrawal
+
+    return try_auto_partner_withdrawal(db, wd)
 
 
 def withdrawal_view(wd: PartnerWithdrawal) -> dict:
@@ -312,6 +318,9 @@ def withdrawal_view(wd: PartnerWithdrawal) -> dict:
         "status_label": withdrawal_status_label(wd.status),
         "pix_key": wd.pix_key,
         "notes": wd.notes,
+        "inter_codigo_solicitacao": getattr(wd, "inter_codigo_solicitacao", None),
+        "inter_end_to_end_id": getattr(wd, "inter_end_to_end_id", None),
+        "payment_error": getattr(wd, "payment_error", None),
         "processed_at": wd.processed_at.isoformat() if wd.processed_at else None,
         "created_at": wd.created_at.isoformat() if wd.created_at else None,
     }
@@ -393,8 +402,10 @@ def process_partner_withdrawal(
     )
     if not wd:
         raise HTTPException(404, "Saque não encontrado.")
-    if wd.status != WD_PENDING:
+    if wd.status in {WD_PAID, WD_CANCELLED}:
         raise HTTPException(409, "Saque já processado.")
+    if wd.status == WD_PROCESSING and action == WD_PAID:
+        raise HTTPException(409, "Saque aguardando confirmação PIX do Banco Inter.")
     partner = db.get(User, wd.user_id)
     if not partner:
         raise HTTPException(404, "Parceiro não encontrado.")

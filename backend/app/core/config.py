@@ -89,6 +89,14 @@ class Settings(BaseSettings):
     inter_base_url: str = "https://cdpj.partners.bancointer.com.br"
     inter_webhook_access_token: str | None = None
     inter_boleto_vencimento_dias: int = 5
+    # API Inter separada — pagamento PIX a parceiros/fornecedores (doc 170)
+    inter_payout_client_id: str | None = None
+    inter_payout_client_secret: str | None = None
+    inter_payout_conta_corrente: str | None = None
+    inter_payout_cert_path: str | None = None
+    inter_payout_key_path: str | None = None
+    inter_payout_webhook_access_token: str | None = None
+    inter_payout_auto_on_withdraw: bool = True
     zapsign_api_token: str | None = None
     zapsign_base_url: str = "https://api.zapsign.com.br/api/v1"
     zapsign_auth_mode: str = "assinaturaTela-tokenEmail"

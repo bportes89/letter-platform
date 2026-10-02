@@ -210,6 +210,14 @@ def request_withdrawal(
     )
     db.add(wd)
     db.flush()
+    from app.inter_payout_common import inter_payout_auto_enabled
+    from app.inter_payout_service import submit_supplier_withdrawal_pix
+
+    if inter_payout_auto_enabled():
+        try:
+            submit_supplier_withdrawal_pix(db, wd)
+        except Exception:
+            pass
     return withdrawal_view(wd)
 
 
