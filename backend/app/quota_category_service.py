@@ -101,7 +101,13 @@ def category_view(row: QuotaCategory) -> dict[str, Any]:
     }
 
 
-def list_categories(db: Session, user: User, *, parents_only: bool = False) -> list[QuotaCategory]:
+def list_categories(
+    db: Session,
+    user: User,
+    *,
+    parents_only: bool = False,
+    active_only: bool = False,
+) -> list[QuotaCategory]:
     q = (
         select(QuotaCategory)
         .where(QuotaCategory.organization_id == user.organization_id)
@@ -109,7 +115,107 @@ def list_categories(db: Session, user: User, *, parents_only: bool = False) -> l
     )
     if parents_only:
         q = q.where(QuotaCategory.legacy_type == 0)
+    if active_only:
+        q = q.where(QuotaCategory.active.is_(True))
     return list(db.scalars(q))
+
+
+_BUILTIN_MARKETPLACE_TREE: list[dict[str, Any]] = [
+    {
+        "name": "Imóveis",
+        "title_sub": "Imóvel",
+        "asset_class": "REAL_ESTATE",
+        "children": ["Casa", "Apartamento", "Sala comercial", "Terreno", "Outros imóveis"],
+    },
+    {
+        "name": "Veículos",
+        "title_sub": "Veículo",
+        "asset_class": "VEHICLE",
+        "children": ["Carro", "Moto", "Caminhão", "Máquina", "Outros veículos"],
+    },
+]
+
+
+def _has_active_subcategories(db: Session, organization_id: str) -> bool:
+    found = db.scalar(
+        select(QuotaCategory.id)
+        .where(
+            QuotaCategory.organization_id == organization_id,
+            QuotaCategory.legacy_type == 1,
+            QuotaCategory.active.is_(True),
+        )
+        .limit(1)
+    )
+    return bool(found)
+
+
+def _seed_builtin_marketplace_categories(db: Session, organization_id: str) -> int:
+    created = 0
+    for index, group in enumerate(_BUILTIN_MARKETPLACE_TREE, start=1):
+        parent = db.scalar(
+            select(QuotaCategory).where(
+                QuotaCategory.organization_id == organization_id,
+                QuotaCategory.legacy_type == 0,
+                QuotaCategory.asset_class == group["asset_class"],
+            )
+        )
+        if not parent:
+            parent = QuotaCategory(
+                organization_id=organization_id,
+                name=group["name"],
+                title_sub=group["title_sub"],
+                legacy_type=0,
+                sort_order=index * 10,
+                asset_class=group["asset_class"],
+                active=True,
+            )
+            db.add(parent)
+            db.flush()
+            created += 1
+        for child_index, child_name in enumerate(group["children"], start=1):
+            exists = db.scalar(
+                select(QuotaCategory.id).where(
+                    QuotaCategory.organization_id == organization_id,
+                    QuotaCategory.legacy_type == 1,
+                    QuotaCategory.parent_id == parent.id,
+                    QuotaCategory.name == child_name,
+                )
+            )
+            if exists:
+                continue
+            db.add(
+                QuotaCategory(
+                    organization_id=organization_id,
+                    name=child_name,
+                    legacy_type=1,
+                    parent_id=parent.id,
+                    sort_order=child_index * 10,
+                    asset_class=group["asset_class"],
+                    active=True,
+                )
+            )
+            created += 1
+    db.flush()
+    return created
+
+
+def ensure_marketplace_quota_categories(db: Session, organization_id: str) -> dict[str, int]:
+    """Garante subcategorias para o dropdown da Esteira 2 (import legado ou árvore padrão)."""
+    if _has_active_subcategories(db, organization_id):
+        return {"skipped": True, "reason": "already_has_subcategories"}
+
+    path = DEFAULT_LEGACY_SQL
+    if path.is_file():
+        try:
+            result = import_legacy_categories(db, organization_id, sql_path=path)
+            db.flush()
+            if _has_active_subcategories(db, organization_id):
+                return {"imported_legacy": True, **result}
+        except HTTPException:
+            pass
+
+    seeded = _seed_builtin_marketplace_categories(db, organization_id)
+    return {"seeded_builtin": seeded, "created": seeded}
 
 
 def get_category(db: Session, user: User, category_id: str) -> QuotaCategory:

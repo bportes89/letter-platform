@@ -89,7 +89,12 @@ from app.schemas import (
     ContractStatusView, ContractAcceptRequest, MasterTreeView,
     NetworkNodeCreate, NetworkNodeView, NetworkDownlineMemberView, NetworkReferralView, PayoutApprove, PayoutCreate, PayoutView, ProposalCreate, ProposalUpdate,
     ReconciliationBatchView, ReconciliationItemView, ReconciliationResolveRequest,
-    MarketplaceEsteira1Request, MarketplaceEsteira1Response, MarketplaceEsteira2Request, MarketplaceEsteira2Response,
+    MarketplaceEsteira1Request,
+    MarketplaceEsteira1Response,
+    MarketplaceEsteira2Request,
+    MarketplaceEsteira2Response,
+    MarketplaceEsteiraLockRequest,
+    MarketplaceEsteiraLockResponse,
     VendaDiretaRoboSearchRequest, VendaDiretaRoboSearchResponse, VendaDiretaRoboConfirmRequest, VendaDiretaRoboConfirmResponse,
     QuotaSupplierCreate, QuotaSupplierUpdate, QuotaSupplierView, QuotaInventorySyncView,
     QuotaCategoryCreate, QuotaCategoryUpdate, QuotaCategoryMoveRequest, QuotaCategoryView, QuotaCategoryImportResult,
@@ -2007,12 +2012,17 @@ def ensure_quota_supplier_defaults(user: User = Depends(require_scope("inventory
 @router.get("/marketplace/quota-categories", response_model=list[QuotaCategoryView])
 def list_quota_categories_route(
     parents_only: bool = False,
+    marketplace: bool = False,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    from app.quota_category_service import category_view, list_categories
+    from app.quota_category_service import category_view, ensure_marketplace_quota_categories, list_categories
 
-    return [category_view(x) for x in list_categories(db, user, parents_only=parents_only)]
+    if marketplace:
+        ensure_marketplace_quota_categories(db, user.organization_id)
+        db.commit()
+    rows = list_categories(db, user, parents_only=parents_only, active_only=marketplace)
+    return [category_view(x) for x in rows]
 
 
 @router.post("/marketplace/quota-categories", response_model=QuotaCategoryView, status_code=201)
@@ -2891,6 +2901,37 @@ def marketplace_esteira1(payload: MarketplaceEsteira1Request, user: User = Depen
     return mask_esteira_result(result, user)
 
 
+@router.post("/marketplace/esteira-1/lock", response_model=MarketplaceEsteiraLockResponse)
+def marketplace_esteira1_lock(
+    payload: MarketplaceEsteiraLockRequest,
+    user: User = Depends(require_any_scope("proposals:write", "inventory:write")),
+    db: Session = Depends(get_db),
+):
+    from app.marketplace_esteira_lock_service import SOURCE_ESTEIRA_1, SOURCE_ESTEIRA_2, lock_quotas_with_proposal
+
+    channel = SOURCE_ESTEIRA_1 if payload.esteira == "SELF_SELECT" else SOURCE_ESTEIRA_2
+    profile = {
+        "monthly_income": str(payload.monthly_income),
+        "monthly_commitment": str(payload.monthly_commitment),
+        "asset_value": str(payload.asset_value),
+        "asset_year": payload.asset_year,
+        "has_credit_restriction": payload.has_credit_restriction,
+        "asset_is_zero_km": payload.asset_is_zero_km,
+    }
+    result = lock_quotas_with_proposal(
+        db,
+        user,
+        quota_ids=payload.quota_ids,
+        channel=channel,
+        profile=profile,
+        match_lane=payload.match_lane,
+        revalidate_esteira1=payload.esteira == "SELF_SELECT",
+    )
+    audit(db, user, "marketplace.esteira.lock", "proposal", result["proposal_id"], {"quota_ids": result["quota_ids"]})
+    db.commit()
+    return result
+
+
 @router.post("/marketplace/esteira-2/match", response_model=MarketplaceEsteira2Response)
 def marketplace_esteira2(payload: MarketplaceEsteira2Request, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     from app.marketplace_service import esteira2_nina_curated_match
@@ -2985,6 +3026,8 @@ def venda_direta_robo_confirm(payload: VendaDiretaRoboConfirmRequest, user: User
 def venda_direta_manual_cotas(
     category: str = "REAL_ESTATE",
     include_reserved: bool = False,
+    administrator_id: str | None = None,
+    limit: int = 400,
     quota_category_id: str | None = None,
     asset_year: int | None = None,
     asset_is_zero_km: bool = False,
@@ -3007,6 +3050,8 @@ def venda_direta_manual_cotas(
         user,
         category=category,
         include_reserved=include_reserved,
+        administrator_id=administrator_id,
+        limit=limit,
         quota_category_id=quota_category_id,
         asset_year=asset_year,
         asset_is_zero_km=asset_is_zero_km,

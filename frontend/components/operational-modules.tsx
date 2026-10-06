@@ -2,7 +2,8 @@
 
 import { Check, CheckCircle2, Clock3, Download, FileText, LockKeyhole, Plus, RefreshCw, Search, Unlock, Users, WalletCards, XCircle } from "lucide-react";
 import Link from "next/link";
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Administrator, api, Calculation, CommercialClient, Contract, downloadApi, Lead, Proposal, Quota, Reservation, User } from "@/lib/api";
 import { FLASH_CAPITAL_SOURCES, productLabel } from "@/lib/products";
 import { SdcQuitConProjectionTable } from "@/components/sdc-quitcon-card";
@@ -290,8 +291,16 @@ function ClientProfileFields({prefix,values,flags,onChange,onFlag,category}:{pre
   </div>;
 }
 
+type MarketplaceLockResponse = {
+  proposal_id: string;
+  lead_id: string;
+  message: string;
+};
+
 export function MarketplaceModule() {
+  const router = useRouter();
   const [catalog,setCatalog]=useState<MarketplaceCatalogCota[]>([]);
+  const [catalogLoading,setCatalogLoading]=useState(false);
   const [error,setError]=useState("");
   const [notice,setNotice]=useState("");
   const [tab,setTab]=useState<"esteira1"|"esteira2">("esteira1");
@@ -305,7 +314,9 @@ export function MarketplaceModule() {
   const [targetAmount,setTargetAmount]=useState("");
   const [targetEntrada,setTargetEntrada]=useState("");
   const [category,setCategory]=useState("REAL_ESTATE");
-  const [quotaCategories,setQuotaCategories]=useState<{id:string;name:string;legacy_type:number;parent_id:string|null;title_sub:string|null}[]>([]);
+  const [quotaCategories,setQuotaCategories]=useState<
+    { id: string; name: string; legacy_type: number; parent_id: string | null; title_sub: string | null; asset_class: string | null; active: boolean }[]
+  >([]);
   const [e2SubcategoryId,setE2SubcategoryId]=useState("");
   const [e2BankAdmins,setE2BankAdmins]=useState<{id:string;name:string;rules:{is_bank?:boolean}}[]>([]);
   const [e2ClientBankIds,setE2ClientBankIds]=useState<string[]>([]);
@@ -314,14 +325,44 @@ export function MarketplaceModule() {
   const [result2,setResult2]=useState<MarketplaceEsteira2Result|null>(null);
   const [esteira1Busy,setEsteira1Busy]=useState(false);
   const [esteira2Busy,setEsteira2Busy]=useState(false);
-  const loadCatalog=(cat:string)=>api<MarketplaceCatalogCota[]>(
-    `/marketplace/venda-direta-manual/cotas?category=${encodeURIComponent(cat)}&include_reserved=true`,
-  ).then(setCatalog).catch(e=>setError(e.message));
-  useEffect(()=>{void loadCatalog(e1Category)},[e1Category]);
-  useEffect(()=>{api<{id:string;name:string;legacy_type:number;parent_id:string|null;title_sub:string|null}[]>("/marketplace/quota-categories").then(setQuotaCategories).catch(()=>setQuotaCategories([]))},[]);
+  const loadCatalog = useCallback(
+    (cat: string, administratorId?: string) => {
+      setCatalogLoading(true);
+      const qs = new URLSearchParams({ category: cat, limit: "400" });
+      if (administratorId) qs.set("administrator_id", administratorId);
+      return api<MarketplaceCatalogCota[]>(`/marketplace/venda-direta-manual/cotas?${qs}`)
+        .then(setCatalog)
+        .catch((e) => setError(e.message))
+        .finally(() => setCatalogLoading(false));
+    },
+    [],
+  );
+  useEffect(() => {
+    void loadCatalog(e1Category, e1FilterAdministratorId || undefined);
+  }, [e1Category, e1FilterAdministratorId, loadCatalog]);
+  useEffect(() => {
+    api<
+      { id: string; name: string; legacy_type: number; parent_id: string | null; title_sub: string | null; asset_class: string | null; active: boolean }[]
+    >("/marketplace/quota-categories?marketplace=true")
+      .then(setQuotaCategories)
+      .catch(() => setQuotaCategories([]));
+  }, []);
   useEffect(()=>{api<{id:string;name:string;rules:{is_bank?:boolean}}[]>("/administrators").then(rows=>setE2BankAdmins(rows.filter(a=>Boolean(a.rules?.is_bank)))).catch(()=>setE2BankAdmins([]))},[]);
   function toggleE2BankId(list:string[],id:string,checked:boolean,setter:(v:string[])=>void){setter(checked?[...list,id]:list.filter(x=>x!==id));}
-  const e2Subcategories=useMemo(()=>quotaCategories.filter(c=>c.legacy_type===1),[quotaCategories]);
+  const e2Subcategories = useMemo(() => {
+    const parents = new Map(quotaCategories.filter((c) => c.legacy_type === 0).map((p) => [p.id, p]));
+    return quotaCategories
+      .filter((c) => c.legacy_type === 1 && c.active)
+      .filter((c) => {
+        const parent = c.parent_id ? parents.get(c.parent_id) : undefined;
+        const asset = c.asset_class || parent?.asset_class || null;
+        return !asset || asset === category;
+      })
+      .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+  }, [quotaCategories, category]);
+  useEffect(() => {
+    setE2SubcategoryId("");
+  }, [category]);
   const e1FilterActive = parseMoney(e1FilterCredit) > 0 || parseMoney(e1FilterEntrada) > 0 || !!e1FilterAdministratorId;
   const e1AdministratorOptions=useMemo(()=>{
     const map=new Map<string,string>();
@@ -334,6 +375,7 @@ export function MarketplaceModule() {
     const creditTarget=parseMoney(e1FilterCredit);
     const entradaTarget=parseMoney(e1FilterEntrada);
     return catalog
+      .filter((c) => c.status !== "RESERVED")
       .filter(c=>{
         if(e1FilterAdministratorId&&c.administrator_id!==e1FilterAdministratorId) return false;
         const credit=Number(c.credit_value);
@@ -380,21 +422,56 @@ export function MarketplaceModule() {
   };
   async function assessEsteira1(e:FormEvent){e.preventDefault();setError("");setNotice("");const validation=profileValidationMessage("e1",e1Category,profile);if(validation){setError(validation);return}if(!selectedQuotaIds.length){setError("Selecione ao menos uma carta na lista.");return}setEsteira1Busy(true);try{const data=await api<MarketplaceEsteira1Result>("/marketplace/esteira-1/assess",{method:"POST",body:JSON.stringify({quota_ids:selectedQuotaIds,...profilePayload("e1",e1Category)})},{interactive:true});setResult1(data);setNotice(data.message)}catch(err){setError(err instanceof Error?err.message:"Falha na Esteira 1")}finally{setEsteira1Busy(false)}}
   async function matchEsteira2(e:FormEvent){e.preventDefault();setError("");setNotice("");setResult2(null);const validation=profileValidationMessage("e2",category,profile);if(validation){setError(validation);return}if(!parseMoney(targetAmount)){setError("Informe o crédito desejado.");return}if(!parseMoney(targetEntrada)){setError("Informe a entrada desejada.");return}setEsteira2Busy(true);try{const data=await api<MarketplaceEsteira2Result>("/marketplace/esteira-2/match",{method:"POST",body:JSON.stringify({target_amount:String(parseMoney(targetAmount)),target_entrada:String(parseMoney(targetEntrada)),category,quota_category_id:e2SubcategoryId||null,client_bank_administrator_ids:e2ClientBankIds,client_problem_bank_administrator_ids:e2ClientProblemBankIds,...profilePayload("e2",category)})},{interactive:true});setResult2(data);setNotice(data.message);if(!data.eligible&&data.blockers?.length)setError(data.blockers.join(" "))}catch(err){setError(err instanceof Error?err.message:"Falha na Esteira 2")}finally{setEsteira2Busy(false)}}
-  async function reserveQuota(quotaId:string){setError("");try{await api("/reservations",{method:"POST",body:JSON.stringify({quota_id:quotaId,ttl_minutes:60})});setNotice("Cota travada por 60 minutos. Prossiga em Propostas.");void loadCatalog(e1Category)}catch(err){setError(err instanceof Error?err.message:"Falha na trava")}}
-  async function reserveSelectedQuotas(ids: string[]) {
+  async function lockMarketplaceQuotas(
+    ids: string[],
+    opts: { esteira: "SELF_SELECT" | "NINA_CURATED"; profilePrefix: "e1" | "e2"; category: string; matchLane?: string },
+  ) {
     setError("");
+    const validation = profileValidationMessage(opts.profilePrefix, opts.category, profile);
+    if (validation) {
+      setError(validation);
+      return;
+    }
     try {
-      for (const quotaId of ids) {
-        await api("/reservations", { method: "POST", body: JSON.stringify({ quota_id: quotaId, ttl_minutes: 60 }) });
-      }
-      setNotice(`${ids.length} cota(s) travada(s) por 60 minutos. Prossiga em Propostas.`);
-      setResult1(null);
-      void loadCatalog(e1Category);
+      const data = await api<MarketplaceLockResponse>("/marketplace/esteira-1/lock", {
+        method: "POST",
+        body: JSON.stringify({
+          quota_ids: ids,
+          ...profilePayload(opts.profilePrefix, opts.category),
+          esteira: opts.esteira,
+          match_lane: opts.matchLane ?? null,
+        }),
+      });
+      setNotice(data.message);
+      setSelectedQuotaIds((prev) => prev.filter((id) => !ids.includes(id)));
+      void loadCatalog(e1Category, e1FilterAdministratorId || undefined);
+      router.push(`/modules/proposals?proposal_id=${encodeURIComponent(data.proposal_id)}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Falha na trava");
     }
   }
-  function MatchCard({ match, onReserve }: { match: MarketplaceMatch; onReserve: (id: string) => void }) {
+  async function reserveQuota(quotaId: string, matchLane?: string) {
+    await lockMarketplaceQuotas([quotaId], {
+      esteira: tab === "esteira2" ? "NINA_CURATED" : "SELF_SELECT",
+      profilePrefix: tab === "esteira2" ? "e2" : "e1",
+      category: tab === "esteira2" ? category : e1Category,
+      matchLane,
+    });
+  }
+  async function reserveSelectedQuotas(ids: string[]) {
+    await lockMarketplaceQuotas(ids, {
+      esteira: "SELF_SELECT",
+      profilePrefix: "e1",
+      category: e1Category,
+    });
+  }
+  function MatchCard({
+    match,
+    onReserve,
+  }: {
+    match: MarketplaceMatch;
+    onReserve: (id: string, lane?: string) => void;
+  }) {
     return (
       <article className="marketplace-match-card">
         <p>
@@ -415,9 +492,14 @@ export function MarketplaceModule() {
               · Nina {q.nina_scan_status ?? "PENDENTE"}
             </small>
             {q.status === "AVAILABLE" && q.nina_scan_status === "CLEARED" ? (
-              <button type="button" className="table-action lock" style={{ marginTop: 8 }} onClick={() => onReserve(q.quota_id)}>
+              <button
+                type="button"
+                className="table-action lock"
+                style={{ marginTop: 8 }}
+                onClick={() => onReserve(q.quota_id, match.lane ?? undefined)}
+              >
                 <LockKeyhole />
-                Travar 60 min
+                Travar 60 min e preencher cadastro
               </button>
             ) : null}
           </div>
@@ -479,7 +561,8 @@ export function MarketplaceModule() {
             {e1Catalog.length > e1SelectableCatalog.length ? ` · ${e1Catalog.length - e1SelectableCatalog.length} aguardando aprovação` : ""}
           </b>
           <div className="quota-pick-scroll" style={{ maxHeight: 240 }}>
-            {e1Catalog.length === 0 ? (
+            {catalogLoading ? <small className="muted">Carregando cartas…</small> : null}
+            {!catalogLoading && e1Catalog.length === 0 ? (
               <small className="muted">
                 {catalog.length === 0
                   ? `Nenhuma carta de ${e1Category === "REAL_ESTATE" ? "imóvel" : "veículo"} no estoque. Cadastre em Inventário ou sincronize Fornecedores e aprove a cota (compliance).`
@@ -510,7 +593,6 @@ export function MarketplaceModule() {
                       <small className="muted" style={{ display: "block", marginTop: 4 }}>
                         {c.group_code} · {c.quota_code}
                         {!selectable ? " · aguardando aprovação (Inventário)" : ""}
-                        {c.status === "RESERVED" ? " · reservada" : ""}
                       </small>
                     </span>
                   </label>
@@ -534,14 +616,34 @@ export function MarketplaceModule() {
         <label className="marketplace-field">Crédito desejado (R$)<CurrencyInput value={targetAmount} onChange={setTargetAmount} required/></label>
         <label className="marketplace-field">Entrada desejada (R$)<CurrencyInput value={targetEntrada} onChange={setTargetEntrada} required/></label>
         <label className="marketplace-field marketplace-field-compact">Categoria<select value={category} onChange={e=>setCategory(e.target.value)}><option value="REAL_ESTATE">Imóvel</option><option value="VEHICLE">Veículo</option></select></label>
-        <label className="marketplace-field marketplace-field-compact">Subcategoria<select value={e2SubcategoryId} onChange={e=>setE2SubcategoryId(e.target.value)}><option value="">Todas (tipo de bem)</option>{e2Subcategories.map(s=>{const p=quotaCategories.find(x=>x.id===s.parent_id);return<option key={s.id} value={s.id}>{p?(p.title_sub||p.name)+" — ":""}{s.name}</option>})}</select></label>
+        <label className="marketplace-field marketplace-field-compact">
+          Subcategoria
+          <select value={e2SubcategoryId} onChange={(e) => setE2SubcategoryId(e.target.value)}>
+            <option value="">Todas (tipo de bem)</option>
+            {e2Subcategories.map((s) => {
+              const p = quotaCategories.find((x) => x.id === s.parent_id);
+              return (
+                <option key={s.id} value={s.id}>
+                  {p ? `${p.title_sub || p.name} — ` : ""}
+                  {s.name}
+                </option>
+              );
+            })}
+          </select>
+          {!e2Subcategories.length ? (
+            <small className="muted" style={{ display: "block", marginTop: 4 }}>
+              Nenhuma subcategoria para {category === "REAL_ESTATE" ? "imóvel" : "veículo"}. O sistema tentará
+              criar as padrão ao abrir a tela; se persistir, use Comercial → Categorias de cotas.
+            </small>
+          ) : null}
+        </label>
         <ClientProfileFields prefix="e2" category={category} values={profile} flags={flags} onChange={(k,v)=>setProfile(p=>({...p,[k]:v}))} onFlag={(k,v)=>setFlags(p=>({...p,[k]:v}))}/>
         {e2BankAdmins.length>0&&<div className="marketplace-form-row" style={{flexDirection:"column",alignItems:"stretch",gap:8}}><small className="muted">Bancos administradores: correntista ou restrição com a administradora.</small><div style={{display:"flex",flexWrap:"wrap",gap:"12px 20px"}}>{e2BankAdmins.map(adm=><div key={adm.id} style={{minWidth:200}}><b style={{fontSize:11}}>{adm.name}</b><label style={{display:"flex",alignItems:"center",gap:6,fontSize:11,marginTop:4}}><input type="checkbox" checked={e2ClientBankIds.includes(adm.id)} onChange={e=>toggleE2BankId(e2ClientBankIds,adm.id,e.target.checked,setE2ClientBankIds)}/>Cliente correntista</label><label style={{display:"flex",alignItems:"center",gap:6,fontSize:11,marginTop:2}}><input type="checkbox" checked={e2ClientProblemBankIds.includes(adm.id)} onChange={e=>toggleE2BankId(e2ClientProblemBankIds,adm.id,e.target.checked,setE2ClientProblemBankIds)}/>Restrição / inadimplência</label></div>)}</div></div>}
         <button type="submit" className="marketplace-submit" disabled={esteira2Busy}><RefreshCw className={esteira2Busy?"spin":undefined}/>{esteira2Busy?"Buscando opções robô…":"Buscar opções robô"}</button>
       </div>
     </form>}
     {esteira2Busy&&tab==="esteira2"&&<div className="notice"><Clock3/>Robô Nina consultando o estoque e as regras Bacen — pode levar alguns segundos na primeira busca do dia.</div>}
-    {result1&&tab==="esteira1"&&<section className="panel"><div className="panel-title"><h2>Resultado Esteira 1{result1.combo?" (junção manual)":""}</h2></div><div className="notice">{result1.message}</div>{result1.blockers.length>0&&<div className="error">{result1.blockers.map(b=><div key={b}>{b}</div>)}</div>}{(result1.selected_quotas??[result1.quota]).map(q=><div key={q.quota_id} className="marketplace-match-card" style={{marginTop:12}}><Pill value={result1.eligible?"CLEARED":"BLOCKED"}/><div style={{marginTop:10}}><MarketplaceQuotaFields quota={q}/></div></div>)}{result1.eligible&&(result1.selected_quotas??[result1.quota]).every(q=>q.status==="AVAILABLE"&&q.nina_scan_status==="CLEARED")?<button type="button" className="table-action lock" onClick={()=>void reserveSelectedQuotas((result1.selected_quotas??[result1.quota]).map(q=>q.quota_id))}><LockKeyhole/>Travar 60 min{(result1.selected_quotas?.length??1)>1?` (${result1.selected_quotas?.length} cotas)`:""}</button>:null}{result1.alternatives.length>0&&<><h3>Alternativas Nina</h3>{result1.alternatives.map(m=><MatchCard key={m.quota_ids.join("-")} match={m} onReserve={reserveQuota}/>)}</>}</section>}
+    {result1&&tab==="esteira1"&&<section className="panel"><div className="panel-title"><h2>Resultado Esteira 1{result1.combo?" (junção manual)":""}</h2></div><div className="notice">{result1.message}</div>{result1.blockers.length>0&&<div className="error">{result1.blockers.map(b=><div key={b}>{b}</div>)}</div>}{(result1.selected_quotas??[result1.quota]).map(q=><div key={q.quota_id} className="marketplace-match-card" style={{marginTop:12}}><Pill value={result1.eligible?"CLEARED":"BLOCKED"}/><div style={{marginTop:10}}><MarketplaceQuotaFields quota={q}/></div></div>)}{result1.eligible&&(result1.selected_quotas??[result1.quota]).every(q=>q.status==="AVAILABLE"&&q.nina_scan_status==="CLEARED")?<button type="button" className="table-action lock" onClick={()=>void reserveSelectedQuotas((result1.selected_quotas??[result1.quota]).map(q=>q.quota_id))}><LockKeyhole/>Travar 60 min e ir para Propostas{(result1.selected_quotas?.length??1)>1?` (${result1.selected_quotas?.length} cotas)`:""}</button>:null}{result1.alternatives.length>0&&<><h3>Alternativas Nina</h3>{result1.alternatives.map(m=><MatchCard key={m.quota_ids.join("-")} match={m} onReserve={reserveQuota}/>)}</>}</section>}
     {result2&&tab==="esteira2"&&!esteira2Busy&&<section className="panel"><div className="panel-title"><h2>Opções robô Esteira 2 (régua {result2.band_percent??"10"}%)</h2></div><div className="notice">{result2.message}</div>{(result2.blockers??[]).map(b=><div className="error" key={b}>{b}</div>)}{(result2.credit_matches?.length??0)>0&&<h3>Lane crédito</h3>}{(result2.credit_matches??[]).map(m=><MatchCard key={`c-${m.quota_ids.join("-")}`} match={m} onReserve={reserveQuota}/>)}{(result2.entrada_matches?.length??0)>0&&<h3>Lane entrada</h3>}{(result2.entrada_matches??[]).map(m=><MatchCard key={`e-${m.quota_ids.join("-")}`} match={m} onReserve={reserveQuota}/>)}{!(result2.credit_matches?.length||result2.entrada_matches?.length)&&result2.matches.map(m=><MatchCard key={m.quota_ids.join("-")} match={m} onReserve={reserveQuota}/>)}</section>}
   </OperationalLayout>
 }
@@ -581,8 +683,16 @@ export function ProposalsModule() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const id = new URLSearchParams(window.location.search).get("lead_id");
-    if (id) setSelectedLeadId(id);
+    const params = new URLSearchParams(window.location.search);
+    const leadId = params.get("lead_id");
+    if (leadId) setSelectedLeadId(leadId);
+    const proposalId = params.get("proposal_id");
+    if (proposalId) {
+      setHighlightProposalId(proposalId);
+      setActiveProposalId(proposalId);
+      setNotice("Proposta Marketplace criada com trava de 60 min — complete o cadastro do cliente e finalize o fluxo.");
+      window.setTimeout(() => proposalsTableRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 400);
+    }
   }, []);
 
   const poolRatePreview = useMemo(() => {

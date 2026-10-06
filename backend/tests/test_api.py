@@ -639,6 +639,22 @@ def test_marketplace_esteira1_and_esteira2(client, auth_headers):
     assert body2.get("band_percent") == "10"
     assert "credit_matches" in body2 and "entrada_matches" in body2
 
+    lock = client.post(
+        "/api/v1/marketplace/esteira-1/lock",
+        headers=auth_headers,
+        json={"quota_ids": [quota["id"]], "esteira": "SELF_SELECT", **profile},
+    )
+    assert lock.status_code == 200
+    lock_body = lock.json()
+    assert lock_body["proposal_id"]
+    assert lock_body["quota_ids"] == [quota["id"]]
+    cotas_after = client.get(
+        "/api/v1/marketplace/venda-direta-manual/cotas",
+        headers=auth_headers,
+        params={"category": quota["category"]},
+    ).json()
+    assert all(row["quota_id"] != quota["id"] for row in cotas_after)
+
 
 def test_marketplace_esteira2_robot_band_rollover_and_markup(client, auth_headers):
     """Paulo: régua 10%, rollover ≤7d, markup Fraga +3% / Uni +10%."""
@@ -1657,6 +1673,20 @@ def test_marketplace_esteira2_subcategory_filter(client, auth_headers):
                 if x["id"] == q["quota_id"]
             )
             assert quota["quota_category_id"] == sub_a["id"]
+
+
+def test_marketplace_quota_categories_ensure_subcategories(client, auth_headers):
+    listed = client.get("/api/v1/marketplace/quota-categories?marketplace=true", headers=auth_headers)
+    assert listed.status_code == 200
+    rows = listed.json()
+    subs = [x for x in rows if x["legacy_type"] == 1 and x["active"]]
+    assert len(subs) >= 5
+    realestate = [x for x in subs if x.get("asset_class") == "REAL_ESTATE" or any(
+        p["id"] == x.get("parent_id") and p.get("asset_class") == "REAL_ESTATE"
+        for p in rows
+        if p["legacy_type"] == 0
+    )]
+    assert len(realestate) >= 3
 
 
 def test_quota_categories_crud(client, auth_headers):

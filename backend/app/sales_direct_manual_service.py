@@ -45,6 +45,8 @@ def list_cotas_options(
     *,
     category: str,
     include_reserved: bool = False,
+    administrator_id: str | None = None,
+    limit: int = 400,
     quota_category_id: str | None = None,
     asset_year: int | None = None,
     asset_is_zero_km: bool = False,
@@ -56,22 +58,29 @@ def list_cotas_options(
     if category not in {"REAL_ESTATE", "VEHICLE"}:
         raise HTTPException(status_code=422, detail="Categoria deve ser REAL_ESTATE ou VEHICLE.")
     from app.marketplace_partner_view import user_sees_supplier_quota_identity
+    from app.services import release_expired_reservations
+
+    release_expired_reservations(db, user.organization_id)
+    db.flush()
 
     suppliers = suppliers_index(db, user.organization_id)
     statuses = ["AVAILABLE", "RESERVED"] if include_reserved else ["AVAILABLE"]
     if user_sees_supplier_quota_identity(user):
         statuses = list(dict.fromkeys([*statuses, "PENDING_REVIEW"]))
-    quotas = list(
-        db.scalars(
-            select(Quota)
-            .where(
-                Quota.organization_id == user.organization_id,
-                Quota.status.in_(statuses),
-                Quota.category == category,
-            )
-            .order_by(Quota.credit_value.asc())
+    cap = max(1, min(int(limit or 400), 800))
+    stmt = (
+        select(Quota)
+        .where(
+            Quota.organization_id == user.organization_id,
+            Quota.status.in_(statuses),
+            Quota.category == category,
         )
+        .order_by(Quota.credit_value.asc())
+        .limit(cap)
     )
+    if (administrator_id or "").strip():
+        stmt = stmt.where(Quota.administrator_id == administrator_id.strip())
+    quotas = list(db.scalars(stmt))
     from app.marketplace_partner_view import mask_quota_fields
 
     from app.quota_inventory_service import ensure_quota_installment_due
@@ -85,23 +94,37 @@ def list_cotas_options(
         db.flush()
     from app.venda_direta_filters import quota_client_profile_blockers
 
+    profile_filter_active = any(
+        [
+            quota_category_id,
+            client_bank_administrator_ids,
+            client_problem_bank_administrator_ids,
+            asset_year is not None,
+            asset_is_zero_km,
+            has_credit_restriction,
+        ]
+    )
+
     for q in quotas:
-        admin = db.get(Administrator, q.administrator_id)
-        profile_blockers = quota_client_profile_blockers(
-            db,
-            user.organization_id,
-            q,
-            admin,
-            category=category,
-            asset_year=asset_year,
-            asset_is_zero_km=asset_is_zero_km,
-            has_credit_restriction=has_credit_restriction,
-            quota_category_id=quota_category_id,
-            client_bank_administrator_ids=client_bank_administrator_ids,
-            client_problem_bank_administrator_ids=client_problem_bank_administrator_ids,
-        )
-        if profile_blockers:
+        if q.status == "RESERVED":
             continue
+        admin = db.get(Administrator, q.administrator_id)
+        if profile_filter_active:
+            profile_blockers = quota_client_profile_blockers(
+                db,
+                user.organization_id,
+                q,
+                admin,
+                category=category,
+                asset_year=asset_year,
+                asset_is_zero_km=asset_is_zero_km,
+                has_credit_restriction=has_credit_restriction,
+                quota_category_id=quota_category_id,
+                client_bank_administrator_ids=client_bank_administrator_ids,
+                client_problem_bank_administrator_ids=client_problem_bank_administrator_ids,
+            )
+            if profile_blockers:
+                continue
         pricing = pricing_for_quota(q, suppliers=suppliers)
         masked = mask_quota_fields(
             {"group_code": q.group_code, "quota_code": q.quota_code},

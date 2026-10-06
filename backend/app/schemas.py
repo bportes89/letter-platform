@@ -2280,6 +2280,22 @@ class MarketplaceMatchView(BaseModel):
     quotas: list[MarketplaceQuotaBrief] = Field(default_factory=list)
 
 
+class MarketplaceEsteiraLockRequest(MarketplaceClientProfile):
+    quota_ids: list[str] = Field(min_length=1)
+    match_lane: str | None = None
+    esteira: str = Field(default="SELF_SELECT", pattern="^(SELF_SELECT|NINA_CURATED)$")
+
+
+class MarketplaceEsteiraLockResponse(BaseModel):
+    lead_id: str
+    proposal_id: str
+    quota_ids: list[str]
+    reservation_ids: list[str]
+    requested_amount: str
+    entrada_final: str
+    message: str
+
+
 class MarketplaceEsteira1Response(BaseModel):
     esteira: str
     eligible: bool

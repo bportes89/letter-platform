@@ -1,5 +1,7 @@
 .env
 .env.local
+.env.render-payout
+backend/.env.render-payout
 .venv/
 __pycache__/
 *.py[cod]
