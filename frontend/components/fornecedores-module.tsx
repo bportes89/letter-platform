@@ -297,10 +297,18 @@ export function FornecedoresModule() {
     setBusy(true);
     const form = e.currentTarget;
     const fd = new FormData(form);
+    const apiUrl = String(fd.get("api_url") || "").trim();
+    const sourceKey = String(fd.get("source_key") || "");
+    let syncMode = String(fd.get("sync_mode") || "NONE");
+    if (apiUrl && syncMode === "NONE") {
+      const lower = apiUrl.toLowerCase();
+      syncMode = lower.includes(".json") || lower.includes("/api/json") ? "JSON" : "SCRAPE";
+    }
+    const vehicleKey = /veicul|vehicle|auto|moto|carro/i.test(sourceKey) || /veicul/i.test(apiUrl);
     const body = {
       name: String(fd.get("name") || ""),
       trade_name: String(fd.get("trade_name") || "") || null,
-      source_key: String(fd.get("source_key") || ""),
+      source_key: sourceKey,
       document: String(fd.get("document") || ""),
       person_type: String(fd.get("person_type") || "PJ"),
       email: String(fd.get("email") || "") || null,
@@ -312,25 +320,35 @@ export function FornecedoresModule() {
       pix_key: String(fd.get("pix_key") || "") || null,
       notes: String(fd.get("notes") || "") || null,
       active: fd.get("active") === "1",
-      sync_mode: String(fd.get("sync_mode") || "NONE"),
-      api_url: String(fd.get("api_url") || "") || null,
+      sync_mode: syncMode,
+      api_url: apiUrl || null,
       scrape_table_id: String(fd.get("scrape_table_id") || "") || null,
-      scrape_category: String(fd.get("scrape_category") || "REAL_ESTATE") || null,
+      scrape_category: vehicleKey
+        ? "VEHICLE"
+        : String(fd.get("scrape_category") || "REAL_ESTATE") || null,
       scrape_layout: String(fd.get("scrape_layout") || "tablepress") || null,
       scrape_tls_ca: String(fd.get("scrape_tls_ca") || "") || null,
     };
     try {
+      let saved: QuotaSupplier;
       if (editing) {
-        await api(`/marketplace/suppliers/${editing.id}`, { method: "PATCH", body: JSON.stringify(body) });
+        saved = await api<QuotaSupplier>(`/marketplace/suppliers/${editing.id}`, {
+          method: "PATCH",
+          body: JSON.stringify(body),
+        });
         setNotice(`Fornecedor ${body.name} atualizado.`);
         setEditing(null);
       } else {
-        await api("/marketplace/suppliers", { method: "POST", body: JSON.stringify(body) });
+        saved = await api<QuotaSupplier>("/marketplace/suppliers", { method: "POST", body: JSON.stringify(body) });
         setNotice(`Fornecedor ${body.name} cadastrado.`);
         setFormKey((k) => k + 1);
       }
       form.reset();
       await load();
+      const mode = saved.sync_mode || "NONE";
+      if (mode !== "NONE" && (saved.api_url || "").trim() && !saved.last_sync_at) {
+        await syncOne(saved);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Falha ao salvar");
     } finally {
@@ -630,7 +648,10 @@ export function FornecedoresModule() {
                       type="button"
                       className="table-action"
                       onClick={() => syncOne(x)}
-                      disabled={busy || (x.sync_mode || "NONE") === "NONE"}
+                      disabled={
+                        busy ||
+                        ((x.sync_mode || "NONE") === "NONE" && !(x.api_url || "").trim())
+                      }
                     >
                       Sincronizar
                     </button>

@@ -1849,6 +1849,39 @@ def test_marketplace_suppliers_crud_and_markup_override(client, auth_headers):
     assert patched.json()["active"] is False
 
 
+def test_marketplace_supplier_infer_scrape_from_url_only(client, auth_headers):
+    """URL + sync manual: backend infere SCRAPE TablePress (parceiros veículos tipo TOCO_VEICULOS)."""
+    created = client.post(
+        "/api/v1/marketplace/suppliers",
+        headers=auth_headers,
+        json={
+            "name": "Toco Autos Demo",
+            "source_key": "TOCO_VEICULOS",
+            "document": "11222333000144",
+            "markup_percent": "10",
+            "api_url": "https://parceiro-exemplo.com.br/veiculos-contemplados/",
+        },
+    )
+    assert created.status_code == 201, created.text
+    body = created.json()
+    assert body["sync_mode"] == "SCRAPE"
+    cfg = json.loads(body["scrape_config_json"])
+    assert cfg["layout"] == "tablepress"
+    assert cfg["table_id"] == "tablepress-tab-veiculos"
+    assert cfg["category"] == "VEHICLE"
+
+    patched = client.patch(
+        f"/api/v1/marketplace/suppliers/{body['id']}",
+        headers=auth_headers,
+        json={"sync_mode": "NONE", "api_url": "https://unicontemplados.com.br/veiculos/"},
+    )
+    assert patched.status_code == 200, patched.text
+    fixed = patched.json()
+    assert fixed["sync_mode"] == "SCRAPE"
+    cfg2 = json.loads(fixed["scrape_config_json"])
+    assert cfg2["table_id"] == "tablepress-tab-veiculos"
+
+
 def test_marketplace_supplier_json_sync_upsert_and_deactivate(client, auth_headers, monkeypatch):
     """Sync JSON: cria/atualiza cotas e inativa as que sumiram; falha não zera estoque."""
     import httpx

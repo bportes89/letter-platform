@@ -1981,8 +1981,17 @@ def list_quota_suppliers(active_only: bool = False, user: User = Depends(get_cur
 def create_quota_supplier(payload: QuotaSupplierCreate, user: User = Depends(require_scope("inventory:write")), db: Session = Depends(get_db)):
     from app.quota_supplier_service import create_supplier, supplier_view
 
-    item = create_supplier(db, user, payload.model_dump())
+    raw = payload.model_dump()
+    manual_sync = str(raw.get("sync_mode") or "NONE").upper() == "NONE" and bool((raw.get("api_url") or "").strip())
+    item = create_supplier(db, user, raw)
     audit(db, user, "marketplace.supplier.created", "quota_supplier", item.id, {"source_key": item.source_key})
+    if manual_sync and (item.sync_mode or "NONE") in {"JSON", "SCRAPE"} and (item.api_url or "").strip():
+        from app.quota_sync_service import sync_supplier_inventory
+
+        try:
+            sync_supplier_inventory(db, user, item.id)
+        except Exception:
+            pass
     db.commit()
     db.refresh(item)
     return supplier_view(item)
@@ -1992,8 +2001,17 @@ def create_quota_supplier(payload: QuotaSupplierCreate, user: User = Depends(req
 def update_quota_supplier(supplier_id: str, payload: QuotaSupplierUpdate, user: User = Depends(require_scope("inventory:write")), db: Session = Depends(get_db)):
     from app.quota_supplier_service import supplier_view, update_supplier
 
-    item = update_supplier(db, user, supplier_id, payload.model_dump(exclude_unset=True))
+    patch = payload.model_dump(exclude_unset=True)
+    item = update_supplier(db, user, supplier_id, patch)
     audit(db, user, "marketplace.supplier.updated", "quota_supplier", item.id, payload.model_dump(exclude_unset=True, mode="json"))
+    sync_fields = {"sync_mode", "api_url", "scrape_table_id", "scrape_category", "scrape_layout", "scrape_tls_ca"}
+    if sync_fields.intersection(patch.keys()) and (item.sync_mode or "NONE") in {"JSON", "SCRAPE"} and (item.api_url or "").strip():
+        from app.quota_sync_service import sync_supplier_inventory
+
+        try:
+            sync_supplier_inventory(db, user, item.id)
+        except Exception:
+            pass
     db.commit()
     db.refresh(item)
     return supplier_view(item)

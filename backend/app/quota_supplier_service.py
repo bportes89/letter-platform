@@ -148,6 +148,102 @@ def normalize_source_key(value: str) -> str:
     return key.replace(" ", "_")
 
 
+def _vehicle_hint(text: str) -> bool:
+    lower = (text or "").lower()
+    return any(token in lower for token in ("veicul", "vehicle", "auto", "moto", "carro"))
+
+
+def _infer_set(out: dict, key: str, value: str | None) -> None:
+    if value is None:
+        return
+    if not str(out.get(key) or "").strip():
+        out[key] = value
+
+
+def infer_supplier_sync_config(data: dict) -> dict:
+    """Inferência de sync SCRAPE/JSON quando o admin só informa a URL do site (QuotasUrlCrons / Paulo)."""
+    out = dict(data)
+    api_url = (str(out.get("api_url") or "")).strip()
+    sync_mode = str(out.get("sync_mode") or "NONE").upper()
+    source_key = normalize_supplier_key(str(out.get("source_key") or ""))
+
+    if api_url and sync_mode == "NONE":
+        lower = api_url.lower()
+        if ".json" in lower or "/api/json" in lower:
+            out["sync_mode"] = "JSON"
+        else:
+            out["sync_mode"] = "SCRAPE"
+
+    sync_mode = str(out.get("sync_mode") or "NONE").upper()
+    if sync_mode != "SCRAPE" or not api_url:
+        return out
+
+    table_id = str(out.get("scrape_table_id") or "").strip()
+    layout = str(out.get("scrape_layout") or "").strip().lower()
+    category = str(out.get("scrape_category") or "").strip().upper()
+    lower = api_url.lower()
+
+    if not table_id:
+        matched = False
+        for preset in SUPPLIER_SYNC_PRESETS.values():
+            if preset.get("sync_mode") != "SCRAPE":
+                continue
+            preset_url = (preset.get("api_url") or "").lower()
+            if preset_url and (
+                preset_url.rstrip("/") in lower.rstrip("/") or lower.rstrip("/") in preset_url.rstrip("/")
+            ):
+                cfg = json.loads(preset.get("scrape_config_json") or "{}")
+                _infer_set(out, "scrape_layout", cfg.get("layout"))
+                _infer_set(out, "scrape_table_id", cfg.get("table_id"))
+                _infer_set(out, "scrape_category", cfg.get("category"))
+                if cfg.get("ca"):
+                    _infer_set(out, "scrape_tls_ca", cfg.get("ca"))
+                matched = True
+                break
+        if not matched:
+            if "unicontemplados.com.br" in lower:
+                _infer_set(out, "scrape_layout", "tablepress")
+                if _vehicle_hint(lower) or _vehicle_hint(source_key):
+                    _infer_set(out, "scrape_table_id", "tablepress-tab-veiculos")
+                    _infer_set(out, "scrape_category", "VEHICLE")
+                else:
+                    _infer_set(out, "scrape_table_id", "tablepress-tab-imoveis")
+                    _infer_set(out, "scrape_category", "REAL_ESTATE")
+            elif "contempladosp.com.br" in lower:
+                _infer_set(out, "scrape_layout", "contempladosp")
+                _infer_set(out, "scrape_table_id", "tbCotasGerais")
+                _infer_set(out, "scrape_tls_ca", "lets-encrypt-root-yr.pem")
+                _infer_set(
+                    out,
+                    "scrape_category",
+                    "VEHICLE" if _vehicle_hint(lower) or _vehicle_hint(source_key) else "REAL_ESTATE",
+                )
+            elif "cartascontempladas.com.br" in lower:
+                _infer_set(out, "scrape_layout", "cartascontempladas")
+                _infer_set(out, "scrape_table_id", "listaCotas")
+                _infer_set(
+                    out,
+                    "scrape_category",
+                    "VEHICLE" if _vehicle_hint(lower) or _vehicle_hint(source_key) else "REAL_ESTATE",
+                )
+            elif _vehicle_hint(source_key) and not table_id:
+                # Sites WordPress no padrão Uni (TablePress) — comum em parceiros veículos.
+                _infer_set(out, "scrape_layout", "tablepress")
+                _infer_set(out, "scrape_table_id", "tablepress-tab-veiculos")
+                _infer_set(out, "scrape_category", "VEHICLE")
+
+    if _vehicle_hint(source_key):
+        out["scrape_category"] = "VEHICLE"
+    elif not category:
+        out.setdefault(
+            "scrape_category",
+            "VEHICLE" if _vehicle_hint(api_url) else "REAL_ESTATE",
+        )
+    if not layout:
+        _infer_set(out, "scrape_layout", "tablepress")
+    return out
+
+
 def supplier_view(item: QuotaSupplier) -> dict:
     return {
         "id": item.id,
@@ -201,6 +297,7 @@ def get_supplier(db: Session, user: User, supplier_id: str) -> QuotaSupplier:
 
 
 def create_supplier(db: Session, user: User, data: dict) -> QuotaSupplier:
+    data = infer_supplier_sync_config(data)
     source_key = normalize_source_key(str(data.get("source_key") or ""))
     document = _digits(str(data.get("document") or ""))
     if len(document) not in {11, 14}:
@@ -279,8 +376,44 @@ def _scrape_config_payload(data: dict, *, sync_mode: str) -> str:
     return "{}"
 
 
+def _scrape_fields_from_stored_config(raw: str | None) -> dict[str, str | None]:
+    try:
+        cfg = json.loads(raw or "{}")
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(cfg, dict):
+        return {}
+    return {
+        "scrape_table_id": cfg.get("table_id"),
+        "scrape_layout": cfg.get("layout"),
+        "scrape_category": cfg.get("category"),
+        "scrape_tls_ca": cfg.get("ca"),
+    }
+
+
 def update_supplier(db: Session, user: User, supplier_id: str, data: dict) -> QuotaSupplier:
     item = get_supplier(db, user, supplier_id)
+    merged = {
+        "source_key": item.source_key,
+        "sync_mode": item.sync_mode,
+        "api_url": item.api_url,
+        **_scrape_fields_from_stored_config(item.scrape_config_json),
+        **data,
+    }
+    inferred = infer_supplier_sync_config(merged)
+    sync_in_patch = str(data.get("sync_mode") if "sync_mode" in data else merged.get("sync_mode") or "NONE").upper()
+    if sync_in_patch == "NONE" and str(inferred.get("sync_mode") or "NONE").upper() != "NONE":
+        data["sync_mode"] = inferred["sync_mode"]
+    reinfer_scrape = "api_url" in data or (
+        "sync_mode" in data and str(data.get("sync_mode") or "NONE").upper() == "NONE"
+    )
+    for key in ("scrape_table_id", "scrape_category", "scrape_layout", "scrape_tls_ca"):
+        if reinfer_scrape and inferred.get(key):
+            data[key] = inferred[key]
+            continue
+        current = str(data.get(key) if key in data else merged.get(key) or "").strip()
+        if not current and inferred.get(key):
+            data[key] = inferred[key]
     if "source_key" in data and data["source_key"] is not None:
         new_key = normalize_source_key(str(data["source_key"]))
         if new_key != item.source_key:
@@ -341,14 +474,15 @@ def update_supplier(db: Session, user: User, supplier_id: str, data: dict) -> Qu
             "sync_mode",
         )
     ):
+        stored_scrape = _scrape_fields_from_stored_config(item.scrape_config_json)
+        scrape_payload = {
+            **stored_scrape,
+            **{k: data[k] for k in ("scrape_table_id", "scrape_category", "scrape_layout", "scrape_tls_ca") if k in data},
+        }
+        if "scrape_config_json" in data and data["scrape_config_json"] is not None:
+            scrape_payload["scrape_config_json"] = data["scrape_config_json"]
         item.scrape_config_json = _scrape_config_payload(
-            {
-                **data,
-                "scrape_table_id": data.get("scrape_table_id"),
-                "scrape_category": data.get("scrape_category"),
-                "scrape_layout": data.get("scrape_layout"),
-                "scrape_tls_ca": data.get("scrape_tls_ca"),
-            },
+            scrape_payload,
             sync_mode=item.sync_mode or "NONE",
         )
     final_mode = item.sync_mode or "NONE"
