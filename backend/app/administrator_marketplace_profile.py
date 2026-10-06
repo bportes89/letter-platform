@@ -8,8 +8,31 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.administrator_service import normalize_admin_key, parse_rules
+from app.administrator_service import APPROVED_STATUSES, normalize_admin_key, parse_rules
 from app.models import Administrator, Quota, QuotaCategory
+
+_DEMO_ADMIN_NAME_KEYS = frozenset(
+    {
+        normalize_admin_key("Administradora Demonstração"),
+        normalize_admin_key("Administradora Demo"),
+        normalize_admin_key("Administradora Demonstracao"),
+    }
+)
+
+
+def administrator_eligible_for_marketplace(admin: Administrator | None) -> bool:
+    """Exclui administradoras demo/inativas do robô e catálogo comercial."""
+    if not admin:
+        return False
+    if admin.authorization_status not in APPROVED_STATUSES:
+        return False
+    name_key = normalize_admin_key(admin.name or "")
+    code_key = normalize_admin_key(admin.code or "")
+    if name_key in _DEMO_ADMIN_NAME_KEYS or code_key in _DEMO_ADMIN_NAME_KEYS:
+        return False
+    if "demonstracao" in name_key or "demonstration" in name_key:
+        return False
+    return True
 
 DIRTY_NAME_ADMIN_FALLBACK_KEYS = frozenset(
     {

@@ -42,23 +42,28 @@ def mask_quota_brief(brief: dict) -> dict:
     return out
 
 
-def mask_marketplace_match_item(item: dict) -> dict:
+def mask_marketplace_match_item(item: dict, *, strip_verbose: bool = False) -> dict:
     out = {**item}
     if "quotas" in out and isinstance(out["quotas"], list):
         out["quotas"] = [mask_quota_brief(q) for q in out["quotas"]]
+    if strip_verbose:
+        out["explanation"] = ""
+        out["message"] = ""
     return out
 
 
 def mask_esteira_result(result: dict, user: User) -> dict:
     """Consulta Marketplace (Esteiras / venda direta): nunca expor sync/fornecedor na UI."""
-    if user_sees_supplier_quota_identity(user):
-        return result
+    del user  # mascaramento comercial é obrigatório para todos os perfis
+    strip_verbose = result.get("esteira") == "NINA_CURATED"
     out = {**result}
+    if strip_verbose:
+        out["message"] = ""
     if "quota" in out and isinstance(out["quota"], dict):
         out["quota"] = mask_quota_brief(out["quota"])
     if "selected_quotas" in out and isinstance(out["selected_quotas"], list):
         out["selected_quotas"] = [mask_quota_brief(q) for q in out["selected_quotas"]]
     for key in ("alternatives", "matches", "credit_matches", "entrada_matches"):
         if key in out and isinstance(out[key], list):
-            out[key] = [mask_marketplace_match_item(x) for x in out[key]]
+            out[key] = [mask_marketplace_match_item(x, strip_verbose=strip_verbose) for x in out[key]]
     return out

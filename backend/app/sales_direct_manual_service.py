@@ -109,6 +109,10 @@ def list_cotas_options(
         if q.status == "RESERVED":
             continue
         admin = db.get(Administrator, q.administrator_id)
+        from app.administrator_marketplace_profile import administrator_eligible_for_marketplace
+
+        if not administrator_eligible_for_marketplace(admin):
+            continue
         if profile_filter_active:
             profile_blockers = quota_client_profile_blockers(
                 db,

@@ -495,6 +495,15 @@ def _rank_alternatives(
     if quota_category_ids:
         quotas = [q for q in quotas if q.quota_category_id and q.quota_category_id in quota_category_ids]
 
+    from app.administrator_marketplace_profile import administrator_eligible_for_marketplace
+
+    eligible_quotas: list[Quota] = []
+    for q in quotas:
+        admin = db.get(Administrator, q.administrator_id)
+        if administrator_eligible_for_marketplace(admin):
+            eligible_quotas.append(q)
+    quotas = eligible_quotas
+
     if client_bank_administrator_ids or client_problem_bank_administrator_ids:
         from app.administrator_marketplace_profile import administrator_in_client_pool
 
@@ -573,6 +582,8 @@ def _rank_alternatives(
                 entrada_ok = _within_band(entrada, target_entrada, entrada_band)
             if not credit_ok and not entrada_ok:
                 continue
+            item["matches_credit_band"] = credit_ok
+            item["matches_entrada_band"] = entrada_ok
             candidates.append(item)
     return sorted(candidates, key=lambda x: (-x["score"], Decimal(x["deviation_percent"])))[: max(limit * 4, 20)]
 
@@ -886,7 +897,8 @@ def esteira2_nina_curated_match(
         return enrich_match_row_display(db, user.organization_id, row, category=category)
 
     credit_lane: list[dict] = []
-    for item in sorted(pool, key=lambda x: (Decimal(x["deviation_percent"]), -x["score"])):
+    credit_pool = [x for x in pool if x.get("matches_credit_band")]
+    for item in sorted(credit_pool, key=lambda x: (Decimal(x["deviation_percent"]), -x["score"])):
         is_combo = bool(item.get("is_combo")) or len(item.get("quota_ids") or []) > 1
         credit_cap = ESTEIRA2_COMBO_BAND_PERCENT if is_combo else ESTEIRA2_CREDIT_BAND_PERCENT
         if Decimal(item["deviation_percent"]) > credit_cap:
@@ -896,12 +908,15 @@ def esteira2_nina_curated_match(
             break
 
     entrada_lane: list[dict] = []
+    credit_keys = {tuple(x["quota_ids"]) for x in credit_lane}
     ranked_entrada = sorted(
         [
             x
             for x in pool
-            if x.get("entrada_deviation_percent") is not None
+            if x.get("matches_entrada_band")
+            and x.get("entrada_deviation_percent") is not None
             and Decimal(x["entrada_deviation_percent"]) <= ESTEIRA2_ENTRADA_BAND_PERCENT
+            and tuple(x["quota_ids"]) not in credit_keys
         ],
         key=lambda x: (Decimal(x["entrada_deviation_percent"]), -x["score"]),
     )
@@ -922,11 +937,6 @@ def esteira2_nina_curated_match(
         if len(matches) >= limit:
             break
 
-    band_msg = (
-        f"crédito {ESTEIRA2_CREDIT_BAND_PERCENT}% / entrada {ESTEIRA2_ENTRADA_BAND_PERCENT}% / combo {ESTEIRA2_COMBO_BAND_PERCENT}%"
-        f" · até {ESTEIRA2_CREDIT_LANE_LIMIT}+{ESTEIRA2_ENTRADA_LANE_LIMIT} opções"
-        f" · rollover {INSTALLMENT_ROLLOVER_DAYS}d · markup fornecedor"
-    )
     return {
         "esteira": "NINA_CURATED",
         "eligible": bool(matches),
@@ -940,11 +950,5 @@ def esteira2_nina_curated_match(
         "credit_band_percent": str(ESTEIRA2_CREDIT_BAND_PERCENT),
         "entrada_band_percent": str(ESTEIRA2_ENTRADA_BAND_PERCENT),
         "combo_band_percent": str(ESTEIRA2_COMBO_BAND_PERCENT),
-        "message": (
-            f"Robô Nina: {len(matches)} opção(ões) para crédito R$ {money(target_amount)}"
-            + (f" / entrada R$ {money(target_entrada)}" if target_entrada else "")
-            + f" ({band_msg})."
-            if matches
-            else f"Sem opções na {band_msg}. Cadastre cotas ou ajuste alvos."
-        ),
+        "message": "",
     }

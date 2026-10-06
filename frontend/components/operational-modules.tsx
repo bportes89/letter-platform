@@ -421,7 +421,7 @@ export function MarketplaceModule() {
     };
   };
   async function assessEsteira1(e:FormEvent){e.preventDefault();setError("");setNotice("");const validation=profileValidationMessage("e1",e1Category,profile);if(validation){setError(validation);return}if(!selectedQuotaIds.length){setError("Selecione ao menos uma carta na lista.");return}setEsteira1Busy(true);try{const data=await api<MarketplaceEsteira1Result>("/marketplace/esteira-1/assess",{method:"POST",body:JSON.stringify({quota_ids:selectedQuotaIds,...profilePayload("e1",e1Category)})},{interactive:true});setResult1(data);setNotice(data.message)}catch(err){setError(err instanceof Error?err.message:"Falha na Esteira 1")}finally{setEsteira1Busy(false)}}
-  async function matchEsteira2(e:FormEvent){e.preventDefault();setError("");setNotice("");setResult2(null);const validation=profileValidationMessage("e2",category,profile);if(validation){setError(validation);return}if(!parseMoney(targetAmount)){setError("Informe o crédito desejado.");return}if(!parseMoney(targetEntrada)){setError("Informe a entrada desejada.");return}setEsteira2Busy(true);try{const data=await api<MarketplaceEsteira2Result>("/marketplace/esteira-2/match",{method:"POST",body:JSON.stringify({target_amount:String(parseMoney(targetAmount)),target_entrada:String(parseMoney(targetEntrada)),category,quota_category_id:e2SubcategoryId||null,client_bank_administrator_ids:e2ClientBankIds,client_problem_bank_administrator_ids:e2ClientProblemBankIds,...profilePayload("e2",category)})},{interactive:true});setResult2(data);setNotice(data.message);if(!data.eligible&&data.blockers?.length)setError(data.blockers.join(" "))}catch(err){setError(err instanceof Error?err.message:"Falha na Esteira 2")}finally{setEsteira2Busy(false)}}
+  async function matchEsteira2(e:FormEvent){e.preventDefault();setError("");setNotice("");setResult2(null);const validation=profileValidationMessage("e2",category,profile);if(validation){setError(validation);return}if(!parseMoney(targetAmount)){setError("Informe o crédito desejado.");return}if(!parseMoney(targetEntrada)){setError("Informe a entrada desejada.");return}setEsteira2Busy(true);try{const data=await api<MarketplaceEsteira2Result>("/marketplace/esteira-2/match",{method:"POST",body:JSON.stringify({target_amount:String(parseMoney(targetAmount)),target_entrada:String(parseMoney(targetEntrada)),category,quota_category_id:e2SubcategoryId||null,client_bank_administrator_ids:e2ClientBankIds,client_problem_bank_administrator_ids:e2ClientProblemBankIds,...profilePayload("e2",category)})},{interactive:true});setResult2(data);if(!data.eligible&&data.blockers?.length)setError(data.blockers.join(" "))}catch(err){setError(err instanceof Error?err.message:"Falha na Esteira 2")}finally{setEsteira2Busy(false)}}
   async function lockMarketplaceQuotas(
     ids: string[],
     opts: { esteira: "SELF_SELECT" | "NINA_CURATED"; profilePrefix: "e1" | "e2"; category: string; matchLane?: string },
@@ -450,12 +450,12 @@ export function MarketplaceModule() {
       setError(err instanceof Error ? err.message : "Falha na trava");
     }
   }
-  async function reserveQuota(quotaId: string, matchLane?: string) {
-    await lockMarketplaceQuotas([quotaId], {
+  async function reserveMatch(match: MarketplaceMatch) {
+    await lockMarketplaceQuotas(match.quota_ids, {
       esteira: tab === "esteira2" ? "NINA_CURATED" : "SELF_SELECT",
       profilePrefix: tab === "esteira2" ? "e2" : "e1",
       category: tab === "esteira2" ? category : e1Category,
-      matchLane,
+      matchLane: match.lane ?? undefined,
     });
   }
   async function reserveSelectedQuotas(ids: string[]) {
@@ -465,45 +465,23 @@ export function MarketplaceModule() {
       category: e1Category,
     });
   }
-  function MatchCard({
-    match,
-    onReserve,
-  }: {
-    match: MarketplaceMatch;
-    onReserve: (id: string, lane?: string) => void;
-  }) {
+  function MatchCard({ match, onReserve }: { match: MarketplaceMatch; onReserve: (match: MarketplaceMatch) => void }) {
+    const lockable =
+      match.quotas.length > 0 &&
+      match.quotas.every((q) => q.status === "AVAILABLE" && q.nina_scan_status === "CLEARED");
     return (
       <article className="marketplace-match-card">
-        <p>
-          {match.explanation}
-          {match.message ? ` — ${match.message}` : ""}
-        </p>
-        <small>
-          Lane {match.lane ?? "—"} · Score {match.score} · Desvio crédito {match.deviation_percent}%
-          {match.entrada_deviation_percent != null ? ` · Desvio entrada ${match.entrada_deviation_percent}%` : ""}
-          {match.rollover_applied ? " · Rollover 7d" : ""}
-        </small>
         {match.quotas.map((q) => (
           <div className="marketplace-match-quota" key={q.quota_id}>
             <MarketplaceQuotaFields quota={q} administratorFallback={match.administrator_name} />
-            <small className="muted" style={{ display: "block", marginTop: 6 }}>
-              {q.group_code} · {q.quota_code}
-              {q.rollover_applied ? " · rollover na entrada" : ""}
-              · Nina {q.nina_scan_status ?? "PENDENTE"}
-            </small>
-            {q.status === "AVAILABLE" && q.nina_scan_status === "CLEARED" ? (
-              <button
-                type="button"
-                className="table-action lock"
-                style={{ marginTop: 8 }}
-                onClick={() => onReserve(q.quota_id, match.lane ?? undefined)}
-              >
-                <LockKeyhole />
-                Travar 60 min e preencher cadastro
-              </button>
-            ) : null}
           </div>
         ))}
+        {lockable ? (
+          <button type="button" className="table-action lock" style={{ marginTop: 8 }} onClick={() => void onReserve(match)}>
+            <LockKeyhole />
+            Travar 60 min{match.quota_ids.length > 1 ? ` (${match.quota_ids.length} cotas)` : ""}
+          </button>
+        ) : null}
       </article>
     );
   }
@@ -643,8 +621,8 @@ export function MarketplaceModule() {
       </div>
     </form>}
     {esteira2Busy&&tab==="esteira2"&&<div className="notice"><Clock3/>Robô Nina consultando o estoque e as regras Bacen — pode levar alguns segundos na primeira busca do dia.</div>}
-    {result1&&tab==="esteira1"&&<section className="panel"><div className="panel-title"><h2>Resultado Esteira 1{result1.combo?" (junção manual)":""}</h2></div><div className="notice">{result1.message}</div>{result1.blockers.length>0&&<div className="error">{result1.blockers.map(b=><div key={b}>{b}</div>)}</div>}{(result1.selected_quotas??[result1.quota]).map(q=><div key={q.quota_id} className="marketplace-match-card" style={{marginTop:12}}><Pill value={result1.eligible?"CLEARED":"BLOCKED"}/><div style={{marginTop:10}}><MarketplaceQuotaFields quota={q}/></div></div>)}{result1.eligible&&(result1.selected_quotas??[result1.quota]).every(q=>q.status==="AVAILABLE"&&q.nina_scan_status==="CLEARED")?<button type="button" className="table-action lock" onClick={()=>void reserveSelectedQuotas((result1.selected_quotas??[result1.quota]).map(q=>q.quota_id))}><LockKeyhole/>Travar 60 min e ir para Propostas{(result1.selected_quotas?.length??1)>1?` (${result1.selected_quotas?.length} cotas)`:""}</button>:null}{result1.alternatives.length>0&&<><h3>Alternativas Nina</h3>{result1.alternatives.map(m=><MatchCard key={m.quota_ids.join("-")} match={m} onReserve={reserveQuota}/>)}</>}</section>}
-    {result2&&tab==="esteira2"&&!esteira2Busy&&<section className="panel"><div className="panel-title"><h2>Opções robô Esteira 2 (régua {result2.band_percent??"10"}%)</h2></div><div className="notice">{result2.message}</div>{(result2.blockers??[]).map(b=><div className="error" key={b}>{b}</div>)}{(result2.credit_matches?.length??0)>0&&<h3>Lane crédito</h3>}{(result2.credit_matches??[]).map(m=><MatchCard key={`c-${m.quota_ids.join("-")}`} match={m} onReserve={reserveQuota}/>)}{(result2.entrada_matches?.length??0)>0&&<h3>Lane entrada</h3>}{(result2.entrada_matches??[]).map(m=><MatchCard key={`e-${m.quota_ids.join("-")}`} match={m} onReserve={reserveQuota}/>)}{!(result2.credit_matches?.length||result2.entrada_matches?.length)&&result2.matches.map(m=><MatchCard key={m.quota_ids.join("-")} match={m} onReserve={reserveQuota}/>)}</section>}
+    {result1&&tab==="esteira1"&&<section className="panel"><div className="panel-title"><h2>Resultado Esteira 1{result1.combo?" (junção manual)":""}</h2></div><div className="notice">{result1.message}</div>{result1.blockers.length>0&&<div className="error">{result1.blockers.map(b=><div key={b}>{b}</div>)}</div>}{(result1.selected_quotas??[result1.quota]).map(q=><div key={q.quota_id} className="marketplace-match-card" style={{marginTop:12}}><Pill value={result1.eligible?"CLEARED":"BLOCKED"}/><div style={{marginTop:10}}><MarketplaceQuotaFields quota={q}/></div></div>)}{result1.eligible&&(result1.selected_quotas??[result1.quota]).every(q=>q.status==="AVAILABLE"&&q.nina_scan_status==="CLEARED")?<button type="button" className="table-action lock" onClick={()=>void reserveSelectedQuotas((result1.selected_quotas??[result1.quota]).map(q=>q.quota_id))}><LockKeyhole/>Travar 60 min e ir para Propostas{(result1.selected_quotas?.length??1)>1?` (${result1.selected_quotas?.length} cotas)`:""}</button>:null}{result1.alternatives.length>0&&<><h3>Alternativas Nina</h3>{result1.alternatives.map(m=><MatchCard key={m.quota_ids.join("-")} match={m} onReserve={reserveMatch}/>)}</>}</section>}
+    {result2&&tab==="esteira2"&&!esteira2Busy&&<section className="panel"><div className="panel-title"><h2>Opções Esteira 2</h2></div>{(result2.blockers??[]).map(b=><div className="error" key={b}>{b}</div>)}{(result2.credit_matches?.length??0)>0&&<h3>Lane crédito</h3>}{(result2.credit_matches??[]).map(m=><MatchCard key={`c-${m.quota_ids.join("-")}`} match={m} onReserve={reserveMatch}/>)}{(result2.entrada_matches?.length??0)>0&&<h3>Lane entrada</h3>}{(result2.entrada_matches??[]).map(m=><MatchCard key={`e-${m.quota_ids.join("-")}`} match={m} onReserve={reserveMatch}/>)}{!(result2.credit_matches?.length||result2.entrada_matches?.length)&&result2.matches.map(m=><MatchCard key={m.quota_ids.join("-")} match={m} onReserve={reserveMatch}/>)}</section>}
   </OperationalLayout>
 }
 

@@ -2904,7 +2904,7 @@ def marketplace_esteira1(payload: MarketplaceEsteira1Request, user: User = Depen
 @router.post("/marketplace/esteira-1/lock", response_model=MarketplaceEsteiraLockResponse)
 def marketplace_esteira1_lock(
     payload: MarketplaceEsteiraLockRequest,
-    user: User = Depends(require_any_scope("proposals:write", "inventory:write")),
+    user: User = Depends(require_any_scope("proposals:write", "inventory:write", "operations:write")),
     db: Session = Depends(get_db),
 ):
     from app.marketplace_esteira_lock_service import SOURCE_ESTEIRA_1, SOURCE_ESTEIRA_2, lock_quotas_with_proposal

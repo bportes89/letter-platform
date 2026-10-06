@@ -701,7 +701,9 @@ def test_marketplace_esteira2_robot_band_rollover_and_markup(client, auth_header
     assert fraga_match["rollover_applied"] is True
     assert Decimal(fraga_match["total_entrada"]) == Decimal("94800.00")
     qbrief = fraga_match["quotas"][0]
-    assert qbrief["markup_percent"] in {"3", "3.00"}
+    assert qbrief["group_code"] == "Letter"
+    assert qbrief["supplier_source"] is None
+    assert qbrief["markup_percent"] is None
     assert qbrief["remaining_installments"] == 47
 
     # Fora da banda 10%: alvo 1M não casa com inventário ~400k
