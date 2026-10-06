@@ -8,7 +8,8 @@ from app.core.config import settings
 from app.inter_common import DEFAULT_BASE_URL, inter_base_url
 
 INTER_PAYOUT_SCOPE = (
-    "pagamento-pix.write pagamento-pix.read extrato.read saldo.read"
+    "pagamento-pix.write pagamento-pix.read extrato.read saldo.read "
+    "webhook-banking.write webhook-banking.read"
 )
 
 

@@ -1850,6 +1850,20 @@ def cron_lss_billing_evaluation(
     return LssBillingSyncView(**result)
 
 
+@router.post("/system/cron/inter-payout-poll")
+def cron_inter_payout_poll(request: Request, db: Session = Depends(get_db)):
+    secret = settings.cron_secret
+    if secret:
+        provided = request.headers.get("x-cron-secret") or request.headers.get("authorization", "").removeprefix("Bearer ").strip()
+        if provided != secret:
+            raise HTTPException(status_code=401, detail="Cron secret inválido")
+    from app.inter_payout_service import poll_processing_partner_withdrawals
+
+    result = poll_processing_partner_withdrawals(db)
+    db.commit()
+    return {"status": "ok", **result}
+
+
 @router.post("/system/cron/recurring-commission-settlement", response_model=RecurringCommissionSettlementView)
 def cron_recurring_commission_settlement(
     request: Request,
@@ -2636,6 +2650,20 @@ def marketplace_process_supplier_withdrawal(
     return result
 
 
+@router.post("/marketplace/supplier-withdrawals/{withdrawal_id}/retry-inter-payout", response_model=SupplierWithdrawalView)
+def marketplace_retry_supplier_inter_payout(
+    withdrawal_id: str,
+    user: User = Depends(require_any_scope("inventory:write", "payments:review")),
+    db: Session = Depends(get_db),
+):
+    from app.supplier_wallet_service import retry_supplier_withdrawal_inter
+
+    result = retry_supplier_withdrawal_inter(db, user, withdrawal_id)
+    audit(db, user, "marketplace.supplier_withdrawal.retry_inter", "supplier_withdrawal", withdrawal_id, {})
+    db.commit()
+    return result
+
+
 @router.get("/marketplace/partner-withdrawals", response_model=list[PartnerWithdrawalView])
 def marketplace_partner_withdrawals(
     status: str | None = None,
@@ -2659,6 +2687,20 @@ def marketplace_process_partner_withdrawal(
 
     result = process_partner_withdrawal(db, user, withdrawal_id, action=payload.action, notes=payload.notes)
     audit(db, user, "marketplace.partner_withdrawal.process", "partner_withdrawal", withdrawal_id, payload.model_dump())
+    db.commit()
+    return result
+
+
+@router.post("/marketplace/partner-withdrawals/{withdrawal_id}/retry-inter-payout", response_model=PartnerWithdrawalView)
+def marketplace_retry_partner_inter_payout(
+    withdrawal_id: str,
+    user: User = Depends(require_any_scope("inventory:write", "payments:review")),
+    db: Session = Depends(get_db),
+):
+    from app.partner_legacy_wallet_service import retry_partner_withdrawal_inter
+
+    result = retry_partner_withdrawal_inter(db, user, withdrawal_id)
+    audit(db, user, "marketplace.partner_withdrawal.retry_inter", "partner_withdrawal", withdrawal_id, {})
     db.commit()
     return result
 

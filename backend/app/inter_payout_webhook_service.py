@@ -106,7 +106,9 @@ def complete_supplier_withdrawal_paid(db: Session, wd: SupplierWithdrawal, body:
         wd.payment_error = situacao[:500]
         db.flush()
         return {"processed": True, "kind": "supplier", "withdrawal_id": wd.id, "status": wd.status}
-    if not _status_liquidado(body):
+    if wd.status not in {"PENDING", "PROCESSING"} and not _status_liquidado(body):
+        return {"processed": False, "reason": "status_ignorado", "withdrawal_id": wd.id, "situacao": situacao}
+    if not _status_liquidado(body) and situacao not in {"", "PROCESSANDO", "EM_PROCESSAMENTO"}:
         return {"processed": False, "reason": "nao_liquidado", "withdrawal_id": wd.id}
     e2e = _extract_end_to_end(body)
     if e2e:

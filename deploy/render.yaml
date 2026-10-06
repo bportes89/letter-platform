@@ -87,3 +87,25 @@ services:
         sync: false
       - key: LETTER_LSS_BILLING_ENABLED
         value: "true"
+
+  # PIX saída Inter: poll saques PROCESSING (fallback webhook) — a cada 15 min.
+  - type: cron
+    name: letter-inter-payout-poll
+    runtime: python
+    schedule: "*/15 * * * *"
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: python scripts/cron_inter_payout_poll.py
+    buildFilter:
+      paths:
+        - backend/**
+        - deploy/render.yaml
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.10"
+      - key: LETTER_ENV
+        value: staging
+      - key: LETTER_API_PUBLIC_URL
+        sync: false
+      - key: LETTER_CRON_SECRET
+        sync: false

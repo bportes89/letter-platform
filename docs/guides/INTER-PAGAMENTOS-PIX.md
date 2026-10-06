@@ -9,7 +9,7 @@ API **separada** da cobrança (entrada marketplace / TAPAF / LSS). Especificaç�
 3. Se `LETTER_INTER_PAYOUT_*` configurado e `LETTER_INTER_PAYOUT_AUTO_ON_WITHDRAW=true` (default), a API chama **PIX saída** no Inter.
 4. Status do saque: `PROCESSING` → webhook/confirmação → `PAID` (baixa comissão).
 
-Fornecedor: mesma ideia em `supplier_withdrawals` (auto a ligar na próxima iteração).
+Fornecedor: mesmo fluxo automático em `supplier_withdrawals` ao solicitar saque no portal.
 
 ## Variáveis Render (não commitar secrets)
 
@@ -24,6 +24,7 @@ Fornecedor: mesma ideia em `supplier_withdrawals` (auto a ligar na próxima iter
 | `LETTER_INTER_PAYOUT_KEY_BASE64` | Chave do zip em Base64 |
 | `LETTER_INTER_PAYOUT_WEBHOOK_ACCESS_TOKEN` | Token do webhook de liquidação PIX (opcional) |
 | `LETTER_INTER_PAYOUT_AUTO_ON_WITHDRAW` | `true` / `false` |
+| `LETTER_INTER_PAYOUT_ON_FISCAL_RELEASE` | `true` = PIX automático ao validar NF (doc 170), sem clicar em Sacar |
 
 Escopos no painel Inter: `pagamento-pix.write`, `pagamento-pix.read`, `extrato.read`, `saldo.read`.
 
@@ -44,7 +45,27 @@ O `start_cloud.sh` roda `materialize_inter_certs.py`, que grava cobrança **e** 
 - Header/query: mesmo padrão da cobrança (`x-inter-webhook-token` = `LETTER_INTER_PAYOUT_WEBHOOK_ACCESS_TOKEN`)
 - Fecha saques em `PROCESSING` → `PAID` (parceiro baixa comissão; fornecedor já teve saldo reservado no pedido)
 
+## Scripts
+
+```powershell
+# PC com .env payout + cert
+$env:LETTER_INTER_PAYOUT_WEBHOOK_URL = "https://letter-api-fobc.onrender.com/api/v1/webhooks/inter-payout"
+py backend/scripts/register_inter_payout_webhook.py
+
+# Cron fallback (poll PROCESSING) — mesmo LETTER_CRON_SECRET do Render
+py backend/scripts/cron_inter_payout_poll.py
+```
+
+Status de saque: `PROCESSING`, `AWAITING_BALANCE` (saldo Inter), `FAILED`, `PAID`.
+
+Admin:
+
+- `POST /marketplace/partner-withdrawals/{id}/retry-inter-payout`
+- `POST /marketplace/supplier-withdrawals/{id}/retry-inter-payout`
+
+O cron `inter-payout-poll` consulta saques **parceiro e fornecedor** em `PROCESSING` / `AWAITING_BALANCE`.
+
 ## Pendências
 
-- Registrar webhook no painel Inter (app **pagamentos**).
-- Doc 170: pagamento automático **na aprovação da NF** (alternativa ao gatilho “Sacar”) — alinhar com Paulo.
+- Registrar webhook no Inter (`register_inter_payout_webhook.py`) e cron opcional no Render.
+- Homologação E2E com conta real; ajustar payload do webhook se o Inter divergir.

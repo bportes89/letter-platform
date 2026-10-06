@@ -206,6 +206,20 @@ def release_commissions_after_sefaz(
         ensure_ascii=False,
     )
 
+    from app.inter_payout_service import payout_partner_after_fiscal_release
+
+    payout = payout_partner_after_fiscal_release(
+        db,
+        user,
+        pending_total,
+        nf_access_key=key_used,
+    )
+    if payout:
+        evidence.detail_json = json.dumps(
+            {**json.loads(evidence.detail_json), "inter_payout": payout},
+            ensure_ascii=False,
+        )
+
     return evidence
 
 

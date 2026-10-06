@@ -15,9 +15,12 @@ from app.services import money
 
 WD_PENDING = "PENDING"
 WD_PROCESSING = "PROCESSING"
+WD_AWAITING_BALANCE = "AWAITING_BALANCE"
 WD_PAID = "PAID"
 WD_CANCELLED = "CANCELLED"
 WD_FAILED = "FAILED"
+
+WD_OPEN_STATUSES = frozenset({WD_PENDING, WD_PROCESSING, WD_AWAITING_BALANCE})
 WITHDRAWN_STATUS = "WITHDRAWN"
 HELD_STATUSES = frozenset({"PENDING_FISCAL", "PENDING_RECEIPT"})
 
@@ -30,6 +33,7 @@ _COMMISSION_STATUS_LABELS = {
 _WITHDRAWAL_STATUS_LABELS = {
     WD_PENDING: "Em análise",
     WD_PROCESSING: "PIX em processamento (Inter)",
+    WD_AWAITING_BALANCE: "Aguardando saldo na conta Inter",
     WD_PAID: "Pago",
     WD_CANCELLED: "Cancelado",
     WD_FAILED: "Erro no pagamento PIX",
@@ -147,7 +151,7 @@ def partner_earnings_summary(db: Session, user: User) -> dict:
     reserved = db.scalar(
         select(func.coalesce(func.sum(PartnerWithdrawal.amount), 0)).where(
             PartnerWithdrawal.user_id == user.id,
-            PartnerWithdrawal.status.in_([WD_PENDING, WD_PROCESSING]),
+            PartnerWithdrawal.status.in_(list(WD_OPEN_STATUSES)),
         )
     )
     reserved = money(Decimal(str(reserved or 0)))
@@ -176,7 +180,7 @@ def partner_earnings_summary(db: Session, user: User) -> dict:
     pending_wd = db.scalar(
         select(PartnerWithdrawal).where(
             PartnerWithdrawal.user_id == user.id,
-            PartnerWithdrawal.status.in_([WD_PENDING, WD_PROCESSING]),
+            PartnerWithdrawal.status.in_(list(WD_OPEN_STATUSES)),
         )
     )
     pending_withdrawal = withdrawal_view(pending_wd) if pending_wd else None
@@ -288,7 +292,7 @@ def request_partner_withdrawal(
     pending = db.scalar(
         select(PartnerWithdrawal).where(
             PartnerWithdrawal.user_id == user.id,
-            PartnerWithdrawal.status.in_([WD_PENDING, WD_PROCESSING]),
+            PartnerWithdrawal.status.in_(list(WD_OPEN_STATUSES)),
         )
     )
     if pending:
@@ -381,6 +385,27 @@ def list_withdrawals_admin(db: Session, user: User, *, status: str | None = None
         view["partner_email"] = partner.email if partner else None
         out.append(view)
     return out
+
+
+def retry_partner_withdrawal_inter(db: Session, admin: User, withdrawal_id: str) -> dict:
+    from app.inter_payout_service import retry_partner_withdrawal_pix
+
+    wd = db.scalar(
+        select(PartnerWithdrawal).where(
+            PartnerWithdrawal.id == withdrawal_id,
+            PartnerWithdrawal.organization_id == admin.organization_id,
+        )
+    )
+    if not wd:
+        raise HTTPException(404, "Saque não encontrado.")
+    retry_partner_withdrawal_pix(db, wd)
+    db.flush()
+    view = withdrawal_view(wd)
+    partner = db.get(User, wd.user_id)
+    if partner:
+        view["partner_name"] = partner.name
+        view["partner_email"] = partner.email
+    return view
 
 
 def process_partner_withdrawal(

@@ -2766,8 +2766,12 @@ class SupplierWithdrawalView(BaseModel):
     supplier_id: str
     amount: str
     status: str
+    status_label: str | None = None
     pix_key: str
     notes: str | None = None
+    inter_codigo_solicitacao: str | None = None
+    inter_end_to_end_id: str | None = None
+    payment_error: str | None = None
     ledger_entry_id: str | None = None
     processed_at: str | None = None
     created_at: str | None = None

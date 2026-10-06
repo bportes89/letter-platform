@@ -17,8 +17,13 @@ from app.services import money
 KIND_CREDIT = "CREDIT"
 KIND_DEBIT = "DEBIT"
 WD_PENDING = "PENDING"
+WD_PROCESSING = "PROCESSING"
+WD_AWAITING_BALANCE = "AWAITING_BALANCE"
+WD_FAILED = "FAILED"
 WD_PAID = "PAID"
 WD_CANCELLED = "CANCELLED"
+WD_PAYOUT_OPEN_STATUSES = frozenset({WD_PENDING, WD_PROCESSING, WD_AWAITING_BALANCE})
+WD_BLOCK_NEW_WITHDRAWAL_STATUSES = frozenset({WD_PENDING, WD_PROCESSING, WD_AWAITING_BALANCE, WD_FAILED})
 
 
 def _supplier_by_source(db: Session, organization_id: str, source: str | None) -> QuotaSupplier | None:
@@ -174,14 +179,14 @@ def request_withdrawal(
     key = (pix_key or supplier.pix_key or "").strip()
     if len(key) < 5:
         raise HTTPException(422, "Cadastre uma chave PIX no fornecedor antes de sacar.")
-    pending = db.scalar(
+    open_wd = db.scalar(
         select(SupplierWithdrawal).where(
             SupplierWithdrawal.supplier_id == supplier.id,
-            SupplierWithdrawal.status == WD_PENDING,
+            SupplierWithdrawal.status.in_(list(WD_BLOCK_NEW_WITHDRAWAL_STATUSES)),
         )
     )
-    if pending:
-        raise HTTPException(409, "Já existe um saque pendente. Aguarde o processamento.")
+    if open_wd:
+        raise HTTPException(409, "Já existe um saque em aberto. Aguarde o processamento ou contate o suporte.")
 
     # reserva: debita saldo e lança DEBIT no extrato
     reference = f"SUPPLIER_WITHDRAW:{supplier.id}:{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}"
@@ -269,8 +274,10 @@ def process_withdrawal(
     )
     if not wd:
         raise HTTPException(404, "Saque não encontrado.")
-    if wd.status != WD_PENDING:
-        raise HTTPException(409, f"Saque já está {wd.status}.")
+    if wd.status in {WD_PAID, WD_CANCELLED}:
+        raise HTTPException(409, "Saque já processado.")
+    if wd.status == WD_PROCESSING and action == WD_PAID:
+        raise HTTPException(409, "Saque aguardando confirmação PIX do Banco Inter.")
     supplier = db.get(QuotaSupplier, wd.supplier_id)
     if not supplier:
         raise HTTPException(404, "Fornecedor não encontrado.")
@@ -302,14 +309,40 @@ def process_withdrawal(
 
 
 def withdrawal_view(wd: SupplierWithdrawal) -> dict:
+    from app.partner_legacy_wallet_service import withdrawal_status_label
+
     return {
         "id": wd.id,
         "supplier_id": wd.supplier_id,
         "amount": str(money(Decimal(str(wd.amount)))),
         "status": wd.status,
+        "status_label": withdrawal_status_label(wd.status),
         "pix_key": wd.pix_key,
         "notes": wd.notes,
+        "inter_codigo_solicitacao": wd.inter_codigo_solicitacao,
+        "inter_end_to_end_id": wd.inter_end_to_end_id,
+        "payment_error": wd.payment_error,
         "ledger_entry_id": wd.ledger_entry_id,
         "processed_at": wd.processed_at.isoformat() if wd.processed_at else None,
         "created_at": wd.created_at.isoformat() if wd.created_at else None,
     }
+
+
+def retry_supplier_withdrawal_inter(db: Session, admin: User, withdrawal_id: str) -> dict:
+    from app.inter_payout_service import retry_supplier_withdrawal_pix
+
+    wd = db.scalar(
+        select(SupplierWithdrawal).where(
+            SupplierWithdrawal.id == withdrawal_id,
+            SupplierWithdrawal.organization_id == admin.organization_id,
+        )
+    )
+    if not wd:
+        raise HTTPException(404, "Saque não encontrado.")
+    retry_supplier_withdrawal_pix(db, wd)
+    db.flush()
+    view = withdrawal_view(wd)
+    supplier = db.get(QuotaSupplier, wd.supplier_id)
+    view["supplier_name"] = supplier.name if supplier else None
+    view["supplier_source_key"] = supplier.source_key if supplier else None
+    return view

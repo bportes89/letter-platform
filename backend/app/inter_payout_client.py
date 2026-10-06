@@ -120,3 +120,17 @@ class InterPayoutClient:
         if resp.status_code >= 400:
             raise HTTPException(status_code=502, detail=f"Inter consulta PIX falhou ({resp.status_code})")
         return body if isinstance(body, dict) else {"raw": body}
+
+    def register_pix_payment_webhook(self, webhook_url: str, *, tipo: str = "pix-pagamento") -> dict:
+        payload = {"webhookUrl": webhook_url}
+        with self._client() as client:
+            resp = client.put(
+                f"{self.base}/banking/v2/webhooks/{tipo}",
+                json=payload,
+                headers=self._headers(),
+            )
+        body = resp.json() if resp.content else {}
+        if resp.status_code >= 400:
+            detail = body.get("detail") or body.get("title") or resp.text[:400]
+            raise HTTPException(status_code=502, detail=f"Inter webhook banking falhou: {detail}")
+        return body if isinstance(body, dict) else {"raw": body}

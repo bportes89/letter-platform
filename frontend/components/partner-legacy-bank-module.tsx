@@ -14,6 +14,8 @@ type PendingWithdrawal = {
   status: string;
   status_label?: string | null;
   pix_key: string;
+  payment_error?: string | null;
+  inter_codigo_solicitacao?: string | null;
   created_at: string | null;
 };
 
@@ -102,14 +104,26 @@ export function PartnerLegacyBankModule() {
     setSuccessNotice("");
     setErrorNotice("");
     try {
-      await api("/wallet/me/legacy-withdrawals", {
+      const created = await api<PendingWithdrawal>("/wallet/me/legacy-withdrawals", {
         method: "POST",
         body: JSON.stringify({
           amount: withdrawAmount.replace(",", "."),
           pix_key: pixKey.trim(),
         }),
       });
-      setSuccessNotice("Saque solicitado. Você receberá o PIX após a conferência da plataforma.");
+      if (created.status === "PAID" || created.status === "PROCESSING") {
+        setSuccessNotice(
+          created.status === "PAID"
+            ? "PIX enviado pelo Banco Inter — saque liquidado."
+            : "PIX enviado ao Banco Inter — aguarde a confirmação na sua conta.",
+        );
+      } else if (created.status === "AWAITING_BALANCE") {
+        setSuccessNotice("Saque registrado — aguardando saldo na conta Inter da plataforma. Tente novamente em breve.");
+      } else if (created.status === "FAILED") {
+        setErrorNotice(created.payment_error || "Falha ao enviar PIX pelo Inter.");
+      } else {
+        setSuccessNotice("Saque solicitado. Se o Inter estiver ativo, o PIX será processado automaticamente.");
+      }
       setWithdrawAmount("");
       await load();
     } catch (err) {
@@ -194,12 +208,18 @@ export function PartnerLegacyBankModule() {
           <h2 className="subheading">Saque em análise</h2>
           <p className="muted">
             {brl.format(Number(summary.pending_withdrawal.amount))} ·{" "}
-            {summary.pending_withdrawal.status_label || "Em análise"} · PIX{" "}
+            {summary.pending_withdrawal.status_label || summary.pending_withdrawal.status} · PIX{" "}
             {summary.pending_withdrawal.pix_key}
             {summary.pending_withdrawal.created_at
               ? ` · ${new Date(summary.pending_withdrawal.created_at).toLocaleString("pt-BR")}`
               : ""}
           </p>
+          {summary.pending_withdrawal.payment_error && (
+            <small className="muted">{summary.pending_withdrawal.payment_error}</small>
+          )}
+          {summary.pending_withdrawal.status === "PROCESSING" && (
+            <small className="form-help">O valor deve cair na sua conta em instantes após confirmação do banco.</small>
+          )}
         </div>
       )}
 

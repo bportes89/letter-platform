@@ -97,6 +97,7 @@ class Settings(BaseSettings):
     inter_payout_key_path: str | None = None
     inter_payout_webhook_access_token: str | None = None
     inter_payout_auto_on_withdraw: bool = True
+    inter_payout_on_fiscal_release: bool = False
     zapsign_api_token: str | None = None
     zapsign_base_url: str = "https://api.zapsign.com.br/api/v1"
     zapsign_auth_mode: str = "assinaturaTela-tokenEmail"
