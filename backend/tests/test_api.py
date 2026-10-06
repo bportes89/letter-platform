@@ -776,6 +776,13 @@ def test_venda_direta_robo_search_and_confirm(client, auth_headers):
     assert done["proposal_id"]
     assert done["reservation_ids"]
     assert set(done["quota_ids"]) == set(chosen["quota_ids"])
+    assert done.get("contract_available") is True
+    assert done.get("boleto", {}).get("codigo_solicitacao")
+    assert done.get("contract_pdf_path")
+
+    cadastro = client.get(f"/api/v1/marketplace/cadastros/{body['lead_id']}", headers=auth_headers)
+    assert cadastro.status_code == 200
+    assert cadastro.json().get("contract_ack")
 
     leads = client.get("/api/v1/leads", headers=auth_headers).json()
     lead = next(l for l in leads if l["id"] == body["lead_id"])

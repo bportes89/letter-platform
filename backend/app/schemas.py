@@ -2379,7 +2379,14 @@ class VendaDiretaRoboConfirmResponse(BaseModel):
     quota_ids: list[str]
     reservation_ids: list[str] = Field(default_factory=list)
     requested_amount: str
+    entrada_final: str | None = None
     message: str
+    boleto: dict | None = None
+    boleto_created: bool = False
+    contract_available: bool = False
+    cadastro_path: str | None = None
+    boleto_download_path: str | None = None
+    contract_pdf_path: str | None = None
 
 
 class QuotaSupplierCreate(BaseModel):

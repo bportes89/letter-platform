@@ -3007,7 +3007,11 @@ def venda_direta_robo_search(payload: VendaDiretaRoboSearchRequest, user: User =
 
 
 @router.post("/marketplace/venda-direta-robo/confirm", response_model=VendaDiretaRoboConfirmResponse)
-def venda_direta_robo_confirm(payload: VendaDiretaRoboConfirmRequest, user: User = Depends(require_any_scope("proposals:write", "leads:write")), db: Session = Depends(get_db)):
+def venda_direta_robo_confirm(
+    payload: VendaDiretaRoboConfirmRequest,
+    user: User = Depends(require_any_scope("proposals:write", "leads:write", "operations:write")),
+    db: Session = Depends(get_db),
+):
     from app.sales_direct_robo_service import confirm_cota
 
     result = confirm_cota(

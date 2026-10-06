@@ -3,7 +3,7 @@
 import { Bot, CheckCircle2, RefreshCw, WalletCards } from "lucide-react";
 import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useState } from "react";
-import { api } from "@/lib/api";
+import { api, downloadApi } from "@/lib/api";
 import { CurrencyInput } from "@/components/currency-input";
 import { MarketplaceQuotaFields } from "@/components/marketplace-quota-fields";
 import { lookupCep } from "@/lib/cep-lookup";
@@ -76,7 +76,14 @@ type ConfirmResult = {
   quota_ids: string[];
   reservation_ids: string[];
   requested_amount: string;
+  entrada_final?: string | null;
   message: string;
+  boleto?: { amount?: string; download_token?: string } | null;
+  boleto_created?: boolean;
+  contract_available?: boolean;
+  cadastro_path?: string | null;
+  boleto_download_path?: string | null;
+  contract_pdf_path?: string | null;
 };
 
 export function VendaDiretaRoboModule() {
@@ -250,6 +257,13 @@ export function VendaDiretaRoboModule() {
         setBusy(false);
         return;
       }
+      if (parseMoney(targetAmount) > parseMoney(assetValue)) {
+        setError(
+          `Crédito desejado (${brl.format(parseMoney(targetAmount))}) não pode ser maior que o valor do bem (${brl.format(parseMoney(assetValue))}).`,
+        );
+        setBusy(false);
+        return;
+      }
       if (category === "VEHICLE" && !String(assetYear || "").trim()) {
         setError("Informe o ano do bem (veículo).");
         setBusy(false);
@@ -295,7 +309,6 @@ export function VendaDiretaRoboModule() {
         return;
       }
       setResult(data);
-      setNotice(data.message);
       setStep(2);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Falha na busca do robô");
@@ -341,8 +354,10 @@ export function VendaDiretaRoboModule() {
     setNotice("");
   }
 
-  const creditMatches = result?.credit_matches?.length ? result.credit_matches : result?.matches || [];
-  const entradaMatches = result?.entrada_matches || [];
+  const creditMatches = result?.credit_matches ?? [];
+  const entradaMatches = result?.entrada_matches ?? [];
+  const fallbackMatches =
+    result && creditMatches.length === 0 && entradaMatches.length === 0 ? result.matches ?? [] : [];
 
   return (
     <>
@@ -351,9 +366,9 @@ export function VendaDiretaRoboModule() {
           <span className="eyebrow dark">VENDAS</span>
           <h1>Venda Direta — Robô</h1>
           <p>
-            Preencha cliente e filtros; o robô Esteira 2 (10% crédito · 20% entrada · 5% combo · até 2+2 opções,
-            rollover e markup) sugere cotas. Com parceiro, aplica % a mais na entrada como no chat. Confirme para
-            gravar lead + proposta e travar 60 minutos.
+            Preencha cliente e filtros; o robô sugere até 2 opções por crédito e 2 por entrada (com junção automática
+            quando necessário). Ao confirmar, geramos contrato e boleto da entrada; a assinatura digital segue após o
+            pagamento.
           </p>
         </div>
         <div className="operational-icon">
@@ -579,9 +594,7 @@ export function VendaDiretaRoboModule() {
               </div>
             ) : null}
             <p>
-              Pré-cadastro <b>{result.client_name}</b> · régua {result.credit_band_percent ?? result.band_percent ?? "10"}%/
-              {result.entrada_band_percent ?? "20"}%/{result.combo_band_percent ?? "5"}% · lead{" "}
-              <code>{result.lead_id.slice(0, 8)}…</code>
+              Pré-cadastro <b>{result.client_name}</b> · lead <code>{result.lead_id.slice(0, 8)}…</code>
             </p>
             {result.blockers.map((b) => (
               <div className="error" key={b}>
@@ -595,6 +608,9 @@ export function VendaDiretaRoboModule() {
             {entradaMatches.length > 0 && <h3>Lane entrada</h3>}
             {entradaMatches.map((m) => (
               <MatchCard key={`e-${m.quota_ids.join("-")}`} match={m} busy={busy} onConfirm={confirm} />
+            ))}
+            {fallbackMatches.map((m) => (
+              <MatchCard key={m.quota_ids.join("-")} match={m} busy={busy} onConfirm={confirm} />
             ))}
             <button type="button" className="table-action" style={{ marginTop: "1rem" }} onClick={resetWizard} disabled={busy}>
               Voltar e ajustar filtros
@@ -610,10 +626,59 @@ export function VendaDiretaRoboModule() {
             </div>
             <p>
               Proposta <code>{confirmed.proposal_id}</code> · crédito{" "}
-              {brl.format(Number(confirmed.requested_amount))} · {confirmed.quota_ids.length} cota(s) travada(s).
+              {brl.format(Number(confirmed.requested_amount))}
+              {confirmed.entrada_final ? ` · entrada ${brl.format(Number(confirmed.entrada_final))}` : ""} ·{" "}
+              {confirmed.quota_ids.length} cota(s) travada(s).
             </p>
-            <p>
-              <Link href="/modules/proposals">Ir para Propostas</Link>
+            <p className="muted" style={{ marginTop: 8 }}>
+              Contrato disponível; ZapSign só após confirmação do pagamento da entrada.
+            </p>
+            <p style={{ marginTop: 12 }}>
+              {confirmed.cadastro_path ? (
+                <Link href={confirmed.cadastro_path}>Abrir cadastro Marketplace</Link>
+              ) : (
+                <Link href={`/modules/cadastros?lead_id=${encodeURIComponent(confirmed.lead_id)}`}>
+                  Abrir cadastro Marketplace
+                </Link>
+              )}
+              {" · "}
+              <Link href={`/modules/proposals?proposal_id=${encodeURIComponent(confirmed.proposal_id)}`}>
+                Propostas
+              </Link>
+              {confirmed.contract_pdf_path ? (
+                <>
+                  {" · "}
+                  <button
+                    type="button"
+                    className="table-action"
+                    onClick={() =>
+                      void downloadApi(
+                        confirmed.contract_pdf_path!,
+                        `contrato-${confirmed.lead_id.slice(0, 8)}.pdf`,
+                      ).catch((e) => setError(e instanceof Error ? e.message : "Falha ao baixar contrato"))
+                    }
+                  >
+                    Contrato (PDF)
+                  </button>
+                </>
+              ) : null}
+              {confirmed.boleto_download_path && confirmed.boleto?.amount ? (
+                <>
+                  {" · "}
+                  <button
+                    type="button"
+                    className="table-action"
+                    onClick={() =>
+                      void downloadApi(
+                        confirmed.boleto_download_path!,
+                        `boleto-${confirmed.lead_id.slice(0, 8)}.pdf`,
+                      ).catch((e) => setError(e instanceof Error ? e.message : "Falha ao baixar boleto"))
+                    }
+                  >
+                    Boleto entrada ({brl.format(Number(confirmed.boleto.amount))})
+                  </button>
+                </>
+              ) : null}
               {" · "}
               <button type="button" className="table-action" onClick={resetWizard}>
                 Nova venda robô
@@ -635,42 +700,30 @@ function MatchCard({
   busy: boolean;
   onConfirm: (m: MarketplaceMatch) => void;
 }) {
+  const combo = match.quota_ids.length > 1;
   return (
     <article className="marketplace-match-card">
-      {match.lane ? (
-        <p>
-          <b>Lane {match.lane}</b>
-          {match.tipo_credito ? ` · ${match.tipo_credito}` : ""}
-          {match.administrator_name ? ` · ${match.administrator_name}` : ""}
-        </p>
-      ) : null}
+      {match.lane === "CREDIT" ? <h4>Opção crédito{combo ? " (junção)" : ""}</h4> : null}
+      {match.lane === "ENTRADA" ? <h4>Opção entrada{combo ? " (junção)" : ""}</h4> : null}
       {match.parcela_legacy ? (
         <p>
           <b>Parcelas:</b> {match.parcela_legacy}
-          {match.vencimento_dia ? ` · venc. dia ${match.vencimento_dia}` : ""}
-          {match.vencimento_proxima ? ` · próxima ${match.vencimento_proxima}` : ""}
+          {match.vencimento_proxima ? ` · venc. ${match.vencimento_proxima}` : ""}
         </p>
       ) : null}
-      <p>
-        {match.explanation}
-        {match.message ? ` — ${match.message}` : ""}
-      </p>
-      <small>
-        Lane {match.lane ?? "—"} · Score {match.score} · Desvio crédito {match.deviation_percent}%
-        {match.entrada_deviation_percent != null ? ` · Desvio entrada ${match.entrada_deviation_percent}%` : ""}
-        {match.rollover_applied ? " · Rollover 7d" : ""}
-        {match.markup_amount ? ` · Markup ${brl.format(Number(match.markup_amount))}` : ""}
-      </small>
       {match.quotas.map((q) => (
         <div className="marketplace-match-quota" key={q.quota_id}>
           <MarketplaceQuotaFields quota={q} administratorFallback={match.administrator_name} />
-          <small className="muted" style={{ display: "block", marginTop: 6 }}>
-            {q.group_code} · {q.quota_code} · Nina {q.nina_scan_status ?? "PENDENTE"}
-          </small>
         </div>
       ))}
-      <button type="button" className="marketplace-submit" style={{ marginTop: "0.75rem" }} disabled={busy} onClick={() => onConfirm(match)}>
-        Confirmar esta opção
+      <button
+        type="button"
+        className="marketplace-submit"
+        style={{ marginTop: "0.75rem" }}
+        disabled={busy}
+        onClick={() => void onConfirm(match)}
+      >
+        Confirmar{combo ? ` (${match.quota_ids.length} cotas)` : ""}
       </button>
     </article>
   );

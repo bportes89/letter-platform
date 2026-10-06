@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from fastapi import HTTPException
@@ -13,7 +14,7 @@ from sqlalchemy.orm import Session
 from app.commission_attribution import apply_proposal_attribution
 from app.marketplace_service import esteira2_nina_curated_match, pricing_for_combo, pricing_for_quota
 from app.cadastro_service import seed_marketplace_lifecycle
-from app.models import Lead, Proposal, Quota, Role, User
+from app.models import Administrator, Lead, Proposal, Quota, Role, User
 from app.quota_supplier_service import suppliers_index
 from app.services import money, reserve_quota
 
@@ -194,7 +195,108 @@ def search_cotas(
         "credit_band_percent": match.get("credit_band_percent") or "10",
         "entrada_band_percent": match.get("entrada_band_percent") or "20",
         "combo_band_percent": match.get("combo_band_percent") or "5",
-        "message": match.get("message") or "Opções encontradas pelo robô. Escolha uma cota para confirmar.",
+        "message": "",
+    }
+
+
+def _parse_terms(raw: str | None) -> dict:
+    try:
+        data = json.loads(raw or "{}")
+        return data if isinstance(data, dict) else {}
+    except json.JSONDecodeError:
+        return {}
+
+
+def _contract_snap_from_purchase(
+    db: Session,
+    lead: Lead,
+    proposal: Proposal,
+    snapshot: dict,
+    quotas: list[Quota],
+    *,
+    affiliate_markup: dict[str, str] | None,
+) -> dict:
+    from app.marketplace_service import pricing_for_quota
+
+    suppliers = suppliers_index(db, lead.organization_id)
+    terms = _parse_terms(proposal.terms_json)
+    total_credit = Decimal(str(terms.get("total_credit") or proposal.requested_amount or 0))
+    total_entrada = Decimal(str(terms.get("total_entrada") or 0))
+    handoff_quotas: list[dict] = []
+    for q in quotas:
+        admin = db.get(Administrator, q.administrator_id)
+        row = pricing_for_quota(q, suppliers=suppliers, affiliate_markup=affiliate_markup)
+        handoff_quotas.append(
+            {
+                "id": q.id,
+                "administradora": admin.name if admin else "—",
+                "tipo_credito": "Imóvel" if q.category == "REAL_ESTATE" else "Veículo",
+                "price": str(row["credit"]),
+                "price_entrada": str(row["entrada_final"]),
+                "parcelas": q.remaining_installments,
+                "price_parcela": str(q.installment_value or 0),
+            }
+        )
+    snap = dict(snapshot)
+    snap["email"] = snap.get("email") or lead.email
+    snap["proposal_id"] = proposal.id
+    snap["handoff_credit"] = str(total_credit)
+    snap["handoff_entrada"] = str(total_entrada)
+    snap["handoff_quotas"] = handoff_quotas
+    snap["declared_income"] = snap.get("monthly_income")
+    return snap
+
+
+def _emit_contract_and_boleto(
+    db: Session,
+    user: User,
+    lead: Lead,
+    proposal: Proposal,
+    contract_snap: dict,
+) -> dict:
+    from app.marketplace_contract_template_service import render_marketplace_contract_html
+    from app.product_contract_flow_service import mark_marketplace_contract_at_purchase
+
+    html = render_marketplace_contract_html(db, user.organization_id, lead, contract_snap)
+    accepted_at = datetime.now(UTC).isoformat()
+    terms = seed_marketplace_lifecycle(_parse_terms(proposal.terms_json))
+    terms["contract_html"] = html
+    terms["contract_ack"] = {
+        "accepted_at": accepted_at,
+        "channel": SOURCE,
+        "provider": "OFFICE_ROBO_ACK",
+    }
+    mark_marketplace_contract_at_purchase(terms)
+    proposal.terms_json = json.dumps(terms, ensure_ascii=False)
+
+    detail = _parse_terms(lead.scr_detail_json)
+    block = detail.get("venda_direta_robo") if isinstance(detail.get("venda_direta_robo"), dict) else {}
+    block = {**block, **contract_snap, "contract_html": html, "contract_accepted_at": accepted_at}
+    detail["venda_direta_robo"] = block
+    lead.scr_detail_json = json.dumps(detail, ensure_ascii=False)
+    db.flush()
+
+    boleto_view = None
+    boleto_created = False
+    try:
+        from app.inter_boleto_service import issue_marketplace_boleto
+
+        issued = issue_marketplace_boleto(db, user, lead.id)
+        boleto_view = issued.get("boleto")
+        boleto_created = bool(issued.get("created"))
+    except HTTPException:
+        boleto_view = None
+
+    from app.inter_boleto_service import boleto_public_token
+
+    token = boleto_public_token(lead.id) if boleto_view else None
+    return {
+        "boleto": boleto_view,
+        "boleto_created": boleto_created,
+        "contract_available": bool(html),
+        "cadastro_path": f"/modules/cadastros?lead_id={lead.id}",
+        "boleto_download_path": f"/marketplace/cadastros/{lead.id}/boleto/{token}" if token else None,
+        "contract_pdf_path": f"/marketplace/cadastros/{lead.id}/contrato.pdf",
     }
 
 
@@ -337,14 +439,29 @@ def confirm_cota(
     lead.status = "PROPOSAL"
     db.flush()
 
+    contract_snap = _contract_snap_from_purchase(
+        db, lead, proposal, snapshot, quotas, affiliate_markup=affiliate_markup
+    )
+    docs = _emit_contract_and_boleto(db, user, lead, proposal, contract_snap)
+
+    msg_parts = [
+        f"Venda gravada. Cotas travadas por {RESERVE_TTL_MINUTES} min.",
+        "Contrato de intermediação disponível para o cliente.",
+    ]
+    if docs.get("boleto"):
+        msg_parts.append(
+            "Boleto da entrada emitido. A assinatura digital (ZapSign) será enviada após a confirmação do pagamento."
+        )
+    else:
+        msg_parts.append("Emita o boleto da entrada em Cadastros Marketplace se necessário.")
+
     return {
         "lead_id": lead.id,
         "proposal_id": proposal.id,
         "quota_ids": ids,
         "reservation_ids": [r.id for r in reservations],
         "requested_amount": str(money(total_credit)),
-        "message": (
-            f"Venda gravada. Cotas travadas por {RESERVE_TTL_MINUTES} min. "
-            "Finalize o cálculo e o contrato em Propostas."
-        ),
+        "entrada_final": str(money(total_entrada)),
+        "message": " ".join(msg_parts),
+        **docs,
     }
