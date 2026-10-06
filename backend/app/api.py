@@ -3049,7 +3049,7 @@ def venda_direta_manual_cotas(
         parts = [p.strip() for p in raw.split(",") if p.strip()]
         return parts or None
 
-    return list_cotas_options(
+    rows = list_cotas_options(
         db,
         user,
         category=category,
@@ -3063,6 +3063,8 @@ def venda_direta_manual_cotas(
         client_bank_administrator_ids=_split_ids(client_bank_administrator_ids),
         client_problem_bank_administrator_ids=_split_ids(client_problem_bank_administrator_ids),
     )
+    db.commit()
+    return rows
 
 
 @router.get("/marketplace/venda-direta-manual/cadastros", response_model=list[VendaDiretaManualCadastroOption])
@@ -3080,7 +3082,11 @@ def venda_direta_manual_partners(user: User = Depends(get_current_user), db: Ses
 
 
 @router.post("/marketplace/venda-direta-manual/store", response_model=VendaDiretaManualStoreResponse)
-def venda_direta_manual_store(payload: VendaDiretaManualStoreRequest, user: User = Depends(require_any_scope("proposals:write", "leads:write")), db: Session = Depends(get_db)):
+def venda_direta_manual_store(
+    payload: VendaDiretaManualStoreRequest,
+    user: User = Depends(require_any_scope("proposals:write", "leads:write", "operations:write")),
+    db: Session = Depends(get_db),
+):
     from app.br_validation import assert_valid_contact
     from app.sales_direct_manual_service import store_manual
 

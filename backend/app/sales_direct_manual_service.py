@@ -83,15 +83,15 @@ def list_cotas_options(
     quotas = list(db.scalars(stmt))
     from app.marketplace_partner_view import mask_quota_fields
 
-    from app.quota_inventory_service import ensure_quota_installment_due
+    admin_ids = {q.administrator_id for q in quotas if q.administrator_id}
+    admin_map: dict[str, Administrator] = {}
+    if admin_ids:
+        admin_map = {
+            a.id: a
+            for a in db.scalars(select(Administrator).where(Administrator.id.in_(admin_ids)))
+        }
 
     rows: list[dict] = []
-    due_touched = False
-    for q in quotas:
-        if ensure_quota_installment_due(q):
-            due_touched = True
-    if due_touched:
-        db.flush()
     from app.venda_direta_filters import quota_client_profile_blockers
 
     profile_filter_active = any(
@@ -108,7 +108,7 @@ def list_cotas_options(
     for q in quotas:
         if q.status == "RESERVED":
             continue
-        admin = db.get(Administrator, q.administrator_id)
+        admin = admin_map.get(q.administrator_id) if q.administrator_id else None
         from app.administrator_marketplace_profile import administrator_eligible_for_marketplace
 
         if not administrator_eligible_for_marketplace(admin):
@@ -376,7 +376,10 @@ def store_manual(
         from app.quota_inventory_service import _nina_scan_fresh
 
         if quota.nina_scan_status != "CLEARED" or not _nina_scan_fresh(quota):
-            result = run_nina_quota_scan(db, user, quota)
+            try:
+                result = run_nina_quota_scan(db, user, quota)
+            except HTTPException as exc:
+                raise HTTPException(status_code=422, detail=str(exc.detail)) from exc
             if result.get("status") != "CLEARED":
                 raise HTTPException(
                     status_code=422,

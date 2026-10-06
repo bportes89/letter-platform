@@ -126,30 +126,20 @@ export function VendaDiretaManualModule() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
+  const [cotasLoading, setCotasLoading] = useState(false);
   const [done, setDone] = useState<StoreResult | null>(null);
 
-  const loadCotas = useCallback(async (cat: string) => {
-    const params = new URLSearchParams({ category: cat });
-    if (quotaCategoryId) params.set("quota_category_id", quotaCategoryId);
-    if (cat === "VEHICLE" && assetYear.trim()) params.set("asset_year", assetYear.trim());
-    if (zeroKm) params.set("asset_is_zero_km", "true");
-    if (dirty) params.set("has_credit_restriction", "true");
-    if (clientBankAdministratorIds.length) {
-      params.set("client_bank_administrator_ids", clientBankAdministratorIds.join(","));
+  const loadCotas = useCallback(async (cat: string, administratorId?: string) => {
+    const params = new URLSearchParams({ category: cat, limit: "400" });
+    if (administratorId) params.set("administrator_id", administratorId);
+    setCotasLoading(true);
+    try {
+      const rows = await api<CotaOption[]>(`/marketplace/venda-direta-manual/cotas?${params.toString()}`);
+      setCotas(rows);
+    } finally {
+      setCotasLoading(false);
     }
-    if (clientProblemBankAdministratorIds.length) {
-      params.set("client_problem_bank_administrator_ids", clientProblemBankAdministratorIds.join(","));
-    }
-    const rows = await api<CotaOption[]>(`/marketplace/venda-direta-manual/cotas?${params.toString()}`);
-    setCotas(rows);
-  }, [
-    quotaCategoryId,
-    assetYear,
-    zeroKm,
-    dirty,
-    clientBankAdministratorIds,
-    clientProblemBankAdministratorIds,
-  ]);
+  }, []);
 
   const loadMeta = useCallback(async () => {
     const [c, p] = await Promise.all([
@@ -161,8 +151,10 @@ export function VendaDiretaManualModule() {
   }, []);
 
   useEffect(() => {
-    loadCotas(category).catch((e) => setError(e instanceof Error ? e.message : "Falha ao carregar cotas"));
-  }, [category, loadCotas]);
+    void loadCotas(category, filterAdministratorId || undefined).catch((e) =>
+      setError(e instanceof Error ? e.message : "Falha ao carregar cotas"),
+    );
+  }, [category, filterAdministratorId, loadCotas]);
 
   useEffect(() => {
     loadMeta().catch(() => undefined);
@@ -264,8 +256,8 @@ export function VendaDiretaManualModule() {
       const data = await api<StoreResult>(
         "/marketplace/venda-direta-manual/store",
         {
-        method: "POST",
-        body: JSON.stringify({
+          method: "POST",
+          body: JSON.stringify({
           name,
           email,
           phone,
@@ -290,14 +282,14 @@ export function VendaDiretaManualModule() {
           quota_category_id: quotaCategoryId || null,
           client_bank_administrator_ids: clientBankAdministratorIds,
           client_problem_bank_administrator_ids: clientProblemBankAdministratorIds,
-        }),
-      },
+          }),
+        },
         { interactive: true },
       );
       setDone(data);
       setNotice(data.message);
       setQuotaIds([]);
-      await loadCotas(category);
+      void loadCotas(category, filterAdministratorId || undefined).catch(() => undefined);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Falha ao gravar venda");
     } finally {
@@ -522,7 +514,12 @@ export function VendaDiretaManualModule() {
             <div className="marketplace-field marketplace-field-wide quota-pick-list">
               <b>Cotas (multi-seleção){filteredCotas.length ? ` — ${filteredCotas.length} opção(ões)` : ""}</b>
               <div className="quota-pick-scroll">
-                {filteredCotas.length === 0 ? (
+                {cotasLoading ? (
+                  <small className="muted">
+                    <RefreshCw className="spin" style={{ marginRight: 6, verticalAlign: "middle" }} />
+                    Carregando cotas…
+                  </small>
+                ) : filteredCotas.length === 0 ? (
                   <small className="muted">
                     Nenhuma cota neste filtro. Ajuste crédito, entrada, administradora ou a categoria.
                   </small>
