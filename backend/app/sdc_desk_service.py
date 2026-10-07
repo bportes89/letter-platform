@@ -72,6 +72,7 @@ IMOVEL_TAXA = Decimal("1.6")
 STATUS_AWAITING_DOCS = "AWAITING_DOCS"
 STATUS_UNDER_REVIEW = "UNDER_REVIEW"
 STATUS_PENDING = "PENDING"
+STATUS_AWAITING_TAPAF_PAYMENT = "AWAITING_TAPAF_PAYMENT"
 STATUS_APPROVED = "APPROVED"
 STATUS_REJECTED = "REJECTED"
 STATUS_CANCELLED = "CANCELLED"
@@ -81,6 +82,7 @@ STATUS_LABELS = {
     STATUS_AWAITING_DOCS: "Aguardando Documentação",
     STATUS_UNDER_REVIEW: "Em Análise",
     STATUS_PENDING: "Pendente",
+    STATUS_AWAITING_TAPAF_PAYMENT: "Pendente pagamento TAPAF",
     STATUS_APPROVED: "Aprovado",
     STATUS_REJECTED: "Reprovado",
     STATUS_CANCELLED: "Cancelado",
@@ -310,6 +312,20 @@ def submit_documents(
         )
     if partner_observation is not None:
         item.partner_observation = partner_observation.strip() or None
+    from app.desk_property_inspection import validate_property_inspections
+    from app.desk_workflow_helpers import inspections_from_item, item_is_real_estate, properties_from_item
+
+    if item_is_real_estate(item):
+        insp_errors = validate_property_inspections(
+            inspections_from_item(item),
+            properties_from_item(item),
+            asset_is_real_estate=True,
+        )
+        if insp_errors:
+            raise HTTPException(
+                status_code=422,
+                detail={"message": insp_errors[0], "motivos": insp_errors},
+            )
     item.status = STATUS_UNDER_REVIEW
     _append_status_log(item, user, status=STATUS_UNDER_REVIEW, notes="Documentação inicial transmitida pelo parceiro.")
     db.flush()
@@ -792,8 +808,20 @@ def open_tapaf_checkout_for_solicitation(db: Session, user: User, item: SdcSolic
     pauta = get_or_create_pauta(db, user, proposal)
     if pauta.status == "PENDING_DOCUMENTS":
         pauta.status = "DOCUMENTS_OK"
+    from app.desk_tapaf_config_service import resolve_desk_tapaf_nominal
+
+    nominal = resolve_desk_tapaf_nominal(db, user.organization_id, "SDC")
+    tapaf_meta["tapaf_nominal_brl"] = str(nominal)
     at = "VEHICLE" if item.asset_type in TIPOS_VEICULO else "REAL_ESTATE"
     pauta.asset_type = at
+    try:
+        pmeta = json_loads(pauta.client_result_json or "{}")
+    except (TypeError, ValueError):
+        pmeta = {}
+    if not isinstance(pmeta, dict):
+        pmeta = {}
+    pmeta["desk_tapaf_nominal_brl"] = str(nominal)
+    pauta.client_result_json = json_dumps(pmeta, ensure_ascii=False)
     db.flush()
 
     tapaf_meta["pauta_id"] = pauta.id
@@ -915,6 +943,23 @@ def update_status(
     elif status != STATUS_PENDING:
         if status != item.status or not _load_pending_codes(item):
             _save_pending_codes(item, [])
+    if status == STATUS_AWAITING_TAPAF_PAYMENT:
+        if item.status != STATUS_UNDER_REVIEW:
+            raise HTTPException(
+                status_code=422,
+                detail="Pendente pagamento TAPAF só após análise (status Em Análise).",
+            )
+        open_tapaf_checkout_for_solicitation(db, user, item)
+    if status == STATUS_APPROVED:
+        from app.desk_workflow_helpers import tapaf_paid_for_item
+
+        meta = json_loads(item.evaluation_json or "{}")
+        if isinstance(meta, dict) and (meta.get("tapaf") or {}).get("pauta_id"):
+            if not tapaf_paid_for_item(db, item):
+                raise HTTPException(
+                    status_code=422,
+                    detail="Aprovação só após pagamento da TAPAF pelo cliente.",
+                )
     item.status = status
     if notes is not None:
         item.status_notes = notes
@@ -1310,4 +1355,24 @@ def solicitation_view(
         "created_at": item.created_at.isoformat() if item.created_at else None,
         "can_create_sale": item.status == STATUS_APPROVED and not item.quota_id,
         **evaluation_meta(item.evaluation_json),
+        **_client_tapaf_path_fields(item),
+    }
+
+
+def _client_tapaf_path_fields(item: SdcSolicitation) -> dict:
+    if item.status != STATUS_AWAITING_TAPAF_PAYMENT:
+        return {}
+    try:
+        meta = json_loads(item.evaluation_json or "{}")
+    except (TypeError, ValueError):
+        return {}
+    tapaf = meta.get("tapaf") if isinstance(meta.get("tapaf"), dict) else {}
+    if not tapaf.get("pauta_id"):
+        return {}
+    from app.inter_cobranca_helpers import sdc_tapaf_client_token
+
+    tok = sdc_tapaf_client_token(item.id)
+    return {
+        "client_tapaf_path": f"/tapaf-sdc?solicitation_id={item.id}&token={tok}",
+        "tapaf_proposal_id": tapaf.get("proposal_id"),
     }

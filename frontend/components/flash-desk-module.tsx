@@ -9,6 +9,8 @@ import { FinOpsModule } from "@/components/finops-module";
 import { PreAnalysisModule } from "@/components/pre-analysis-module";
 import { DeskSourceMetaRow } from "@/lib/desk-source-meta";
 import { CurrencyInput } from "@/components/currency-input";
+import { DeskPropertyInspectionPanel } from "@/components/desk-property-inspection-panel";
+import { DeskTapafConfigPanel } from "@/components/desk-tapaf-config-panel";
 import { PartnerSociosFields, SocioPartner, sociosPayload } from "@/components/partner-socios-fields";
 import { validateSocioMaritalRows } from "@/lib/marital-status";
 import { lookupCep, lookupMunicipalityPopulation } from "@/lib/cep-lookup";
@@ -58,6 +60,8 @@ type FlashSolicitation = {
   documents: Array<{ id: string; doc_type: string; document_id?: string | null; filename?: string | null; status?: string | null; created_at: string | null }>;
   can_create_sale: boolean;
   can_submit_documents?: boolean;
+  properties_json?: Array<{ matricula?: string; zone?: string; lot_type?: string }>;
+  property_inspections_json?: unknown[];
 };
 
 type EvalResult = {
@@ -102,6 +106,7 @@ const STATUS_OPTIONS = [
   { value: "AWAITING_DOCS", label: "Aguardando Documentação" },
   { value: "UNDER_REVIEW", label: "Em Análise" },
   { value: "PENDING", label: "Pendente" },
+  { value: "AWAITING_TAPAF_PAYMENT", label: "Pendente pagamento TAPAF" },
   { value: "APPROVED", label: "Aprovado" },
   { value: "REJECTED", label: "Reprovado" },
   { value: "CANCELLED", label: "Cancelado" },
@@ -1728,6 +1733,18 @@ export function FlashDeskModule() {
                   label={selected.source_channel_label}
                   leadId={selected.lead_id}
                 />
+                {selected.properties_json?.length ? (
+                  <DeskPropertyInspectionPanel
+                    desk="flash"
+                    solicitationId={selected.id}
+                    properties={selected.properties_json.map((p) => ({
+                      matricula: String(p.matricula || ""),
+                      zone: p.zone || "URBANO",
+                      lot_type: p.lot_type,
+                    }))}
+                    disabled={selected.status !== "AWAITING_DOCS"}
+                  />
+                ) : null}
                 {selected.status === "AWAITING_DOCS" && !letterOps && (
                   <>
                     <label style={{ display: "block", marginTop: 12, fontSize: 11 }}>
@@ -1800,6 +1817,9 @@ export function FlashDeskModule() {
         )}
       </section>
 
+      {letterOps ? (
+        <DeskTapafConfigPanel />
+      ) : null}
       {letterOps ? (
         <>
           <section className="panel operational-panel" style={{ marginTop: 16 }}>

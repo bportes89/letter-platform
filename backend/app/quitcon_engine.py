@@ -181,24 +181,45 @@ class EngineQuitConLetter:
         valor_quitacao: Decimal,
         *,
         operational_service: bool = False,
+        perfil: str = "QUITADOR",
     ) -> dict:
         """Custos pagos pelo cliente no início da operação (doc253)."""
         vp = money(Decimal(str(valor_quitacao)))
         taxa_servico = self.calcular_taxa_servico_operacional_inicio(vp) if operational_service else money(Decimal("0"))
         taxa_sucesso = self.calcular_taxa_sucesso_escrow(vp)
-        tapaf = money(self.taxa_tapaf_nominal)
-        abertura_itens: list[dict] = [
-            {
-                "codigo": "TAPAF",
-                "nome": "TAPAF — Taxa de Avaliação e Auditoria",
-                "valor": str(tapaf),
-                "obrigatorio": True,
-                "reembolsavel": False,
-                "momento": "ABERTURA",
-                "descricao": (
-                    "Taxa não reembolsável. Certidões, ONR e laudo AVM são entregues ao cliente."
-                ),
-            },
+        liberacao = self.calcular_liberacao_cessionario(vp)
+        taxa_5 = money(Decimal(str(liberacao["taxa_plataforma_5_porcento"])))
+        escrow_abertura = money(vp + taxa_5)
+        abertura_itens: list[dict] = []
+        if str(perfil or "").upper() == "ALIENACAO":
+            tapaf = money(self.taxa_tapaf_nominal)
+            abertura_itens.append(
+                {
+                    "codigo": "TAPAF",
+                    "nome": "TAPAF — Taxa de Avaliação e Auditoria (bem alienado)",
+                    "valor": str(tapaf),
+                    "obrigatorio": True,
+                    "reembolsavel": False,
+                    "momento": "ABERTURA",
+                    "descricao": "Aplicável ao cliente que aliena o outro bem na operação.",
+                },
+            )
+        else:
+            abertura_itens.append(
+                {
+                    "codigo": "ESCROW_QUITACAO_5PCT",
+                    "nome": "Quitação (VP) + 5% plataforma — conta Escrow",
+                    "valor": str(escrow_abertura),
+                    "obrigatorio": True,
+                    "reembolsavel": False,
+                    "momento": "ABERTURA",
+                    "descricao": (
+                        "Valor de quitação e taxa de 5% depositados em Escrow na abertura. "
+                        "Sem novo cessionário em até 60 dias, o cliente poderá solicitar saque (controle interno LETTER)."
+                    ),
+                },
+            )
+        abertura_itens.append(
             {
                 "codigo": "SERVICO_OPERACIONAL_2PCT",
                 "nome": "Taxa de Serviço LETTER (2% sobre VP)",
@@ -208,11 +229,10 @@ class EngineQuitConLetter:
                 "reembolsavel": False,
                 "momento": "ABERTURA",
                 "descricao": (
-                    "Paga na abertura quando a LETTER conduz toda a burocracia junto à administradora. "
-                    "Não se aplica se o cliente preferir conduzir o processo diretamente com a ADM."
+                    "Facultativa — paga na abertura quando a LETTER conduz toda a burocracia junto à administradora."
                 ),
             },
-        ]
+        )
         pos_aprovacao_itens = [
             {
                 "codigo": "TAXA_SUCESSO_ESCROW_10PCT",
@@ -229,18 +249,21 @@ class EngineQuitConLetter:
             },
         ]
         itens = abertura_itens + pos_aprovacao_itens
-        total_obrigatorio = tapaf
-        total_com_servico = money(tapaf + taxa_servico) if operational_service else tapaf
+        if str(perfil or "").upper() == "ALIENACAO":
+            total_obrigatorio = money(self.taxa_tapaf_nominal)
+            ordem = ["TAPAF"]
+        else:
+            total_obrigatorio = escrow_abertura
+            ordem = ["ESCROW_QUITACAO_5PCT"]
+        total_com_servico = money(total_obrigatorio + taxa_servico) if operational_service else total_obrigatorio
+        if operational_service:
+            ordem.append("SERVICO_OPERACIONAL_2PCT")
         return {
             "titulo": "Custos pagos pelo cliente no início da operação",
             "itens": itens,
             "total_obrigatorio_abertura": str(total_obrigatorio),
             "total_com_servico_operacional": str(total_com_servico),
-            "ordem_pagamento": (
-                ["TAPAF", "SERVICO_OPERACIONAL_2PCT"]
-                if operational_service
-                else ["TAPAF"]
-            ),
+            "ordem_pagamento": ordem,
         }
 
     def calcular_liberacao_cessionario(self, valor_quitacao: Decimal) -> dict:

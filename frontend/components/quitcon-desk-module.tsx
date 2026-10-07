@@ -201,7 +201,11 @@ export function QuitConDeskModule() {
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [lastCheckout, setLastCheckout] = useState<Record<string, unknown> | null>(null);
+  const [lastSale, setLastSale] = useState<{
+    escrow_abertura?: { custos_entrada?: { total_obrigatorio_abertura?: string; itens?: unknown[] }; operacao_id?: string };
+    alienacao_tapaf?: { interface_checkout_tapaf?: { valor_nominal_taxa?: string }; pauta_code?: string };
+    quitcon_operacao_id?: string;
+  } | null>(null);
   const [quotaLines, setQuotaLines] = useState<QuotaLine[]>([emptyQuotaLine()]);
   const [clientAddress, setClientAddress] = useState<AddressFields>(emptyAddress());
   const [assetAddress, setAssetAddress] = useState<AddressFields>(emptyAddress());
@@ -590,10 +594,15 @@ export function QuitConDeskModule() {
         message: string;
         quitcon_operacao_id: string;
         operacao_code: string;
-        tapaf_checkout: Record<string, unknown>;
+        escrow_abertura?: Record<string, unknown>;
+        alienacao_tapaf?: Record<string, unknown>;
       }>(`/quitcon/desk/solicitations/${selectedId}/sale`, { method: "POST" });
       setNotice(`${res.message} (${res.operacao_code})`);
-      setLastCheckout(res.tapaf_checkout);
+      setLastSale({
+        quitcon_operacao_id: res.quitcon_operacao_id,
+        escrow_abertura: res.escrow_abertura as typeof lastSale extends null ? never : NonNullable<typeof lastSale>["escrow_abertura"],
+        alienacao_tapaf: res.alienacao_tapaf as typeof lastSale extends null ? never : NonNullable<typeof lastSale>["alienacao_tapaf"],
+      });
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Falha ao abrir operação");
@@ -611,7 +620,7 @@ export function QuitConDeskModule() {
           <span className="eyebrow dark">COMERCIAL</span>
           <h1>QuitCon</h1>
           <p>
-            Mesa doc253: simular VP e custos de entrada → documentos/status → abrir operação em AGUARDANDO_TAPAF.
+            Mesa doc253: simular VP → documentos/análise → abertura com Escrow (VP+5%). TAPAF só para alienação do outro bem.
             Parceiro anexa docs; operação LETTER altera status.
           </p>
         </div>
@@ -1206,8 +1215,8 @@ export function QuitConDeskModule() {
         {tab === "venda" && (
           <div style={{ padding: "0 18px 18px" }} className="stack-form">
             <p className="muted">
-              Abre proposta QuitCon + operação em AGUARDANDO_TAPAF. Na abertura o cliente paga TAPAF (R$ 1.500) e, se
-              contratado, a taxa de serviço LETTER (2%).
+              Abre a operação em <b>AGUARDANDO_ESCROW_ENTRADA</b>: na abertura o cliente deposita quitação (VP) + 5% em Escrow
+              (e 2% de serviço LETTER, se contratado). TAPAF é gerada apenas se houver bem alienado cadastrado.
             </p>
             {fundingPipeline.length > 0 && (
               <section className="panel" style={{ padding: 12, background: "#f2faf6" }}>
@@ -1239,11 +1248,39 @@ export function QuitConDeskModule() {
             <button type="button" className="admin-button" disabled={!selectedId || busy} onClick={() => void createSale()}>
               Abrir operação QuitCon
             </button>
-            {lastCheckout && (
-              <div className="notice">
-                <b>Checkout TAPAF</b>
-                <div>Valor: {String(lastCheckout.valor_tapaf_brl ?? "1500.00")}</div>
-                <small>{String(lastCheckout.texto_tooltip ?? "")}</small>
+            {lastSale?.escrow_abertura && (
+              <div className="notice" style={{ marginTop: 10 }}>
+                <b>Depósito Escrow (abertura)</b>
+                <div>
+                  Total obrigatório: R$ {lastSale.escrow_abertura.custos_entrada?.total_obrigatorio_abertura ?? "—"}
+                </div>
+                {isInternal && lastSale.quitcon_operacao_id && (
+                  <button
+                    type="button"
+                    className="admin-button"
+                    style={{ marginTop: 8 }}
+                    disabled={busy}
+                    onClick={() =>
+                      void api(`/finops/quitcon/confirm-escrow-opening?operacao_id=${lastSale.quitcon_operacao_id}`, {
+                        method: "POST",
+                      })
+                        .then(() => setNotice("Depósito Escrow confirmado (sandbox)."))
+                        .catch((e) => setError(e instanceof Error ? e.message : "Falha"))
+                    }
+                  >
+                    Confirmar depósito Escrow (LETTER)
+                  </button>
+                )}
+              </div>
+            )}
+            {lastSale?.alienacao_tapaf?.interface_checkout_tapaf && (
+              <div className="notice" style={{ marginTop: 10 }}>
+                <b>TAPAF — bem alienado</b>
+                <div>
+                  Valor: R$ {lastSale.alienacao_tapaf.interface_checkout_tapaf.valor_nominal_taxa ?? "1500.00"}
+                  {lastSale.alienacao_tapaf.pauta_code ? ` · Pauta ${lastSale.alienacao_tapaf.pauta_code}` : ""}
+                </div>
+                <small className="muted">Cobrança via pré-análise / FinOps (não confunde com depósito Escrow da quitação).</small>
               </div>
             )}
           </div>

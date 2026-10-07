@@ -3,7 +3,7 @@
 import hashlib
 import json
 from datetime import UTC, datetime
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from uuid import uuid4
 
 from fastapi import HTTPException
@@ -374,16 +374,27 @@ def validate_documents_phase1(db: Session, user: User, proposal: Proposal, docum
     return pauta
 
 
+def pauta_tapaf_nominal(pauta: PreAnalysisPauta) -> Decimal:
+    try:
+        meta = json.loads(pauta.client_result_json or "{}")
+        if isinstance(meta, dict) and meta.get("desk_tapaf_nominal_brl"):
+            return money(Decimal(str(meta["desk_tapaf_nominal_brl"])))
+    except (TypeError, ValueError, InvalidOperation):
+        pass
+    return TAPAF_NOMINAL
+
+
 def generate_tapaf_checkout(pauta: PreAnalysisPauta) -> dict:
     if pauta.status not in {"DOCUMENTS_OK", "TAPAF_CHECKOUT_ACCEPTED", "TAPAF_PAID"}:
         raise HTTPException(status_code=409, detail="Documentação deve estar validada na Fase 1 antes da TAPAF")
+    nominal = pauta_tapaf_nominal(pauta)
     pix = pauta.pix_copy_paste or f"00020101021126580014br.gov.bcb.pix0136letter-spe-tapaf-{pauta.id[:8]}"
     return {
         "endpoint": "/api/v1/finops/pre-analysis/generate-tapaf",
         "status": "SUCCESS",
         "pauta_id": pauta.pauta_code,
         "interface_checkout_tapaf": {
-            "valor_nominal_taxa": "1500.00",
+            "valor_nominal_taxa": str(nominal),
             "gateway_baas_pix_qrcode": pix,
             "pix_copy_paste": pix,
             "pix_qr_code": pauta.pix_qr_code,
@@ -440,8 +451,9 @@ def confirm_tapaf_payment(db: Session, user: User, pauta: PreAnalysisPauta, even
         return pauta
     if pauta.status != "TAPAF_CHECKOUT_ACCEPTED":
         raise HTTPException(status_code=409, detail="Aceite do checkout TAPAF é obrigatório antes do pagamento")
-    if money(amount) != MotorPreAnaliseFiduciariaV6.taxa_tapaf_nominal:
-        raise HTTPException(status_code=422, detail="Valor TAPAF deve ser exatamente R$ 1.500,00")
+    expected = pauta_tapaf_nominal(pauta)
+    if money(amount) != expected:
+        raise HTTPException(status_code=422, detail=f"Valor TAPAF deve ser exatamente R$ {expected}")
     pauta.tapaf_payment_reference = event_id
     pauta.tapaf_paid_at = datetime.now(UTC)
     pauta.status = "TAPAF_PAID"

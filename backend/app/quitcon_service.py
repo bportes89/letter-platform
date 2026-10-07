@@ -193,7 +193,7 @@ def create_operacao(
         quota_id=quota_id,
         owner_user_id=owner_user_id or user.id,
         operacao_code=code,
-        status="AGUARDANDO_TAPAF",
+        status="AGUARDANDO_ESCROW_ENTRADA",
         property_type=property_type.upper(),
         appraisal_value=money(appraisal_value or saldo),
         outstanding_balance=saldo,
@@ -212,7 +212,14 @@ def create_operacao(
     )
     db.add(item)
     db.flush()
-    _log_transition(db, item, user, "NEW", "AGUARDANDO_TAPAF", "Lead consórcio doc253 — checkout TAPAF R$ 1.500,00")
+    _log_transition(
+        db,
+        item,
+        user,
+        "NEW",
+        "AGUARDANDO_ESCROW_ENTRADA",
+        "QuitCon — depósito Escrow (VP quitação + 5%) na abertura; TAPAF apenas para alienação do outro bem.",
+    )
     return item
 
 
@@ -239,6 +246,41 @@ def provision_quitcon_tapaf_inter(db: Session, user: User, operacao: QuitConOper
     save_quitcon_inter_block(operacao, block)
     db.flush()
     return block
+
+
+def confirm_escrow_opening_deposit(
+    db: Session,
+    user: User,
+    operacao: QuitConOperacao,
+    *,
+    event_id: str | None = None,
+) -> QuitConOperacao:
+    if operacao.status != "AGUARDANDO_ESCROW_ENTRADA":
+        raise HTTPException(
+            status_code=409,
+            detail="Depósito Escrow só para operações em AGUARDANDO_ESCROW_ENTRADA.",
+        )
+    from datetime import timedelta
+
+    snap = json.loads(operacao.product_snapshot_json or "{}")
+    if not isinstance(snap, dict):
+        snap = {}
+    now = datetime.now(UTC)
+    snap["escrow_deposit_confirmed_at"] = now.isoformat()
+    snap["escrow_release_eligible_after"] = (now + timedelta(days=60)).isoformat()
+    snap["escrow_deposit_event_id"] = event_id or f"escrow-sandbox-{operacao.id[:8]}"
+    operacao.product_snapshot_json = json.dumps(snap, ensure_ascii=False)
+    operacao.status = "ESCROW_DEPOSITADO"
+    _log_transition(
+        db,
+        operacao,
+        user,
+        "AGUARDANDO_ESCROW_ENTRADA",
+        "ESCROW_DEPOSITADO",
+        "Depósito Escrow (VP quitação + 5%) confirmado na abertura.",
+    )
+    db.flush()
+    return operacao
 
 
 def generate_tapaf_checkout(operacao: QuitConOperacao) -> dict:

@@ -130,6 +130,8 @@ from app.schemas import (
     MarketplaceBindChatLeadRequest, MarketplaceBindChatLeadResponse,
     VenderCotaCalculateRequest, VenderCotaStoreRequest, QuotaOfferRangeUpdate, QuotaSellOfferUpdate, VenderCotaCloseRequest,
     SdcDeskEvaluateRequest,
+    DeskPropertyInspectionPatch,
+    DeskTapafConfigSave,
     SdcDeskStoreRequest,
     SdcDeskStatusUpdate,
     SdcDeskSaleCreate,
@@ -4304,28 +4306,14 @@ def sdc_desk_store(payload: SdcDeskStoreRequest, user: User = Depends(get_curren
         phone=payload.contact_phone,
         person_type=payload.person_type,
     )
-    from app.sdc_desk_service import open_tapaf_checkout_for_solicitation
-
     item = store_solicitation(db, user, payload.model_dump())
-    tapaf_bundle = None
-    try:
-        tapaf_bundle = open_tapaf_checkout_for_solicitation(db, user, item)
-    except HTTPException:
-        tapaf_bundle = None
     audit(db, user, "sdc_desk.solicitation_created", "sdc_solicitation", item.id, {
         "asset_type": item.asset_type,
         "credit_estimated": str(item.credit_estimated),
     })
     db.commit()
     db.refresh(item)
-    view = solicitation_view(item, list_documents(db, item.id), db)
-    if tapaf_bundle:
-        from app.inter_cobranca_helpers import sdc_tapaf_client_token
-
-        view["tapaf_proposal_id"] = tapaf_bundle.get("proposal_id")
-        tok = sdc_tapaf_client_token(item.id)
-        view["client_tapaf_path"] = f"/tapaf-sdc?solicitation_id={item.id}&token={tok}"
-    return view
+    return solicitation_view(item, list_documents(db, item.id), db)
 
 
 @router.get("/sdc/desk/solicitations")
@@ -4340,6 +4328,82 @@ def sdc_desk_get(solicitation_id: str, user: User = Depends(get_current_user), d
     from app.sdc_desk_service import get_solicitation, list_documents, solicitation_view
 
     item = get_solicitation(db, user, solicitation_id)
+    return solicitation_view(item, list_documents(db, item.id), db)
+
+
+@router.get("/desk/tapaf-config")
+def desk_tapaf_config_get(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.desk_tapaf_config_service import list_desk_tapaf_config
+    from app.sdc_desk_service import assert_desk_access
+
+    assert_desk_access(user)
+    return list_desk_tapaf_config(db, user.organization_id)
+
+
+@router.put("/desk/tapaf-config")
+def desk_tapaf_config_put(
+    payload: DeskTapafConfigSave,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.desk_tapaf_config_service import save_desk_tapaf_config
+    from app.sdc_desk_service import _is_letter_ops, assert_desk_access
+
+    assert_desk_access(user)
+    if not _is_letter_ops(user):
+        raise HTTPException(status_code=403, detail="Apenas operação LETTER altera valores TAPAF.")
+    values = {k: v for k, v in payload.model_dump().items() if v is not None}
+    try:
+        saved = save_desk_tapaf_config(db, user.organization_id, values)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    db.commit()
+    return saved
+
+
+@router.patch("/sdc/desk/solicitations/{solicitation_id}/property-inspection")
+def sdc_desk_property_inspection_patch(
+    solicitation_id: str,
+    payload: DeskPropertyInspectionPatch,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.desk_inspection_service import patch_property_inspection
+    from app.sdc_desk_service import get_solicitation, list_documents, solicitation_view
+
+    item = get_solicitation(db, user, solicitation_id)
+    patch_property_inspection(db, user, item, payload.model_dump())
+    db.commit()
+    db.refresh(item)
+    return solicitation_view(item, list_documents(db, item.id), db)
+
+
+@router.post("/sdc/desk/solicitations/{solicitation_id}/property-inspection/photo")
+async def sdc_desk_property_inspection_photo(
+    solicitation_id: str,
+    file: UploadFile = File(...),
+    matricula: str = Form(...),
+    photo_key: str = Form(...),
+    camera_native: bool = Form(True),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.desk_inspection_service import upload_property_inspection_photo
+    from app.sdc_desk_service import get_solicitation, list_documents, solicitation_view
+
+    item = get_solicitation(db, user, solicitation_id)
+    await upload_property_inspection_photo(
+        db,
+        user,
+        item,
+        upload=file,
+        matricula=matricula,
+        photo_key=photo_key,
+        camera_native=camera_native,
+        storage_scope="sdc_solicitation",
+    )
+    db.commit()
+    db.refresh(item)
     return solicitation_view(item, list_documents(db, item.id), db)
 
 
@@ -4558,29 +4622,14 @@ def flash_desk_store(payload: FlashDeskStoreRequest, user: User = Depends(get_cu
         phone=payload.contact_phone,
         person_type=payload.person_type,
     )
-    from app.flash_desk_service import open_tapaf_checkout_for_solicitation
-
     item = store_solicitation(db, user, payload.model_dump())
-    tapaf_bundle = None
-    try:
-        tapaf_bundle = open_tapaf_checkout_for_solicitation(db, user, item)
-    except HTTPException:
-        tapaf_bundle = None
     audit(db, user, "flash_desk.solicitation_created", "flash_solicitation", item.id, {
         "asset_type": item.asset_type,
         "principal": str(item.principal),
     })
     db.commit()
     db.refresh(item)
-    view = solicitation_view(item, list_documents(db, item.id), db)
-    if tapaf_bundle:
-        from app.inter_cobranca_helpers import flash_tapaf_client_token
-
-        view["tapaf_proposal_id"] = tapaf_bundle.get("proposal_id")
-        view["tapaf_checkout"] = tapaf_bundle.get("interface_checkout_tapaf") or tapaf_bundle
-        tok = flash_tapaf_client_token(item.id)
-        view["client_tapaf_path"] = f"/tapaf-flash?solicitation_id={item.id}&token={tok}"
-    return view
+    return solicitation_view(item, list_documents(db, item.id), db)
 
 
 @router.get("/flash/desk/solicitations")
@@ -4595,6 +4644,52 @@ def flash_desk_get(solicitation_id: str, user: User = Depends(get_current_user),
     from app.flash_desk_service import get_solicitation, list_documents, solicitation_view
 
     item = get_solicitation(db, user, solicitation_id)
+    return solicitation_view(item, list_documents(db, item.id), db)
+
+
+@router.patch("/flash/desk/solicitations/{solicitation_id}/property-inspection")
+def flash_desk_property_inspection_patch(
+    solicitation_id: str,
+    payload: DeskPropertyInspectionPatch,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.desk_inspection_service import patch_property_inspection
+    from app.flash_desk_service import get_solicitation, list_documents, solicitation_view
+
+    item = get_solicitation(db, user, solicitation_id)
+    patch_property_inspection(db, user, item, payload.model_dump())
+    db.commit()
+    db.refresh(item)
+    return solicitation_view(item, list_documents(db, item.id), db)
+
+
+@router.post("/flash/desk/solicitations/{solicitation_id}/property-inspection/photo")
+async def flash_desk_property_inspection_photo(
+    solicitation_id: str,
+    file: UploadFile = File(...),
+    matricula: str = Form(...),
+    photo_key: str = Form(...),
+    camera_native: bool = Form(True),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.desk_inspection_service import upload_property_inspection_photo
+    from app.flash_desk_service import get_solicitation, list_documents, solicitation_view
+
+    item = get_solicitation(db, user, solicitation_id)
+    await upload_property_inspection_photo(
+        db,
+        user,
+        item,
+        upload=file,
+        matricula=matricula,
+        photo_key=photo_key,
+        camera_native=camera_native,
+        storage_scope="flash_solicitation",
+    )
+    db.commit()
+    db.refresh(item)
     return solicitation_view(item, list_documents(db, item.id), db)
 
 
@@ -5444,6 +5539,22 @@ def quitcon_list_operacoes(user: User = Depends(get_current_user), db: Session =
 @router.get("/finops/quitcon/operacoes/{operacao_id}", response_model=QuitConOperacaoView)
 def quitcon_get_operacao(operacao_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     return QuitConOperacaoView(**quitcon_operacao_view(_load_quitcon_operacao(db, user, operacao_id)))
+
+
+@router.post("/finops/quitcon/confirm-escrow-opening", response_model=QuitConOperacaoView)
+def quitcon_confirm_escrow_opening(
+    operacao_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.quitcon_service import confirm_escrow_opening_deposit
+
+    operacao = _load_quitcon_operacao(db, user, operacao_id)
+    confirm_escrow_opening_deposit(db, user, operacao)
+    audit(db, user, "finops.quitcon.escrow_opening", "quitcon_operacao", operacao.id)
+    db.commit()
+    db.refresh(operacao)
+    return QuitConOperacaoView(**quitcon_operacao_view(operacao))
 
 
 @router.post("/finops/quitcon/tapaf-checkout")

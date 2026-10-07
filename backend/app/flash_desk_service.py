@@ -42,6 +42,7 @@ DEBT_OUTRAS = "OUTRAS"
 STATUS_AWAITING_DOCS = "AWAITING_DOCS"
 STATUS_UNDER_REVIEW = "UNDER_REVIEW"
 STATUS_PENDING = "PENDING"
+STATUS_AWAITING_TAPAF_PAYMENT = "AWAITING_TAPAF_PAYMENT"
 STATUS_APPROVED = "APPROVED"
 STATUS_REJECTED = "REJECTED"
 STATUS_CANCELLED = "CANCELLED"
@@ -51,6 +52,7 @@ STATUS_LABELS = {
     STATUS_AWAITING_DOCS: "Aguardando Documentação",
     STATUS_UNDER_REVIEW: "Em Análise",
     STATUS_PENDING: "Pendente",
+    STATUS_AWAITING_TAPAF_PAYMENT: "Pendente pagamento TAPAF",
     STATUS_APPROVED: "Aprovado",
     STATUS_REJECTED: "Reprovado",
     STATUS_CANCELLED: "Cancelado",
@@ -394,10 +396,21 @@ def open_tapaf_checkout_for_solicitation(db: Session, user: User, item: FlashSol
         raise HTTPException(status_code=500, detail="Proposta TAPAF não encontrada")
 
     pauta = get_or_create_pauta(db, user, proposal)
-    # Mesa comercial: documentos vão para Acompanhamento — TAPAF após gravar a solicitação.
     if pauta.status == "PENDING_DOCUMENTS":
         pauta.status = "DOCUMENTS_OK"
+    from app.desk_tapaf_config_service import resolve_desk_tapaf_nominal
+
+    nominal = resolve_desk_tapaf_nominal(db, user.organization_id, "FLASH")
+    tapaf_meta["tapaf_nominal_brl"] = str(nominal)
     pauta.asset_type = "REAL_ESTATE" if item.asset_category == "REAL_ESTATE" else "VEHICLE"
+    try:
+        pmeta = json_loads(pauta.client_result_json or "{}")
+    except (TypeError, ValueError):
+        pmeta = {}
+    if not isinstance(pmeta, dict):
+        pmeta = {}
+    pmeta["desk_tapaf_nominal_brl"] = str(nominal)
+    pauta.client_result_json = json_dumps(pmeta, ensure_ascii=False)
     db.flush()
 
     from app.product_contract_flow_service import emit_desk_contract_on_tapaf, flash_context_from_solicitation
@@ -563,6 +576,17 @@ def submit_documents(db: Session, user: User, item: FlashSolicitation, notes: st
             status_code=422,
             detail={"message": "Anexe todos os documentos obrigatórios antes de enviar.", "missing": missing},
         )
+    from app.desk_property_inspection import validate_property_inspections
+    from app.desk_workflow_helpers import inspections_from_item, item_is_real_estate, properties_from_item
+
+    if item_is_real_estate(item):
+        insp_errors = validate_property_inspections(
+            inspections_from_item(item),
+            properties_from_item(item),
+            asset_is_real_estate=True,
+        )
+        if insp_errors:
+            raise HTTPException(status_code=422, detail={"message": insp_errors[0], "motivos": insp_errors})
     item.status = STATUS_UNDER_REVIEW
     if notes:
         item.status_notes = notes.strip()
@@ -700,6 +724,23 @@ def update_status(db: Session, user: User, item: FlashSolicitation, status: str,
     status = status.upper().strip()
     if status not in STATUS_LABELS:
         raise HTTPException(status_code=422, detail="Status inválido")
+    if status == STATUS_AWAITING_TAPAF_PAYMENT:
+        if item.status != STATUS_UNDER_REVIEW:
+            raise HTTPException(
+                status_code=422,
+                detail="Pendente pagamento TAPAF só após análise (status Em Análise).",
+            )
+        open_tapaf_checkout_for_solicitation(db, user, item)
+    if status == STATUS_APPROVED:
+        from app.desk_workflow_helpers import tapaf_paid_for_item
+
+        meta = json_loads(item.evaluation_json or "{}")
+        if isinstance(meta, dict) and (meta.get("tapaf") or {}).get("pauta_id"):
+            if not tapaf_paid_for_item(db, item):
+                raise HTTPException(
+                    status_code=422,
+                    detail="Aprovação só após pagamento da TAPAF pelo cliente.",
+                )
     item.status = status
     if notes is not None:
         item.status_notes = notes
@@ -960,4 +1001,24 @@ def solicitation_view(
         if db
         else False,
         **evaluation_meta(item.evaluation_json),
+        **_client_tapaf_path_fields(item),
+    }
+
+
+def _client_tapaf_path_fields(item: FlashSolicitation) -> dict:
+    if item.status != STATUS_AWAITING_TAPAF_PAYMENT:
+        return {}
+    try:
+        meta = json_loads(item.evaluation_json or "{}")
+    except (TypeError, ValueError):
+        return {}
+    tapaf = meta.get("tapaf") if isinstance(meta.get("tapaf"), dict) else {}
+    if not tapaf.get("pauta_id"):
+        return {}
+    from app.inter_cobranca_helpers import flash_tapaf_client_token
+
+    tok = flash_tapaf_client_token(item.id)
+    return {
+        "client_tapaf_path": f"/tapaf-flash?solicitation_id={item.id}&token={tok}",
+        "tapaf_proposal_id": tapaf.get("proposal_id"),
     }

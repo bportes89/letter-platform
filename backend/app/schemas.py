@@ -3278,6 +3278,21 @@ class SdcDeskPartnerObservationUpdate(BaseModel):
     partner_observation: str | None = Field(default=None, max_length=8000)
 
 
+class DeskPropertyInspectionPatch(BaseModel):
+    matricula: str = Field(min_length=1, max_length=80)
+    zone: str = "URBANO"
+    lot_type: str | None = None
+    built_area_m2: float | None = None
+    rooms: dict = Field(default_factory=dict)
+    rural: dict = Field(default_factory=dict)
+
+
+class DeskTapafConfigSave(BaseModel):
+    SDC: Decimal | None = None
+    FLASH: Decimal | None = None
+    QUITCON_ALIENACAO: Decimal | None = None
+
+
 class SdcChecklistConfigItem(BaseModel):
     code: str = Field(min_length=1, max_length=80)
     label: str = Field(min_length=2, max_length=500)

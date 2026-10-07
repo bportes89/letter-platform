@@ -389,7 +389,7 @@ def test_sdc_desk_partner_status_checklist_and_submit(client, auth_headers, part
     })
     assert stored.status_code == 201, stored.text
     sid = stored.json()["id"]
-    assert stored.json().get("client_tapaf_path")
+    assert stored.json().get("client_tapaf_path") is None
 
     blocked = client.patch(
         f"/api/v1/sdc/desk/solicitations/{sid}",
@@ -505,7 +505,7 @@ def test_flash_desk_submit_documents_and_partner_status(client, auth_headers, pa
     assert stored.status_code == 201, stored.text
     sid = stored.json()["id"]
     assert stored.json()["status"] == "AWAITING_DOCS"
-    assert stored.json().get("client_tapaf_path")
+    assert stored.json().get("client_tapaf_path") is None
 
     blocked = client.patch(
         f"/api/v1/flash/desk/solicitations/{sid}",
@@ -663,9 +663,16 @@ def test_quitcon_desk_evaluate_store_approve_and_sale(client, auth_headers):
     assert sale.status_code == 201, sale.text
     body = sale.json()
     assert body["quitcon_operacao_id"]
-    assert body["operacao_status"] == "AGUARDANDO_TAPAF"
-    assert body["tapaf_checkout"]["valor_tapaf_brl"] == "1500.00"
+    assert body["operacao_status"] == "AGUARDANDO_ESCROW_ENTRADA"
+    assert body["escrow_abertura"]["custos_entrada"]["total_obrigatorio_abertura"]
     assert body["solicitation"]["can_create_sale"] is False
+
+    escrow_ok = client.post(
+        f"/api/v1/finops/quitcon/confirm-escrow-opening?operacao_id={body['quitcon_operacao_id']}",
+        headers=auth_headers,
+    )
+    assert escrow_ok.status_code == 200
+    assert escrow_ok.json()["status"] == "ESCROW_DEPOSITADO"
 
     again = client.post(f"/api/v1/quitcon/desk/solicitations/{sid}/sale", headers=auth_headers)
     assert again.status_code == 409

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 from json import dumps as json_dumps
+from json import loads as json_loads
 
 from fastapi import HTTPException, UploadFile
 from sqlalchemy import select
@@ -24,7 +25,7 @@ from app.models import (
 )
 from app.network_service import PARTNER_NETWORK_ROLES
 from app.quitcon_engine import EngineQuitConLetter
-from app.quitcon_service import create_operacao, generate_tapaf_checkout
+from app.quitcon_service import create_operacao
 from app.services import money
 
 QUITCON_PRODUCT = "QUITCON"
@@ -610,6 +611,105 @@ def ensure_quitcon_commission_rule(db: Session, organization_id: str) -> Commiss
     return rule
 
 
+def _desk_meta(item: QuitConSolicitation) -> dict:
+    try:
+        meta = json_loads(item.evaluation_json or "{}")
+    except (TypeError, ValueError):
+        meta = {}
+    return meta if isinstance(meta, dict) else {}
+
+
+def _has_alienation_asset(meta: dict) -> bool:
+    return bool(
+        str(meta.get("alienated_property_registry") or "").strip()
+        or str(meta.get("alienated_vehicle_plate") or "").strip()
+        or str(meta.get("alienated_vehicle_chassi") or "").strip()
+    )
+
+
+def open_alienacao_tapaf_for_solicitation(
+    db: Session,
+    user: User,
+    item: QuitConSolicitation,
+    operacao: QuitConOperacao,
+) -> dict:
+    """TAPAF apenas para alienação do outro bem (não para quitação do consórcio)."""
+    meta = _desk_meta(item)
+    if not _has_alienation_asset(meta):
+        return {}
+    from app.desk_tapaf_config_service import resolve_desk_tapaf_nominal
+    from app.pre_analysis_service import generate_tapaf_checkout, get_or_create_pauta
+
+    alien = meta.get("alienacao_tapaf") if isinstance(meta.get("alienacao_tapaf"), dict) else {}
+    proposal_id = alien.get("proposal_id")
+    if not proposal_id:
+        tapaf_lead = Lead(
+            organization_id=user.organization_id,
+            owner_id=item.partner_user_id or user.id,
+            name=item.contact_name,
+            phone=item.contact_phone or "00000000000",
+            document=item.document,
+            product_interest=QUITCON_PRODUCT,
+            status="QUALIFIED",
+            source="QUITCON_DESK_ALIENACAO",
+        )
+        db.add(tapaf_lead)
+        db.flush()
+        tapaf_proposal = Proposal(
+            organization_id=user.organization_id,
+            lead_id=tapaf_lead.id,
+            product=QUITCON_PRODUCT,
+            requested_amount=item.quitacao_vp_amount,
+            status="SUBMITTED",
+            terms_json=json_dumps(
+                {
+                    "quitcon_solicitation_id": item.id,
+                    "quitcon_operacao_id": operacao.id,
+                    "tapaf_phase": True,
+                    "tapaf_role": "ALIENACAO",
+                    "channel": "QUITCON_DESK",
+                },
+                ensure_ascii=False,
+            ),
+            sale_channel="PARTNER_OFFICE",
+            served_by_user_id=user.id,
+            commission_originator_id=item.partner_user_id,
+            created_by_user_id=user.id,
+        )
+        db.add(tapaf_proposal)
+        db.flush()
+        proposal_id = tapaf_proposal.id
+        alien["proposal_id"] = proposal_id
+        alien["lead_id"] = tapaf_lead.id
+
+    tapaf_proposal = db.get(Proposal, proposal_id)
+    if not tapaf_proposal:
+        raise HTTPException(status_code=500, detail="Proposta TAPAF alienação não encontrada")
+    pauta = get_or_create_pauta(db, user, tapaf_proposal)
+    if pauta.status == "PENDING_DOCUMENTS":
+        pauta.status = "DOCUMENTS_OK"
+    nominal = resolve_desk_tapaf_nominal(db, user.organization_id, "QUITCON_ALIENACAO")
+    try:
+        pmeta = json_loads(pauta.client_result_json or "{}")
+    except (TypeError, ValueError):
+        pmeta = {}
+    if not isinstance(pmeta, dict):
+        pmeta = {}
+    pmeta["desk_tapaf_nominal_brl"] = str(nominal)
+    pauta.client_result_json = json_dumps(pmeta, ensure_ascii=False)
+    pauta.asset_type = "REAL_ESTATE" if str(meta.get("alienated_property_registry") or "").strip() else "VEHICLE"
+    db.flush()
+    alien["pauta_id"] = pauta.id
+    alien["pauta_code"] = pauta.pauta_code
+    checkout = generate_tapaf_checkout(pauta)
+    alien["interface_checkout_tapaf"] = checkout.get("interface_checkout_tapaf")
+    meta["alienacao_tapaf"] = alien
+    channel = str(meta.get("channel") or "QUITCON_DESK")
+    item.evaluation_json = json_dumps({**meta, "channel": channel}, ensure_ascii=False)
+    db.flush()
+    return alien
+
+
 def create_sale_from_quitcon(db: Session, user: User, item: QuitConSolicitation) -> dict:
     assert_desk_access(user)
     if item.status != STATUS_APPROVED:
@@ -671,7 +771,6 @@ def create_sale_from_quitcon(db: Session, user: User, item: QuitConSolicitation)
         bem_faturado=item.bem_faturado,
         parcelas_em_dia=item.parcelas_em_dia,
     )
-    checkout = generate_tapaf_checkout(operacao)
     from app.product_contract_flow_service import emit_desk_contract_on_tapaf
 
     emit_desk_contract_on_tapaf(
@@ -687,14 +786,32 @@ def create_sale_from_quitcon(db: Session, user: User, item: QuitConSolicitation)
     )
     item.proposal_id = proposal.id
     item.quitcon_operacao_id = operacao.id
+    engine = EngineQuitConLetter()
+    vp = money(operacao.quitacao_vp_amount or operacao.outstanding_balance)
+    custos = engine.montar_custos_entrada(
+        vp,
+        operational_service=bool(operacao.operational_service_enabled),
+        perfil="QUITADOR",
+    )
+    alienacao_tapaf = open_alienacao_tapaf_for_solicitation(db, user, item, operacao)
     db.flush()
     return {
+        "message": "Operação QuitCon aberta — depósito Escrow na abertura.",
         "proposal_id": proposal.id,
         "lead_id": lead.id,
         "quitcon_operacao_id": operacao.id,
         "operacao_code": operacao.operacao_code,
         "operacao_status": operacao.status,
-        "tapaf_checkout": checkout,
+        "escrow_abertura": {
+            "status": operacao.status,
+            "operacao_id": operacao.id,
+            "custos_entrada": custos,
+            "nota": (
+                "Quitação (VP) + 5% plataforma na abertura em conta Escrow. "
+                "Sem novo cessionário em até 60 dias, saque pelo cliente (controle interno LETTER)."
+            ),
+        },
+        "alienacao_tapaf": alienacao_tapaf or None,
     }
 
 

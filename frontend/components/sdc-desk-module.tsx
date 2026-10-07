@@ -15,6 +15,8 @@ import { canEditLetterFinOpsParams, isInternalProductRole } from "@/lib/product-
 import { PreAnalysisModule } from "@/components/pre-analysis-module";
 import { DeskSourceMetaRow } from "@/lib/desk-source-meta";
 import { ClientMaritalFields } from "@/components/client-marital-fields";
+import { DeskPropertyInspectionPanel } from "@/components/desk-property-inspection-panel";
+import { DeskTapafConfigPanel } from "@/components/desk-tapaf-config-panel";
 import { PartnerSociosFields, SocioPartner, sociosPayload } from "@/components/partner-socios-fields";
 import { validatePfMaritalFields, validateSocioMaritalRows } from "@/lib/marital-status";
 import { CurrencyInput } from "@/components/currency-input";
@@ -80,6 +82,8 @@ type SdcSolicitation = {
   docs_checklist_complete?: boolean;
   can_submit_documents?: boolean;
   can_create_sale: boolean;
+  properties_json?: Array<{ matricula?: string; zone?: string; lot_type?: string }>;
+  property_inspections_json?: unknown[];
 };
 
 type EvalSimRow = {
@@ -162,6 +166,7 @@ const STATUS_OPTIONS = [
   { value: "AWAITING_DOCS", label: "Aguardando Documentação" },
   { value: "UNDER_REVIEW", label: "Em Análise" },
   { value: "PENDING", label: "Pendente" },
+  { value: "AWAITING_TAPAF_PAYMENT", label: "Pendente pagamento TAPAF" },
   { value: "APPROVED", label: "Aprovado" },
   { value: "REJECTED", label: "Reprovado" },
   { value: "CANCELLED", label: "Cancelado" },
@@ -2030,6 +2035,21 @@ export function SdcDeskModule() {
                     </ul>
                   </div>
                 )}
+                {selected &&
+                  (String(selected.asset_type || "").includes("imovel") ||
+                    String(selected.asset_category || "").includes("imovel")) &&
+                  Array.isArray(selected.properties_json) &&
+                  selected.properties_json.length > 0 && (
+                    <DeskPropertyInspectionPanel
+                      desk="sdc"
+                      solicitationId={selected.id}
+                      properties={selected.properties_json.map((p: { matricula?: string; zone?: string }) => ({
+                        matricula: String(p.matricula || ""),
+                        zone: p.zone,
+                      }))}
+                      disabled={selected.status !== "AWAITING_DOCS" && !selected.awaiting_pendency_upload}
+                    />
+                  )}
                 {(selected.status === "AWAITING_DOCS" || selected.awaiting_pendency_upload) && !letterOps && (
                   <>
                     <label style={{ display: "block", marginTop: 12, fontSize: 11 }}>
@@ -2120,6 +2140,8 @@ export function SdcDeskModule() {
           </div>
         )}
       </section>
+
+      {letterOps ? <DeskTapafConfigPanel /> : null}
 
       {letterOps ? (
         <section className="panel operational-panel" style={{ marginTop: 16 }}>
