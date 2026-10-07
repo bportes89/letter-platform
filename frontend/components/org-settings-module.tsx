@@ -1,24 +1,30 @@
 "use client";
 
-import { CheckCircle2, RefreshCw, Settings } from "lucide-react";
+import Link from "next/link";
+import { CheckCircle2, Info, RefreshCw, Settings } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 
+type SettingField = { key: string; label: string; hint?: string };
+
 type SettingsPayload = {
-  groups: Record<string, { key: string; label: string }[]>;
+  groups: Record<string, SettingField[]>;
   values: Record<string, string>;
+  group_meta?: Record<string, { title: string; summary: string }>;
 };
 
-const GROUP_LABELS: Record<string, string> = {
-  info: "Informações (menu 11)",
-  payments: "Pagamentos (comissão / saque)",
+const TAB_ORDER = ["info", "payments", "templates", "meta"] as const;
+
+const FALLBACK_TAB_LABELS: Record<string, string> = {
+  info: "Informações do site",
+  payments: "Pagamentos e taxa Letter",
   templates: "Contratos e textos de fluxo",
-  meta: "Meta tags",
+  meta: "Meta tags (SEO)",
 };
 
 export function OrgSettingsModule() {
   const [data, setData] = useState<SettingsPayload | null>(null);
-  const [tab, setTab] = useState("info");
+  const [tab, setTab] = useState<string>("info");
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
@@ -33,6 +39,17 @@ export function OrgSettingsModule() {
   useEffect(() => {
     load().catch((e) => setError(e instanceof Error ? e.message : "Falha ao carregar"));
   }, [load]);
+
+  const tabLabels = useMemo(() => {
+    const meta = data?.group_meta ?? {};
+    const labels: Record<string, string> = { ...FALLBACK_TAB_LABELS };
+    for (const key of TAB_ORDER) {
+      if (meta[key]?.title) labels[key] = meta[key].title;
+    }
+    return labels;
+  }, [data?.group_meta]);
+
+  const tabHelp = data?.group_meta?.[tab]?.summary ?? "";
 
   const fields = useMemo(() => data?.groups[tab] ?? [], [data, tab]);
 
@@ -81,7 +98,11 @@ export function OrgSettingsModule() {
         <div>
           <span className="eyebrow dark">ADMIN</span>
           <h1>Configurações gerais</h1>
-          <p>Legado x_settings: informações do site, comissão da plataforma e templates HTML (contrato marketplace, SDC, venda direta).</p>
+          <p>
+            Ajustes globais da organização: contato no site, taxa Letter no marketplace, templates HTML de contratos
+            e meta tags para buscadores. Comissões da rede MMN e markup por fornecedor ficam em outros menus (veja a
+            aba Pagamentos).
+          </p>
         </div>
         <div className="operational-icon"><Settings /></div>
       </div>
@@ -90,15 +111,40 @@ export function OrgSettingsModule() {
       {error && <div className="error">{error}</div>}
 
       <div className="marketplace-subtabs">
-        {Object.keys(GROUP_LABELS).map((key) => (
+        {TAB_ORDER.filter((key) => data?.groups?.[key]).map((key) => (
           <button key={key} type="button" className={tab === key ? "active" : ""} onClick={() => setTab(key)}>
-            {GROUP_LABELS[key]}
+            {tabLabels[key] ?? key}
           </button>
         ))}
         <button type="button" className="table-action" disabled={busy} onClick={() => void importLegacy()}>
           <RefreshCw /> Importar SQL legado
         </button>
       </div>
+
+      {tabHelp ? (
+        <div className="notice" style={{ marginBottom: 12 }}>
+          <Info />
+          <div>
+            <b>{tabLabels[tab]}</b>
+            <p style={{ margin: "6px 0 0", lineHeight: 1.45 }}>{tabHelp}</p>
+            {tab === "payments" && (
+              <p style={{ margin: "8px 0 0", fontSize: "0.9rem" }}>
+                <Link href="/modules/mmn">Rede e comissões (MMN)</Link>
+                {" · "}
+                <Link href="/modules/fornecedores">Fornecedores (markup / % plataforma)</Link>
+                {" · "}
+                <Link href="/modules/cms-texts">Textos e e-mails</Link>
+              </p>
+            )}
+            {tab === "templates" && (
+              <p style={{ margin: "8px 0 0", fontSize: "0.9rem" }}>
+                Contratos em Word devem ser convertidos para HTML antes de colar aqui. Use «Importar SQL legado» se já
+                existirem no banco antigo.
+              </p>
+            )}
+          </div>
+        </div>
+      ) : null}
 
       <section className="panel">
         <form
@@ -112,7 +158,8 @@ export function OrgSettingsModule() {
             const isLong = f.key.includes("html") || f.key.startsWith("txt_") || f.key.includes("meta_");
             return (
               <label key={f.key}>
-                {f.label}
+                <span>{f.label}</span>
+                {f.hint ? <small className="muted" style={{ display: "block", marginBottom: 6 }}>{f.hint}</small> : null}
                 {isLong ? (
                   <textarea
                     rows={10}

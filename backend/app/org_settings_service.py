@@ -16,45 +16,136 @@ from app.models import OrganizationSetting, User
 
 DEFAULT_LEGACY_SQL = DEFAULT_SQL
 
+def _field(
+    key: str,
+    label: str,
+    *,
+    hint: str = "",
+) -> dict[str, str]:
+    row: dict[str, str] = {"key": key, "label": label}
+    if hint:
+        row["hint"] = hint
+    return row
+
+
 SETTING_GROUPS: dict[str, list[dict[str, str]]] = {
     "info": [
-        {"key": "phone", "label": "Telefone"},
-        {"key": "email_1", "label": "E-mail"},
-        {"key": "cnpj", "label": "CNPJ"},
-        {"key": "razao_social", "label": "Razão social"},
-        {"key": "whatsapp", "label": "WhatsApp"},
-        {"key": "whatsapp_code", "label": "WhatsApp (código país)"},
-        {"key": "whatsapp_txt", "label": "WhatsApp (texto padrão)"},
-        {"key": "opening_hours", "label": "Horário de atendimento"},
-        {"key": "facebook", "label": "Facebook"},
-        {"key": "youtube", "label": "Youtube"},
-        {"key": "instagram", "label": "Instagram"},
-        {"key": "tiktok", "label": "Tiktok"},
-        {"key": "linkedin", "label": "Linkedin"},
-        {"key": "txt_cadastro", "label": "Mensagem para clientes"},
-        {"key": "txt_fornecedores", "label": "Mensagem para fornecedores"},
+        _field("phone", "Telefone", hint="Exibido no site público, rodapé e canais de contato."),
+        _field("email_1", "E-mail", hint="E-mail institucional de contato."),
+        _field("cnpj", "CNPJ"),
+        _field("razao_social", "Razão social"),
+        _field("whatsapp", "WhatsApp", hint="Número com DDD (apenas dígitos ou formatado)."),
+        _field("whatsapp_code", "WhatsApp (código país)", hint="Ex.: 55 para Brasil."),
+        _field("whatsapp_txt", "WhatsApp (texto padrão)", hint="Mensagem pré-preenchida ao abrir o WhatsApp."),
+        _field("opening_hours", "Horário de atendimento"),
+        _field("facebook", "Facebook", hint="URL completa do perfil."),
+        _field("youtube", "Youtube", hint="URL do canal ou vídeo institucional."),
+        _field("instagram", "Instagram"),
+        _field("tiktok", "Tiktok"),
+        _field("linkedin", "Linkedin"),
+        _field(
+            "txt_cadastro",
+            "Mensagem para clientes",
+            hint="Texto exibido em cadastros / área do cliente (HTML simples permitido).",
+        ),
+        _field(
+            "txt_fornecedores",
+            "Mensagem para fornecedores",
+            hint="Texto exibido no portal e fluxos de fornecedor.",
+        ),
     ],
     "payments": [
-        {"key": "platform_commission_percent", "label": "Comissão do site (%)"},
-        {"key": "min_withdrawal_amount", "label": "Mínimo para saque (R$)"},
-        {
-            "key": "bank_display_mode",
-            "label": "Bank parceiro: legacy (ganhos) ou asaas (conta digital)",
-        },
+        _field(
+            "platform_commission_percent",
+            "Taxa da plataforma Letter (%)",
+            hint=(
+                "Percentual global da LETTER na liberação de comissão do marketplace "
+                "(legado x_settings «price»). Usado quando o fornecedor não tem «% plataforma» no cadastro. "
+                "Não é markup do fornecedor (Fornecedores) nem comissão da rede MMN (menu Rede e comissões)."
+            ),
+        ),
+        _field(
+            "min_withdrawal_amount",
+            "Mínimo para saque (R$)",
+            hint="Valor mínimo para parceiro/fornecedor solicitar saque (legado price_min_saque).",
+        ),
+        _field(
+            "bank_display_mode",
+            "Modo carteira parceiro",
+            hint="legacy = extrato de ganhos interno; asaas = conta digital Asaas (quando habilitado).",
+        ),
     ],
     "templates": [
-        {"key": "marketplace_contract_html", "label": "Contrato marketplace (chat/cadastros)"},
-        {"key": "contract_template_html", "label": "Contrato (editor legado menu 87)"},
-        {"key": "venda_direta_html", "label": "Texto venda direta"},
-        {"key": "venda_direta_robo_html", "label": "Texto venda direta robô"},
-        {"key": "chat_robo_video_url", "label": "Vídeo explicativo (URL YouTube/Vimeo) — robô chat"},
-        {"key": "sdc_flow_html", "label": "Texto fluxo SDC"},
+        _field(
+            "marketplace_contract_html",
+            "Contrato marketplace (HTML)",
+            hint="Minuta exibida no chat Nina e cadastros. Cole o HTML aqui ou use «Importar SQL legado».",
+        ),
+        _field(
+            "contract_template_html",
+            "Contrato geral (HTML — legado)",
+            hint="Template antigo do editor menu 87; mantido para compatibilidade.",
+        ),
+        _field("venda_direta_html", "Texto venda direta (HTML)"),
+        _field("venda_direta_robo_html", "Texto venda direta robô (HTML)"),
+        _field(
+            "chat_robo_video_url",
+            "Vídeo explicativo (URL)",
+            hint="YouTube ou Vimeo — aparece no robô de venda direta e no chat.",
+        ),
+        _field("sdc_flow_html", "Texto fluxo SDC (HTML)"),
     ],
     "meta": [
-        {"key": "name_site", "label": "Nome do site"},
-        {"key": "meta_title", "label": "Meta title"},
-        {"key": "meta_description", "label": "Meta description"},
+        _field("name_site", "Nome do site", hint="Nome exibido em títulos e identidade pública."),
+        _field(
+            "meta_title",
+            "Meta title (SEO)",
+            hint="Título sugerido para buscadores (Google). Aparece na aba do navegador e em resultados de busca.",
+        ),
+        _field(
+            "meta_description",
+            "Meta description (SEO)",
+            hint="Resumo curto da página para buscadores (até ~160 caracteres).",
+        ),
     ],
+}
+
+SETTING_GROUP_META: dict[str, dict[str, str]] = {
+    "info": {
+        "title": "Informações do site",
+        "summary": (
+            "Dados de contato e redes sociais da LETTER no site público, rodapé, WhatsApp e mensagens "
+            "de boas-vindas. Corresponde ao bloco «Informações» do admin legado (menu interno id 11) — "
+            "não é menu de navegação do painel."
+        ),
+    },
+    "payments": {
+        "title": "Pagamentos e taxa Letter",
+        "summary": (
+            "Ajustes financeiros globais do marketplace. A taxa da plataforma (%) aqui é única e vale como "
+            "fallback na liberação de comissão. As outras comissões são configuradas em outros lugares: "
+            "markup e % plataforma por fornecedor em «Fornecedores»; repasse MMN (rede, níveis, retenção) "
+            "em «Rede e comissões» (/modules/mmn); comissão do parceiro na venda segue as regras do produto "
+            "e do MMN, não este campo."
+        ),
+    },
+    "templates": {
+        "title": "Contratos e textos de fluxo",
+        "summary": (
+            "Templates em HTML usados pelo sistema ao gerar contratos e textos nos fluxos (marketplace, "
+            "venda direta, SDC). Não há upload de Word/PDF nesta tela: cole o HTML formatado ou importe "
+            "do SQL legado. Os contratos que você enviou em .docx precisam ser convertidos para HTML "
+            "(equipe LETTER ou importação legada) antes de aparecerem aqui. E-mails transacionais ficam em "
+            "«Textos e e-mails»."
+        ),
+    },
+    "meta": {
+        "title": "Meta tags (SEO)",
+        "summary": (
+            "Meta tags são informações para buscadores (Google): título e descrição da página pública. "
+            "Não alteram o contrato nem comissões; melhoram como o site aparece nos resultados de busca."
+        ),
+    },
 }
 
 PUBLIC_SITE_KEYS = frozenset(
@@ -141,7 +232,7 @@ def set_settings(db: Session, organization_id: str, payload: dict[str, Any]) -> 
 
 def admin_settings_view(db: Session, user: User) -> dict[str, Any]:
     values = settings_map(db, user.organization_id)
-    return {"groups": SETTING_GROUPS, "values": values}
+    return {"groups": SETTING_GROUPS, "values": values, "group_meta": SETTING_GROUP_META}
 
 
 def public_site_info(db: Session, organization_id: str) -> dict[str, str]:

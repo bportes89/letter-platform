@@ -2618,6 +2618,7 @@ class PartnerQualificationAppraisalHistoryView(BaseModel):
 class OrgSettingsView(BaseModel):
     groups: dict[str, list[dict[str, str]]]
     values: dict[str, str]
+    group_meta: dict[str, dict[str, str]] = Field(default_factory=dict)
 
 
 class OrgSettingsPatch(BaseModel):
