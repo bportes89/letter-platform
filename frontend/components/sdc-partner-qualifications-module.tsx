@@ -156,7 +156,10 @@ export function SdcPartnerQualificationsModule() {
         <div>
           <span className="eyebrow dark">SDC</span>
           <h1>Qualificação de parceiros</h1>
-          <p>Faixas por faturamento SDC e bônus somado à % da franquia em vendas Capital de Giro.</p>
+          <p>
+            Faixas por volume de vendas (SDC, Marketplace carta contemplada, Flash Capital e QuitCon) e bônus somado à
+            % da franquia em vendas Capital de Giro.
+          </p>
         </div>
         <div className="operational-icon"><Award /></div>
       </div>
@@ -166,7 +169,9 @@ export function SdcPartnerQualificationsModule() {
 
       <div className="marketplace-subtabs">
         <button type="button" className={tab === "tiers" ? "active" : ""} onClick={() => setTab("tiers")}>Faixas</button>
-        <button type="button" className={tab === "appraisal" ? "active" : ""} onClick={() => setTab("appraisal")}>Apuração SDC</button>
+        <button type="button" className={tab === "appraisal" ? "active" : ""} onClick={() => setTab("appraisal")}>
+          Apuração de volume
+        </button>
         {tab === "tiers" && (
           <button type="button" className="table-action" onClick={() => void importLegacy()}>
             <RefreshCw /> Importar SQL legado
@@ -216,7 +221,11 @@ export function SdcPartnerQualificationsModule() {
         <>
           <section className="panel">
             <h2><Calculator /> Período da apuração</h2>
-            <p className="muted">Soma vendas SDC aprovadas (crédito estimado) por franquia no período.</p>
+            <p className="muted">
+              Soma vendas concluídas no período por franquia: SDC aprovado (crédito estimado), Marketplace carta
+              contemplada (valor solicitado, cadastro concluído), Flash Capital aprovado (principal) e QuitCon aprovado
+              (VP quitação).
+            </p>
             <div className="stack-form grid-2">
               <label>
                 Data inicial

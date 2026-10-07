@@ -1,7 +1,8 @@
-"""Qualificação de parceiros SDC — faixas, apuração e bônus de comissão (legado affiliates_qualification)."""
+"""Qualificação de parceiros — faixas, apuração de volume multi-produto e bônus SDC (legado affiliates_qualification)."""
 
 from __future__ import annotations
 
+import json
 from datetime import date, datetime, time, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -12,16 +13,22 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.affiliate_chain_commission_service import resolve_chain_user_ids
+from app.cadastro_service import SIT_CONCLUIDO
 from app.legacy_export_service import DEFAULT_SQL
 from app.legacy_sql_parser import load_table
 from app.models import (
+    FlashSolicitation,
     PartnerQualificationAppraisalRun,
     PartnerQualificationTier,
+    Proposal,
+    QuitConSolicitation,
     Role,
     SdcSolicitation,
     User,
 )
-from app.sdc_desk_service import STATUS_APPROVED
+from app.flash_desk_service import STATUS_APPROVED as FLASH_STATUS_APPROVED
+from app.quitcon_desk_service import STATUS_APPROVED as QUITCON_STATUS_APPROVED
+from app.sdc_desk_service import STATUS_APPROVED as SDC_STATUS_APPROVED
 from app.services import money
 
 DEFAULT_LEGACY_SQL = DEFAULT_SQL
@@ -135,35 +142,137 @@ def _franchise_users(db: Session, organization_id: str) -> list[User]:
     )
 
 
-def _sdc_sales_by_franchise(
-    db: Session,
-    organization_id: str,
-    date_init: date,
-    date_final: date,
-) -> dict[str, Decimal]:
+def _period_bounds(date_init: date, date_final: date) -> tuple[datetime, datetime]:
     start = datetime.combine(date_init, time.min, tzinfo=timezone.utc)
     end = datetime.combine(date_final, time.max.replace(microsecond=0), tzinfo=timezone.utc)
+    return start, end
+
+
+def _rollup_partner_amounts_to_franchise(
+    db: Session,
+    organization_id: str,
+    partner_amounts: dict[str, Decimal],
+) -> dict[str, Decimal]:
+    totals: dict[str, Decimal] = {}
+    for partner_user_id, amount in partner_amounts.items():
+        if amount <= 0:
+            continue
+        chain = resolve_chain_user_ids(db, organization_id, partner_user_id)
+        franchise_id = chain.get("franquia")
+        if not franchise_id:
+            continue
+        totals[franchise_id] = totals.get(franchise_id, Decimal("0")) + money(amount)
+    return totals
+
+
+def _desk_partner_totals(
+    db: Session,
+    organization_id: str,
+    start: datetime,
+    end: datetime,
+    model: type,
+    status_approved: str,
+    amount_column,
+) -> dict[str, Decimal]:
     rows = db.execute(
-        select(SdcSolicitation.partner_user_id, func.coalesce(func.sum(SdcSolicitation.credit_estimated), 0))
+        select(model.partner_user_id, func.coalesce(func.sum(amount_column), 0))
         .where(
-            SdcSolicitation.organization_id == organization_id,
-            SdcSolicitation.status == STATUS_APPROVED,
-            SdcSolicitation.created_at >= start,
-            SdcSolicitation.created_at <= end,
-            SdcSolicitation.partner_user_id.isnot(None),
+            model.organization_id == organization_id,
+            model.status == status_approved,
+            model.created_at >= start,
+            model.created_at <= end,
+            model.partner_user_id.isnot(None),
         )
-        .group_by(SdcSolicitation.partner_user_id)
+        .group_by(model.partner_user_id)
     ).all()
     totals: dict[str, Decimal] = {}
     for partner_user_id, total in rows:
         if not partner_user_id:
             continue
-        chain = resolve_chain_user_ids(db, organization_id, str(partner_user_id))
-        franchise_id = chain.get("franquia")
-        if not franchise_id:
+        value = money(Decimal(str(total or 0)))
+        if value <= 0:
             continue
-        totals[franchise_id] = totals.get(franchise_id, Decimal("0")) + money(Decimal(str(total or 0)))
+        totals[str(partner_user_id)] = totals.get(str(partner_user_id), Decimal("0")) + value
     return totals
+
+
+def _marketplace_concluded_partner_totals(
+    db: Session,
+    organization_id: str,
+    start: datetime,
+    end: datetime,
+) -> dict[str, Decimal]:
+    """Cartas contempladas concluídas no período (lifecycle CONCLUIDO)."""
+    rows = db.execute(
+        select(
+            Proposal.commission_originator_id,
+            Proposal.requested_amount,
+            Proposal.terms_json,
+        ).where(
+            Proposal.organization_id == organization_id,
+            Proposal.product == "MARKETPLACE",
+            Proposal.created_at >= start,
+            Proposal.created_at <= end,
+            Proposal.commission_originator_id.isnot(None),
+        )
+    ).all()
+    totals: dict[str, Decimal] = {}
+    concluded = {SIT_CONCLUIDO, "CONCLUIDA"}
+    for originator_id, requested_amount, terms_raw in rows:
+        if not originator_id:
+            continue
+        try:
+            terms = json.loads(terms_raw or "{}")
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(terms, dict):
+            continue
+        life = terms.get("lifecycle")
+        if not isinstance(life, dict):
+            continue
+        situation = str(life.get("situation") or "").upper()
+        if situation not in concluded:
+            continue
+        value = money(Decimal(str(requested_amount or 0)))
+        if value <= 0:
+            continue
+        key = str(originator_id)
+        totals[key] = totals.get(key, Decimal("0")) + value
+    return totals
+
+
+def _sales_volume_by_franchise(
+    db: Session,
+    organization_id: str,
+    date_init: date,
+    date_final: date,
+) -> dict[str, Decimal]:
+    """Volume de vendas concluídas: SDC, Marketplace, Flash Capital e QuitCon."""
+    start, end = _period_bounds(date_init, date_final)
+    partner_amounts: dict[str, Decimal] = {}
+
+    for chunk in (
+        _desk_partner_totals(
+            db, organization_id, start, end, SdcSolicitation, SDC_STATUS_APPROVED, SdcSolicitation.credit_estimated
+        ),
+        _desk_partner_totals(
+            db, organization_id, start, end, FlashSolicitation, FLASH_STATUS_APPROVED, FlashSolicitation.principal
+        ),
+        _desk_partner_totals(
+            db,
+            organization_id,
+            start,
+            end,
+            QuitConSolicitation,
+            QUITCON_STATUS_APPROVED,
+            QuitConSolicitation.quitacao_vp_amount,
+        ),
+        _marketplace_concluded_partner_totals(db, organization_id, start, end),
+    ):
+        for partner_id, amount in chunk.items():
+            partner_amounts[partner_id] = partner_amounts.get(partner_id, Decimal("0")) + amount
+
+    return _rollup_partner_amounts_to_franchise(db, organization_id, partner_amounts)
 
 
 def clear_appraisal_preview(db: Session, organization_id: str) -> None:
@@ -177,7 +286,7 @@ def clear_appraisal_preview(db: Session, organization_id: str) -> None:
 def run_appraisal_preview(db: Session, organization_id: str, date_init: date, date_final: date) -> list[dict[str, Any]]:
     if date_final < date_init:
         raise HTTPException(status_code=422, detail="Data final deve ser igual ou posterior à inicial")
-    totals = _sdc_sales_by_franchise(db, organization_id, date_init, date_final)
+    totals = _sales_volume_by_franchise(db, organization_id, date_init, date_final)
     result: list[dict[str, Any]] = []
     for franchise in _franchise_users(db, organization_id):
         amount = totals.get(franchise.id, Decimal("0"))
