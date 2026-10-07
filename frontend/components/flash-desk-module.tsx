@@ -589,6 +589,10 @@ export function FlashDeskModule() {
     return null;
   }
 
+  function mergeSolicitation(updated: FlashSolicitation) {
+    setItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
+  }
+
   const load = useCallback(async () => {
     const [me, list, cadastroRows] = await Promise.all([
       api<User>("/auth/me"),
@@ -958,9 +962,9 @@ export function FlashDeskModule() {
       const body = new FormData();
       body.append("file", file);
       body.append("doc_type", type);
-      await apiForm(`/flash/desk/solicitations/${item.id}/documents`, body);
+      const updated = await apiForm<FlashSolicitation>(`/flash/desk/solicitations/${item.id}/documents`, body);
+      mergeSolicitation(updated);
       setNotice(`Documento ${type} anexado em ${item.contact_name}`);
-      await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Falha no upload");
     } finally {
@@ -992,7 +996,8 @@ export function FlashDeskModule() {
     try {
       await deleteApi(`/flash/desk/solicitations/${item.id}/documents/${docId}`);
       setNotice("Documento excluído.");
-      await load();
+      const fresh = await api<FlashSolicitation>(`/flash/desk/solicitations/${item.id}`);
+      mergeSolicitation(fresh);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Falha ao excluir documento");
     } finally {
@@ -1716,14 +1721,6 @@ export function FlashDeskModule() {
                   label={selected.source_channel_label}
                   leadId={selected.lead_id}
                 />
-                <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
-                  {selected.required_docs.map((d) => (
-                    <li key={d.code}>
-                      {d.uploaded ? "✓" : "○"} {d.label}
-                      {d.required === false ? <span className="muted"> (opcional)</span> : null}
-                    </li>
-                  ))}
-                </ul>
                 {selected.status === "AWAITING_DOCS" && !letterOps && (
                   <>
                     <label style={{ display: "block", marginTop: 12, fontSize: 11 }}>
@@ -1752,13 +1749,12 @@ export function FlashDeskModule() {
                   </>
                 )}
                 <AdminDocumentPanel
-                  title={`Documentos anexados (${selected.documents.length})`}
-                  hint="Anexe, baixe ou exclua arquivos desta solicitação Flash Capital."
+                  title="Documentação"
+                  hint="Anexe cada item do checklist. Itens já enviados somem da lista até você excluir o arquivo."
                   documents={selected.documents}
                   busy={busy}
-                  canDelete={letterOps}
-                  docTypeOptions={flashDocTypeOptions}
-                  defaultDocType={docType}
+                  canDelete={letterOps || selected.status === "AWAITING_DOCS"}
+                  checklistDocs={selected.required_docs}
                   onUpload={(file, type) => uploadDoc(selected, file, type || docType)}
                   onDownload={(doc) => downloadApi(`/documents/${doc.document_id}/download`, doc.filename || "documento")}
                   onDelete={(doc) => deleteDoc(selected, doc.id)}

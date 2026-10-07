@@ -134,6 +134,7 @@ from app.schemas import (
     SdcDeskStatusUpdate,
     SdcDeskSaleCreate,
     SdcDeskPartnerObservationUpdate,
+    SdcDeskSubmitDocumentsRequest,
     SdcChecklistConfigSave,
     FlashDeskEvaluateRequest, FlashDeskStoreRequest, FlashDeskStatusUpdate, FlashDeskSubmitDocumentsRequest,
     FlashDeskSaleCreate,
@@ -4319,8 +4320,11 @@ def sdc_desk_store(payload: SdcDeskStoreRequest, user: User = Depends(get_curren
     db.refresh(item)
     view = solicitation_view(item, list_documents(db, item.id), db)
     if tapaf_bundle:
+        from app.inter_cobranca_helpers import sdc_tapaf_client_token
+
         view["tapaf_proposal_id"] = tapaf_bundle.get("proposal_id")
-        view["tapaf_checkout"] = tapaf_bundle.get("interface_checkout_tapaf") or tapaf_bundle
+        tok = sdc_tapaf_client_token(item.id)
+        view["client_tapaf_path"] = f"/tapaf-sdc?solicitation_id={item.id}&token={tok}"
     return view
 
 
@@ -4418,11 +4422,9 @@ def sdc_desk_partner_observation(
 @router.get("/sdc/desk/checklist-config")
 def sdc_desk_list_checklist_config(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     from app.sdc_checklist_service import list_checklist_configs
-    from app.sdc_desk_service import assert_desk_access, _is_admin
+    from app.sdc_desk_service import assert_desk_access
 
     assert_desk_access(user)
-    if not _is_admin(user):
-        raise HTTPException(status_code=403, detail="Somente operação LETTER configura checklists")
     return list_checklist_configs(db, user.organization_id)
 
 
@@ -4433,10 +4435,10 @@ def sdc_desk_save_checklist_config(
     db: Session = Depends(get_db),
 ):
     from app.sdc_checklist_service import list_checklist_configs, save_checklist_config
-    from app.sdc_desk_service import assert_desk_access, _is_admin
+    from app.sdc_desk_service import _is_letter_ops, assert_desk_access
 
     assert_desk_access(user)
-    if not _is_admin(user):
+    if not _is_letter_ops(user):
         raise HTTPException(status_code=403, detail="Somente operação LETTER configura checklists")
     save_checklist_config(
         db,
@@ -4452,13 +4454,14 @@ def sdc_desk_save_checklist_config(
 @router.post("/sdc/desk/solicitations/{solicitation_id}/submit-documents")
 def sdc_desk_submit_documents(
     solicitation_id: str,
+    payload: SdcDeskSubmitDocumentsRequest,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     from app.sdc_desk_service import get_solicitation, list_documents, solicitation_view, submit_documents
 
     item = get_solicitation(db, user, solicitation_id)
-    submit_documents(db, user, item)
+    submit_documents(db, user, item, partner_observation=payload.partner_observation)
     audit(db, user, "sdc_desk.documents_submitted", "sdc_solicitation", item.id, {"status": item.status})
     db.commit()
     db.refresh(item)
@@ -4637,6 +4640,34 @@ def public_flash_desk_tapaf_checkout(solicitation_id: str, token: str, db: Sessi
     from app.flash_desk_service import public_client_tapaf_view
 
     return public_client_tapaf_view(db, solicitation_id, token)
+
+
+@router.get("/public/sdc-desk/tapaf/{solicitation_id}/{token}")
+def public_sdc_desk_tapaf_checkout(solicitation_id: str, token: str, db: Session = Depends(get_db)):
+    from app.sdc_desk_service import public_client_tapaf_view
+
+    return public_client_tapaf_view(db, solicitation_id, token)
+
+
+@router.post("/public/sdc-desk/tapaf/{solicitation_id}/{token}/accept")
+def public_sdc_desk_tapaf_accept(
+    solicitation_id: str,
+    token: str,
+    payload: dict,
+    db: Session = Depends(get_db),
+):
+    from app.sdc_desk_service import public_client_tapaf_accept
+
+    result = public_client_tapaf_accept(
+        db,
+        solicitation_id,
+        token,
+        scroll_completed=bool(payload.get("scroll_completed")),
+        checkbox_1=bool(payload.get("checkbox_1")),
+        checkbox_2=bool(payload.get("checkbox_2")),
+    )
+    db.commit()
+    return result
 
 
 @router.post("/public/flash-desk/tapaf/{solicitation_id}/{token}/accept")

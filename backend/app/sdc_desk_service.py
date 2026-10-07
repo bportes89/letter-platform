@@ -235,12 +235,16 @@ def _checklist_uploaded_codes(
     return out
 
 
+def _required_doc_codes(docs: list[dict]) -> set[str]:
+    return {d["code"] for d in docs if d.get("required", True)}
+
+
 def _active_required_codes(item: SdcSolicitation, db: Session | None) -> set[str]:
     if item.status == STATUS_PENDING:
         pending = _load_pending_codes(item)
         if pending:
             return set(pending)
-    return {d["code"] for d in _required_docs_for_item(db, item)}
+    return _required_doc_codes(_required_docs_for_item(db, item))
 
 
 def checklist_complete_for(
@@ -257,10 +261,16 @@ def checklist_complete_for(
     return required.issubset(uploaded)
 
 
-def submit_documents(db: Session, user: User, item: SdcSolicitation) -> SdcSolicitation:
+def submit_documents(
+    db: Session,
+    user: User,
+    item: SdcSolicitation,
+    *,
+    partner_observation: str | None = None,
+) -> SdcSolicitation:
     """Parceiro transmite o pacote após anexar todos os itens obrigatórios do checklist."""
     assert_desk_access(user)
-    if _is_admin(user):
+    if _is_letter_ops(user):
         raise HTTPException(status_code=403, detail="Transmissão é ação do parceiro; admin altera status manualmente.")
     if item.status in STATUS_TERMINAL:
         raise HTTPException(status_code=422, detail="Solicitação encerrada — não é possível transmitir documentação.")
@@ -288,7 +298,9 @@ def submit_documents(db: Session, user: User, item: SdcSolicitation) -> SdcSolic
         raise HTTPException(status_code=422, detail="Documentação já foi transmitida ou está em análise.")
     if not checklist_complete_for(item, docs, db):
         uploaded = _checklist_uploaded_codes(docs, upload_batch=UPLOAD_BATCH_INITIAL)
-        missing = [d for d in _required_docs_for_item(db, item) if d["code"] not in uploaded]
+        missing = [
+            d for d in _required_docs_for_item(db, item) if d.get("required", True) and d["code"] not in uploaded
+        ]
         raise HTTPException(
             status_code=422,
             detail={
@@ -296,6 +308,8 @@ def submit_documents(db: Session, user: User, item: SdcSolicitation) -> SdcSolic
                 "missing": missing,
             },
         )
+    if partner_observation is not None:
+        item.partner_observation = partner_observation.strip() or None
     item.status = STATUS_UNDER_REVIEW
     _append_status_log(item, user, status=STATUS_UNDER_REVIEW, notes="Documentação inicial transmitida pelo parceiro.")
     db.flush()
@@ -624,6 +638,10 @@ def _is_admin(user: User) -> bool:
     return user.role in {Role.PLATFORM_ADMIN, Role.INTERNAL_STAFF, Role.MASTER_FRANCHISEE}
 
 
+def _is_letter_ops(user: User) -> bool:
+    return user.role in {Role.PLATFORM_ADMIN, Role.INTERNAL_STAFF}
+
+
 def _chain_user_ids(db: Session, user: User) -> list[str]:
     """Parceiro vê a própria cadeia (downline); admin não usa filtro."""
     from app.models import NetworkNode
@@ -707,8 +725,8 @@ def _resolve_chosen_credit(payload: dict, result: dict) -> tuple[Decimal, dict]:
 
 
 def open_tapaf_checkout_for_solicitation(db: Session, user: User, item: SdcSolicitation) -> dict:
-    """Cria proposta SD C + pauta pré-análise e retorna checkout TAPAF (R$ 1.500)."""
-    from app.pre_analysis_service import generate_tapaf_checkout, get_or_create_pauta
+    """Cria proposta SDC + pauta pré-análise (cobrança TAPAF após aceite do tomador)."""
+    from app.pre_analysis_service import get_or_create_pauta
 
     assert_desk_access(user)
     try:
@@ -775,7 +793,6 @@ def open_tapaf_checkout_for_solicitation(db: Session, user: User, item: SdcSolic
     pauta.asset_type = at
     db.flush()
 
-    checkout = generate_tapaf_checkout(pauta)
     tapaf_meta["pauta_id"] = pauta.id
     tapaf_meta["pauta_code"] = pauta.pauta_code
     meta["tapaf"] = tapaf_meta
@@ -783,7 +800,6 @@ def open_tapaf_checkout_for_solicitation(db: Session, user: User, item: SdcSolic
     return {
         "proposal_id": proposal_id,
         "pauta_id": pauta.id,
-        **checkout,
     }
 
 
@@ -868,7 +884,7 @@ def update_status(
     pending_doc_codes: list[str] | None = None,
 ) -> SdcSolicitation:
     assert_desk_access(user)
-    if not _is_admin(user):
+    if not _is_letter_ops(user):
         raise HTTPException(status_code=403, detail="Apenas operação LETTER altera o status do SDC")
     status = status.upper().strip()
     if status not in STATUS_LABELS:
@@ -904,7 +920,7 @@ def update_status(
 
 def update_partner_observation(db: Session, user: User, item: SdcSolicitation, observation: str | None) -> SdcSolicitation:
     assert_desk_access(user)
-    if _is_admin(user):
+    if _is_letter_ops(user):
         raise HTTPException(status_code=403, detail="Observação do parceiro é preenchida pelo parceiro.")
     if item.status in STATUS_TERMINAL:
         raise HTTPException(status_code=422, detail="Solicitação encerrada.")
@@ -961,8 +977,11 @@ async def add_document(
 
 def remove_document(db: Session, user: User, item: SdcSolicitation, link_id: str) -> None:
     assert_desk_access(user)
-    if not _is_admin(user):
-        raise HTTPException(status_code=403, detail="Apenas operação LETTER pode excluir documentos")
+    if not _is_letter_ops(user):
+        if item.status in STATUS_TERMINAL:
+            raise HTTPException(status_code=403, detail="Solicitação encerrada — não é possível excluir documentos.")
+        if item.status not in {STATUS_AWAITING_DOCS, STATUS_PENDING}:
+            raise HTTPException(status_code=403, detail="Exclusão de documentos só na fase de envio de documentação.")
     row = db.scalar(
         select(SdcSolicitationDocument).where(
             SdcSolicitationDocument.id == link_id,
@@ -978,6 +997,130 @@ def remove_document(db: Session, user: User, item: SdcSolicitation, link_id: str
         purge_document_links(db, document.id)
         purge_document(db, document)
     db.flush()
+
+
+def _pauta_for_sdc_solicitation(db: Session, item: SdcSolicitation):
+    from app.models import PreAnalysisPauta
+    from app.pre_analysis_service import get_or_create_pauta
+
+    try:
+        meta = json_loads(item.evaluation_json or "{}")
+    except (TypeError, ValueError):
+        meta = {}
+    tapaf_meta = meta.get("tapaf") if isinstance(meta.get("tapaf"), dict) else {}
+    proposal_id = tapaf_meta.get("proposal_id") or item.proposal_id
+    if not proposal_id:
+        return None
+    proposal = db.get(Proposal, proposal_id)
+    if not proposal:
+        return None
+    pauta_id = tapaf_meta.get("pauta_id")
+    if pauta_id:
+        row = db.get(PreAnalysisPauta, pauta_id)
+        if row:
+            return row
+    partner = db.get(User, item.partner_user_id) if item.partner_user_id else None
+    if not partner:
+        partner = db.scalar(
+            select(User).where(
+                User.organization_id == item.organization_id,
+                User.role == Role.PLATFORM_ADMIN,
+            )
+        )
+    if not partner:
+        return None
+    return get_or_create_pauta(db, partner, proposal)
+
+
+def _tapaf_manifest_preview_ui() -> dict:
+    from app.pre_analysis_constants import TAPAF_CHECKBOX_01, TAPAF_CHECKBOX_02, TAPAF_MANIFESTO_HTML, TAPAF_TOOLTIP
+
+    return {
+        "valor_nominal_taxa": "1500.00",
+        "texto_explicativo_tooltip_interrogacao": TAPAF_TOOLTIP,
+        "checkbox_obrigatorio_01": TAPAF_CHECKBOX_01,
+        "checkbox_obrigatorio_02": TAPAF_CHECKBOX_02,
+        "manifesto_html": TAPAF_MANIFESTO_HTML,
+        "botao_habilitado": False,
+        "checkout_url": None,
+    }
+
+
+def public_client_tapaf_view(db: Session, solicitation_id: str, token: str) -> dict:
+    from app.inter_cobranca_helpers import verify_sdc_tapaf_client_token
+    from app.pre_analysis_service import generate_tapaf_checkout
+
+    if not verify_sdc_tapaf_client_token(solicitation_id, token):
+        raise HTTPException(status_code=403, detail="Link TAPAF inválido ou expirado.")
+    item = db.get(SdcSolicitation, solicitation_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Solicitação não encontrada")
+    pauta = _pauta_for_sdc_solicitation(db, item)
+    if not pauta:
+        raise HTTPException(status_code=409, detail="TAPAF ainda não disponível para esta solicitação.")
+    accepted = pauta.status in {"TAPAF_CHECKOUT_ACCEPTED", "TAPAF_PAID"}
+    if accepted:
+        checkout = generate_tapaf_checkout(pauta)
+        ui = checkout.get("interface_checkout_tapaf") or {}
+    else:
+        ui = _tapaf_manifest_preview_ui()
+    return {
+        "contact_name": item.contact_name,
+        "solicitation_id": item.id,
+        "pauta_status": pauta.status,
+        "interface_checkout_tapaf": ui,
+        "checkout_accepted": accepted,
+        "checkout_paid": pauta.status == "TAPAF_PAID",
+    }
+
+
+def public_client_tapaf_accept(
+    db: Session,
+    solicitation_id: str,
+    token: str,
+    *,
+    scroll_completed: bool,
+    checkbox_1: bool,
+    checkbox_2: bool,
+) -> dict:
+    from app.inter_cobranca_helpers import verify_sdc_tapaf_client_token
+    from app.pre_analysis_service import accept_tapaf_checkout, generate_tapaf_checkout
+
+    if not verify_sdc_tapaf_client_token(solicitation_id, token):
+        raise HTTPException(status_code=403, detail="Link TAPAF inválido ou expirado.")
+    item = db.get(SdcSolicitation, solicitation_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Solicitação não encontrada")
+    pauta = _pauta_for_sdc_solicitation(db, item)
+    if not pauta:
+        raise HTTPException(status_code=409, detail="TAPAF indisponível.")
+    actor = db.get(User, item.partner_user_id) if item.partner_user_id else None
+    if not actor:
+        actor = db.scalar(
+            select(User).where(
+                User.organization_id == item.organization_id,
+                User.role == Role.PLATFORM_ADMIN,
+            )
+        )
+    if not actor:
+        raise HTTPException(status_code=500, detail="Não foi possível registrar o aceite TAPAF.")
+    asset = "VEHICLE" if item.asset_type in TIPOS_VEICULO else "REAL_ESTATE"
+    accept_tapaf_checkout(
+        db,
+        actor,
+        pauta,
+        scroll_completed=scroll_completed,
+        checkbox_1=checkbox_1,
+        checkbox_2=checkbox_2,
+        asset_type=asset,
+    )
+    db.flush()
+    checkout = generate_tapaf_checkout(pauta)
+    return {
+        "status": "OK",
+        "interface_checkout_tapaf": checkout.get("interface_checkout_tapaf") or {},
+        "pauta_status": pauta.status,
+    }
 
 
 def _document_link_view(db: Session, row: SdcSolicitationDocument) -> dict:

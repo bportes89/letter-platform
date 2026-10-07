@@ -109,15 +109,23 @@ def _asset_block(category: str) -> list[dict]:
     return list(DOCS_IMOVEL_URBANO)
 
 
+def _normalize_checklist_item(raw: dict) -> dict:
+    return {
+        "code": str(raw.get("code") or "").strip(),
+        "label": str(raw.get("label") or "").strip(),
+        "required": bool(raw.get("required", True)),
+    }
+
+
 def default_checklist_items(asset_category: str, operation_type: str) -> list[dict]:
     category = normalize_asset_category(asset_category)
     op = normalize_operation_type(operation_type)
-    rows: list[dict] = list(DOCS_CLIENT_BASE)
+    rows: list[dict] = [_normalize_checklist_item({**x, "required": True}) for x in DOCS_CLIENT_BASE]
     if op.startswith("PJ_"):
-        rows.extend(DOCS_BUYER_PJ)
+        rows.extend([_normalize_checklist_item({**x, "required": True}) for x in DOCS_BUYER_PJ])
     if op.endswith("_PJ"):
-        rows.extend(DOCS_COUNTERPARTY_PJ)
-    rows.extend(_asset_block(category))
+        rows.extend([_normalize_checklist_item({**x, "required": True}) for x in DOCS_COUNTERPARTY_PJ])
+    rows.extend([_normalize_checklist_item({**x, "required": True}) for x in _asset_block(category)])
     dedup: dict[str, dict] = {}
     for row in rows:
         dedup[row["code"]] = row
@@ -157,7 +165,7 @@ def resolve_required_docs(
             try:
                 items = json_loads(row.items_json)
                 if isinstance(items, list) and items:
-                    return [{"code": str(i["code"]), "label": str(i["label"])} for i in items if i.get("code")]
+                    return [_normalize_checklist_item(i) for i in items if i.get("code")]
             except (TypeError, ValueError, KeyError):
                 pass
     return default_checklist_items(category, op)
@@ -179,7 +187,7 @@ def list_checklist_configs(db: Session, organization_id: str) -> list[dict]:
                 try:
                     parsed = json_loads(row.items_json)
                     if isinstance(parsed, list) and parsed:
-                        items = parsed
+                        items = [_normalize_checklist_item(i) for i in parsed if i.get("code")]
                 except (TypeError, ValueError):
                     pass
             out.append(
@@ -208,7 +216,15 @@ def save_checklist_config(
     op = normalize_operation_type(operation_type)
     if category not in ASSET_CATEGORIES or op not in OPERATION_TYPES:
         raise ValueError("Categoria ou tipo de operação inválido")
-    cleaned = [{"code": str(i["code"]).strip().upper(), "label": str(i["label"]).strip()} for i in items if i.get("code")]
+    cleaned = [
+        {
+            "code": str(i["code"]).strip().upper(),
+            "label": str(i["label"]).strip(),
+            "required": bool(i.get("required", True)),
+        }
+        for i in items
+        if i.get("code")
+    ]
     row = get_checklist_config_row(db, organization_id, category, op)
     payload = json.dumps(cleaned, ensure_ascii=False)
     if not row:

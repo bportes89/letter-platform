@@ -734,7 +734,10 @@ async def add_document(
 def remove_document(db: Session, user: User, item: FlashSolicitation, link_id: str) -> None:
     assert_desk_access(user)
     if not _is_letter_ops(user):
-        raise HTTPException(status_code=403, detail="Apenas operação LETTER pode excluir documentos")
+        if item.status in STATUS_TERMINAL:
+            raise HTTPException(status_code=403, detail="Solicitação encerrada — não é possível excluir documentos.")
+        if item.status != STATUS_AWAITING_DOCS:
+            raise HTTPException(status_code=403, detail="Exclusão de documentos só na fase de envio de documentação.")
     row = db.scalar(
         select(FlashSolicitationDocument).where(
             FlashSolicitationDocument.id == link_id,

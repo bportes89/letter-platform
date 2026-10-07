@@ -233,7 +233,7 @@ def test_sdc_desk_evaluate_store_approve_and_sale(client, auth_headers):
         "contact_name": "Cliente SDC Desk",
         "contact_email": "cliente.sdc.desk@example.com",
         "contact_phone": "31988776655",
-        "document": "12345678901",
+        "document": "39053344705",
         "person_type": "PF",
         "income_value": "15000",
     })
@@ -354,6 +354,66 @@ def test_flash_desk_evaluate_store_approve_and_sale(client, auth_headers):
     assert sale.json()["calculation_id"]
     assert sale.json()["flash_route"]["route"] == "DIRECT_CLEAN"
     assert sale.json()["solicitation"]["can_create_sale"] is False
+
+
+def test_sdc_desk_partner_status_checklist_and_submit(client, auth_headers, partner_headers):
+    ok = client.post("/api/v1/sdc/desk/evaluate", headers=auth_headers, json={
+        "asset_type": "imovel",
+        "asset_value": "500000",
+        "asset_paid_off": True,
+        "asset_has_lien": False,
+        "docs_complete": True,
+        "client_has_credit_restriction": False,
+        "person_type": "PF",
+        "operation_type": "PF_PF",
+    })
+    assert ok.status_code == 200 and ok.json()["result"]["viable"] is True
+    stored = client.post("/api/v1/sdc/desk/solicitations", headers=partner_headers, json={
+        "asset_type": "imovel",
+        "asset_value": "500000",
+        "asset_paid_off": True,
+        "asset_has_lien": False,
+        "docs_complete": True,
+        "contact_name": "Cliente SDC Parceiro",
+        "contact_email": "sdc.partner@example.com",
+        "contact_phone": "31988776600",
+        "document": "39053344705",
+        "person_type": "PF",
+        "income_value": "15000",
+        "client_has_credit_restriction": False,
+        "operation_type": "PF_PF",
+    })
+    assert stored.status_code == 201, stored.text
+    sid = stored.json()["id"]
+    assert stored.json().get("client_tapaf_path")
+
+    blocked = client.patch(
+        f"/api/v1/sdc/desk/solicitations/{sid}",
+        headers=partner_headers,
+        json={"status": "UNDER_REVIEW"},
+    )
+    assert blocked.status_code == 403
+
+    cfg = client.get("/api/v1/sdc/desk/checklist-config", headers=partner_headers)
+    assert cfg.status_code == 200
+
+    denied = client.put(
+        "/api/v1/sdc/desk/checklist-config",
+        headers=partner_headers,
+        json={
+            "asset_category": "imovel_urbano",
+            "operation_type": "PF_PF",
+            "items": [{"code": "RG_CPF", "label": "RG", "required": True}],
+        },
+    )
+    assert denied.status_code == 403
+
+    missing = client.post(
+        f"/api/v1/sdc/desk/solicitations/{sid}/submit-documents",
+        headers=partner_headers,
+        json={},
+    )
+    assert missing.status_code == 422
 
 
 def test_sdc_desk_property_debt_and_flash_redirect(client, auth_headers):

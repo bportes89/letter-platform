@@ -11,7 +11,7 @@ import {
 import { lookupCep } from "@/lib/cep-lookup";
 import { AdminDocumentPanel } from "@/components/admin-document-panel";
 import { api, apiForm, deleteApi, downloadApi, User } from "@/lib/api";
-import { isInternalProductRole } from "@/lib/product-nav";
+import { canEditLetterFinOpsParams, isInternalProductRole } from "@/lib/product-nav";
 import { PreAnalysisModule } from "@/components/pre-analysis-module";
 import { DeskSourceMetaRow } from "@/lib/desk-source-meta";
 import { PartnerSociosFields, SocioPartner, sociosPayload } from "@/components/partner-socios-fields";
@@ -20,7 +20,7 @@ import { DESK_SIMULATION_NOTICE } from "@/lib/desk-simulation-notice";
 import { commercialQuotaDisplay } from "@/lib/commercial-quota-label";
 import { formatDocumentDigits } from "@/lib/br-validation";
 
-type RequiredDoc = { code: string; label: string; uploaded?: boolean };
+type RequiredDoc = { code: string; label: string; uploaded?: boolean; required?: boolean };
 
 type StatusLogEntry = {
   at: string;
@@ -124,6 +124,7 @@ type TapafCheckoutUi = {
 type StoreResponse = SdcSolicitation & {
   tapaf_checkout?: TapafCheckoutUi;
   tapaf_proposal_id?: string;
+  client_tapaf_path?: string;
 };
 
 type QuotaRow = {
@@ -252,7 +253,7 @@ type ChecklistConfigRow = {
   customized?: boolean;
 };
 
-type ChecklistItemDraft = { code: string; label: string };
+type ChecklistItemDraft = { code: string; label: string; required: boolean };
 
 type SdcCadastroOption = {
   lead_id: string;
@@ -317,8 +318,12 @@ function SdcChecklistConfigPanel({
 
   useEffect(() => {
     if (!selected) return;
-    const items = selected.items.map((it) => ({ code: it.code, label: it.label }));
-    setDraftItems(items.length ? items : [{ code: "", label: "" }]);
+    const items = selected.items.map((it) => ({
+      code: it.code,
+      label: it.label,
+      required: (it as { required?: boolean }).required !== false,
+    }));
+    setDraftItems(items.length ? items : [{ code: "", label: "", required: true }]);
   }, [selected?.asset_category, selected?.operation_type, selected?.items]);
 
   function patchDraftItem(index: number, patch: Partial<ChecklistItemDraft>) {
@@ -334,7 +339,7 @@ function SdcChecklistConfigPanel({
     setError("");
     setNotice("");
     const cleaned = draftItems
-      .map((it) => ({ code: it.code.trim(), label: it.label.trim() }))
+      .map((it) => ({ code: it.code.trim(), label: it.label.trim(), required: it.required }))
       .filter((it) => it.code && it.label);
     if (!cleaned.length) {
       setError("Informe ao menos um item com código e descrição.");
@@ -408,7 +413,7 @@ function SdcChecklistConfigPanel({
         {draftItems.map((it, idx) => (
           <div
             key={`${idx}-${it.code}`}
-            style={{ display: "grid", gap: 8, gridTemplateColumns: "minmax(120px,0.35fr) minmax(0,1fr) auto", alignItems: "end" }}
+            style={{ display: "grid", gap: 8, gridTemplateColumns: "minmax(120px,0.35fr) minmax(0,1fr) auto auto", alignItems: "end" }}
           >
             <label style={{ fontSize: 11 }}>
               Código
@@ -417,6 +422,14 @@ function SdcChecklistConfigPanel({
             <label style={{ fontSize: 11 }}>
               Documento / descrição
               <input value={it.label} onChange={(e) => patchDraftItem(idx, { label: e.target.value })} placeholder="RG e CPF do proponente" />
+            </label>
+            <label style={{ fontSize: 11, display: "flex", alignItems: "center", gap: 6, paddingBottom: 6 }}>
+              <input
+                type="checkbox"
+                checked={it.required}
+                onChange={(e) => patchDraftItem(idx, { required: e.target.checked })}
+              />
+              Obrigatório
             </label>
             <button
               type="button"
@@ -433,7 +446,7 @@ function SdcChecklistConfigPanel({
           type="button"
           className="table-action"
           style={{ alignSelf: "flex-start" }}
-          onClick={() => setDraftItems((prev) => [...prev, { code: "", label: "" }])}
+          onClick={() => setDraftItems((prev) => [...prev, { code: "", label: "", required: true }])}
         >
           <Plus size={14} />
           Adicionar documento obrigatório
@@ -474,6 +487,7 @@ export function SdcDeskModule() {
   const [properties, setProperties] = useState<SdcPropertyRow[]>(() => [newSdcPropertyRow()]);
   const [vehicles, setVehicles] = useState<VehicleRow[]>([{ plate: "", renavam: "", year: "", vehicle_value: "" }]);
   const tapafPanelRef = useRef<HTMLDivElement>(null);
+  const resultPanelRef = useRef<HTMLDivElement>(null);
   const [creditChoice, setCreditChoice] = useState<"limite" | "solicitada" | null>(null);
   const [tapafCheckout, setTapafCheckout] = useState<TapafCheckoutUi | null>(null);
   const [tapafProposalId, setTapafProposalId] = useState("");
@@ -490,6 +504,7 @@ export function SdcDeskModule() {
   const checklistEditorRef = useRef<HTMLDivElement>(null);
 
   const isInternal = isInternalProductRole(user?.role);
+  const letterOps = canEditLetterFinOpsParams(user?.role);
   const formChecklistKey = useMemo(
     () => `${form.asset_type}:${form.operation_type}`,
     [form.asset_type, form.operation_type],
@@ -524,11 +539,14 @@ export function SdcDeskModule() {
   }, [load]);
 
   useEffect(() => {
-    if (!isInternal) return;
     api<ChecklistConfigRow[]>("/sdc/desk/checklist-config")
       .then(setChecklistCatalog)
       .catch(() => setChecklistCatalog([]));
-  }, [isInternal, user?.role]);
+  }, [user?.role]);
+
+  function mergeSolicitation(updated: SdcSolicitation) {
+    setItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
+  }
 
   const filtered = useMemo(
     () => (statusFilter === "ALL" ? items : items.filter((i) => i.status === statusFilter)),
@@ -844,6 +862,7 @@ export function SdcDeskModule() {
       } else {
         setCreditChoice("limite");
       }
+      window.setTimeout(() => resultPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 120);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Falha no cálculo");
     } finally {
@@ -934,21 +953,30 @@ export function SdcDeskModule() {
           partners_json: form.person_type === "PJ" ? partnersForPayload() : [],
           asset_category: form.asset_type,
           operation_type: form.operation_type,
-          partner_observation: form.partner_observation.trim() || null,
         }),
       });
-      setNotice(`SDC gravado: ${created.contact_name} — ${created.status_label}. Conclua o TAPAF no painel ao lado.`);
-      if (created.tapaf_checkout) {
-        setTapafCheckout(created.tapaf_checkout);
-        setTapafProposalId(created.tapaf_proposal_id || "");
-        setTapafScroll(false);
-        setTapafCb1(false);
-        setTapafCb2(false);
-        window.setTimeout(() => tapafPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 150);
+      setTapafCheckout(null);
+      setTapafProposalId("");
+      const clientPath = created.client_tapaf_path || "";
+      const clientUrl = clientPath ? `${window.location.origin}${clientPath}` : "";
+      if (clientUrl) {
+        setNotice(
+          `Solicitação gravada (${created.status_label}). Envie o link TAPAF ao cliente por e-mail ou WhatsApp — só ele aceita e paga a taxa.`,
+        );
+        try {
+          await navigator.clipboard.writeText(clientUrl);
+          setNotice((n) => `${n} Link copiado: ${clientUrl}`);
+        } catch {
+          setNotice((n) => `${n} Link para o cliente: ${clientUrl}`);
+        }
       } else {
-        setError("Solicitação gravada, mas o checkout TAPAF não foi gerado. Atualize a página ou contate o suporte.");
+        setNotice(`SDC gravado: ${created.contact_name} — ${created.status_label}.`);
+      }
+      if (letterOps && created.tapaf_proposal_id) {
+        setTapafProposalId(created.tapaf_proposal_id);
       }
       setSelectedId(created.id);
+      setTab("lista");
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Falha ao gravar solicitação");
@@ -1081,9 +1109,9 @@ export function SdcDeskModule() {
       body.append("file", file);
       body.append("doc_type", type);
       if (item.awaiting_pendency_upload) body.append("upload_batch", "PENDENCY");
-      await apiForm(`/sdc/desk/solicitations/${item.id}/documents`, body);
+      const updated = await apiForm<SdcSolicitation>(`/sdc/desk/solicitations/${item.id}/documents`, body);
+      mergeSolicitation(updated);
       setNotice(`Documento anexado em ${item.contact_name}`);
-      await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Falha no upload");
     } finally {
@@ -1095,7 +1123,10 @@ export function SdcDeskModule() {
     setError("");
     setBusy(true);
     try {
-      const updated = await api<SdcSolicitation>(`/sdc/desk/solicitations/${item.id}/submit-documents`, { method: "POST" });
+      const updated = await api<SdcSolicitation>(`/sdc/desk/solicitations/${item.id}/submit-documents`, {
+        method: "POST",
+        body: JSON.stringify({ partner_observation: partnerObsDraft.trim() || null }),
+      });
       setNotice(
         updated.status === "UNDER_REVIEW" && updated.awaiting_pendency_upload === false && item.status === "PENDING"
           ? `Pendências reenviadas — ${updated.contact_name} em análise LETTER.`
@@ -1116,7 +1147,8 @@ export function SdcDeskModule() {
     try {
       await deleteApi(`/sdc/desk/solicitations/${item.id}/documents/${docId}`);
       setNotice("Documento excluído.");
-      await load();
+      const fresh = await api<SdcSolicitation>(`/sdc/desk/solicitations/${item.id}`);
+      mergeSolicitation(fresh);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Falha ao excluir documento");
     } finally {
@@ -1281,29 +1313,30 @@ export function SdcDeskModule() {
                 >
                   {OPERATION_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
                 </select>
-                {isInternal && (
-                  <div
-                    style={{
-                      gridColumn: "1 / -1",
-                      padding: 12,
-                      borderRadius: 10,
-                      border: "1px dashed var(--line)",
-                      background: "#f9fcfb",
-                      fontSize: 11,
-                    }}
-                  >
-                    <b>Checklist que será exigido nesta combinação</b>
-                    {formChecklistPreview.length ? (
-                      <ul style={{ margin: "8px 0", paddingLeft: 18 }}>
-                        {formChecklistPreview.map((d) => (
-                          <li key={d.code}>{d.label}</li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <p className="muted" style={{ margin: "8px 0 0" }}>
-                        Nenhum item carregado — configure na seção INTERNO abaixo.
-                      </p>
-                    )}
+                <div
+                  style={{
+                    gridColumn: "1 / -1",
+                    padding: 12,
+                    borderRadius: 10,
+                    border: "1px dashed var(--line)",
+                    background: "#f9fcfb",
+                    fontSize: 11,
+                  }}
+                >
+                  <b>Checklist que será exigido nesta combinação</b>
+                  {formChecklistPreview.length ? (
+                    <ul style={{ margin: "8px 0", paddingLeft: 18 }}>
+                      {formChecklistPreview.map((d) => (
+                        <li key={d.code}>
+                          {(d as { required?: boolean }).required === false ? "○ (opcional) " : "● "}
+                          {d.label}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="muted" style={{ margin: "8px 0 0" }}>Carregando checklist…</p>
+                  )}
+                  {letterOps && (
                     <button
                       type="button"
                       className="table-action"
@@ -1311,17 +1344,10 @@ export function SdcDeskModule() {
                         checklistEditorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
                       }}
                     >
-                      Ir para editor de documentos obrigatórios
+                      Editar checklist (admin)
                     </button>
-                  </div>
-                )}
-                <textarea
-                  placeholder="Observação do parceiro sobre esta proposta (opcional)"
-                  value={form.partner_observation}
-                  onChange={(e) => patchForm("partner_observation", e.target.value)}
-                  rows={2}
-                  style={{ gridColumn: "1 / -1" }}
-                />
+                  )}
+                </div>
                 {isMaquina && (
                   <>
                     <label>
@@ -1648,7 +1674,7 @@ export function SdcDeskModule() {
                 <button type="button" className="admin-button" disabled={busy} onClick={() => void calculate()}>Calcular viabilidade</button>
               </div>
             </div>
-            <div ref={tapafPanelRef} style={{ border: "1px solid var(--line)", borderRadius: 12, padding: 16, background: "#f7fbf9" }}>
+            <div ref={resultPanelRef} style={{ border: "1px solid var(--line)", borderRadius: 12, padding: 16, background: "#f7fbf9" }}>
               <b>Resultado da análise</b>
               {error && evalResult && !tapafCheckout && (
                 <div className="error" style={{ marginTop: 10, fontSize: 12 }}>{error}</div>
@@ -1752,7 +1778,7 @@ export function SdcDeskModule() {
                   {DESK_SIMULATION_NOTICE}
                 </p>
               )}
-              {tapafCheckout && (
+              {letterOps && tapafCheckout && (
                 <div className="tapaf-checkout" style={{ marginTop: 14 }}>
                   <b>TAPAF — taxa de abertura</b>
                   <div className="finops-summary tapaf-price" style={{ marginTop: 10 }}>
@@ -1886,27 +1912,12 @@ export function SdcDeskModule() {
                     {selected.operation_type_label ? ` · ${selected.operation_type_label}` : ""}
                   </div>
                 )}
-                {!isInternal && (
-                  <div style={{ marginTop: 12 }}>
-                    <b style={{ fontSize: 12 }}>Observação do parceiro</b>
-                    <textarea
-                      value={partnerObsDraft}
-                      onChange={(e) => setPartnerObsDraft(e.target.value)}
-                      rows={3}
-                      style={{ width: "100%", marginTop: 6, fontSize: 12 }}
-                      placeholder="Informações adicionais sobre a proposta…"
-                    />
-                    <button type="button" className="table-action" style={{ marginTop: 6 }} disabled={busy} onClick={() => void savePartnerObservation(selected)}>
-                      Salvar observação
-                    </button>
-                  </div>
-                )}
-                {selected.partner_observation && isInternal && (
+                {selected.partner_observation && letterOps && (
                   <div style={{ marginTop: 10, fontSize: 11 }}>
                     <b>Observação do parceiro:</b> {selected.partner_observation}
                   </div>
                 )}
-                {isInternal && (
+                {letterOps && (
                   <div style={{ marginTop: 14, padding: 12, borderRadius: 10, border: "1px solid var(--line)", background: "#fafcfb" }}>
                     <b style={{ fontSize: 12 }}>Retorno LETTER (esteira)</b>
                     <div style={{ display: "grid", gap: 8, marginTop: 8, gridTemplateColumns: "1fr 1fr" }}>
@@ -1975,29 +1986,22 @@ export function SdcDeskModule() {
                     </ul>
                   </div>
                 )}
-                <div style={{ marginTop: 12 }}>
-                  <b style={{ fontSize: 12 }}>
-                    Checklist documental
-                    {selected.awaiting_pendency_upload ? " — somente pendências" : ""}
-                  </b>
-                  <p className="muted" style={{ fontSize: 11, margin: "6px 0 8px" }}>
-                    Anexe cada item do checklist. O botão <em>Transmitir documentação</em> só libera quando todos estiverem marcados.
-                    {selected.awaiting_pendency_upload
-                      ? " Os arquivos de pendência ficam em lote separado dos documentos iniciais."
-                      : ""}
-                  </p>
-                  <ul style={{ margin: "0 0 12px", paddingLeft: 18, fontSize: 11, lineHeight: 1.5 }}>
-                    {(selected.required_docs ?? []).map((d) => (
-                      <li key={d.code} style={{ color: d.uploaded ? "#067647" : "#52605a" }}>
-                        {d.uploaded ? "✓" : "○"} {d.label}
-                      </li>
-                    ))}
-                  </ul>
-                  {!isInternal && (selected.status === "AWAITING_DOCS" || selected.awaiting_pendency_upload) && (
+                {(selected.status === "AWAITING_DOCS" || selected.awaiting_pendency_upload) && !letterOps && (
+                  <>
+                    <label style={{ display: "block", marginTop: 12, fontSize: 11 }}>
+                      Observações para a operação (opcional)
+                      <textarea
+                        rows={3}
+                        value={partnerObsDraft}
+                        onChange={(e) => setPartnerObsDraft(e.target.value)}
+                        style={{ width: "100%", marginTop: 4 }}
+                        placeholder="Informações adicionais antes de enviar a documentação…"
+                      />
+                    </label>
                     <button
                       type="button"
                       className="admin-button"
-                      style={{ marginBottom: 12 }}
+                      style={{ marginTop: 8, marginBottom: 12 }}
                       disabled={busy || !selected.can_submit_documents}
                       onClick={() => void submitDocuments(selected)}
                     >
@@ -2005,28 +2009,30 @@ export function SdcDeskModule() {
                         ? "Enviar documentação pendente"
                         : "Transmitir documentação para análise"}
                     </button>
-                  )}
-                  {(selected.status === "AWAITING_DOCS" || selected.awaiting_pendency_upload) && !selected.can_submit_documents && (
-                    <p className="muted" style={{ fontSize: 10, margin: "0 0 10px" }}>
-                      Faltam itens do checklist — anexe todos os tipos obrigatórios antes de transmitir.
-                    </p>
-                  )}
-                </div>
+                    {!selected.can_submit_documents && (
+                      <p className="muted" style={{ fontSize: 10, margin: "0 0 10px" }}>
+                        Anexe todos os documentos obrigatórios do checklist antes de transmitir.
+                      </p>
+                    )}
+                  </>
+                )}
                 <AdminDocumentPanel
-                  title={`Arquivos anexados (${selected.documents.length})`}
+                  title="Documentação"
                   hint={
                     selected.awaiting_pendency_upload
-                      ? "Anexe apenas os tipos marcados na pendência — serão enviados em lote separado."
-                      : "Escolha o tipo do checklist no seletor e anexe o arquivo correspondente."
+                      ? "Anexe os itens pendentes abaixo. Ao excluir um arquivo, o item volta para a lista de anexo."
+                      : "Anexe cada item do checklist. Itens já enviados somem da lista até você excluir o arquivo."
                   }
                   documents={selected.documents.map((d) => ({
                     ...d,
                     filename: d.upload_batch === "PENDENCY" ? `[Pendência] ${d.filename || d.doc_type}` : d.filename,
                   }))}
                   busy={busy}
-                  canDelete={isInternal}
-                  docTypeOptions={[...sdcDocTypeOptions, { value: "SDC_SUPPORT", label: "Documento de apoio (opcional)" }]}
-                  defaultDocType={docType}
+                  canDelete={
+                    letterOps || selected.status === "AWAITING_DOCS" || Boolean(selected.awaiting_pendency_upload)
+                  }
+                  checklistDocs={selected.required_docs ?? []}
+                  optionalUpload={{ value: "SDC_SUPPORT", label: "Documento de apoio (opcional)" }}
                   onUpload={(file, type) => uploadDoc(selected, file, type || docType)}
                   onDownload={(doc) => downloadApi(`/documents/${doc.document_id}/download`, doc.filename || "documento")}
                   onDelete={(doc) => deleteDoc(selected, doc.id)}
@@ -2071,13 +2077,13 @@ export function SdcDeskModule() {
         )}
       </section>
 
-      {isInternal ? (
+      {letterOps ? (
         <section className="panel operational-panel" style={{ marginTop: 16 }}>
           <div className="page-heading" style={{ marginBottom: 8 }}>
             <div>
               <span className="eyebrow dark">INTERNO</span>
               <h2 style={{ fontSize: 18, margin: "6px 0" }}>Checklists SDC (documentos obrigatórios)</h2>
-              <p className="muted">Configure os itens por tipo de bem e tipo de operação (PF/PJ).</p>
+              <p className="muted">Somente operação LETTER edita documentos por combinação bem + operação.</p>
             </div>
           </div>
           <div style={{ padding: "0 18px 18px" }}>

@@ -3267,6 +3267,10 @@ class SdcDeskStatusUpdate(BaseModel):
     pending_doc_codes: list[str] = Field(default_factory=list)
 
 
+class SdcDeskSubmitDocumentsRequest(BaseModel):
+    partner_observation: str | None = Field(default=None, max_length=4000)
+
+
 class SdcDeskPartnerObservationUpdate(BaseModel):
     partner_observation: str | None = Field(default=None, max_length=8000)
 
