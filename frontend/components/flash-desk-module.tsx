@@ -14,7 +14,19 @@ import { lookupCep, lookupMunicipalityPopulation } from "@/lib/cep-lookup";
 import { DESK_SIMULATION_NOTICE } from "@/lib/desk-simulation-notice";
 import { clearFlashHandoff, loadFlashHandoff } from "@/lib/desk-flash-handoff";
 
-type RequiredDoc = { code: string; label: string; uploaded?: boolean };
+type RequiredDoc = { code: string; label: string; uploaded?: boolean; required?: boolean };
+
+type CadastroOption = {
+  lead_id: string;
+  name: string;
+  document: string | null;
+  phone: string;
+  email: string | null;
+  person_type: string;
+  occupation?: string | null;
+  monthly_income?: string | null;
+  label: string;
+};
 
 type FlashSolicitation = {
   id: string;
@@ -44,6 +56,7 @@ type FlashSolicitation = {
   required_docs: RequiredDoc[];
   documents: Array<{ id: string; doc_type: string; document_id?: string | null; filename?: string | null; status?: string | null; created_at: string | null }>;
   can_create_sale: boolean;
+  can_submit_documents?: boolean;
 };
 
 type EvalResult = {
@@ -79,6 +92,7 @@ type TapafCheckoutUi = {
 type StoreResponse = FlashSolicitation & {
   tapaf_checkout?: TapafCheckoutUi;
   tapaf_proposal_id?: string;
+  client_tapaf_path?: string;
 };
 
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
@@ -134,7 +148,7 @@ type FlashChecklistConfigRow = {
   customized?: boolean;
 };
 
-type FlashChecklistItemDraft = { code: string; label: string };
+type FlashChecklistItemDraft = { code: string; label: string; required: boolean };
 
 const FLASH_OPERATION_OPTIONS = [
   { value: "IMOVEL_PROPRIO", label: "Imóvel próprio" },
@@ -179,8 +193,12 @@ function FlashChecklistConfigPanel({
 
   useEffect(() => {
     if (!selected) return;
-    const items = selected.items.map((it) => ({ code: it.code, label: it.label }));
-    setDraftItems(items.length ? items : [{ code: "", label: "" }]);
+    const items = selected.items.map((it) => ({
+      code: it.code,
+      label: it.label,
+      required: (it as { required?: boolean }).required !== false,
+    }));
+    setDraftItems(items.length ? items : [{ code: "", label: "", required: true }]);
   }, [selected?.operation_type, selected?.items]);
 
   function patchDraftItem(index: number, patch: Partial<FlashChecklistItemDraft>) {
@@ -196,7 +214,7 @@ function FlashChecklistConfigPanel({
     setError("");
     setNotice("");
     const cleaned = draftItems
-      .map((it) => ({ code: it.code.trim(), label: it.label.trim() }))
+      .map((it) => ({ code: it.code.trim(), label: it.label.trim(), required: it.required }))
       .filter((it) => it.code && it.label);
     if (!cleaned.length) {
       setError("Informe ao menos um item com código e descrição.");
@@ -261,7 +279,7 @@ function FlashChecklistConfigPanel({
         {draftItems.map((it, idx) => (
           <div
             key={`${idx}-${it.code}`}
-            style={{ display: "grid", gap: 8, gridTemplateColumns: "minmax(120px,0.35fr) minmax(0,1fr) auto", alignItems: "end" }}
+            style={{ display: "grid", gap: 8, gridTemplateColumns: "minmax(120px,0.35fr) minmax(0,1fr) auto auto", alignItems: "end" }}
           >
             <label style={{ fontSize: 11 }}>
               Código
@@ -270,6 +288,14 @@ function FlashChecklistConfigPanel({
             <label style={{ fontSize: 11 }}>
               Documento / descrição
               <input value={it.label} onChange={(e) => patchDraftItem(idx, { label: e.target.value })} placeholder="Comprovante de renda" />
+            </label>
+            <label style={{ fontSize: 11, display: "flex", alignItems: "center", gap: 6, paddingBottom: 8 }}>
+              <input
+                type="checkbox"
+                checked={it.required}
+                onChange={(e) => patchDraftItem(idx, { required: e.target.checked })}
+              />
+              Obrigatório
             </label>
             <button
               type="button"
@@ -286,7 +312,7 @@ function FlashChecklistConfigPanel({
           type="button"
           className="table-action"
           style={{ alignSelf: "flex-start" }}
-          onClick={() => setDraftItems((prev) => [...prev, { code: "", label: "" }])}
+          onClick={() => setDraftItems((prev) => [...prev, { code: "", label: "", required: true }])}
         >
           <Plus size={14} />
           Adicionar documento obrigatório
@@ -420,11 +446,16 @@ export function FlashDeskModule() {
   const [tapafCb1, setTapafCb1] = useState(false);
   const [tapafCb2, setTapafCb2] = useState(false);
   const tapafPanelRef = useRef<HTMLDivElement>(null);
+  const resultPanelRef = useRef<HTMLDivElement>(null);
   const checklistEditorRef = useRef<HTMLDivElement>(null);
   const [checklistCatalog, setChecklistCatalog] = useState<FlashChecklistConfigRow[]>([]);
+  const [cadastros, setCadastros] = useState<CadastroOption[]>([]);
+  const [existingCadastroId, setExistingCadastroId] = useState("");
+  const [docSubmitNotes, setDocSubmitNotes] = useState("");
 
   const isInternal = isInternalProductRole(user?.role);
-  const canEditFinOpsRate = canEditLetterFinOpsParams(user?.role);
+  const letterOps = canEditLetterFinOpsParams(user?.role);
+  const canEditFinOpsRate = letterOps;
   const formChecklistPreview = useMemo(() => {
     const row = checklistCatalog.find((r) => r.operation_type === form.operation_type);
     return row?.items ?? [];
@@ -559,12 +590,20 @@ export function FlashDeskModule() {
   }
 
   const load = useCallback(async () => {
-    const [me, list] = await Promise.all([
+    const [me, list, cadastroRows] = await Promise.all([
       api<User>("/auth/me"),
       api<FlashSolicitation[]>("/flash/desk/solicitations"),
+      api<CadastroOption[]>("/marketplace/venda-direta-manual/cadastros").catch(() => [] as CadastroOption[]),
     ]);
     setUser(me);
     setItems(list);
+    setCadastros(
+      cadastroRows.filter((c) => {
+        const pt = (c.person_type || "PF").toUpperCase();
+        const docDigits = (c.document || "").replace(/\D/g, "");
+        return pt === "PJ" || docDigits.length === 14;
+      }),
+    );
   }, []);
 
   useEffect(() => {
@@ -575,11 +614,44 @@ export function FlashDeskModule() {
   }, [load]);
 
   useEffect(() => {
-    if (!isInternal) return;
     api<FlashChecklistConfigRow[]>("/flash/desk/checklist-config")
       .then(setChecklistCatalog)
       .catch(() => setChecklistCatalog([]));
-  }, [isInternal, user?.role]);
+  }, [user?.role]);
+
+  function fillCadastroFromRow(row: CadastroOption) {
+    const addr = (row as { address?: Record<string, string> }).address || {};
+    setForm((prev) => ({
+      ...prev,
+      contact_name: row.name || prev.contact_name,
+      contact_email: row.email || prev.contact_email,
+      contact_phone: row.phone || prev.contact_phone,
+      document: row.document || prev.document,
+      person_type: "PJ",
+      occupation: row.occupation || prev.occupation,
+      income_value: row.monthly_income ? String(row.monthly_income) : prev.income_value,
+      hq_street: addr.street || prev.hq_street,
+      hq_number: addr.number || prev.hq_number,
+      hq_neighborhood: addr.neighborhood || prev.hq_neighborhood,
+      hq_city: addr.city || prev.hq_city,
+      hq_state: addr.uf || addr.state || prev.hq_state,
+      hq_zip: addr.zipcode || addr.zip || prev.hq_zip,
+    }));
+    setEvalResult(null);
+  }
+
+  function applyCadastro(id: string) {
+    setExistingCadastroId(id);
+    if (!id) return;
+    const row = cadastros.find((x) => x.lead_id === id);
+    if (!row) {
+      setError("Cadastro não encontrado. Clique em Atualizar e tente de novo.");
+      return;
+    }
+    setError("");
+    fillCadastroFromRow(row);
+    setNotice(`Dados de ${row.name} importados do cadastro na plataforma.`);
+  }
 
   useEffect(() => {
     const handoff = loadFlashHandoff();
@@ -673,7 +745,7 @@ export function FlashDeskModule() {
       lien_payoff_value: null,
       property_registry: registry || null,
       properties_json: props,
-      docs_complete: form.docs_complete,
+      docs_complete: true,
       term_months: Number(form.term_months),
       capital_source: form.capital_source,
       operation_type: form.operation_type,
@@ -717,6 +789,7 @@ export function FlashDeskModule() {
         body: JSON.stringify(evaluatePayload()),
       });
       setEvalResult(res.result);
+      window.setTimeout(() => resultPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 120);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Falha no cálculo");
     } finally {
@@ -751,18 +824,30 @@ export function FlashDeskModule() {
           partners_json: sociosPayload(socios),
         }),
       });
-      setNotice(`Flash gravado: ${created.contact_name} — ${created.status_label}. Conclua o TAPAF no painel ao lado.`);
-      if (created.tapaf_checkout) {
+      setTapafCheckout(null);
+      setTapafProposalId("");
+      const clientPath = created.client_tapaf_path || "";
+      const clientUrl = clientPath ? `${window.location.origin}${clientPath}` : "";
+      if (clientUrl) {
+        setNotice(
+          `Solicitação gravada (${created.status_label}). Envie o link TAPAF ao cliente (tomador) por e-mail ou WhatsApp — só ele aceita e paga a taxa.`,
+        );
+        try {
+          await navigator.clipboard.writeText(clientUrl);
+          setNotice((n) => `${n} Link copiado: ${clientUrl}`);
+        } catch {
+          setNotice((n) => `${n} Link para o cliente: ${clientUrl}`);
+        }
+      } else {
+        setNotice(`Flash gravado: ${created.contact_name} — ${created.status_label}.`);
+      }
+      if (letterOps && created.tapaf_checkout) {
         setTapafCheckout(created.tapaf_checkout);
         setTapafProposalId(created.tapaf_proposal_id || "");
-        setTapafScroll(false);
-        setTapafCb1(false);
-        setTapafCb2(false);
         window.setTimeout(() => tapafPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 150);
-      } else {
-        setError("Solicitação gravada, mas o checkout TAPAF não foi gerado. Atualize a página ou contate o suporte.");
       }
       setSelectedId(created.id);
+      setTab("lista");
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Falha ao gravar solicitação");
@@ -812,7 +897,8 @@ export function FlashDeskModule() {
         }),
       });
       await refreshTapafCheckout();
-      setNotice("Aceite TAPAF registrado. Use o botão abaixo para gerar boleto/Pix.");
+      setNotice("Aceite TAPAF registrado. Abra o boleto ou Pix abaixo.");
+      await refreshTapafCheckout();
       tapafPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Falha no aceite TAPAF");
@@ -828,7 +914,7 @@ export function FlashDeskModule() {
     try {
       const mode = tapafCheckout?.checkout_mode || "";
       const url = tapafCheckout?.checkout_url || "";
-      const isGateway = (mode === "ASAAS" || mode === "INTER") && url.startsWith("http");
+      const isGateway = (mode === "ASAAS" || mode === "INTER" || mode === "SANDBOX") && url.startsWith("http");
       if (isGateway) {
         window.open(url, "_blank", "noopener,noreferrer");
         setNotice(
@@ -877,6 +963,24 @@ export function FlashDeskModule() {
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Falha no upload");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitDocuments(item: FlashSolicitation) {
+    setError("");
+    setBusy(true);
+    try {
+      const updated = await api<FlashSolicitation>(`/flash/desk/solicitations/${item.id}/submit-documents`, {
+        method: "POST",
+        body: JSON.stringify({ status_notes: docSubmitNotes.trim() || null }),
+      });
+      setNotice(`${updated.contact_name}: documentação enviada — ${updated.status_label}.`);
+      setDocSubmitNotes("");
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Falha ao enviar documentação");
     } finally {
       setBusy(false);
     }
@@ -1016,6 +1120,19 @@ export function FlashDeskModule() {
                 Flash Capital é exclusivo para <b>Pessoa Jurídica (PJ)</b>. Informe o tomador do crédito e cada imóvel em garantia (operação em nome de terceiros titulares).
               </p>
               <div style={{ display: "grid", gap: 9, gridTemplateColumns: "1fr 1fr" }}>
+                <label style={{ gridColumn: "1 / -1", fontSize: 11, fontWeight: 700 }}>
+                  Cliente PJ já cadastrado na plataforma
+                  <select
+                    value={existingCadastroId}
+                    onChange={(e) => applyCadastro(e.target.value)}
+                    style={{ width: "100%", marginTop: 4, padding: 8, borderRadius: 8, fontWeight: 400 }}
+                  >
+                    <option value="">Preencher manualmente</option>
+                    {cadastros.map((c) => (
+                      <option key={c.lead_id} value={c.lead_id}>{c.label}</option>
+                    ))}
+                  </select>
+                </label>
                 <div style={{ gridColumn: "1 / -1" }}>
                   <b style={{ fontSize: 12 }}>Tomador do crédito (PJ)</b>
                 </div>
@@ -1044,36 +1161,39 @@ export function FlashDeskModule() {
                     Imóvel próprio: garantia do tomador PJ. Imóvel de terceiro: o proprietário também assina o contrato.
                   </small>
                 </label>
-                {isInternal && (
-                  <div
-                    style={{
-                      gridColumn: "1 / -1",
-                      padding: 12,
-                      borderRadius: 10,
-                      border: "1px dashed var(--line)",
-                      background: "#f9fcfb",
-                      fontSize: 11,
-                    }}
-                  >
-                    <b>Checklist que será exigido nesta operação</b>
-                    {formChecklistPreview.length ? (
-                      <ul style={{ margin: "8px 0", paddingLeft: 18 }}>
-                        {formChecklistPreview.map((d) => (
-                          <li key={d.code}>{d.label}</li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <p className="muted" style={{ margin: "8px 0 0" }}>Configure os documentos na seção INTERNO abaixo.</p>
-                    )}
+                <div
+                  style={{
+                    gridColumn: "1 / -1",
+                    padding: 12,
+                    borderRadius: 10,
+                    border: "1px dashed var(--line)",
+                    background: "#f9fcfb",
+                    fontSize: 11,
+                  }}
+                >
+                  <b>Checklist que será exigido nesta operação</b>
+                  {formChecklistPreview.length ? (
+                    <ul style={{ margin: "8px 0", paddingLeft: 18 }}>
+                      {formChecklistPreview.map((d) => (
+                        <li key={d.code}>
+                          {(d as { required?: boolean }).required === false ? "○ (opcional) " : "● "}
+                          {d.label}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="muted" style={{ margin: "8px 0 0" }}>Carregando checklist…</p>
+                  )}
+                  {letterOps && (
                     <button
                       type="button"
                       className="table-action"
                       onClick={() => checklistEditorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
                     >
-                      Ir para editor de documentos obrigatórios
+                      Editar checklist (admin)
                     </button>
-                  </div>
-                )}
+                  )}
+                </div>
                 {form.operation_type === "IMOVEL_TERCEIRO" && (
                   <>
                     <div style={{ gridColumn: "1 / -1", marginTop: 4 }}>
@@ -1424,11 +1544,6 @@ export function FlashDeskModule() {
                 Adicionar outro imóvel
               </button>
 
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 14, fontSize: 12, fontWeight: 700 }}>
-                <label>
-                  <input type="checkbox" checked={form.docs_complete} onChange={(e) => patchForm("docs_complete", e.target.checked)} /> Checklist lastros ok
-                </label>
-              </div>
               {totalPropertiesValue() > 0 && (
                 <p className="muted" style={{ margin: 0, fontSize: 11 }}>
                   Valor total dos imóveis: <b>{brl.format(totalPropertiesValue())}</b>
@@ -1438,7 +1553,7 @@ export function FlashDeskModule() {
                 <button type="button" className="admin-button" disabled={busy} onClick={() => void calculate()}>Calcular viabilidade</button>
               </div>
             </div>
-            <div ref={tapafPanelRef} style={{ border: "1px solid var(--line)", borderRadius: 12, padding: 16, background: "#f7fbf9" }}>
+            <div ref={resultPanelRef} style={{ border: "1px solid var(--line)", borderRadius: 12, padding: 16, background: "#f7fbf9" }}>
               <b>Resultado Flash Capital</b>
               {!evalResult && !tapafCheckout && <p className="muted" style={{ marginTop: 10 }}>Preencha e clique em Calcular.</p>}
               {evalResult?.viable && !tapafCheckout && (
@@ -1473,8 +1588,8 @@ export function FlashDeskModule() {
                   {DESK_SIMULATION_NOTICE}
                 </p>
               )}
-              {tapafCheckout && (
-                <div className="tapaf-checkout" style={{ marginTop: 14 }}>
+              {letterOps && tapafCheckout && (
+                <div ref={tapafPanelRef} className="tapaf-checkout" style={{ marginTop: 14 }}>
                   <b>TAPAF — taxa de abertura</b>
                   <div className="finops-summary tapaf-price" style={{ marginTop: 10 }}>
                     <article>
@@ -1499,13 +1614,13 @@ export function FlashDeskModule() {
                     <button type="button" className="admin-button" disabled={busy || !tapafScroll || !tapafCb1 || !tapafCb2} onClick={() => void acceptTapaf()}>
                       Aceitar TAPAF e gerar boleto/Pix
                     </button>
-                    {tapafCheckout.checkout_mode === "ASAAS" && tapafCheckout.checkout_url?.startsWith("http") ? (
+                    {(tapafCheckout.botao_habilitado || tapafCheckout.checkout_url?.startsWith("http")) ? (
                       <button type="button" className="admin-button" disabled={busy} onClick={() => void payTapaf()}>
                         {tapafCheckout.botao_label || "Abrir boleto / Pix TAPAF"}
                       </button>
                     ) : (
                       <p className="muted" style={{ fontSize: 11, margin: 0, lineHeight: 1.45 }}>
-                        Cobrança real via Banco Inter em implantação. Após o aceite, a LETTER enviará o boleto ou Pix da TAPAF — não use confirmação sandbox.
+                        Após o aceite do cliente, o boleto/Pix Inter será liberado neste painel (sandbox: confirmação manual).
                       </p>
                     )}
                   </div>
@@ -1531,7 +1646,8 @@ export function FlashDeskModule() {
               </thead>
               <tbody>
                 {filtered.map((item) => {
-                  const uploaded = item.required_docs.filter((d) => d.uploaded).length;
+                  const mandatory = item.required_docs.filter((d) => d.required !== false);
+                  const uploaded = mandatory.filter((d) => d.uploaded).length;
                   return (
                     <tr key={item.id} style={selectedId === item.id ? { background: "#f2faf6" } : undefined}>
                       <td>
@@ -1552,9 +1668,9 @@ export function FlashDeskModule() {
                       <td>{brl.format(Number(item.principal))}</td>
                       <td>{brl.format(Number(item.net_payout))}</td>
                       <td>{item.status_label}</td>
-                      <td>{uploaded}/{item.required_docs.length}</td>
+                      <td>{uploaded}/{mandatory.length || item.required_docs.length}</td>
                       <td style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-                        {isInternal && (
+                        {letterOps && (
                           <select
                             value={item.status}
                             disabled={busy}
@@ -1602,15 +1718,45 @@ export function FlashDeskModule() {
                 />
                 <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
                   {selected.required_docs.map((d) => (
-                    <li key={d.code}>{d.uploaded ? "✓" : "○"} {d.label}</li>
+                    <li key={d.code}>
+                      {d.uploaded ? "✓" : "○"} {d.label}
+                      {d.required === false ? <span className="muted"> (opcional)</span> : null}
+                    </li>
                   ))}
                 </ul>
+                {selected.status === "AWAITING_DOCS" && !letterOps && (
+                  <>
+                    <label style={{ display: "block", marginTop: 12, fontSize: 11 }}>
+                      Observações para a operação (opcional)
+                      <textarea
+                        rows={3}
+                        value={docSubmitNotes}
+                        onChange={(e) => setDocSubmitNotes(e.target.value)}
+                        style={{ width: "100%", marginTop: 4 }}
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      className="admin-button"
+                      style={{ marginTop: 8 }}
+                      disabled={busy || !selected.can_submit_documents}
+                      onClick={() => void submitDocuments(selected)}
+                    >
+                      Enviar documentação para análise
+                    </button>
+                    {!selected.can_submit_documents && (
+                      <p className="muted" style={{ fontSize: 10, margin: "8px 0 0" }}>
+                        Anexe todos os documentos obrigatórios do checklist antes de enviar.
+                      </p>
+                    )}
+                  </>
+                )}
                 <AdminDocumentPanel
                   title={`Documentos anexados (${selected.documents.length})`}
                   hint="Anexe, baixe ou exclua arquivos desta solicitação Flash Capital."
                   documents={selected.documents}
                   busy={busy}
-                  canDelete={isInternal}
+                  canDelete={letterOps}
                   docTypeOptions={flashDocTypeOptions}
                   defaultDocType={docType}
                   onUpload={(file, type) => uploadDoc(selected, file, type || docType)}
@@ -1651,14 +1797,14 @@ export function FlashDeskModule() {
         )}
       </section>
 
-      {isInternal ? (
+      {letterOps ? (
         <>
           <section className="panel operational-panel" style={{ marginTop: 16 }}>
             <div className="page-heading" style={{ marginBottom: 8 }}>
               <div>
                 <span className="eyebrow dark">INTERNO</span>
                 <h2 style={{ fontSize: 18, margin: "6px 0" }}>Checklists Flash Capital</h2>
-                <p className="muted">Documentos obrigatórios por tipo de operação (próprio vs terceiro).</p>
+                <p className="muted">Somente operação LETTER edita documentos por tipo de operação. Parceiros só anexam e enviam.</p>
               </div>
             </div>
             <div style={{ padding: "0 18px 18px" }}>
@@ -1674,15 +1820,17 @@ export function FlashDeskModule() {
             </div>
             <FinOpsModule allowRateEdit={canEditFinOpsRate} />
           </section>
-          <section className="panel operational-panel" style={{ marginTop: 16 }}>
-            <div className="page-heading" style={{ marginBottom: 8 }}>
-              <div>
-                <span className="eyebrow dark">INTERNO</span>
-                <h2 style={{ fontSize: 18, margin: "6px 0" }}>Esteira TAPAF / Valid-Stamp</h2>
+          {isInternal && (
+            <section className="panel operational-panel" style={{ marginTop: 16 }}>
+              <div className="page-heading" style={{ marginBottom: 8 }}>
+                <div>
+                  <span className="eyebrow dark">INTERNO</span>
+                  <h2 style={{ fontSize: 18, margin: "6px 0" }}>Esteira TAPAF / Valid-Stamp</h2>
+                </div>
               </div>
-            </div>
-            <PreAnalysisModule variant="flash" />
-          </section>
+              <PreAnalysisModule variant="flash" />
+            </section>
+          )}
         </>
       ) : null}
     </>

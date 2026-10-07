@@ -157,6 +157,19 @@ def verify_tapaf_boleto_token(pauta_id: str, token: str) -> bool:
     return hmac.compare_digest(tapaf_boleto_public_token(pauta_id), (token or "").strip())
 
 
+def flash_tapaf_client_token(solicitation_id: str) -> str:
+    digest = hmac.new(
+        settings.secret_key.encode("utf-8"),
+        f"flash-tapaf-client-{solicitation_id}".encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    return digest[:32]
+
+
+def verify_flash_tapaf_client_token(solicitation_id: str, token: str) -> bool:
+    return hmac.compare_digest(flash_tapaf_client_token(solicitation_id), (token or "").strip())
+
+
 def lss_boleto_public_token(subscription_id: str) -> str:
     digest = hmac.new(
         settings.secret_key.encode("utf-8"),

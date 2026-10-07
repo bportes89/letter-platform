@@ -32,3 +32,13 @@ def client():
 def auth_headers(client):
     response = client.post("/api/v1/auth/login", json={"email": "admin@letter.com.br", "password": "Letter@123"})
     return {"Authorization": f"Bearer {response.json()['access_token']}"}
+
+
+@pytest.fixture
+def partner_headers(client):
+    response = client.post(
+        "/api/v1/auth/login",
+        json={"email": "parceiro@letter.com.br", "password": "Letter@123"},
+    )
+    assert response.status_code == 200
+    return {"Authorization": f"Bearer {response.json()['access_token']}"}

@@ -199,9 +199,6 @@ def evaluate_flash_desk(data: dict, db: Session | None = None, organization_id: 
         if bool(data.get("asset_has_lien", False)):
             motivos.append("O bem possui pendência/gravame impeditivo.")
 
-    if not bool(data.get("docs_complete", True)):
-        motivos.append("Documentação incompleta (checklist Flash Capital).")
-
     valor = _dec(data.get("asset_value") or 0)
     if valor <= 0:
         motivos.append("Informe o valor do bem.")
@@ -285,6 +282,11 @@ def _is_admin(user: User) -> bool:
     return user.role in {Role.PLATFORM_ADMIN, Role.INTERNAL_STAFF, Role.MASTER_FRANCHISEE}
 
 
+def _is_letter_ops(user: User) -> bool:
+    """Status manual, checklist e exclusão de docs — somente operação LETTER central."""
+    return user.role in {Role.PLATFORM_ADMIN, Role.INTERNAL_STAFF}
+
+
 def _chain_user_ids(db: Session, user: User) -> list[str]:
     from app.models import NetworkNode
 
@@ -328,8 +330,8 @@ def list_documents(db: Session, solicitation_id: str) -> list[FlashSolicitationD
 
 
 def open_tapaf_checkout_for_solicitation(db: Session, user: User, item: FlashSolicitation) -> dict:
-    """Cria proposta Flash + pauta pré-análise e retorna checkout TAPAF (R$ 1.500)."""
-    from app.pre_analysis_service import generate_tapaf_checkout, get_or_create_pauta
+    """Cria proposta Flash + pauta pré-análise (cobrança TAPAF após aceite do tomador)."""
+    from app.pre_analysis_service import get_or_create_pauta
 
     assert_desk_access(user)
     try:
@@ -398,7 +400,6 @@ def open_tapaf_checkout_for_solicitation(db: Session, user: User, item: FlashSol
     pauta.asset_type = "REAL_ESTATE" if item.asset_category == "REAL_ESTATE" else "VEHICLE"
     db.flush()
 
-    checkout = generate_tapaf_checkout(pauta)
     from app.product_contract_flow_service import emit_desk_contract_on_tapaf, flash_context_from_solicitation
 
     emit_desk_contract_on_tapaf(
@@ -411,10 +412,10 @@ def open_tapaf_checkout_for_solicitation(db: Session, user: User, item: FlashSol
     tapaf_meta["pauta_code"] = pauta.pauta_code
     meta["tapaf"] = tapaf_meta
     item.evaluation_json = json_dumps({**meta, "channel": meta.get("channel") or "FLASH_DESK"}, ensure_ascii=False)
+    # Cobrança TAPAF só após aceite do tomador (link público /tapaf-flash).
     return {
         "proposal_id": proposal_id,
         "pauta_id": pauta.id,
-        **checkout,
     }
 
 
@@ -509,9 +510,187 @@ def store_solicitation(db: Session, user: User, payload: dict) -> FlashSolicitat
     return item
 
 
+def _required_doc_codes(docs: list[dict]) -> set[str]:
+    return {d["code"] for d in docs if d.get("required", True)}
+
+
+def checklist_complete_for(item: FlashSolicitation, docs: list[FlashSolicitationDocument], db: Session) -> bool:
+    op = item.operation_type
+    required = _required_doc_codes(
+        resolve_required_docs(db, item.organization_id, operation_type=op, asset_category=item.asset_category)
+    )
+    uploaded = {d.doc_type for d in docs}
+    return required.issubset(uploaded)
+
+
+def submit_documents(db: Session, user: User, item: FlashSolicitation, notes: str | None = None) -> FlashSolicitation:
+    """Parceiro envia o pacote após anexar todos os documentos obrigatórios."""
+    assert_desk_access(user)
+    if _is_letter_ops(user):
+        raise HTTPException(status_code=403, detail="Transmissão é ação do parceiro; admin altera status manualmente.")
+    if item.status in STATUS_TERMINAL:
+        raise HTTPException(status_code=422, detail="Solicitação encerrada — não é possível enviar documentação.")
+    if item.status != STATUS_AWAITING_DOCS:
+        raise HTTPException(status_code=422, detail="Documentação já foi enviada ou está em análise.")
+    doc_rows = list_documents(db, item.id)
+    if not checklist_complete_for(item, doc_rows, db):
+        required = _required_doc_codes(
+            resolve_required_docs(
+                db,
+                item.organization_id,
+                operation_type=item.operation_type,
+                asset_category=item.asset_category,
+            )
+        )
+        uploaded = {d.doc_type for d in doc_rows}
+        missing_codes = [c for c in required if c not in uploaded]
+        catalog = {
+            d["code"]: d
+            for d in resolve_required_docs(
+                db,
+                item.organization_id,
+                operation_type=item.operation_type,
+                asset_category=item.asset_category,
+            )
+        }
+        missing = [catalog.get(c, {"code": c, "label": c}) for c in missing_codes]
+        raise HTTPException(
+            status_code=422,
+            detail={"message": "Anexe todos os documentos obrigatórios antes de enviar.", "missing": missing},
+        )
+    item.status = STATUS_UNDER_REVIEW
+    if notes:
+        item.status_notes = notes.strip()
+    db.flush()
+    return item
+
+
+def _pauta_for_flash_solicitation(db: Session, item: FlashSolicitation):
+    from app.models import PreAnalysisPauta
+    from app.pre_analysis_service import get_or_create_pauta
+
+    try:
+        meta = json_loads(item.evaluation_json or "{}")
+    except (TypeError, ValueError):
+        meta = {}
+    tapaf_meta = meta.get("tapaf") if isinstance(meta.get("tapaf"), dict) else {}
+    proposal_id = tapaf_meta.get("proposal_id") or item.proposal_id
+    if not proposal_id:
+        return None
+    proposal = db.get(Proposal, proposal_id)
+    if not proposal:
+        return None
+    pauta_id = tapaf_meta.get("pauta_id")
+    if pauta_id:
+        row = db.get(PreAnalysisPauta, pauta_id)
+        if row:
+            return row
+    partner = db.get(User, item.partner_user_id) if item.partner_user_id else None
+    if not partner:
+        partner = db.scalar(
+            select(User).where(
+                User.organization_id == item.organization_id,
+                User.role == Role.PLATFORM_ADMIN,
+            )
+        )
+    if not partner:
+        return None
+    return get_or_create_pauta(db, partner, proposal)
+
+
+def _tapaf_manifest_preview_ui() -> dict:
+    from app.pre_analysis_constants import TAPAF_CHECKBOX_01, TAPAF_CHECKBOX_02, TAPAF_MANIFESTO_HTML, TAPAF_TOOLTIP
+
+    return {
+        "valor_nominal_taxa": "1500.00",
+        "texto_explicativo_tooltip_interrogacao": TAPAF_TOOLTIP,
+        "checkbox_obrigatorio_01": TAPAF_CHECKBOX_01,
+        "checkbox_obrigatorio_02": TAPAF_CHECKBOX_02,
+        "manifesto_html": TAPAF_MANIFESTO_HTML,
+        "botao_habilitado": False,
+        "checkout_url": None,
+    }
+
+
+def public_client_tapaf_view(db: Session, solicitation_id: str, token: str) -> dict:
+    from app.inter_cobranca_helpers import verify_flash_tapaf_client_token
+    from app.pre_analysis_service import generate_tapaf_checkout
+
+    if not verify_flash_tapaf_client_token(solicitation_id, token):
+        raise HTTPException(status_code=403, detail="Link TAPAF inválido ou expirado.")
+    item = db.get(FlashSolicitation, solicitation_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Solicitação não encontrada")
+    pauta = _pauta_for_flash_solicitation(db, item)
+    if not pauta:
+        raise HTTPException(status_code=409, detail="TAPAF ainda não disponível para esta solicitação.")
+    accepted = pauta.status in {"TAPAF_CHECKOUT_ACCEPTED", "TAPAF_PAID"}
+    if accepted:
+        checkout = generate_tapaf_checkout(pauta)
+        ui = checkout.get("interface_checkout_tapaf") or {}
+    else:
+        ui = _tapaf_manifest_preview_ui()
+    return {
+        "contact_name": item.contact_name,
+        "solicitation_id": item.id,
+        "pauta_status": pauta.status,
+        "interface_checkout_tapaf": ui,
+        "checkout_accepted": accepted,
+        "checkout_paid": pauta.status == "TAPAF_PAID",
+    }
+
+
+def public_client_tapaf_accept(
+    db: Session,
+    solicitation_id: str,
+    token: str,
+    *,
+    scroll_completed: bool,
+    checkbox_1: bool,
+    checkbox_2: bool,
+) -> dict:
+    from app.inter_cobranca_helpers import verify_flash_tapaf_client_token
+    from app.pre_analysis_service import accept_tapaf_checkout, generate_tapaf_checkout
+
+    if not verify_flash_tapaf_client_token(solicitation_id, token):
+        raise HTTPException(status_code=403, detail="Link TAPAF inválido ou expirado.")
+    item = db.get(FlashSolicitation, solicitation_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Solicitação não encontrada")
+    pauta = _pauta_for_flash_solicitation(db, item)
+    if not pauta:
+        raise HTTPException(status_code=409, detail="TAPAF indisponível.")
+    actor = db.get(User, item.partner_user_id) if item.partner_user_id else None
+    if not actor:
+        actor = db.scalar(
+            select(User).where(
+                User.organization_id == item.organization_id,
+                User.role == Role.PLATFORM_ADMIN,
+            )
+        )
+    if not actor:
+        raise HTTPException(status_code=500, detail="Não foi possível registrar o aceite TAPAF.")
+    accept_tapaf_checkout(
+        db,
+        actor,
+        pauta,
+        scroll_completed=scroll_completed,
+        checkbox_1=checkbox_1,
+        checkbox_2=checkbox_2,
+        asset_type="REAL_ESTATE",
+    )
+    db.flush()
+    checkout = generate_tapaf_checkout(pauta)
+    return {
+        "status": "OK",
+        "interface_checkout_tapaf": checkout.get("interface_checkout_tapaf") or {},
+        "pauta_status": pauta.status,
+    }
+
+
 def update_status(db: Session, user: User, item: FlashSolicitation, status: str, notes: str | None = None) -> FlashSolicitation:
     assert_desk_access(user)
-    if not _is_admin(user):
+    if not _is_letter_ops(user):
         raise HTTPException(status_code=403, detail="Apenas operação LETTER altera o status do Flash Capital")
     status = status.upper().strip()
     if status not in STATUS_LABELS:
@@ -548,15 +727,13 @@ async def add_document(
         uploaded_by_id=user.id,
     )
     db.add(row)
-    if not _is_admin(user) and item.status == STATUS_AWAITING_DOCS:
-        item.status = STATUS_UNDER_REVIEW
     db.flush()
     return row
 
 
 def remove_document(db: Session, user: User, item: FlashSolicitation, link_id: str) -> None:
     assert_desk_access(user)
-    if not _is_admin(user):
+    if not _is_letter_ops(user):
         raise HTTPException(status_code=403, detail="Apenas operação LETTER pode excluir documentos")
     row = db.scalar(
         select(FlashSolicitationDocument).where(
@@ -588,6 +765,14 @@ def _document_link_view(db: Session, row: FlashSolicitationDocument) -> dict:
     }
 
 
+def _flash_sale_parties_configured(item: FlashSolicitation) -> bool:
+    try:
+        parties = json_loads(item.parties_json or "{}")
+    except (TypeError, ValueError):
+        return False
+    return isinstance(parties, dict) and bool(parties.get("route"))
+
+
 def create_sale_from_flash(
     db: Session,
     user: User,
@@ -598,46 +783,56 @@ def create_sale_from_flash(
     assert_desk_access(user)
     if item.status != STATUS_APPROVED:
         raise HTTPException(status_code=422, detail="Só Flash Capital Aprovado pode gerar proposta")
-    if item.proposal_id:
-        raise HTTPException(status_code=409, detail="Este Flash Capital já possui proposta vinculada")
+    if _flash_sale_parties_configured(item):
+        raise HTTPException(status_code=409, detail="Partes PJ desta solicitação já foram configuradas")
 
-    lead = Lead(
-        organization_id=user.organization_id,
-        owner_id=item.partner_user_id or user.id,
-        name=item.contact_name,
-        phone=item.contact_phone or "00000000000",
-        document=item.document,
-        product_interest="FLASH_CREDIT",
-        status="QUALIFIED",
-        source="FLASH_DESK",
-    )
-    db.add(lead)
-    db.flush()
-    proposal = Proposal(
-        organization_id=user.organization_id,
-        lead_id=lead.id,
-        product=FLASH_CAPITAL_PRODUCT,
-        requested_amount=item.principal,
-        status="SUBMITTED",
-        terms_json=json_dumps(
-            {
-                "flash_solicitation_id": item.id,
-                "asset_type": item.asset_type,
-                "asset_category": item.asset_category,
-                "asset_value": str(item.asset_value),
-                "capital_source": item.capital_source,
-                "term_months": item.term_months,
-                "channel": "FLASH_DESK",
-            },
-            ensure_ascii=False,
-        ),
-        sale_channel="PARTNER_OFFICE",
-        served_by_user_id=user.id,
-        commission_originator_id=item.partner_user_id,
-        created_by_user_id=user.id,
-    )
-    db.add(proposal)
-    db.flush()
+    proposal = None
+    lead_id = None
+    if item.proposal_id:
+        proposal = db.get(Proposal, item.proposal_id)
+        if not proposal:
+            raise HTTPException(status_code=409, detail="Proposta TAPAF vinculada não encontrada")
+        lead_id = proposal.lead_id
+    else:
+        lead = Lead(
+            organization_id=user.organization_id,
+            owner_id=item.partner_user_id or user.id,
+            name=item.contact_name,
+            phone=item.contact_phone or "00000000000",
+            document=item.document,
+            product_interest="FLASH_CREDIT",
+            status="QUALIFIED",
+            source="FLASH_DESK",
+        )
+        db.add(lead)
+        db.flush()
+        lead_id = lead.id
+        proposal = Proposal(
+            organization_id=user.organization_id,
+            lead_id=lead.id,
+            product=FLASH_CAPITAL_PRODUCT,
+            requested_amount=item.principal,
+            status="SUBMITTED",
+            terms_json=json_dumps(
+                {
+                    "flash_solicitation_id": item.id,
+                    "asset_type": item.asset_type,
+                    "asset_category": item.asset_category,
+                    "asset_value": str(item.asset_value),
+                    "capital_source": item.capital_source,
+                    "term_months": item.term_months,
+                    "channel": "FLASH_DESK",
+                },
+                ensure_ascii=False,
+            ),
+            sale_channel="PARTNER_OFFICE",
+            served_by_user_id=user.id,
+            commission_originator_id=item.partner_user_id,
+            created_by_user_id=user.id,
+        )
+        db.add(proposal)
+        db.flush()
+        item.proposal_id = proposal.id
 
     calculation = calculate_flash_credit(
         db,
@@ -665,11 +860,10 @@ def create_sale_from_flash(
         )
         item.parties_json = json_dumps(route, ensure_ascii=False)
 
-    item.proposal_id = proposal.id
     db.flush()
     return {
         "proposal_id": proposal.id,
-        "lead_id": lead.id,
+        "lead_id": lead_id,
         "calculation_id": calculation.id,
         "flash_route": route,
     }
@@ -737,7 +931,7 @@ def solicitation_view(
         "proposal_id": item.proposal_id,
         "parties": json_loads(item.parties_json or "{}"),
         "required_docs": [
-            {**d, "uploaded": d["code"] in uploaded} for d in required
+            {**d, "uploaded": d["code"] in uploaded, "required": d.get("required", True)} for d in required
         ],
         "documents": [
             _document_link_view(db, d) if db else {
@@ -752,6 +946,10 @@ def solicitation_view(
             for d in (docs or [])
         ],
         "created_at": item.created_at.isoformat() if item.created_at else None,
-        "can_create_sale": item.status == STATUS_APPROVED and not item.proposal_id,
+        "can_create_sale": item.status == STATUS_APPROVED and not _flash_sale_parties_configured(item),
+        "can_submit_documents": item.status == STATUS_AWAITING_DOCS
+        and checklist_complete_for(item, docs or [], db)
+        if db
+        else False,
         **evaluation_meta(item.evaluation_json),
     }

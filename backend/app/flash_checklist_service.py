@@ -18,8 +18,16 @@ OPERATION_TYPE_LABELS = {
     "IMOVEL_TERCEIRO": "Imóvel de terceiro",
 }
 
+def _normalize_checklist_item(raw: dict) -> dict:
+    return {
+        "code": str(raw.get("code") or "").strip(),
+        "label": str(raw.get("label") or "").strip(),
+        "required": bool(raw.get("required", True)),
+    }
+
+
 DOCS_BASE = [
-    {"code": "CONTRATO_SOCIAL", "label": "Contrato social / alterações consolidadas (PJ tomador)"},
+    {"code": "CONTRATO_SOCIAL", "label": "Contrato social / alterações consolidadas (PJ tomador)", "required": True},
     {"code": "QSA_REPRESENTANTES", "label": "QSA / procuração dos representantes legais"},
     {"code": "RG_CPF_REPRESENTANTES", "label": "RG e CPF (ou CNH) dos representantes legais"},
     {"code": "COMPROVANTE_RENDA", "label": "Comprovante de renda / faturamento (últimos 3 meses)"},
@@ -27,12 +35,16 @@ DOCS_BASE = [
     {"code": "LAUDO_AVALIACAO", "label": "Laudo de avaliação do imóvel"},
     {"code": "FOTOS_IMOVEL", "label": "Fotos do imóvel (fachada, ambientes internos e áreas comuns)"},
     {"code": "SERASA", "label": "Consulta Serasa / restrições cadastrais"},
-    {"code": "BACEN", "label": "Consulta Bacen (SCR)"},
+    {"code": "BACEN", "label": "Consulta Bacen (SCR)", "required": True},
 ]
 DOCS_TERCEIRO_EXTRA = [
-    {"code": "RG_CPF_PROPRIETARIO", "label": "RG e CPF (ou CNH) do proprietário do imóvel (terceiro)"},
-    {"code": "COMPROVANTE_ENDERECO_PROPRIETARIO", "label": "Comprovante de endereço do proprietário (terceiro)"},
-    {"code": "AUTORIZACAO_ASSINATURA_TERCEIRO", "label": "Autorização / dados para assinatura do contrato pelo proprietário"},
+    {"code": "RG_CPF_PROPRIETARIO", "label": "RG e CPF (ou CNH) do proprietário do imóvel (terceiro)", "required": True},
+    {"code": "COMPROVANTE_ENDERECO_PROPRIETARIO", "label": "Comprovante de endereço do proprietário (terceiro)", "required": True},
+    {
+        "code": "AUTORIZACAO_ASSINATURA_TERCEIRO",
+        "label": "Autorização / dados para assinatura do contrato pelo proprietário",
+        "required": True,
+    },
 ]
 
 
@@ -45,9 +57,9 @@ def normalize_flash_operation_type(value: str | None) -> str:
 
 def default_checklist_items(operation_type: str) -> list[dict]:
     op = normalize_flash_operation_type(operation_type)
-    items = [dict(x) for x in DOCS_BASE]
+    items = [_normalize_checklist_item(x) for x in DOCS_BASE]
     if op == "IMOVEL_TERCEIRO":
-        items.extend(dict(x) for x in DOCS_TERCEIRO_EXTRA)
+        items.extend(_normalize_checklist_item(x) for x in DOCS_TERCEIRO_EXTRA)
     return items
 
 
@@ -76,7 +88,11 @@ def resolve_required_docs(
         try:
             parsed = json_loads(row.items_json)
             if isinstance(parsed, list) and parsed:
-                return [{"code": str(i["code"]), "label": str(i["label"])} for i in parsed if i.get("code")]
+                return [
+                    _normalize_checklist_item(i)
+                    for i in parsed
+                    if isinstance(i, dict) and i.get("code")
+                ]
         except (TypeError, ValueError, KeyError):
             pass
     return default_checklist_items(op)
@@ -124,7 +140,7 @@ def save_checklist_config(
     op = normalize_flash_operation_type(operation_type)
     if op not in OPERATION_TYPES:
         raise ValueError("Tipo de operação inválido")
-    cleaned = [{"code": str(i["code"]).strip(), "label": str(i["label"]).strip()} for i in items]
+    cleaned = [_normalize_checklist_item(i) for i in items if isinstance(i, dict)]
     cleaned = [i for i in cleaned if i["code"] and i["label"]]
     if not cleaned:
         raise ValueError("Informe ao menos um item")

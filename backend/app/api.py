@@ -135,7 +135,8 @@ from app.schemas import (
     SdcDeskSaleCreate,
     SdcDeskPartnerObservationUpdate,
     SdcChecklistConfigSave,
-    FlashDeskEvaluateRequest, FlashDeskStoreRequest, FlashDeskStatusUpdate, FlashDeskSaleCreate,
+    FlashDeskEvaluateRequest, FlashDeskStoreRequest, FlashDeskStatusUpdate, FlashDeskSubmitDocumentsRequest,
+    FlashDeskSaleCreate,
     FlashChecklistConfigSave,
     QuitConDeskEvaluateRequest, QuitConDeskStoreRequest, QuitConDeskStatusUpdate,
     ProposalView, QuotaCreate, QuotaUpdate, QuotaView, QuotaComplianceRejectRequest, NinaQuotaScanView, RecoveredAssetCreate, RecoveredAssetView, RefreshRequest,
@@ -4515,11 +4516,9 @@ def flash_desk_evaluate(
 @router.get("/flash/desk/checklist-config")
 def flash_desk_list_checklist_config(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     from app.flash_checklist_service import list_checklist_configs
-    from app.flash_desk_service import _is_admin, assert_desk_access
+    from app.flash_desk_service import assert_desk_access
 
     assert_desk_access(user)
-    if not _is_admin(user):
-        raise HTTPException(status_code=403, detail="Somente operação LETTER configura checklists")
     return list_checklist_configs(db, user.organization_id)
 
 
@@ -4530,10 +4529,10 @@ def flash_desk_save_checklist_config(
     db: Session = Depends(get_db),
 ):
     from app.flash_checklist_service import list_checklist_configs, save_checklist_config
-    from app.flash_desk_service import _is_admin, assert_desk_access
+    from app.flash_desk_service import _is_letter_ops, assert_desk_access
 
     assert_desk_access(user)
-    if not _is_admin(user):
+    if not _is_letter_ops(user):
         raise HTTPException(status_code=403, detail="Somente operação LETTER configura checklists")
     save_checklist_config(
         db,
@@ -4572,8 +4571,12 @@ def flash_desk_store(payload: FlashDeskStoreRequest, user: User = Depends(get_cu
     db.refresh(item)
     view = solicitation_view(item, list_documents(db, item.id), db)
     if tapaf_bundle:
+        from app.inter_cobranca_helpers import flash_tapaf_client_token
+
         view["tapaf_proposal_id"] = tapaf_bundle.get("proposal_id")
         view["tapaf_checkout"] = tapaf_bundle.get("interface_checkout_tapaf") or tapaf_bundle
+        tok = flash_tapaf_client_token(item.id)
+        view["client_tapaf_path"] = f"/tapaf-flash?solicitation_id={item.id}&token={tok}"
     return view
 
 
@@ -4610,6 +4613,51 @@ def flash_desk_status(
     db.commit()
     db.refresh(item)
     return solicitation_view(item, list_documents(db, item.id), db)
+
+
+@router.post("/flash/desk/solicitations/{solicitation_id}/submit-documents")
+def flash_desk_submit_documents(
+    solicitation_id: str,
+    payload: FlashDeskSubmitDocumentsRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.flash_desk_service import get_solicitation, list_documents, solicitation_view, submit_documents
+
+    item = get_solicitation(db, user, solicitation_id)
+    submit_documents(db, user, item, payload.status_notes)
+    audit(db, user, "flash_desk.documents_submitted", "flash_solicitation", item.id, {"status": item.status})
+    db.commit()
+    db.refresh(item)
+    return solicitation_view(item, list_documents(db, item.id), db)
+
+
+@router.get("/public/flash-desk/tapaf/{solicitation_id}/{token}")
+def public_flash_desk_tapaf_checkout(solicitation_id: str, token: str, db: Session = Depends(get_db)):
+    from app.flash_desk_service import public_client_tapaf_view
+
+    return public_client_tapaf_view(db, solicitation_id, token)
+
+
+@router.post("/public/flash-desk/tapaf/{solicitation_id}/{token}/accept")
+def public_flash_desk_tapaf_accept(
+    solicitation_id: str,
+    token: str,
+    payload: dict,
+    db: Session = Depends(get_db),
+):
+    from app.flash_desk_service import public_client_tapaf_accept
+
+    result = public_client_tapaf_accept(
+        db,
+        solicitation_id,
+        token,
+        scroll_completed=bool(payload.get("scroll_completed")),
+        checkbox_1=bool(payload.get("checkbox_1")),
+        checkbox_2=bool(payload.get("checkbox_2")),
+    )
+    db.commit()
+    return result
 
 
 @router.post("/flash/desk/solicitations/{solicitation_id}/documents")

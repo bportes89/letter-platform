@@ -321,7 +321,7 @@ def test_flash_desk_evaluate_store_approve_and_sale(client, auth_headers):
         "contact_name": "Cliente Flash Desk",
         "contact_email": "cliente.flash.desk@example.com",
         "contact_phone": "31977665544",
-        "document": "12345678000199",
+        "document": "57255607000130",
         "person_type": "PJ",
         "income_value": "80000",
     })
@@ -409,6 +409,61 @@ def test_sdc_desk_property_debt_and_flash_redirect(client, auth_headers):
         json={**base, "client_has_credit_restriction": True, "properties_json": [{"property_value": "500000", "is_paid_off": True}]},
     )
     assert restricao.json()["result"].get("redirect_flash") is True
+
+
+def test_flash_desk_submit_documents_and_partner_status(client, auth_headers, partner_headers):
+    ok = client.post("/api/v1/flash/desk/evaluate", headers=auth_headers, json={
+        "asset_type": "imovel",
+        "asset_value": "1000000",
+        "asset_paid_off": True,
+        "asset_has_lien": False,
+        "docs_complete": True,
+        "term_months": 36,
+        "capital_source": "RETAIL",
+        "operation_type": "IMOVEL_PROPRIO",
+    })
+    assert ok.status_code == 200 and ok.json()["result"]["viable"] is True
+    stored = client.post("/api/v1/flash/desk/solicitations", headers=partner_headers, json={
+        "asset_type": "imovel",
+        "asset_value": "1000000",
+        "asset_paid_off": True,
+        "asset_has_lien": False,
+        "docs_complete": True,
+        "term_months": 36,
+        "capital_source": "RETAIL",
+        "operation_type": "IMOVEL_PROPRIO",
+        "contact_name": "PJ Parceiro Flash",
+        "contact_email": "pj.flash.partner@example.com",
+        "contact_phone": "31999887766",
+        "document": "11222333000181",
+        "person_type": "PJ",
+    })
+    assert stored.status_code == 201, stored.text
+    sid = stored.json()["id"]
+    assert stored.json()["status"] == "AWAITING_DOCS"
+    assert stored.json().get("client_tapaf_path")
+
+    blocked = client.patch(
+        f"/api/v1/flash/desk/solicitations/{sid}",
+        headers=partner_headers,
+        json={"status": "UNDER_REVIEW"},
+    )
+    assert blocked.status_code == 403
+
+    missing = client.post(f"/api/v1/flash/desk/solicitations/{sid}/submit-documents", headers=partner_headers, json={})
+    assert missing.status_code == 422
+
+    cfg = client.get("/api/v1/flash/desk/checklist-config", headers=partner_headers)
+    assert cfg.status_code == 200
+    denied = client.put(
+        "/api/v1/flash/desk/checklist-config",
+        headers=partner_headers,
+        json={
+            "operation_type": "IMOVEL_PROPRIO",
+            "items": [{"code": "MATRICULA_ENOTARIADO", "label": "Matrícula", "required": True}],
+        },
+    )
+    assert denied.status_code == 403
 
 
 def test_flash_desk_property_debt_rules(client, auth_headers):

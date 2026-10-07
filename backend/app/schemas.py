@@ -3274,6 +3274,7 @@ class SdcDeskPartnerObservationUpdate(BaseModel):
 class SdcChecklistConfigItem(BaseModel):
     code: str = Field(min_length=1, max_length=80)
     label: str = Field(min_length=2, max_length=500)
+    required: bool = True
 
 
 class SdcChecklistConfigSave(BaseModel):
@@ -3326,6 +3327,10 @@ class FlashDeskStoreRequest(FlashDeskEvaluateRequest):
 
 class FlashDeskStatusUpdate(BaseModel):
     status: str = Field(min_length=3, max_length=40)
+    status_notes: str | None = Field(default=None, max_length=4000)
+
+
+class FlashDeskSubmitDocumentsRequest(BaseModel):
     status_notes: str | None = Field(default=None, max_length=4000)
 
 
