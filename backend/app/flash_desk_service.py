@@ -438,6 +438,11 @@ def store_solicitation(db: Session, user: User, payload: dict) -> FlashSolicitat
     assert_desk_access(user)
     payload = dict(payload)
     payload["person_type"] = "PJ"
+    from app.desk_marital_compliance import validate_partners_marital
+
+    marital_errors = validate_partners_marital(payload.get("partners_json"), context="sócio")
+    if marital_errors:
+        raise HTTPException(status_code=422, detail={"message": marital_errors[0], "motivos": marital_errors})
     result = evaluate_flash_desk(payload, db=db, organization_id=user.organization_id)
     if not result["viable"]:
         raise HTTPException(

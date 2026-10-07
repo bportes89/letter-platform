@@ -14,7 +14,9 @@ import { api, apiForm, deleteApi, downloadApi, User } from "@/lib/api";
 import { canEditLetterFinOpsParams, isInternalProductRole } from "@/lib/product-nav";
 import { PreAnalysisModule } from "@/components/pre-analysis-module";
 import { DeskSourceMetaRow } from "@/lib/desk-source-meta";
+import { ClientMaritalFields } from "@/components/client-marital-fields";
 import { PartnerSociosFields, SocioPartner, sociosPayload } from "@/components/partner-socios-fields";
+import { validatePfMaritalFields, validateSocioMaritalRows } from "@/lib/marital-status";
 import { CurrencyInput } from "@/components/currency-input";
 import { DESK_SIMULATION_NOTICE } from "@/lib/desk-simulation-notice";
 import { commercialQuotaDisplay } from "@/lib/commercial-quota-label";
@@ -193,6 +195,9 @@ const emptyForm = {
   asset_city: "",
   asset_state: "",
   asset_zip: "",
+  marital_status: "",
+  spouse_name: "",
+  spouse_document: "",
 };
 
 function moneyPayload(value: string) {
@@ -730,6 +735,9 @@ export function SdcDeskModule() {
         debt_payoff_value: moneyPayload(p.debt_payoff_value),
       })),
       partners_json: partnersForPayload(),
+      marital_status: form.person_type === "PF" ? form.marital_status.trim() : "",
+      spouse_name: form.person_type === "PF" ? form.spouse_name.trim() : "",
+      spouse_document: form.person_type === "PF" ? form.spouse_document.trim() : "",
     };
   }
 
@@ -813,6 +821,9 @@ export function SdcDeskModule() {
       partners_json: partnersForPayload(),
       properties_json: isImovel ? propertiesForPayload() : [],
       vehicles_json: isVeiculo ? vehiclesForPayload() : [],
+      marital_status: form.person_type === "PF" ? form.marital_status.trim() : "",
+      spouse_name: form.person_type === "PF" ? form.spouse_name.trim() : "",
+      spouse_document: form.person_type === "PF" ? form.spouse_document.trim() : "",
       ...(requested && Number(requested) > 0 ? { requested_leverage_amount: requested } : {}),
     };
   }
@@ -898,6 +909,17 @@ export function SdcDeskModule() {
         if (!v.year.trim()) return `Informe o ano do veículo ${i + 1}.`;
         if (!parseMoney(v.vehicle_value)) return `Informe o valor do veículo ${i + 1}.`;
       }
+    }
+    const maritalPf = validatePfMaritalFields(
+      form.person_type,
+      form.marital_status,
+      form.spouse_name,
+      form.spouse_document,
+    );
+    if (maritalPf) return maritalPf;
+    if (form.person_type === "PJ") {
+      const socioMarital = validateSocioMaritalRows(partnersForPayload());
+      if (socioMarital) return socioMarital;
     }
     return null;
   }
@@ -1262,6 +1284,11 @@ export function SdcDeskModule() {
                     const pt = e.target.value;
                     patchForm("person_type", pt);
                     if (pt === "PF") setSocios([]);
+                    if (pt === "PJ") {
+                      patchForm("marital_status", "");
+                      patchForm("spouse_name", "");
+                      patchForm("spouse_document", "");
+                    }
                   }}
                 >
                   <option value="PF">PF</option>
@@ -1283,6 +1310,22 @@ export function SdcDeskModule() {
                     <option value="SIM">Sim</option>
                   </select>
                 </label>
+                {form.person_type === "PF" && (
+                  <ClientMaritalFields
+                    maritalStatus={form.marital_status}
+                    spouseName={form.spouse_name}
+                    spouseDocument={form.spouse_document}
+                    onMaritalStatusChange={(v) => {
+                      patchForm("marital_status", v);
+                      if (v !== "CASADO" && v !== "UNIAO_ESTAVEL") {
+                        patchForm("spouse_name", "");
+                        patchForm("spouse_document", "");
+                      }
+                    }}
+                    onSpouseNameChange={(v) => patchForm("spouse_name", v)}
+                    onSpouseDocumentChange={(v) => patchForm("spouse_document", v)}
+                  />
+                )}
                 {form.person_type === "PJ" && (
                   <label>
                     Empresa (PJ) com restrição creditícia?
@@ -1662,6 +1705,7 @@ export function SdcDeskModule() {
                   value={socios}
                   onChange={setSocios}
                   captureCreditRestriction
+                  captureMaritalStatus
                   title="Sócios / parceiros (PJ)"
                 />
               )}

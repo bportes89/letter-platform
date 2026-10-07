@@ -31,7 +31,13 @@ export type DeskFlashHandoff = {
     document: string;
     role: string;
     share_percent: string;
+    marital_status?: string;
+    spouse_name?: string;
+    spouse_document?: string;
   }>;
+  marital_status?: string;
+  spouse_name?: string;
+  spouse_document?: string;
 };
 
 export function saveFlashHandoff(payload: DeskFlashHandoff): void {

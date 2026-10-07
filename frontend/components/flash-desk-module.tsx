@@ -10,6 +10,7 @@ import { PreAnalysisModule } from "@/components/pre-analysis-module";
 import { DeskSourceMetaRow } from "@/lib/desk-source-meta";
 import { CurrencyInput } from "@/components/currency-input";
 import { PartnerSociosFields, SocioPartner, sociosPayload } from "@/components/partner-socios-fields";
+import { validateSocioMaritalRows } from "@/lib/marital-status";
 import { lookupCep, lookupMunicipalityPopulation } from "@/lib/cep-lookup";
 import { DESK_SIMULATION_NOTICE } from "@/lib/desk-simulation-notice";
 import { clearFlashHandoff, loadFlashHandoff } from "@/lib/desk-flash-handoff";
@@ -586,6 +587,8 @@ export function FlashDeskModule() {
     }
     if (!totalPropertiesValue()) return "Informe o valor de pelo menos um imóvel.";
     if (!evalResult?.viable) return "Calcule a viabilidade antes de avançar.";
+    const socioMarital = validateSocioMaritalRows(sociosPayload(socios));
+    if (socioMarital) return socioMarital;
     return null;
   }
 
@@ -709,6 +712,9 @@ export function FlashDeskModule() {
           document: p.document,
           role: p.role,
           share_percent: p.share_percent,
+          marital_status: p.marital_status || "",
+          spouse_name: p.spouse_name || "",
+          spouse_document: p.spouse_document || "",
         })),
       );
     }
@@ -762,6 +768,7 @@ export function FlashDeskModule() {
               phone: form.third_party_phone.trim(),
             }
           : null,
+      partners_json: sociosPayload(socios),
     };
   }
 
@@ -1300,7 +1307,7 @@ export function FlashDeskModule() {
                   <option value="60">60 meses (balloon 36)</option>
                 </select>
               </div>
-              <PartnerSociosFields value={socios} onChange={setSocios} />
+              <PartnerSociosFields value={socios} onChange={setSocios} captureMaritalStatus title="Sócios (PJ)" />
 
               {properties.map((prop, pIdx) => (
                 <div key={prop.localKey} className="desk-repeat-block" style={{ borderTop: "1px solid var(--line)", paddingTop: 12 }}>

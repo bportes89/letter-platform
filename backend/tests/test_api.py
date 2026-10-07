@@ -235,6 +235,7 @@ def test_sdc_desk_evaluate_store_approve_and_sale(client, auth_headers):
         "contact_phone": "31988776655",
         "document": "39053344705",
         "person_type": "PF",
+        "marital_status": "SOLTEIRO",
         "income_value": "15000",
     })
     assert stored.status_code == 201, stored.text
@@ -379,6 +380,9 @@ def test_sdc_desk_partner_status_checklist_and_submit(client, auth_headers, part
         "contact_phone": "31988776600",
         "document": "39053344705",
         "person_type": "PF",
+        "marital_status": "CASADO",
+        "spouse_name": "Cônjuge Teste",
+        "spouse_document": "52998224725",
         "income_value": "15000",
         "client_has_credit_restriction": False,
         "operation_type": "PF_PF",

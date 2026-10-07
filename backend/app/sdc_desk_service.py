@@ -386,6 +386,9 @@ def _build_flash_handoff_from_sdc(data: dict) -> dict:
         "requested_amount": str(data.get("requested_leverage_amount") or data.get("requested_amount") or ""),
         "properties": data.get("properties_json") if isinstance(data.get("properties_json"), list) else [],
         "partners_json": data.get("partners_json") if isinstance(data.get("partners_json"), list) else [],
+        "marital_status": str(data.get("marital_status") or "").strip(),
+        "spouse_name": str(data.get("spouse_name") or "").strip(),
+        "spouse_document": str(data.get("spouse_document") or "").strip(),
     }
 
 
@@ -806,6 +809,11 @@ def open_tapaf_checkout_for_solicitation(db: Session, user: User, item: SdcSolic
 def store_solicitation(db: Session, user: User, payload: dict) -> SdcSolicitation:
     assert_desk_access(user)
     payload = _apply_sdc_asset_totals(dict(payload))
+    from app.desk_marital_compliance import validate_desk_marital_compliance
+
+    marital_errors = validate_desk_marital_compliance(payload)
+    if marital_errors:
+        raise HTTPException(status_code=422, detail={"message": marital_errors[0], "motivos": marital_errors})
     result = evaluate_sdc_desk(payload)
     if not result["viable"]:
         raise HTTPException(
@@ -862,6 +870,9 @@ def store_solicitation(db: Session, user: User, payload: dict) -> SdcSolicitatio
                         "properties_json",
                         "asset_full_address",
                         "partners_json",
+                        "marital_status",
+                        "spouse_name",
+                        "spouse_document",
                     ),
                 ),
             },

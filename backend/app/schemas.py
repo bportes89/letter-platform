@@ -3235,6 +3235,9 @@ class SdcDeskEvaluateRequest(BaseModel):
     partners_json: list[dict] = Field(default_factory=list)
     properties_json: list[dict] = Field(default_factory=list)
     vehicles_json: list[dict] = Field(default_factory=list)
+    marital_status: str | None = Field(default=None, max_length=40)
+    spouse_name: str | None = Field(default=None, max_length=180)
+    spouse_document: str | None = Field(default=None, max_length=32)
 
 
 class SdcDeskStoreRequest(SdcDeskEvaluateRequest):
@@ -3307,6 +3310,7 @@ class FlashDeskEvaluateRequest(BaseModel):
     operation_type: str = Field(default="IMOVEL_PROPRIO", max_length=30)
     third_party_signer: dict | None = None
     properties_json: list[dict] = Field(default_factory=list)
+    partners_json: list[dict] = Field(default_factory=list)
 
 
 class FlashChecklistConfigSave(BaseModel):
