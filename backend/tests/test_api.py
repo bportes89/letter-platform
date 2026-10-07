@@ -764,6 +764,14 @@ def test_marketplace_esteira1_and_esteira2(client, auth_headers):
     assert isinstance(body2["matches"], list)
     assert body2.get("band_percent") == "10"
     assert "credit_matches" in body2 and "entrada_matches" in body2
+    assert body2.get("message") == ""
+    for lane in body2.get("credit_matches", []) + body2.get("entrada_matches", []):
+        assert not lane.get("explanation")
+        assert not lane.get("message")
+        assert not lane.get("administrator_name")
+        for q in lane.get("quotas") or []:
+            assert not q.get("administrator_name")
+            assert q.get("supplier_source") is None
 
     lock = client.post(
         "/api/v1/marketplace/esteira-1/lock",
@@ -773,7 +781,24 @@ def test_marketplace_esteira1_and_esteira2(client, auth_headers):
     assert lock.status_code == 200
     lock_body = lock.json()
     assert lock_body["proposal_id"]
+    assert lock_body.get("lead_id")
     assert lock_body["quota_ids"] == [quota["id"]]
+    esteira2_after_lock = client.post(
+        "/api/v1/marketplace/esteira-2/match",
+        headers=auth_headers,
+        json={
+            "target_amount": "800000",
+            "target_entrada": "80000",
+            "category": "REAL_ESTATE",
+            **profile,
+        },
+    )
+    assert esteira2_after_lock.status_code == 200
+    locked_ids: set[str] = set()
+    for key in ("matches", "credit_matches", "entrada_matches"):
+        for row in esteira2_after_lock.json().get(key) or []:
+            locked_ids.update(row.get("quota_ids") or [])
+    assert quota["id"] not in locked_ids
     cotas_after = client.get(
         "/api/v1/marketplace/venda-direta-manual/cotas",
         headers=auth_headers,

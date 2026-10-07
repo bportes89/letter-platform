@@ -477,6 +477,11 @@ def _rank_alternatives(
     client_problem_bank_administrator_ids: set[str] | None = None,
 ) -> list[dict]:
     """Candidatos na banda de crédito (e entrada, se informada)."""
+    from app.services import release_expired_reservations
+
+    release_expired_reservations(db, user.organization_id)
+    db.flush()
+
     credit_band = credit_band_percent if credit_band_percent is not None else band_percent
     entrada_band = entrada_band_percent if entrada_band_percent is not None else band_percent
     combo_band = combo_band_percent if combo_band_percent is not None else credit_band

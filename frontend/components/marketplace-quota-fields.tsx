@@ -21,9 +21,12 @@ export function formatMarketplaceDueDate(value: string | null | undefined): stri
 export function MarketplaceQuotaFields({
   quota,
   administratorFallback,
+  showAdministrator = false,
 }: {
   quota: MarketplaceQuotaFieldsData;
   administratorFallback?: string | null;
+  /** Parceiro comercial não vê administradora/fornecedor na esteira. */
+  showAdministrator?: boolean;
 }) {
   const entrada = quota.entrada_final ?? quota.premium_value ?? "0";
   const prazo =
@@ -31,10 +34,16 @@ export function MarketplaceQuotaFields({
       ? `${quota.remaining_installments} parcelas`
       : "—";
 
+  const adminLabel = quota.administrator_name ?? administratorFallback;
+
   return (
     <dl className="marketplace-quota-fields">
-      <dt>Administradora:</dt>
-      <dd>{quota.administrator_name ?? administratorFallback ?? "—"}</dd>
+      {showAdministrator ? (
+        <>
+          <dt>Administradora:</dt>
+          <dd>{adminLabel ?? "—"}</dd>
+        </>
+      ) : null}
       <dt>Crédito:</dt>
       <dd>{brl.format(Number(quota.credit_value))}</dd>
       <dt>Entrada:</dt>

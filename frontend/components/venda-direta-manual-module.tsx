@@ -8,6 +8,7 @@ import { CurrencyInput } from "@/components/currency-input";
 import { lookupCep } from "@/lib/cep-lookup";
 import { formatDocumentDigits, validationMessageForPerson } from "@/lib/br-validation";
 import { commercialQuotaDisplay } from "@/lib/commercial-quota-label";
+import { subcategoriesForAssetClass } from "@/lib/quota-subcategories";
 
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
@@ -158,9 +159,17 @@ export function VendaDiretaManualModule() {
 
   useEffect(() => {
     loadMeta().catch(() => undefined);
-    api<{ id: string; name: string; legacy_type: number; parent_id: string | null; title_sub: string | null }[]>(
-      "/marketplace/quota-categories",
-    )
+    api<
+      {
+        id: string;
+        name: string;
+        legacy_type: number;
+        parent_id: string | null;
+        title_sub: string | null;
+        asset_class?: string | null;
+        active?: boolean;
+      }[]
+    >("/marketplace/quota-categories?marketplace=true")
       .then(setQuotaCategories)
       .catch(() => setQuotaCategories([]));
     api<BankAdministrator[]>("/administrators")
@@ -168,7 +177,10 @@ export function VendaDiretaManualModule() {
       .catch(() => setBankAdministrators([]));
   }, [loadMeta]);
 
-  const subcategories = quotaCategories.filter((c) => c.legacy_type === 1);
+  const subcategories = subcategoriesForAssetClass(quotaCategories, category as "REAL_ESTATE" | "VEHICLE");
+  useEffect(() => {
+    setQuotaCategoryId("");
+  }, [category]);
 
   function toggleBankId(list: string[], id: string, checked: boolean, setter: (v: string[]) => void) {
     setter(checked ? [...list, id] : list.filter((x) => x !== id));

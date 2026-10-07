@@ -186,6 +186,6 @@ def lock_quotas_with_proposal(
         "requested_amount": str(money(total_credit)),
         "entrada_final": str(money(total_entrada)),
         "message": (
-            f"Cota(s) travada(s) por {RESERVE_TTL_MINUTES} min. Complete o cadastro do cliente em Propostas."
+            f"Cota(s) travada(s) por {RESERVE_TTL_MINUTES} min. Complete o cadastro do cliente para contrato e boleto."
         ),
     }

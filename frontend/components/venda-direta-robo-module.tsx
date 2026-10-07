@@ -8,6 +8,7 @@ import { CurrencyInput } from "@/components/currency-input";
 import { MarketplaceQuotaFields } from "@/components/marketplace-quota-fields";
 import { lookupCep } from "@/lib/cep-lookup";
 import { formatDocumentDigits, validationMessageForPerson } from "@/lib/br-validation";
+import { subcategoriesForAssetClass } from "@/lib/quota-subcategories";
 
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
@@ -145,9 +146,17 @@ export function VendaDiretaRoboModule() {
   }, []);
 
   useEffect(() => {
-    api<{ id: string; name: string; legacy_type: number; parent_id: string | null; title_sub: string | null }[]>(
-      "/marketplace/quota-categories",
-    )
+    api<
+      {
+        id: string;
+        name: string;
+        legacy_type: number;
+        parent_id: string | null;
+        title_sub: string | null;
+        asset_class?: string | null;
+        active?: boolean;
+      }[]
+    >("/marketplace/quota-categories?marketplace=true")
       .then(setQuotaCategories)
       .catch(() => setQuotaCategories([]));
     api<{ id: string; name: string; rules: { is_bank?: boolean } }[]>("/administrators")
@@ -159,7 +168,10 @@ export function VendaDiretaRoboModule() {
     setter(checked ? [...list, id] : list.filter((x) => x !== id));
   }
 
-  const subcategories = quotaCategories.filter((c) => c.legacy_type === 1);
+  const subcategories = subcategoriesForAssetClass(quotaCategories, category as "REAL_ESTATE" | "VEHICLE");
+  useEffect(() => {
+    setQuotaCategoryId("");
+  }, [category]);
 
   const loadCadastros = useCallback(async () => {
     try {

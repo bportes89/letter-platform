@@ -2253,7 +2253,7 @@ class MarketplaceQuotaBrief(BaseModel):
     markup_percent: str | None = None
     markup_amount: str | None = None
     rollover_applied: bool = False
-    administrator_name: str | None
+    administrator_name: str | None = None
     status: str
     nina_scan_status: str | None
 
@@ -2265,9 +2265,9 @@ class MarketplaceMatchView(BaseModel):
     deviation_percent: str
     entrada_deviation_percent: str | None = None
     score: int
-    administrator_id: str
+    administrator_id: str | None = None
     administrator_name: str | None = None
-    explanation: str
+    explanation: str = ""
     message: str | None = None
     lane: str | None = None
     rollover_applied: bool = False

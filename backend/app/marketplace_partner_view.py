@@ -39,6 +39,8 @@ def mask_quota_brief(brief: dict) -> dict:
     out["quota_code"] = f"Ref {ref}"
     out["supplier_source"] = None
     out["markup_percent"] = None
+    out.pop("administrator_name", None)
+    out.pop("administrator_id", None)
     return out
 
 
@@ -46,6 +48,8 @@ def mask_marketplace_match_item(item: dict, *, strip_verbose: bool = False) -> d
     out = {**item}
     if "quotas" in out and isinstance(out["quotas"], list):
         out["quotas"] = [mask_quota_brief(q) for q in out["quotas"]]
+    out.pop("administrator_name", None)
+    out.pop("administrator_id", None)
     if strip_verbose:
         out["explanation"] = ""
         out["message"] = ""
@@ -55,7 +59,7 @@ def mask_marketplace_match_item(item: dict, *, strip_verbose: bool = False) -> d
 def mask_esteira_result(result: dict, user: User) -> dict:
     """Consulta Marketplace (Esteiras / venda direta): nunca expor sync/fornecedor na UI."""
     del user  # mascaramento comercial é obrigatório para todos os perfis
-    strip_verbose = result.get("esteira") == "NINA_CURATED"
+    strip_verbose = True
     out = {**result}
     if strip_verbose:
         out["message"] = ""

@@ -2,7 +2,7 @@
 
 import { CheckCircle2, ClipboardList, RefreshCw, X } from "lucide-react";
 import Link from "next/link";
-import { FormEvent, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { AdminDocumentPanel } from "@/components/admin-document-panel";
 import { MarketplaceContractEditor } from "@/components/marketplace-contract-editor";
@@ -139,6 +139,11 @@ export function CadastroMarketplaceModule() {
   const [listLimit, setListLimit] = useState(CADASTRO_LIST_PAGE);
   const [openingLeadId, setOpeningLeadId] = useState<string | null>(null);
   const [portalReady, setPortalReady] = useState(false);
+  const [cadastroShortcuts, setCadastroShortcuts] = useState<
+    Array<{ lead_id: string; label: string; name: string; phone: string; email: string | null; document: string | null }>
+  >([]);
+  const [clientFormKey, setClientFormKey] = useState(0);
+  const openedFromQuery = useRef(false);
   const roleReady = myRole.length > 0;
   const partnerView = myRole === "PARTNER" || myRole === "QUOTA_SELLER";
   const canManageDocs = myRole !== "CLIENT";
@@ -163,6 +168,14 @@ export function CadastroMarketplaceModule() {
 
   useEffect(() => {
     setPortalReady(true);
+  }, []);
+
+  useEffect(() => {
+    api<
+      Array<{ lead_id: string; label: string; name: string; phone: string; email: string | null; document: string | null }>
+    >("/marketplace/venda-direta-manual/cadastros")
+      .then(setCadastroShortcuts)
+      .catch(() => setCadastroShortcuts([]));
   }, []);
 
   useEffect(() => {
@@ -222,6 +235,38 @@ export function CadastroMarketplaceModule() {
       setError(e instanceof Error ? e.message : "Falha ao abrir cadastro");
     } finally {
       setOpeningLeadId(null);
+    }
+  }
+
+  useEffect(() => {
+    if (typeof window === "undefined" || openedFromQuery.current) return;
+    const openId = new URLSearchParams(window.location.search).get("open");
+    if (!openId) return;
+    openedFromQuery.current = true;
+    void openDetail(openId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot deep link from Marketplace trava
+  }, []);
+
+  async function applyCadastroShortcut(sourceLeadId: string) {
+    if (!selected || !sourceLeadId || sourceLeadId === selected.lead_id) return;
+    setBusy(true);
+    setError("");
+    try {
+      const detail = await api<CadastroDetail>(`/marketplace/cadastros/${sourceLeadId}`);
+      setSelected({
+        ...selected,
+        name: detail.name,
+        phone: detail.phone,
+        document: detail.document,
+        email: detail.email,
+        address: detail.address || selected.address,
+      });
+      setClientFormKey((k) => k + 1);
+      setNotice("Dados copiados de outro cadastro — revise e salve.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Falha ao carregar cadastro de origem");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -515,7 +560,7 @@ export function CadastroMarketplaceModule() {
                   {!roleReady ? (
                     <div className="notice">Carregando permissões…</div>
                   ) : (
-                    <form className="marketplace-form" onSubmit={saveDetail} key={selected.lead_id}>
+                    <form className="marketplace-form" onSubmit={saveDetail} key={`${selected.lead_id}-${clientFormKey}`}>
             {selected.my_chain_commission ? (
               <div className="notice">
                 Sua comissão ({selected.my_chain_commission.level_label}):{" "}
@@ -697,6 +742,26 @@ export function CadastroMarketplaceModule() {
                     }
                   >
                     <div className="marketplace-form-row">
+                      <label className="marketplace-field marketplace-field-wide">
+                        Puxar cadastro existente (base do parceiro)
+                        <select
+                          defaultValue=""
+                          onChange={(e) => {
+                            const id = e.target.value;
+                            if (id) void applyCadastroShortcut(id);
+                            e.target.value = "";
+                          }}
+                        >
+                          <option value="">Selecione um cadastro anterior…</option>
+                          {cadastroShortcuts
+                            .filter((c) => c.lead_id !== selected.lead_id)
+                            .map((c) => (
+                              <option key={c.lead_id} value={c.lead_id}>
+                                {c.label || c.name}
+                              </option>
+                            ))}
+                        </select>
+                      </label>
                       <label className="marketplace-field">
                         Nome
                         <input name="name" defaultValue={selected.name} required />
