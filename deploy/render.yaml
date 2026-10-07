@@ -8,7 +8,8 @@ services:
     runtime: python
     plan: free
     rootDir: backend
-    buildCommand: pip install -r requirements.txt
+    # Migrações no build evitam timeout de porta no start (Render espera $PORT antes do alembic terminar).
+    buildCommand: pip install -r requirements.txt && python -m alembic upgrade head
     startCommand: bash scripts/start_cloud.sh
     healthCheckPath: /api/v1/health
     # Monorepo: não redeployar API quando só o frontend mudar (login, etc.).
@@ -32,6 +33,8 @@ services:
       # Seed no boot deixa o deploy lento; ligue só para reset demo (1 no painel).
       - key: LETTER_RUN_STARTUP_SEED
         value: "0"
+      - key: LETTER_SKIP_STARTUP_MIGRATIONS
+        value: "1"
       - key: LETTER_SECRET_KEY
         generateValue: true
       - key: LETTER_DEMO_PASSWORD

@@ -13,7 +13,8 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.affiliate_chain_commission_service import resolve_chain_user_ids
-from app.cadastro_service import SIT_CONCLUIDO
+# Mesmo valor de cadastro_service.SIT_CONCLUIDO (evita import pesado no boot).
+_MARKETPLACE_SITUATION_CONCLUDED = frozenset({"CONCLUIDO", "CONCLUIDA"})
 from app.legacy_export_service import DEFAULT_SQL
 from app.legacy_sql_parser import load_table
 from app.models import (
@@ -217,7 +218,6 @@ def _marketplace_concluded_partner_totals(
         )
     ).all()
     totals: dict[str, Decimal] = {}
-    concluded = {SIT_CONCLUIDO, "CONCLUIDA"}
     for originator_id, requested_amount, terms_raw in rows:
         if not originator_id:
             continue
@@ -231,7 +231,7 @@ def _marketplace_concluded_partner_totals(
         if not isinstance(life, dict):
             continue
         situation = str(life.get("situation") or "").upper()
-        if situation not in concluded:
+        if situation not in _MARKETPLACE_SITUATION_CONCLUDED:
             continue
         value = money(Decimal(str(requested_amount or 0)))
         if value <= 0:

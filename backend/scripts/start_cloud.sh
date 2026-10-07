@@ -6,9 +6,13 @@ cd "$(dirname "$0")/.."
 echo "[letter] materializing Inter mTLS certs (if LETTER_INTER_*_BASE64 set)..."
 python scripts/materialize_inter_certs.py
 
-echo "[letter] running migrations..."
-python -m alembic upgrade head
-echo "[letter] migrations complete"
+if [[ "${LETTER_SKIP_STARTUP_MIGRATIONS:-0}" == "1" ]]; then
+  echo "[letter] startup migrations skipped (LETTER_SKIP_STARTUP_MIGRATIONS=1 — já rodaram no build)"
+else
+  echo "[letter] running migrations..."
+  python -m alembic upgrade head
+  echo "[letter] migrations complete"
+fi
 
 if [[ "${LETTER_RUN_STARTUP_SEED:-0}" == "1" ]]; then
   echo "[letter] seeding demo data (idempotent)..."

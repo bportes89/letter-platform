@@ -73,8 +73,9 @@ A API converte automaticamente para `postgresql+psycopg://` no startup.
 |-------|--------|
 | Root Directory | `backend` |
 | Runtime | Python 3 |
-| Build Command | `pip install -r requirements.txt` |
+| Build Command | `pip install -r requirements.txt && python -m alembic upgrade head` |
 | Start Command | `bash scripts/start_cloud.sh` |
+| Env `LETTER_SKIP_STARTUP_MIGRATIONS` | `1` (migrações no build; evita timeout de porta no Render) |
 | Plan | Free |
 | Health Check Path | `/api/v1/health` |
 | Env `PYTHON_VERSION` | `3.12.10` (obrigatório — 3.14 quebra o build do pydantic) |
