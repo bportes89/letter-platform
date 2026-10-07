@@ -694,7 +694,7 @@ def test_quitcon_desk_evaluate_quota_lines(client, auth_headers):
     assert result["viable"] is True
     assert len(result["quota_breakdown"]) == 2
     assert Decimal(result["totais"]["saldo_devedor_total"]) == Decimal("88800")
-    assert Decimal(result["valor_presente_quitacao"]) > 0
+    assert Decimal(result["valor_presente_quitacao"]) == Decimal("73338.03")
 
 
 def test_marketplace_esteira1_and_esteira2(client, auth_headers):
@@ -4540,9 +4540,12 @@ def test_quitcon_engine_canonical_doc253():
     assert sim["custos_entrada"]["itens"][1]["codigo"] == "SERVICO_OPERACIONAL_2PCT"
     assert sim["custos_entrada"]["itens"][1]["aplicavel"] is False
     assert sim["custos_entrada"]["itens"][2]["valor"] == "22321.43"
+    assert sim["custos_entrada"]["itens"][2]["momento"] == "APOS_APROVACAO_PLATAFORMA"
+    assert sim["custos_entrada"]["total_obrigatorio_abertura"] == "1500.00"
     sim_svc = engine.simular_quitcon_doc253(Decimal("400000"), 0, operational_service=True, administrator_name="Embracon")
     assert sim_svc["custos_entrada"]["itens"][1]["valor"] == "8000.00"
-    assert sim_svc["custos_entrada"]["total_com_servico_operacional"] == "49500.00"
+    assert sim_svc["custos_entrada"]["total_com_servico_operacional"] == "9500.00"
+    assert engine.calcular_vp_parcelas_restantes(Decimal("1355.55"), 75) == Decimal("71284.38")
     assert engine.calcular_pagamento_total_cedente(Decimal("400000")) == Decimal("412000.00")
     assert engine.calcular_liberacao_cessionario(Decimal("400000"))["capital_giro_liquido_na_liberacao"] == "380000.00"
     assert engine.calcular_taxa_servico_operacional_inicio(Decimal("400000")) == Decimal("8000.00")
@@ -4602,11 +4605,6 @@ def test_quitcon_full_pipeline_penalties_and_tokenization(client, auth_headers, 
     })
     assert paid.status_code == 200 and paid.json()["status"] == "TAPAF_LIQUIDADA"
 
-    fee = client.post("/api/v1/finops/quitcon/success-fee-payment-webhook", headers=auth_headers, json={
-        "operacao_id": operacao["id"], "event_id": "fee-qc-001", "amount": "22321.43",
-    })
-    assert fee.status_code == 200 and fee.json()["success_fee_escrow_paid_at"]
-
     photos = _native_photos()
     inspection = client.post("/api/v1/finops/quitcon/inspection-photos", headers=auth_headers, json={
         "operacao_id": operacao["id"], "photos": photos,
@@ -4617,6 +4615,11 @@ def test_quitcon_full_pipeline_penalties_and_tokenization(client, auth_headers, 
         "operacao_id": operacao["id"], "approved": True,
     })
     assert compliance.json()["status"] == "AGUARDANDO_ASSINATURA"
+
+    fee = client.post("/api/v1/finops/quitcon/success-fee-payment-webhook", headers=auth_headers, json={
+        "operacao_id": operacao["id"], "event_id": "fee-qc-001", "amount": "22321.43",
+    })
+    assert fee.status_code == 200 and fee.json()["success_fee_escrow_paid_at"]
 
     admin = client.post(f"/api/v1/finops/quitcon/administrator-approval?operacao_id={operacao['id']}", headers=auth_headers)
     assert admin.status_code == 200 and admin.json()["administrator_approved_at"]

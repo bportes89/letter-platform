@@ -4782,17 +4782,39 @@ def quitcon_desk_store(payload: QuitConDeskStoreRequest, user: User = Depends(ge
 
 @router.get("/quitcon/desk/solicitations")
 def quitcon_desk_list(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.models import QuitConOperacao
     from app.quitcon_desk_service import list_documents, list_solicitations, solicitation_view
 
-    return [solicitation_view(item, list_documents(db, item.id), db) for item in list_solicitations(db, user)]
+    items = list_solicitations(db, user)
+    operacao_ids = [i.quitcon_operacao_id for i in items if i.quitcon_operacao_id]
+    operacao_map: dict[str, QuitConOperacao] = {}
+    if operacao_ids:
+        for operacao in db.scalars(
+            select(QuitConOperacao).where(
+                QuitConOperacao.organization_id == user.organization_id,
+                QuitConOperacao.id.in_(operacao_ids),
+            )
+        ):
+            operacao_map[operacao.id] = operacao
+    return [
+        solicitation_view(
+            item,
+            list_documents(db, item.id),
+            db,
+            operacao=operacao_map.get(item.quitcon_operacao_id or ""),
+        )
+        for item in items
+    ]
 
 
 @router.get("/quitcon/desk/solicitations/{solicitation_id}")
 def quitcon_desk_get(solicitation_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.models import QuitConOperacao
     from app.quitcon_desk_service import get_solicitation, list_documents, solicitation_view
 
     item = get_solicitation(db, user, solicitation_id)
-    return solicitation_view(item, list_documents(db, item.id), db)
+    operacao = db.get(QuitConOperacao, item.quitcon_operacao_id) if item.quitcon_operacao_id else None
+    return solicitation_view(item, list_documents(db, item.id), db, operacao=operacao)
 
 
 @router.patch("/quitcon/desk/solicitations/{solicitation_id}")

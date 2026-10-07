@@ -400,11 +400,22 @@ def confirm_operational_service_payment(db: Session, user: User, operacao: QuitC
     return operacao
 
 
+_SUCCESS_FEE_STATUSES = frozenset({
+    "AGUARDANDO_ASSINATURA",
+    "PRONTO_PARA_CARTORIO",
+    "EM_ANALISE_NO_RGI",
+    "GRAVAME_CONCLUIDO",
+    "ATIVO_OK_EM_PRODUCAO",
+    "LIBERADO_PARA_ANTECIPACAO",
+})
+
+
 def generate_success_fee_checkout(operacao: QuitConOperacao) -> dict:
-    if operacao.status != "TAPAF_LIQUIDADA":
-        raise HTTPException(status_code=409, detail="Taxa de sucesso disponível após TAPAF_LIQUIDADA")
-    if operacao.operational_service_enabled and not operacao.operational_service_paid_at:
-        raise HTTPException(status_code=409, detail="Pague a taxa de serviço operacional 2% antes da taxa de sucesso")
+    if operacao.status not in _SUCCESS_FEE_STATUSES:
+        raise HTTPException(
+            status_code=409,
+            detail="Taxa de sucesso disponível após aprovação da operação pela plataforma (pós-compliance)",
+        )
     if operacao.success_fee_escrow_paid_at:
         raise HTTPException(status_code=409, detail="Taxa de sucesso já depositada em Escrow")
     amount = money(operacao.success_fee_escrow_amount)
@@ -423,10 +434,8 @@ def generate_success_fee_checkout(operacao: QuitConOperacao) -> dict:
 
 
 def confirm_success_fee_payment(db: Session, user: User, operacao: QuitConOperacao, event_id: str, amount) -> QuitConOperacao:
-    if operacao.status != "TAPAF_LIQUIDADA":
+    if operacao.status not in _SUCCESS_FEE_STATUSES:
         raise HTTPException(status_code=409, detail="Depósito Escrow indisponível neste status")
-    if operacao.operational_service_enabled and not operacao.operational_service_paid_at:
-        raise HTTPException(status_code=409, detail="Taxa de serviço operacional 2% pendente")
     expected = money(operacao.success_fee_escrow_amount)
     if money(amount) != expected:
         raise HTTPException(status_code=422, detail=f"Valor da taxa de sucesso deve ser exatamente R$ {expected}")
@@ -507,8 +516,6 @@ def register_inspection_photos(db: Session, user: User, operacao: QuitConOperaca
         raise HTTPException(status_code=409, detail="Vistoria disponível após TAPAF_LIQUIDADA")
     if operacao.operational_service_enabled and not operacao.operational_service_paid_at:
         raise HTTPException(status_code=409, detail="Pague a taxa de serviço operacional 2% antes da vistoria")
-    if not operacao.success_fee_escrow_paid_at:
-        raise HTTPException(status_code=409, detail="Deposite a taxa de sucesso 10% em Escrow antes da vistoria")
     from app.collateral_native_inspection_service import upsert_native_inspection
 
     upsert_native_inspection(

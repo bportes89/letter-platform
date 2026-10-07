@@ -1,7 +1,7 @@
 "use client";
 
 import { CheckCircle2, FileUp, RefreshCw, ShoppingCart, Scale } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AdminDocumentPanel } from "@/components/admin-document-panel";
 import { api, apiForm, deleteApi, downloadApi, User } from "@/lib/api";
 import { isInternalProductRole } from "@/lib/product-nav";
@@ -10,6 +10,8 @@ import { DeskSourceMetaRow } from "@/lib/desk-source-meta";
 import { PartnerSociosFields, SocioPartner, sociosPayload } from "@/components/partner-socios-fields";
 import { CurrencyInput } from "@/components/currency-input";
 import { lookupCep } from "@/lib/cep-lookup";
+import { DESK_SIMULATION_NOTICE } from "@/lib/desk-simulation-notice";
+import { quitconNominalBalance, quitconVpFromInstallments } from "@/lib/quitcon-vp";
 
 type RequiredDoc = { code: string; label: string; uploaded?: boolean };
 
@@ -27,6 +29,10 @@ type QuitConSolicitation = {
   operational_service: boolean;
   proposal_id: string | null;
   quitcon_operacao_id: string | null;
+  operacao_code: string | null;
+  operacao_status: string | null;
+  operacao_tapaf_paid: boolean;
+  operacao_funding_pipeline: boolean;
   source_channel: string | null;
   source_channel_label: string | null;
   lead_id: string | null;
@@ -67,6 +73,18 @@ type AddressFields = {
   district: string;
   city: string;
   state: string;
+};
+
+type QuitConCadastroOption = {
+  lead_id: string;
+  name: string;
+  document: string | null;
+  phone: string;
+  email: string | null;
+  person_type: string;
+  address: Record<string, string>;
+  label: string;
+  occupation?: string | null;
 };
 
 type QuotaLine = {
@@ -144,15 +162,11 @@ function moneyPayload(value: string) {
 }
 
 function quotaSaldo(line: QuotaLine): number {
-  const parcela = parseMoney(line.installment_value);
-  const meses = Number(line.meses_restantes);
-  if (!parcela || !Number.isFinite(meses) || meses < 1) return 0;
-  return parcela * meses;
+  return quitconNominalBalance(parseMoney(line.installment_value), Number(line.meses_restantes));
 }
 
-function quotaVp(saldo: number, meses: number): number {
-  if (!saldo || meses < 1) return 0;
-  return saldo / (1 + 0.01 * meses);
+function quotaVp(line: QuotaLine): number {
+  return quitconVpFromInstallments(parseMoney(line.installment_value), Number(line.meses_restantes));
 }
 
 function composeAddress(addr: AddressFields): string {
@@ -196,18 +210,24 @@ export function QuitConDeskModule() {
   const [alienatedChassi, setAlienatedChassi] = useState("");
   const [alienatedRenavam, setAlienatedRenavam] = useState("");
   const [socios, setSocios] = useState<SocioPartner[]>([]);
+  const [cadastros, setCadastros] = useState<QuitConCadastroOption[]>([]);
+  const [existingCadastroId, setExistingCadastroId] = useState("");
+  const [advanceAccepted, setAdvanceAccepted] = useState(false);
+  const resultPanelRef = useRef<HTMLDivElement | null>(null);
 
   const isInternal = isInternalProductRole(user?.role);
   const isImovel =
     form.property_type === "IMOVEL_URBANO" || form.property_type === "IMOVEL_RURAL";
 
   const load = useCallback(async () => {
-    const [me, list] = await Promise.all([
+    const [me, list, cadastroRows] = await Promise.all([
       api<User>("/auth/me"),
       api<QuitConSolicitation[]>("/quitcon/desk/solicitations"),
+      api<QuitConCadastroOption[]>("/marketplace/venda-direta-manual/cadastros").catch(() => [] as QuitConCadastroOption[]),
     ]);
     setUser(me);
     setItems(list);
+    setCadastros(cadastroRows);
   }, []);
 
   useEffect(() => {
@@ -223,10 +243,48 @@ export function QuitConDeskModule() {
   );
   const selected = useMemo(() => items.find((i) => i.id === selectedId) ?? null, [items, selectedId]);
   const approvedForSale = useMemo(() => items.filter((i) => i.can_create_sale), [items]);
+  const fundingPipeline = useMemo(
+    () => items.filter((i) => i.quitcon_operacao_id && i.operacao_funding_pipeline),
+    [items],
+  );
 
   function patchForm<K extends keyof typeof emptyForm>(key: K, value: (typeof emptyForm)[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
     setEvalResult(null);
+    setAdvanceAccepted(false);
+  }
+
+  function applyCadastro(id: string) {
+    setExistingCadastroId(id);
+    if (!id) return;
+    const row = cadastros.find((x) => x.lead_id === id);
+    if (!row) {
+      setError("Cadastro não encontrado. Clique em Atualizar e tente de novo.");
+      return;
+    }
+    setError("");
+    const addr = row.address || {};
+    setForm((prev) => ({
+      ...prev,
+      contact_name: row.name || "",
+      contact_email: row.email || "",
+      contact_phone: row.phone || "",
+      document: row.document || "",
+      person_type: row.person_type || "PF",
+      occupation: row.occupation ? String(row.occupation) : prev.occupation,
+    }));
+    setClientAddress({
+      zip: addr.zipcode || "",
+      street: addr.street || "",
+      number: addr.number || "",
+      complement: addr.complement || "",
+      district: addr.neighborhood || "",
+      city: addr.city || "",
+      state: addr.uf || "",
+    });
+    setEvalResult(null);
+    setAdvanceAccepted(false);
+    setNotice(`Dados de ${row.name} importados do cadastro na plataforma.`);
   }
 
   const quotaPreview = useMemo(() => {
@@ -237,7 +295,7 @@ export function QuitConDeskModule() {
     const rows = lines.map((q) => {
       const meses = Number(q.meses_restantes);
       const saldo = quotaSaldo(q);
-      const vp = quotaVp(saldo, meses);
+      const vp = quotaVp(q);
       totalSaldo += saldo;
       totalVp += vp;
       if (Number.isFinite(meses)) maxMeses = Math.max(maxMeses, meses);
@@ -316,6 +374,7 @@ export function QuitConDeskModule() {
       return "Marque o aceite da taxa de serviço LETTER (2%) para gravar a solicitação.";
     }
     if (!evalResult?.viable) return "Calcule a viabilidade antes de avançar.";
+    if (!advanceAccepted) return "Marque o aceite da simulação para avançar.";
     return null;
   }
 
@@ -393,6 +452,8 @@ export function QuitConDeskModule() {
         body: JSON.stringify(payload),
       });
       setEvalResult(res.result);
+      setAdvanceAccepted(false);
+      window.setTimeout(() => resultPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 120);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Falha no cálculo");
     } finally {
@@ -446,6 +507,8 @@ export function QuitConDeskModule() {
       setAlienatedRenavam("");
       setSocios([]);
       setEvalResult(null);
+      setAdvanceAccepted(false);
+      setExistingCadastroId("");
       setSelectedId(created.id);
       setTab("lista");
       await load();
@@ -608,6 +671,19 @@ export function QuitConDeskModule() {
           <div style={{ padding: "0 18px 18px", display: "grid", gap: 16, gridTemplateColumns: "minmax(0,1.2fr) minmax(0,0.8fr)" }}>
             <div className="stack-form">
               <div style={{ display: "grid", gap: 9, gridTemplateColumns: "1fr 1fr" }}>
+                <label style={{ gridColumn: "1 / -1", fontSize: 11, fontWeight: 700 }}>
+                  Cliente já cadastrado na plataforma
+                  <select
+                    value={existingCadastroId}
+                    onChange={(e) => applyCadastro(e.target.value)}
+                    style={{ width: "100%", marginTop: 4, padding: 8, borderRadius: 8, fontWeight: 400 }}
+                  >
+                    <option value="">Preencher manualmente</option>
+                    {cadastros.map((c) => (
+                      <option key={c.lead_id} value={c.lead_id}>{c.label}</option>
+                    ))}
+                  </select>
+                </label>
                 <input placeholder="Nome" value={form.contact_name} onChange={(e) => patchForm("contact_name", e.target.value)} />
                 <input placeholder="E-mail" value={form.contact_email} onChange={(e) => patchForm("contact_email", e.target.value)} />
                 <input placeholder="Telefone" value={form.contact_phone} onChange={(e) => patchForm("contact_phone", e.target.value)} />
@@ -708,7 +784,7 @@ export function QuitConDeskModule() {
                 {quotaLines.map((line, idx) => {
                   const saldo = quotaSaldo(line);
                   const meses = Number(line.meses_restantes);
-                  const vp = quotaVp(saldo, meses);
+                  const vp = quotaVp(line);
                   return (
                     <div
                       key={idx}
@@ -942,7 +1018,10 @@ export function QuitConDeskModule() {
                 <button type="button" className="admin-button" disabled={busy} onClick={() => void calculate()}>Calcular viabilidade</button>
               </div>
             </div>
-            <div style={{ border: "1px solid var(--line)", borderRadius: 12, padding: 16, background: "#f7fbf9" }}>
+            <div
+              ref={resultPanelRef}
+              style={{ border: "1px solid var(--line)", borderRadius: 12, padding: 16, background: "#f7fbf9" }}
+            >
               <b>Resultado doc253</b>
               {!evalResult && <p className="muted" style={{ marginTop: 10 }}>Preencha as cotas e clique em Calcular viabilidade.</p>}
               {evalResult?.required_docs?.length && (
@@ -970,34 +1049,47 @@ export function QuitConDeskModule() {
                     </ul>
                   )}
                   <div><small>VP quitação total</small><div><b>{brl.format(Number(evalResult.valor_presente_quitacao))}</b></div></div>
-                  {evalResult.cedente && (
-                    <div><small>Cedente (VP+3%)</small><div><b>{brl.format(Number(evalResult.cedente.pagamento_total_quitacao_mais_intermediacao))}</b></div></div>
-                  )}
-                  {evalResult.cessionario && (
-                    <div><small>Capital giro líquido (VP−5%)</small><div><b>{brl.format(Number(evalResult.cessionario.capital_giro_liquido_na_liberacao))}</b></div></div>
-                  )}
                   {evalResult.custos_entrada && (
                     <div>
-                      <small>Custos de entrada</small>
+                      <small>Custos na abertura (TAPAF + serviço 2% opcional)</small>
                       <ul style={{ margin: "6px 0 0", paddingLeft: 18, fontSize: 12 }}>
                         {evalResult.custos_entrada.itens
-                          .filter((i) => i.aplicavel !== false && i.valor)
+                          .filter(
+                            (i) =>
+                              (i as { momento?: string }).momento === "ABERTURA" &&
+                              i.aplicavel !== false &&
+                              i.valor,
+                          )
                           .map((i) => (
                             <li key={i.codigo}>{i.nome}: {brl.format(Number(i.valor))}</li>
                           ))}
                       </ul>
                       <div style={{ marginTop: 8 }}>
-                        <b>Total abertura: {brl.format(Number(evalResult.custos_entrada.total_com_servico_operacional))}</b>
+                        <b>
+                          Total na abertura:{" "}
+                          {brl.format(Number(evalResult.custos_entrada.total_com_servico_operacional))}
+                        </b>
                       </div>
+                      <p className="muted" style={{ fontSize: 10, margin: "8px 0 0", lineHeight: 1.45 }}>
+                        A taxa de sucesso (10%) é cobrada após aprovação da operação pela plataforma (cessionário).
+                      </p>
                     </div>
                   )}
                   <p style={{ color: "#067647", fontWeight: 700, margin: 0 }}>{evalResult.message}</p>
                 </div>
+                  <label className="tapaf-check" style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 11 }}>
+                    <input
+                      type="checkbox"
+                      checked={advanceAccepted}
+                      onChange={(e) => setAdvanceAccepted(e.target.checked)}
+                    />
+                    <span>{DESK_SIMULATION_NOTICE}</span>
+                  </label>
                   <button
                     type="button"
                     className="admin-button"
                     style={{ width: "100%" }}
-                    disabled={busy}
+                    disabled={busy || !advanceAccepted}
                     onClick={() => void store()}
                   >
                     Avançar e gravar QuitCon
@@ -1113,7 +1205,29 @@ export function QuitConDeskModule() {
 
         {tab === "venda" && (
           <div style={{ padding: "0 18px 18px" }} className="stack-form">
-            <p className="muted">Abre proposta QUITCON + operação em AGUARDANDO_TAPAF com checkout TAPAF R$ 1.500.</p>
+            <p className="muted">
+              Abre proposta QuitCon + operação em AGUARDANDO_TAPAF. Na abertura o cliente paga TAPAF (R$ 1.500) e, se
+              contratado, a taxa de serviço LETTER (2%).
+            </p>
+            {fundingPipeline.length > 0 && (
+              <section className="panel" style={{ padding: 12, background: "#f2faf6" }}>
+                <b>Operações aprovadas / em conformidade (funding SDC)</b>
+                <p className="muted" style={{ fontSize: 11, margin: "6px 0 10px" }}>
+                  QuitCon com TAPAF liquidada e esteira ativa — seguem para captação e lastro de Capital de Giro.
+                  {isInternal ? " Detalhe completo na esteira FinOps abaixo." : " Acompanhe o status com a operação LETTER."}
+                </p>
+                <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12 }}>
+                  {fundingPipeline.map((row) => (
+                    <li key={row.id}>
+                      <b>{row.contact_name}</b>
+                      {row.operacao_code ? ` — ${row.operacao_code}` : ""}
+                      {row.operacao_status ? ` · ${row.operacao_status.replaceAll("_", " ")}` : ""}
+                      {row.operacao_tapaf_paid ? " · TAPAF paga" : ""}
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
             <select value={selectedId ?? ""} onChange={(e) => setSelectedId(e.target.value || null)}>
               <option value="">QuitCon aprovado…</option>
               {approvedForSale.map((i) => (

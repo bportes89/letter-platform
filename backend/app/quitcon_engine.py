@@ -61,7 +61,19 @@ class EngineQuitConLetter:
         "da alienação sem precisar desembolsar o valor bruto total."
     )
 
+    def calcular_vp_parcelas_restantes(self, valor_parcela: Decimal, meses: int) -> Decimal:
+        """VP de fluxo de parcelas iguais — PMT × ((1 − (1+i)^−n) / i), i = 1% a.m."""
+        pmt = money(Decimal(str(valor_parcela)))
+        n = max(int(meses), 0)
+        if pmt <= 0 or n <= 0:
+            return money(Decimal("0"))
+        i = self.taxa_desconto_projecao_mensal
+        base = Decimal("1") + i
+        factor = (Decimal("1") - base ** (-n)) / i
+        return money(pmt * factor)
+
     def calcular_valor_quitcon_vp(self, saldo_devedor: Decimal, meses: int) -> Decimal:
+        """VP quando o saldo devedor já é informado como valor nominal (SB)."""
         sb = money(Decimal(str(saldo_devedor)))
         n = max(int(meses), 0)
         i = self.taxa_desconto_projecao_mensal
@@ -175,7 +187,7 @@ class EngineQuitConLetter:
         taxa_servico = self.calcular_taxa_servico_operacional_inicio(vp) if operational_service else money(Decimal("0"))
         taxa_sucesso = self.calcular_taxa_sucesso_escrow(vp)
         tapaf = money(self.taxa_tapaf_nominal)
-        itens = [
+        abertura_itens: list[dict] = [
             {
                 "codigo": "TAPAF",
                 "nome": "TAPAF — Taxa de Avaliação e Auditoria",
@@ -200,30 +212,34 @@ class EngineQuitConLetter:
                     "Não se aplica se o cliente preferir conduzir o processo diretamente com a ADM."
                 ),
             },
+        ]
+        pos_aprovacao_itens = [
             {
                 "codigo": "TAXA_SUCESSO_ESCROW_10PCT",
                 "nome": "Taxa de Sucesso (10% sobre VP)",
                 "valor": str(taxa_sucesso),
                 "obrigatorio": True,
                 "reembolsavel_se_reprovado_adm": True,
-                "momento": "ABERTURA",
+                "momento": "APOS_APROVACAO_PLATAFORMA",
+                "aplicavel": True,
                 "descricao": (
-                    "Retida em conta Escrow protegida. 100% devolvida se a administradora reprovar "
-                    "o cadastro ou a garantia."
+                    "Paga pelo cessionário após aprovação da operação pela plataforma. Retida em Escrow; "
+                    "100% devolvida se a administradora reprovar o cadastro ou a garantia."
                 ),
             },
         ]
-        total_obrigatorio = money(tapaf + taxa_sucesso)
-        total_com_servico = money(total_obrigatorio + taxa_servico) if operational_service else total_obrigatorio
+        itens = abertura_itens + pos_aprovacao_itens
+        total_obrigatorio = tapaf
+        total_com_servico = money(tapaf + taxa_servico) if operational_service else tapaf
         return {
             "titulo": "Custos pagos pelo cliente no início da operação",
             "itens": itens,
             "total_obrigatorio_abertura": str(total_obrigatorio),
             "total_com_servico_operacional": str(total_com_servico),
             "ordem_pagamento": (
-                ["TAPAF", "SERVICO_OPERACIONAL_2PCT", "TAXA_SUCESSO_ESCROW_10PCT"]
+                ["TAPAF", "SERVICO_OPERACIONAL_2PCT"]
                 if operational_service
-                else ["TAPAF", "TAXA_SUCESSO_ESCROW_10PCT"]
+                else ["TAPAF"]
             ),
         }
 

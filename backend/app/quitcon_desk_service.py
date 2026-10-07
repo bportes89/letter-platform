@@ -16,6 +16,7 @@ from app.models import (
     Document,
     Lead,
     Proposal,
+    QuitConOperacao,
     QuitConSolicitation,
     QuitConSolicitationDocument,
     Role,
@@ -106,11 +107,12 @@ def _compute_quota_breakdown(
         saldo_manual = _dec(raw.get("outstanding_balance") or 0)
         if parcela > 0:
             saldo = money(parcela * meses)
+            vp = engine.calcular_vp_parcelas_restantes(parcela, meses)
         elif saldo_manual > 0:
             saldo = money(saldo_manual)
+            vp = engine.calcular_valor_quitcon_vp(saldo, meses)
         else:
             continue
-        vp = engine.calcular_valor_quitcon_vp(saldo, meses)
         credit = money(_dec(raw.get("credit_at_billing") or 0))
         total_saldo += saldo
         total_vp += vp
@@ -696,10 +698,23 @@ def create_sale_from_quitcon(db: Session, user: User, item: QuitConSolicitation)
     }
 
 
+FUNDING_PIPELINE_STATUSES = frozenset({
+    "TAPAF_LIQUIDADA",
+    "EM_AUDITORIA_RISCO",
+    "AGUARDANDO_ASSINATURA",
+    "PRONTO_PARA_CARTORIO",
+    "EM_ANALISE_NO_RGI",
+    "GRAVAME_CONCLUIDO",
+    "ATIVO_OK_EM_PRODUCAO",
+    "LIBERADO_PARA_ANTECIPACAO",
+})
+
+
 def solicitation_view(
     item: QuitConSolicitation,
     docs: list[QuitConSolicitationDocument] | None = None,
     db: Session | None = None,
+    operacao: QuitConOperacao | None = None,
 ) -> dict:
     uploaded = {d.doc_type for d in (docs or [])}
     return {
@@ -730,6 +745,10 @@ def solicitation_view(
         "quitacao_vp_amount": str(money(_dec(item.quitacao_vp_amount))),
         "proposal_id": item.proposal_id,
         "quitcon_operacao_id": item.quitcon_operacao_id,
+        "operacao_code": operacao.operacao_code if operacao else None,
+        "operacao_status": operacao.status if operacao else None,
+        "operacao_tapaf_paid": bool(operacao and operacao.tapaf_paid_at),
+        "operacao_funding_pipeline": bool(operacao and operacao.status in FUNDING_PIPELINE_STATUSES),
         "required_docs": [{**d, "uploaded": d["code"] in uploaded} for d in REQUIRED_DOCS],
         "documents": [
             _document_link_view(db, d) if db else {

@@ -20,13 +20,22 @@ export type QuitConCustosEntrada = {
   total_com_servico_operacional: string;
 };
 
-export function QuitConCustosEntradaPanel({ data }: { data: QuitConCustosEntrada }) {
-  const comServico = data.itens.some((i) => i.codigo === "SERVICO_OPERACIONAL_2PCT" && i.aplicavel);
+export function QuitConCustosEntradaPanel({
+  data,
+  aberturaOnly = false,
+}: {
+  data: QuitConCustosEntrada;
+  aberturaOnly?: boolean;
+}) {
+  const itens = aberturaOnly
+    ? data.itens.filter((i) => (i as { momento?: string }).momento === "ABERTURA" || i.codigo === "TAPAF" || i.codigo === "SERVICO_OPERACIONAL_2PCT")
+    : data.itens;
+  const comServico = itens.some((i) => i.codigo === "SERVICO_OPERACIONAL_2PCT" && i.aplicavel);
   return (
     <section className="panel quitcon-custos-entrada">
-      <h3>{data.titulo}</h3>
+      <h3>{aberturaOnly ? "Custos na abertura da operação" : data.titulo}</h3>
       <div className="quitcon-custos-list">
-        {data.itens.map((item) => {
+        {itens.map((item) => {
           const opcionalInativo = item.codigo === "SERVICO_OPERACIONAL_2PCT" && !item.aplicavel;
           return (
             <article key={item.codigo} className={opcionalInativo ? "muted" : ""}>
@@ -48,7 +57,7 @@ export function QuitConCustosEntradaPanel({ data }: { data: QuitConCustosEntrada
       </div>
       <div className="finops-summary">
         <article>
-          <small>Total obrigatório (TAPAF + Escrow 10%)</small>
+          <small>{aberturaOnly ? "Total na abertura (TAPAF)" : "Total obrigatório na abertura"}</small>
           <strong>{brl.format(Number(data.total_obrigatorio_abertura))}</strong>
         </article>
         {comServico && (
