@@ -12,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.cadastro_service import _snapshot_from_lead, seed_marketplace_lifecycle
-from app.commission_attribution import apply_proposal_attribution
+from app.commission_attribution import apply_proposal_attribution, is_commercial_seller
 from app.marketplace_service import pricing_for_combo, pricing_for_quota
 from app.models import Administrator, Lead, Proposal, Quota, Role, User
 from app.quota_inventory_service import run_nina_quota_scan
@@ -268,6 +268,7 @@ def store_manual(
     quota_category_id: str | None = None,
     client_bank_administrator_ids: list[str] | None = None,
     client_problem_bank_administrator_ids: list[str] | None = None,
+    source_lead_id: str | None = None,
 ) -> dict:
     """Grava venda manual em uma operação: lead + proposta + trava 60 min."""
     person = (person_type or "PF").upper()
@@ -370,6 +371,8 @@ def store_manual(
         )
         if not partner:
             raise HTTPException(status_code=404, detail="Parceiro não encontrado.")
+    elif is_commercial_seller(user.role):
+        partner = user
 
     pricing_rows: list[dict] = []
     total_credit = Decimal("0")
@@ -437,19 +440,53 @@ def store_manual(
         "quota_ids": resolved_ids,
     }
 
-    lead = Lead(
-        organization_id=user.organization_id,
-        owner_id=partner.id if partner else user.id,
-        name=name.strip(),
-        document=doc,
-        phone=phone.strip(),
-        product_interest=PRODUCT,
-        status="PROPOSAL",
-        source=SOURCE,
-        scr_detail_json=json.dumps({"venda_direta_manual": snapshot}, ensure_ascii=False),
-    )
-    db.add(lead)
-    db.flush()
+    from app.network_visibility import get_lead_for_user
+
+    lead: Lead
+    if (source_lead_id or "").strip():
+        lead = get_lead_for_user(db, user, source_lead_id.strip())
+        open_prop = db.scalar(
+            select(Proposal)
+            .where(
+                Proposal.lead_id == lead.id,
+                Proposal.organization_id == user.organization_id,
+                Proposal.product == PRODUCT,
+                Proposal.status.in_(["DRAFT", "SUBMITTED"]),
+            )
+            .order_by(Proposal.created_at.desc())
+        )
+        if open_prop:
+            raise HTTPException(
+                status_code=409,
+                detail="Este cadastro já possui uma venda em andamento. Abra Cadastros para continuar com boleto e contrato.",
+            )
+        lead.name = name.strip()
+        lead.document = doc
+        lead.phone = phone.strip()
+        lead.product_interest = PRODUCT
+        lead.status = "PROPOSAL"
+        if lead.source not in {SOURCE, "VENDA_DIRETA_ROBO", "DIRECT", "DASHBOARD"}:
+            lead.source = SOURCE
+        detail = json.loads(lead.scr_detail_json or "{}")
+        if not isinstance(detail, dict):
+            detail = {}
+        detail["venda_direta_manual"] = snapshot
+        lead.scr_detail_json = json.dumps(detail, ensure_ascii=False)
+        db.flush()
+    else:
+        lead = Lead(
+            organization_id=user.organization_id,
+            owner_id=partner.id if partner else user.id,
+            name=name.strip(),
+            document=doc,
+            phone=phone.strip(),
+            product_interest=PRODUCT,
+            status="PROPOSAL",
+            source=SOURCE,
+            scr_detail_json=json.dumps({"venda_direta_manual": snapshot}, ensure_ascii=False),
+        )
+        db.add(lead)
+        db.flush()
 
     proposal = Proposal(
         organization_id=user.organization_id,
@@ -514,6 +551,28 @@ def store_manual(
         reservations.append(reserve_quota(db, user, quota, proposal.id, RESERVE_TTL_MINUTES))
     db.flush()
 
+    affiliate_markup = None
+    if partner:
+        from app.affiliate_markup_service import resolve_affiliate_porc_a_mais
+
+        affiliate_markup = resolve_affiliate_porc_a_mais(db, user.organization_id, partner.id, is_sdc=False)
+
+    from app.sales_direct_robo_service import _contract_snap_from_purchase, _emit_contract_and_boleto
+
+    contract_snap = _contract_snap_from_purchase(
+        db, lead, proposal, snapshot, quotas, affiliate_markup=affiliate_markup
+    )
+    docs = _emit_contract_and_boleto(db, user, lead, proposal, contract_snap)
+
+    msg_parts = [
+        f"Venda gravada ({len(resolved_ids)} cota(s)). Cotas travadas por {RESERVE_TTL_MINUTES} min.",
+        "Contrato disponível em Cadastros.",
+    ]
+    if docs.get("boleto"):
+        msg_parts.append("Boleto da entrada emitido.")
+    else:
+        msg_parts.append("Se necessário, emita o boleto em Cadastros.")
+
     return {
         "lead_id": lead.id,
         "proposal_id": proposal.id,
@@ -523,8 +582,6 @@ def store_manual(
         "reservation_ids": [r.id for r in reservations],
         "requested_amount": str(money(total_credit)),
         "entrada_final": str(money(total_entrada)),
-        "message": (
-            f"Venda manual gravada ({len(resolved_ids)} cota(s)). Trava de {RESERVE_TTL_MINUTES} min. "
-            "Finalize o cálculo e o contrato em Propostas."
-        ),
+        "message": " ".join(msg_parts),
+        **docs,
     }

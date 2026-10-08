@@ -86,6 +86,9 @@ type StoreResult = {
   requested_amount: string;
   entrada_final: string;
   message: string;
+  cadastro_path?: string | null;
+  contract_pdf_path?: string | null;
+  contract_available?: boolean;
 };
 
 export function VendaDiretaManualModule() {
@@ -233,6 +236,15 @@ export function VendaDiretaManualModule() {
     }
   }
 
+  async function ensureNinaClearedForSelection() {
+    for (const qid of quotaIds) {
+      const c = cotas.find((x) => x.quota_id === qid);
+      if (c && c.nina_scan_status !== "CLEARED") {
+        await api(`/quotas/${qid}/nina-scan`, { method: "POST" });
+      }
+    }
+  }
+
   async function submit(e: FormEvent) {
     e.preventDefault();
     setError("");
@@ -272,11 +284,10 @@ export function VendaDiretaManualModule() {
         setBusy(false);
         return;
       }
-      const data = await api<StoreResult>(
-        "/marketplace/venda-direta-manual/store",
-        {
-          method: "POST",
-          body: JSON.stringify({
+      await ensureNinaClearedForSelection();
+      const data = await api<StoreResult>("/marketplace/venda-direta-manual/store", {
+        method: "POST",
+        body: JSON.stringify({
           name,
           email,
           phone,
@@ -285,6 +296,7 @@ export function VendaDiretaManualModule() {
           quota_ids: quotaIds,
           quota_id: quotaIds[0],
           partner_user_id: partnerId || null,
+          source_lead_id: existingId || null,
           zipcode,
           street,
           number,
@@ -301,14 +313,14 @@ export function VendaDiretaManualModule() {
           quota_category_id: quotaCategoryId || null,
           client_bank_administrator_ids: clientBankAdministratorIds,
           client_problem_bank_administrator_ids: clientProblemBankAdministratorIds,
-          }),
-        },
-        { interactive: true },
-      );
+        }),
+      });
       setDone(data);
       setNotice(data.message);
       setQuotaIds([]);
-      router.push(`/modules/cadastros?open=${encodeURIComponent(data.lead_id)}`);
+      const cadastroPath =
+        data.cadastro_path || `/modules/cadastros?open=${encodeURIComponent(data.lead_id)}`;
+      router.push(cadastroPath);
       void loadCotas(category, filterAdministratorId || undefined).catch(() => undefined);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Falha ao gravar venda");
@@ -675,8 +687,8 @@ export function VendaDiretaManualModule() {
           </div>
 
           <button type="submit" className="marketplace-submit" disabled={busy || quotaIds.length === 0}>
-            <RefreshCw />
-            {busy ? "Gravando…" : "Gravar venda"}
+            <RefreshCw className={busy ? "spin" : undefined} />
+            {busy ? "Gravando venda (contrato e boleto)…" : "Gravar venda"}
           </button>
         </form>
       </section>

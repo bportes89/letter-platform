@@ -2987,6 +2987,10 @@ class VendaDiretaManualStoreRequest(BaseModel):
     quota_category_id: str | None = None
     client_bank_administrator_ids: list[str] = Field(default_factory=list)
     client_problem_bank_administrator_ids: list[str] = Field(default_factory=list)
+    source_lead_id: str | None = Field(
+        default=None,
+        description="Lead existente (atalho Cadastros) — atualiza o cadastro em vez de criar outro.",
+    )
 
 
 class VendaDiretaManualStoreResponse(BaseModel):
@@ -2999,6 +3003,12 @@ class VendaDiretaManualStoreResponse(BaseModel):
     requested_amount: str
     entrada_final: str
     message: str
+    boleto: dict | None = None
+    boleto_created: bool = False
+    contract_available: bool = False
+    cadastro_path: str | None = None
+    boleto_download_path: str | None = None
+    contract_pdf_path: str | None = None
 
 
 class MyChainCommissionView(BaseModel):

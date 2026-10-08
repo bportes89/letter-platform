@@ -463,9 +463,10 @@ export async function api<T>(path: string, options: RequestInit = {}, call?: Api
   try {
     response = await fetchWithRetry(`${API_URL}${path}`, { ...options, headers }, retryOpts);
   } catch {
+    const slowPath = path.includes("venda-direta-manual/store") || path.includes("venda-direta-robo");
     throw new Error(
-      call?.interactive
-        ? "A busca do robô demorou demais ou a API não respondeu. Aguarde 1 minuto (servidor acordando) e tente de novo."
+      call?.interactive || slowPath
+        ? "A operação demorou demais ou a API não respondeu. Aguarde 1 minuto (servidor acordando) e tente de novo."
         : "Não foi possível conectar à API LETTER. O servidor pode estar iniciando — aguarde até 1 minuto e tente novamente.",
     );
   }

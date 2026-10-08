@@ -3148,6 +3148,7 @@ def venda_direta_manual_store(
         quota_category_id=payload.quota_category_id,
         client_bank_administrator_ids=payload.client_bank_administrator_ids,
         client_problem_bank_administrator_ids=payload.client_problem_bank_administrator_ids,
+        source_lead_id=payload.source_lead_id,
     )
     audit(db, user, "marketplace.venda_direta_manual.store", "proposal", result["proposal_id"], {"quota_id": result["quota_id"]})
     db.commit()
