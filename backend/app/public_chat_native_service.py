@@ -1103,13 +1103,14 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
             return _wrap(
                 [
                     {
-                        "text": match.get("message")
-                        or "Desculpe, não encontramos nenhuma cota com esses valores! Tente mudar o crédito ou a entrada.",
+                        "text": (
+                            "Desculpe, não encontramos nenhuma cota com esses valores. "
+                            "Tente ajustar o crédito ou a entrada, ou fale com nosso time."
+                        ),
                         "options": [
                             {"name": "Ajustar crédito", "next": int(STEP_CREDIT)},
                             {"name": "Recomeçar", "next": 0},
                         ],
-                        "options_empty": "Nenhuma cota nas réguas 10%/20%/5%.",
                     }
                 ],
                 lead_id=lead.id,
@@ -1120,8 +1121,7 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
         options_item: dict[str, Any] = {
             "text": (
                 "Encontrei estas opções para você! "
-                "Até 2 pelo crédito e 2 pela entrada (régua 10% / 20% / 5% combo). "
-                "Confira os detalhes de cada carta e escolha:"
+                "Confira os detalhes de cada carta e escolha a que melhor se encaixa:"
             ),
             "options": options,
             "options_quotas": True,

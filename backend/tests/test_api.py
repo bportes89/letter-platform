@@ -881,6 +881,60 @@ def test_marketplace_esteira2_robot_band_rollover_and_markup(client, auth_header
         assert dev <= cap
 
 
+def test_marketplace_esteira2_combo_join_same_admin(client, auth_headers):
+    """Sem cota única na banda: junta cotas da mesma administradora (legado Esteira 2)."""
+    from uuid import uuid4
+
+    administrator_id = client.get("/api/v1/administrators", headers=auth_headers).json()[0]["id"]
+    suffix = uuid4().hex[:6]
+    ids: list[str] = []
+    for code, credit in (("A1", "400000"), ("A2", "400000")):
+        created = client.post(
+            "/api/v1/quotas",
+            headers=auth_headers,
+            json={
+                "administrator_id": administrator_id,
+                "group_code": f"8{suffix}",
+                "quota_code": code,
+                "category": "REAL_ESTATE",
+                "credit_value": credit,
+                "outstanding_balance": "250000",
+                "premium_value": "80000",
+            },
+        )
+        assert created.status_code == 201
+        ids.append(created.json()["id"])
+        client.patch(
+            f"/api/v1/quotas/{ids[-1]}",
+            headers=auth_headers,
+            json={"installment_due_date": "2026-09-10"},
+        )
+
+    res = client.post(
+        "/api/v1/marketplace/esteira-2/match",
+        headers=auth_headers,
+        json={
+            "monthly_income": "50000",
+            "monthly_commitment": "0",
+            "asset_value": "1500000",
+            "asset_year": 2020,
+            "target_amount": "800000",
+            "target_entrada": "160000",
+            "category": "REAL_ESTATE",
+        },
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["eligible"] is True
+    combo = next(
+        (m for m in body["credit_matches"] if len(m.get("quota_ids") or []) > 1),
+        None,
+    )
+    assert combo is not None, body
+    assert Decimal(combo["total_credit"]) == Decimal("800000")
+    assert len(combo.get("quota_ids") or []) >= 2
+
+
 def test_venda_direta_robo_search_and_confirm(client, auth_headers):
     """Wizard admin: busca Esteira 2 → confirma → lead + proposta + trava."""
     payload = {

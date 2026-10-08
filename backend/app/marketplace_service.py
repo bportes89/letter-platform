@@ -870,6 +870,8 @@ def esteira2_nina_curated_match(
     bank_ids = set(client_bank_administrator_ids or []) if client_bank_administrator_ids else None
     problem_ids = set(client_problem_bank_administrator_ids or []) if client_problem_bank_administrator_ids else None
 
+    # Não pré-filtrar cotas pela banda individual: junções usam cotas que sozinhas
+    # ficam fora da régua de crédito/entrada (legado: cotas únicas primeiro, depois combos).
     pool = _rank_alternatives(
         db,
         user,
@@ -889,7 +891,7 @@ def esteira2_nina_curated_match(
         as_of=as_of,
         affiliate_markup=affiliate_markup,
         max_combo_size=3,
-        prefilter_band=True,
+        prefilter_band=False,
         require_nina_cleared=True,
         quota_category_ids=category_ids,
         client_bank_administrator_ids=bank_ids,
@@ -901,10 +903,16 @@ def esteira2_nina_curated_match(
     def _display(row: dict) -> dict:
         return enrich_match_row_display(db, user.organization_id, row, category=category)
 
+    def _is_combo_row(row: dict) -> bool:
+        return bool(row.get("is_combo")) or len(row.get("quota_ids") or []) > 1
+
     credit_lane: list[dict] = []
     credit_pool = [x for x in pool if x.get("matches_credit_band")]
-    for item in sorted(credit_pool, key=lambda x: (Decimal(x["deviation_percent"]), -x["score"])):
-        is_combo = bool(item.get("is_combo")) or len(item.get("quota_ids") or []) > 1
+    for item in sorted(
+        credit_pool,
+        key=lambda x: (_is_combo_row(x), Decimal(x["deviation_percent"]), -x["score"]),
+    ):
+        is_combo = _is_combo_row(item)
         credit_cap = ESTEIRA2_COMBO_BAND_PERCENT if is_combo else ESTEIRA2_CREDIT_BAND_PERCENT
         if Decimal(item["deviation_percent"]) > credit_cap:
             continue
@@ -923,7 +931,7 @@ def esteira2_nina_curated_match(
             and Decimal(x["entrada_deviation_percent"]) <= ESTEIRA2_ENTRADA_BAND_PERCENT
             and tuple(x["quota_ids"]) not in credit_keys
         ],
-        key=lambda x: (Decimal(x["entrada_deviation_percent"]), -x["score"]),
+        key=lambda x: (_is_combo_row(x), Decimal(x["entrada_deviation_percent"]), -x["score"]),
     )
     for item in ranked_entrada:
         entrada_lane.append({**_display(item), "lane": "ENTRADA"})
