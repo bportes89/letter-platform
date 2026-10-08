@@ -881,6 +881,27 @@ def test_marketplace_esteira2_robot_band_rollover_and_markup(client, auth_header
         assert dev <= cap
 
 
+def test_marketplace_esteira2_credit_cannot_exceed_asset(client, auth_headers):
+    res = client.post(
+        "/api/v1/marketplace/esteira-2/match",
+        headers=auth_headers,
+        json={
+            "monthly_income": "50000",
+            "monthly_commitment": "0",
+            "asset_value": "150000",
+            "asset_year": 2020,
+            "target_amount": "200000",
+            "target_entrada": "30000",
+            "category": "REAL_ESTATE",
+        },
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["eligible"] is False
+    assert body["blockers"]
+    assert "não pode ser maior" in body["blockers"][0].lower()
+
+
 def test_marketplace_esteira2_combo_join_same_admin(client, auth_headers):
     """Sem cota única na banda: junta cotas da mesma administradora (legado Esteira 2)."""
     from uuid import uuid4

@@ -249,6 +249,7 @@ def admin_profile_blockers(
     asset_value: Decimal,
     target_amount: Decimal | None = None,
     combo_size: int = 1,
+    marketplace_income_rule: bool = False,
 ) -> list[str]:
     """Bloqueios a partir de rules_json (painel + approval_rules Bacen sincronizadas)."""
     blockers: list[str] = []
@@ -303,8 +304,8 @@ def admin_profile_blockers(
 
     ratio = Decimal(str(rules.get("min_income_to_installment_ratio") or DEFAULT_INCOME_RATIO))
     approval = rules.get("approval_rules") if isinstance(rules.get("approval_rules"), dict) else {}
-    # Bacen sync: margem de renda em approval_rules.min_income_margin (ex.: 0.30 = 30%)
-    if approval.get("min_income_margin") is not None:
+    # Marketplace / robô legado: renda ≥ N× parcela (padrão 3). Não empilhar margem Bacen (Flash/SDC).
+    if not marketplace_income_rule and approval.get("min_income_margin") is not None:
         try:
             margin = Decimal(str(approval["min_income_margin"]))
             if margin > 0:
@@ -390,6 +391,7 @@ def _eligible_combo_candidate(
         asset_value=asset_value,
         target_amount=target_amount,
         combo_size=len(quotas),
+        marketplace_income_rule=True,
     )
     for q in quotas:
         from app.administrator_marketplace_profile import alienation_blockers
@@ -656,6 +658,7 @@ def esteira1_partner_select(
         monthly_income=monthly_income,
         asset_value=asset_value,
         combo_size=1,
+        marketplace_income_rule=True,
     )
 
     eligible = len(blockers) == 0
@@ -756,6 +759,7 @@ def esteira1_partner_select_combo(
         monthly_income=monthly_income,
         asset_value=asset_value,
         combo_size=len(quotas),
+        marketplace_income_rule=True,
     )
     blockers = list(dict.fromkeys([*blockers, *profile_blockers]))
     eligible = len(blockers) == 0
@@ -840,17 +844,19 @@ def esteira2_nina_curated_match(
             "message": "Perfil incompleto para matching.",
         }
     if target_amount > asset_value:
+        blocker = (
+            f"O crédito desejado (R$ {money(target_amount)}) não pode ser maior que o valor do bem "
+            f"(R$ {money(asset_value)}). Ajuste o crédito ou o valor de avaliação do bem."
+        )
         return {
             "esteira": "NINA_CURATED",
             "eligible": False,
-            "blockers": [
-                f"Crédito alvo (R$ {money(target_amount)}) excede o valor do bem (R$ {money(asset_value)})."
-            ],
+            "blockers": [blocker],
             "matches": [],
             "credit_matches": [],
             "entrada_matches": [],
             "band_percent": str(ESTEIRA2_BAND_PERCENT),
-            "message": "Perfil do cliente não permite matching automático. Ajuste renda, bem ou valor alvo.",
+            "message": blocker,
         }
     if target_entrada is None or target_entrada <= 0:
         return {

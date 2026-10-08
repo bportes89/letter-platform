@@ -121,6 +121,7 @@ def combo_client_profile_blockers(
         monthly_income=monthly_income,
         asset_value=asset_value,
         combo_size=len(quotas),
+        marketplace_income_rule=True,
     )
     for quota in quotas:
         blockers.extend(

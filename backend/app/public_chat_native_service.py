@@ -187,6 +187,20 @@ def _brl(value: Decimal | str | float | int) -> str:
     return f"R$ {formatted}"
 
 
+def _esteira2_empty_chat_message(match: dict) -> str:
+    for text in match.get("blockers") or []:
+        stripped = str(text).strip()
+        if stripped:
+            return stripped
+    legacy = (match.get("message") or "").strip()
+    if legacy:
+        return legacy
+    return (
+        "Desculpe, não encontramos nenhuma cota com esses valores. "
+        "Tente ajustar o crédito ou a entrada, ou fale com nosso time."
+    )
+
+
 def _digits(value: str | None) -> str:
     return re.sub(r"\D", "", value or "")
 
@@ -1103,10 +1117,7 @@ def handle_step(db: Session, step: str, payload: dict | None) -> dict:
             return _wrap(
                 [
                     {
-                        "text": (
-                            "Desculpe, não encontramos nenhuma cota com esses valores. "
-                            "Tente ajustar o crédito ou a entrada, ou fale com nosso time."
-                        ),
+                        "text": _esteira2_empty_chat_message(match),
                         "options": [
                             {"name": "Ajustar crédito", "next": int(STEP_CREDIT)},
                             {"name": "Recomeçar", "next": 0},

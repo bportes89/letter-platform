@@ -45,7 +45,7 @@ Resposta: `matches`, `credit_matches`, `entrada_matches`, `band_percent`.
 | Categorias aceitas | `allowed_categories` |
 | Nome sujo / SPC | `accepts_dirty_name` + `approval_rules.scr_clear_required` |
 | Zero km | `accepts_zero_km` |
-| Renda × parcela | `min_income_to_installment_ratio` / `approval_rules.min_income_margin` |
+| Renda × parcela | Marketplace: `min_income_to_installment_ratio` (padrão **3× parcela**). Margem Bacen só em produtos fiduciários (Flash/SDC). |
 | Lastro | crédito alvo ≤ valor do bem |
 | Teto de crédito / combo | `credit_utilization_rules` |
 | Banda 5% / lanes / rollover / markup | motor Esteira 2 |
