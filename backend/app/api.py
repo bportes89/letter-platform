@@ -64,6 +64,7 @@ from app.schemas import (
     AdHocChargeView, StandaloneChargeCreate, StandaloneChargePaymentWebhook,
     ManualInvestmentCreate, ManualRentabilityCreate, MutuoAcceptSignRequest, MutuoContractCreate, MutuoInterestPostRequest, RentabilityCreditView,
     PaymentReceiptView, PreAnalysisEngineRequest, PreAnalysisPautaView, PreAnalysisProposalRequest,
+    PreAnalysisSdcDeskContextView,
     PreAnalysisTapafCheckoutAcceptRequest, PreAnalysisTapafPaymentWebhook, PreAnalysisValidateDocumentsRequest,
     LeaseEquityPautaCreate, LeaseEquityPautaView, LeaseEquityTapafCheckoutAcceptRequest,
     LeaseEquityTapafWebhook, LeaseEquityInspectionRequest,
@@ -5323,6 +5324,18 @@ def pre_analysis_run_engine(payload: PreAnalysisEngineRequest, user: User = Depe
     audit(db, user, "finops.pre_analysis.run_engine", "pre_analysis_pauta", pauta.id, {"status_core": result.get("status_core")})
     db.commit()
     return {"pauta_id": pauta.pauta_code, "status": pauta.status, "result": result}
+
+
+@router.get("/finops/pre-analysis/sdc-desk-context", response_model=PreAnalysisSdcDeskContextView)
+def pre_analysis_sdc_desk_context(
+    proposal_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.pre_analysis_service import sdc_desk_context_for_proposal
+
+    proposal = _load_proposal(db, user, proposal_id)
+    return PreAnalysisSdcDeskContextView(**sdc_desk_context_for_proposal(db, user, proposal))
 
 
 @router.get("/finops/pre-analysis/{proposal_id}", response_model=PreAnalysisPautaView)

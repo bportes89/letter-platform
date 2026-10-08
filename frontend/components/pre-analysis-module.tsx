@@ -1,6 +1,7 @@
 "use client";
 
 import { AlertCircle, CheckCircle2, FileSearch, HelpCircle, ScrollText } from "lucide-react";
+import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { api, Proposal } from "@/lib/api";
 import { ValidStamp } from "@/components/valid-stamp";
@@ -72,7 +73,8 @@ export function PreAnalysisModule({ variant = "sdc" }: { variant?: "sdc" | "flas
     : {
         eyebrow: "SDC — ESTRUTURA INTERNA",
         title: "SDC — TAPAF, LTV e Valid-Stamp",
-        subtitle: "Puxa automaticamente a proposta SDC: valida lastro (LTV), cobra TAPAF R$ 1.500,00 e emite selo Valid-Stamp após auditoria de renda.",
+        subtitle:
+          "Uso interno LETTER: depois que o parceiro transmite o checklist na mesa SDC, selecione a proposta aqui e valide a documentação (Fase 1) antes da TAPAF e do Valid-Stamp.",
       };
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [proposalId, setProposalId] = useState("");
@@ -89,6 +91,23 @@ export function PreAnalysisModule({ variant = "sdc" }: { variant?: "sdc" | "flas
   const [apiReady, setApiReady] = useState<boolean | null>(null);
   const [settlement, setSettlement] = useState<TapafSettlement | null>(null);
   const [assetType, setAssetType] = useState<"REAL_ESTATE" | "VEHICLE">("REAL_ESTATE");
+  type DocDraftRow = { present: boolean; dpi: number; illegible: boolean; rasurado: boolean; filename: string };
+  const emptyDocDraft = (): Record<string, DocDraftRow> =>
+    Object.fromEntries(
+      DOC_CODES.map(({ code }) => [code, { present: false, dpi: 300, illegible: false, rasurado: false, filename: "" }]),
+    );
+  const [docDraft, setDocDraft] = useState<Record<string, DocDraftRow>>(emptyDocDraft);
+  type SdcDeskContext = {
+    linked: boolean;
+    workflow_hint: string;
+    solicitation_id?: string | null;
+    contact_name?: string | null;
+    status_label?: string | null;
+    partner_documentation_submitted?: boolean | null;
+    uploaded_count?: number | null;
+    prefill?: { code: string; label: string; present: boolean; filename?: string | null }[] | null;
+  };
+  const [sdcContext, setSdcContext] = useState<SdcDeskContext | null>(null);
 
   const evaluateManifestScroll = useCallback(() => {
     const el = manifestRef.current;
@@ -165,19 +184,63 @@ export function PreAnalysisModule({ variant = "sdc" }: { variant?: "sdc" | "flas
 
   useEffect(() => { void loadPauta(proposalId); }, [proposalId]);
 
+  useEffect(() => {
+    if (!proposalId || variant !== "sdc") {
+      setSdcContext(null);
+      return;
+    }
+    api<SdcDeskContext>(`/finops/pre-analysis/sdc-desk-context?proposal_id=${encodeURIComponent(proposalId)}`)
+      .then(setSdcContext)
+      .catch(() => setSdcContext(null));
+  }, [proposalId, variant]);
+
+  useEffect(() => {
+    if (!pauta?.documents || typeof pauta.documents !== "object" || !("submitted" in pauta.documents)) return;
+    const submitted = (pauta.documents as { submitted?: Array<Record<string, unknown>> }).submitted;
+    if (!Array.isArray(submitted) || !submitted.length) return;
+    const next = emptyDocDraft();
+    for (const row of submitted) {
+      const code = String(row.code || "");
+      if (!next[code]) continue;
+      next[code] = {
+        present: Boolean(row.present),
+        dpi: Number(row.dpi || 300),
+        illegible: Boolean(row.illegible),
+        rasurado: Boolean(row.rasurado),
+        filename: String(row.filename || ""),
+      };
+    }
+    setDocDraft(next);
+  }, [pauta?.id, pauta?.documents]);
+
+  function applySdcPrefill() {
+    if (!sdcContext?.prefill?.length) return;
+    setDocDraft((prev) => {
+      const next = { ...prev };
+      for (const row of sdcContext.prefill!) {
+        if (!next[row.code]) continue;
+        next[row.code] = {
+          ...next[row.code],
+          present: row.present,
+          filename: row.filename || next[row.code].filename,
+        };
+      }
+      return next;
+    });
+    setMessage("Checklist pré-preenchido com os anexos transmitidos pelo parceiro na mesa SDC — revise DPI e ilegibilidade antes de validar.");
+  }
+
   const onManifestScroll = () => evaluateManifestScroll();
 
   async function validateDocs(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    const form = e.currentTarget;
-    const f = new FormData(form);
     const documents = DOC_CODES.map(({ code }) => ({
       code,
-      filename: String(f.get(`${code}_file`) || `${code}.pdf`),
-      dpi: Number(f.get(`${code}_dpi`) || 300),
-      present: f.get(`${code}_present`) === "on",
-      illegible: f.get(`${code}_illegible`) === "on",
-      rasurado: f.get(`${code}_rasurado`) === "on",
+      filename: docDraft[code]?.filename || `${code}.pdf`,
+      dpi: Number(docDraft[code]?.dpi || 300),
+      present: Boolean(docDraft[code]?.present),
+      illegible: Boolean(docDraft[code]?.illegible),
+      rasurado: Boolean(docDraft[code]?.rasurado),
     }));
     try {
       const result = await api<Pauta>("/finops/pre-analysis/validate-documents", {
@@ -337,24 +400,97 @@ export function PreAnalysisModule({ variant = "sdc" }: { variant?: "sdc" | "flas
       )}
 
       <section className="panel">
-        <h2>Fase 1 — Upload e triagem OCR</h2>
-        <select value={proposalId} onChange={(e) => setProposalId(e.target.value)} required>
-          <option value="">Selecione a proposta</option>
-          {proposals.map((p) => <option key={p.id} value={p.id}>{p.product} · {brl.format(Number(p.requested_amount))}</option>)}
+        <h2>Fase 1 — Triagem e validação (operação LETTER)</h2>
+        {variant === "sdc" && (
+          <div className="notice" style={{ marginBottom: 12 }}>
+            <HelpCircle />
+            <div style={{ fontSize: 12, lineHeight: 1.5 }}>
+              <b>Sim.</b> Esta fase é para a matriz, depois que o parceiro anexou e <b>transmitiu</b> o checklist completo na{" "}
+              <Link href="/modules/sdc">mesa SDC — Capital de Giro</Link> (status «Em análise»). Aqui você confere qualidade
+              (DPI, ilegível, rasurado) e libera a esteira TAPAF / Valid-Stamp — o parceiro não usa esta tela.
+            </div>
+          </div>
+        )}
+        <select value={proposalId} onChange={(e) => { setProposalId(e.target.value); setDocDraft(emptyDocDraft()); }} required>
+          <option value="">Selecione a proposta SDC</option>
+          {proposals.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.lead_name ? `${p.lead_name} · ` : ""}
+              {brl.format(Number(p.requested_amount))}
+            </option>
+          ))}
         </select>
+        {variant === "sdc" && sdcContext?.linked && (
+          <p className="form-help" style={{ marginTop: 8 }}>
+            Mesa SDC: <b>{sdcContext.contact_name}</b> · {sdcContext.status_label}
+            {sdcContext.partner_documentation_submitted
+              ? ` · ${sdcContext.uploaded_count ?? 0} anexo(s) no pacote do parceiro`
+              : " · aguardando transmissão do parceiro"}
+          </p>
+        )}
+        {variant === "sdc" && sdcContext && !sdcContext.linked && proposalId && (
+          <p className="muted" style={{ fontSize: 11, marginTop: 8 }}>
+            Nenhuma solicitação SDC vinculada a esta proposta — confira se a venda/TAPAF já gerou o vínculo na mesa comercial.
+          </p>
+        )}
         {pauta && (
           <p className="form-help">Pauta <b>{pauta.pauta_code}</b> · status <span className="pill">{pauta.status}</span></p>
+        )}
+        {variant === "sdc" && sdcContext?.linked && sdcContext.partner_documentation_submitted && (
+          <button type="button" className="table-action" style={{ marginBottom: 10 }} onClick={applySdcPrefill}>
+            Carregar anexos do parceiro (mesa SDC)
+          </button>
         )}
         <form className="stack-form doc-check-grid" onSubmit={validateDocs}>
           {DOC_CODES.map(({ code, label }) => (
             <fieldset key={code} className="doc-check-card">
               <legend>{label}</legend>
               <div className="doc-check-row">
-                <label><input type="checkbox" name={`${code}_present`} defaultChecked /> Documento presente</label>
-                <label>DPI <input name={`${code}_dpi`} type="number" min="72" defaultValue="300" /></label>
-                <label><input type="checkbox" name={`${code}_illegible`} /> Ilegível</label>
-                <label><input type="checkbox" name={`${code}_rasurado`} /> Rasurado</label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={docDraft[code]?.present ?? false}
+                    onChange={(e) =>
+                      setDocDraft((d) => ({ ...d, [code]: { ...d[code], present: e.target.checked } }))
+                    }
+                  />
+                  Documento presente
+                </label>
+                <label>
+                  DPI{" "}
+                  <input
+                    type="number"
+                    min="72"
+                    value={docDraft[code]?.dpi ?? 300}
+                    onChange={(e) =>
+                      setDocDraft((d) => ({ ...d, [code]: { ...d[code], dpi: Number(e.target.value) || 300 } }))
+                    }
+                  />
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={docDraft[code]?.illegible ?? false}
+                    onChange={(e) =>
+                      setDocDraft((d) => ({ ...d, [code]: { ...d[code], illegible: e.target.checked } }))
+                    }
+                  />
+                  Ilegível
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={docDraft[code]?.rasurado ?? false}
+                    onChange={(e) =>
+                      setDocDraft((d) => ({ ...d, [code]: { ...d[code], rasurado: e.target.checked } }))
+                    }
+                  />
+                  Rasurado
+                </label>
               </div>
+              {docDraft[code]?.filename && (
+                <small className="muted" style={{ display: "block", marginTop: 6 }}>Arquivo mesa: {docDraft[code].filename}</small>
+              )}
             </fieldset>
           ))}
           <button disabled={!proposalId}>Validar documentação (OCR sandbox)</button>

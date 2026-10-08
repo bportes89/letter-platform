@@ -2164,7 +2164,10 @@ export function SdcDeskModule() {
             <div>
               <span className="eyebrow dark">INTERNO</span>
               <h2 style={{ fontSize: 18, margin: "6px 0" }}>Esteira TAPAF / Valid-Stamp</h2>
-              <p className="muted">Compliance pós-proposta — não faz parte da mesa comercial do parceiro.</p>
+              <p className="muted">
+                Após o parceiro transmitir o checklist na mesa acima, a operação LETTER valida o pacote na Fase 1 (triagem OCR)
+                e segue TAPAF / Valid-Stamp — o parceiro não acessa esta seção.
+              </p>
             </div>
           </div>
           <PreAnalysisModule />

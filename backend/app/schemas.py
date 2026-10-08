@@ -3511,6 +3511,25 @@ class PreAnalysisEngineRequest(BaseModel):
     vehicle: dict | None = None
 
 
+class PreAnalysisSdcDeskPrefillItem(BaseModel):
+    code: str
+    label: str
+    present: bool
+    filename: str | None = None
+
+
+class PreAnalysisSdcDeskContextView(BaseModel):
+    linked: bool
+    workflow_hint: str
+    solicitation_id: str | None = None
+    contact_name: str | None = None
+    status: str | None = None
+    status_label: str | None = None
+    partner_documentation_submitted: bool | None = None
+    uploaded_count: int | None = None
+    prefill: list[PreAnalysisSdcDeskPrefillItem] | None = None
+
+
 class PreAnalysisPautaView(BaseModel):
     id: str
     proposal_id: str

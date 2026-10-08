@@ -14,7 +14,8 @@ from app.administrator_service import homologated_codes, rules_for_administrator
 from app.flash_valid_lss_service import issue_stamp
 from app.company_profile_service import company_profile
 from app.infra_http import digits
-from app.models import PreAnalysisPauta, Proposal, User
+from app.models import Document, PreAnalysisPauta, Proposal, SdcSolicitation, SdcSolicitationDocument, User
+from app.sdc_desk_service import STATUS_LABELS as SDC_STATUS_LABELS
 from app.pre_analysis_constants import (
     DOCUMENT_LABELS,
     REQUIRED_DOCUMENT_CODES,
@@ -771,6 +772,102 @@ def run_engine_phase3(
         pauta.status = "REPROVED"
 
     return client_result
+
+
+def _find_sdc_solicitation_for_proposal(db: Session, organization_id: str, proposal: Proposal) -> SdcSolicitation | None:
+    item = db.scalar(
+        select(SdcSolicitation).where(
+            SdcSolicitation.organization_id == organization_id,
+            SdcSolicitation.proposal_id == proposal.id,
+        )
+    )
+    if item:
+        return item
+    try:
+        terms = json.loads(proposal.terms_json or "{}")
+    except (TypeError, ValueError):
+        terms = {}
+    sid = terms.get("sdc_solicitation_id") if isinstance(terms, dict) else None
+    if not sid:
+        return None
+    return db.scalar(
+        select(SdcSolicitation).where(
+            SdcSolicitation.id == str(sid),
+            SdcSolicitation.organization_id == organization_id,
+        )
+    )
+
+
+def _desk_uploaded_codes(db: Session, solicitation_id: str) -> dict[str, str]:
+    rows = db.scalars(
+        select(SdcSolicitationDocument).where(SdcSolicitationDocument.solicitation_id == solicitation_id)
+    ).all()
+    out: dict[str, str] = {}
+    for row in rows:
+        doc = db.get(Document, row.document_id)
+        out[str(row.doc_type).upper()] = (doc.filename if doc else None) or row.doc_type
+    return out
+
+
+def _pre_analysis_doc_present_from_desk(code: str, uploaded: dict[str, str]) -> tuple[bool, str | None]:
+    keys = set(uploaded.keys())
+    if code == "EXTRATO_BANCARIO_6M":
+        for k, name in uploaded.items():
+            if "RENDA" in k or "EXTRATO" in k:
+                return True, name
+    if code == "PGDAS_DRE":
+        if "COMPROVANTE_RENDA" in keys:
+            return True, uploaded["COMPROVANTE_RENDA"]
+    if code == "DECORE_CRC":
+        if "COMPROVANTE_RENDA" in keys:
+            return True, uploaded["COMPROVANTE_RENDA"]
+    if code == "MATRICULA_OU_CRLV":
+        for key in ("MATRICULA_ENOTARIADO", "MATRICULA_CCIR", "CRLV"):
+            if key in keys:
+                return True, uploaded[key]
+    if code == "LAUDO_AVM" and "LAUDO_AVALIACAO" in keys:
+        return True, uploaded["LAUDO_AVALIACAO"]
+    return False, None
+
+
+def sdc_desk_context_for_proposal(db: Session, user: User, proposal: Proposal) -> dict:
+    item = _find_sdc_solicitation_for_proposal(db, user.organization_id, proposal)
+    if not item:
+        return {
+            "linked": False,
+            "workflow_hint": (
+                "Selecione a proposta SDC vinculada à solicitação na mesa comercial. "
+                "A Fase 1 é para a operação LETTER validar o pacote depois que o parceiro transmitir o checklist."
+            ),
+        }
+    uploaded = _desk_uploaded_codes(db, item.id)
+    partner_submitted = item.status not in {"AWAITING_DOCS"}
+    prefill = []
+    for code in REQUIRED_DOCUMENT_CODES:
+        present, filename = _pre_analysis_doc_present_from_desk(code, uploaded)
+        prefill.append(
+            {
+                "code": code,
+                "label": DOCUMENT_LABELS[code],
+                "present": present,
+                "filename": filename,
+            }
+        )
+    return {
+        "linked": True,
+        "solicitation_id": item.id,
+        "contact_name": item.contact_name,
+        "status": item.status,
+        "status_label": SDC_STATUS_LABELS.get(item.status, item.status),
+        "partner_documentation_submitted": partner_submitted,
+        "uploaded_count": len(uploaded),
+        "prefill": prefill,
+        "workflow_hint": (
+            "Sim — use esta tela depois que o parceiro transmitir a documentação na mesa "
+            "SDC — Capital de Giro (status «Em análise»). Confira os arquivos anexados, marque DPI/ilegível "
+            "se necessário e valide para liberar TAPAF e Valid-Stamp."
+        ),
+    }
 
 
 def pauta_view(item: PreAnalysisPauta) -> dict:

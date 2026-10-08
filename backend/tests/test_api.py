@@ -4147,6 +4147,20 @@ def test_tapaf_inter_webhook_after_checkout(client, auth_headers, monkeypatch):
     assert pauta.json()["status"] == "TAPAF_PAID"
 
 
+def test_pre_analysis_sdc_desk_context(client, auth_headers):
+    lead = client.get("/api/v1/leads", headers=auth_headers).json()[0]
+    proposal = client.post("/api/v1/proposals", headers=auth_headers, json={
+        "lead_id": lead["id"], "product": "SDC", "requested_amount": "150000", "terms": {},
+    }).json()
+    unlinked = client.get(
+        f"/api/v1/finops/pre-analysis/sdc-desk-context?proposal_id={proposal['id']}",
+        headers=auth_headers,
+    )
+    assert unlinked.status_code == 200
+    assert unlinked.json()["linked"] is False
+    assert "parceiro" in unlinked.json()["workflow_hint"].lower()
+
+
 def test_pre_analysis_v6_documents_tapaf_and_engine(client, auth_headers):
     lead = client.get("/api/v1/leads", headers=auth_headers).json()[0]
     proposal = client.post("/api/v1/proposals", headers=auth_headers, json={
