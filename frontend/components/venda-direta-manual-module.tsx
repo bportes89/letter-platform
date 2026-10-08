@@ -2,6 +2,7 @@
 
 import { CheckCircle2, FilePenLine, RefreshCw, Search } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { CurrencyInput } from "@/components/currency-input";
@@ -88,6 +89,7 @@ type StoreResult = {
 };
 
 export function VendaDiretaManualModule() {
+  const router = useRouter();
   const [category, setCategory] = useState("REAL_ESTATE");
   const [filterCredit, setFilterCredit] = useState("");
   const [filterEntrada, setFilterEntrada] = useState("");
@@ -214,16 +216,21 @@ export function VendaDiretaManualModule() {
     if (entrada) setFilterEntrada(String(entrada));
   }
 
-  function applyCadastro(id: string) {
+  async function applyCadastro(id: string) {
     setExistingId(id);
     if (!id) return;
     setError("");
-    const row = cadastros.find((x) => x.lead_id === id);
-    if (!row) {
-      setError("Cadastro não encontrado na lista. Atualize a página.");
-      return;
+    try {
+      const detail = await api<CadastroDetail>(`/marketplace/cadastros/${id}`);
+      fillCadastroFromRow(detail);
+    } catch {
+      const row = cadastros.find((x) => x.lead_id === id);
+      if (!row) {
+        setError("Cadastro não encontrado na lista. Atualize a página.");
+        return;
+      }
+      fillCadastroFromRow(row);
     }
-    fillCadastroFromRow(row);
   }
 
   async function submit(e: FormEvent) {
@@ -301,6 +308,7 @@ export function VendaDiretaManualModule() {
       setDone(data);
       setNotice(data.message);
       setQuotaIds([]);
+      router.push(`/modules/cadastros?open=${encodeURIComponent(data.lead_id)}`);
       void loadCotas(category, filterAdministratorId || undefined).catch(() => undefined);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Falha ao gravar venda");
@@ -369,8 +377,8 @@ export function VendaDiretaManualModule() {
           <span className="eyebrow dark">VENDAS</span>
           <h1>Venda Direta — Manual</h1>
           <p>
-            Admin escolhe a(s) cota(s) no inventário e grava a venda (WhatsApp, ligação, reunião). Mesmas regras Bacen
-            da Venda Direta Robô (renda × parcela, SCR, idade do bem, lastro). Entrada já considera markup do fornecedor.
+            Escolha a(s) cota(s) e os dados do cliente para gravar a venda. Após salvar, finalize boleto e contrato em
+            Cadastros.
           </p>
         </div>
         <div className="operational-icon">
@@ -381,9 +389,8 @@ export function VendaDiretaManualModule() {
       <section className="panel operational-panel">
         <div className="notice">
           <FilePenLine />
-          Para combinação automática use{" "}
-          <Link href="/modules/venda-direta-robo">Venda Direta Robô</Link>. Após gravar, finalize em{" "}
-          <Link href="/modules/proposals">Propostas</Link>.
+          Para combinação automática use <Link href="/modules/venda-direta-robo">Venda Direta Robô</Link>. Após gravar,
+          você será direcionado a <b>Cadastros</b> para boleto e contrato.
         </div>
 
         {notice && (
@@ -396,9 +403,11 @@ export function VendaDiretaManualModule() {
 
         {done && (
           <div className="notice" style={{ marginBottom: "1rem" }}>
-            Proposta <code>{done.proposal_id}</code> · crédito {brl.format(Number(done.requested_amount))} · entrada{" "}
+            Venda gravada · crédito {brl.format(Number(done.requested_amount))} · entrada{" "}
             {brl.format(Number(done.entrada_final))} ·{" "}
-            <Link href="/modules/proposals">Ir para Propostas</Link>
+            <Link href={`/modules/cadastros?open=${encodeURIComponent(done.lead_id)}`}>
+              Abrir Cadastros — contrato e boleto
+            </Link>
           </div>
         )}
 
@@ -573,7 +582,12 @@ export function VendaDiretaManualModule() {
           <div className="marketplace-form-row">
             <label className="marketplace-field marketplace-field-wide">
               Cadastro existente (atalho)
-              <select value={existingId} onChange={(e) => applyCadastro(e.target.value)}>
+              <select
+                value={existingId}
+                onChange={(e) => {
+                  void applyCadastro(e.target.value);
+                }}
+              >
                 <option value="">Novo cliente</option>
                 {cadastros.map((c) => (
                   <option key={c.lead_id} value={c.lead_id}>

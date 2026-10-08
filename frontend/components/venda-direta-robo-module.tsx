@@ -2,6 +2,7 @@
 
 import { Bot, CheckCircle2, RefreshCw, WalletCards } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { api, downloadApi } from "@/lib/api";
 import { CurrencyInput } from "@/components/currency-input";
@@ -87,7 +88,27 @@ type ConfirmResult = {
   contract_pdf_path?: string | null;
 };
 
+type CadastroShortcut = {
+  lead_id: string;
+  label: string;
+  name: string;
+  email: string | null;
+  phone: string;
+  document: string | null;
+  person_type: string;
+  address: Record<string, string>;
+  monthly_income?: string | null;
+  asset_value?: string | null;
+  asset_year?: number | null;
+  target_amount?: string | null;
+  target_entrada?: string | null;
+  category?: string | null;
+  has_credit_restriction?: boolean | null;
+  asset_is_zero_km?: boolean | null;
+};
+
 export function VendaDiretaRoboModule() {
+  const router = useRouter();
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -114,24 +135,6 @@ export function VendaDiretaRoboModule() {
   const [income, setIncome] = useState("");
   const [assetValue, setAssetValue] = useState("");
   const [assetYear, setAssetYear] = useState("");
-  type CadastroShortcut = {
-    lead_id: string;
-    label: string;
-    name: string;
-    email: string | null;
-    phone: string;
-    document: string | null;
-    person_type: string;
-    address: Record<string, string>;
-    monthly_income?: string | null;
-    asset_value?: string | null;
-    asset_year?: number | null;
-    target_amount?: string | null;
-    target_entrada?: string | null;
-    category?: string | null;
-    has_credit_restriction?: boolean | null;
-    asset_is_zero_km?: boolean | null;
-  };
   const [cadastros, setCadastros] = useState<CadastroShortcut[]>([]);
   const [existingId, setExistingId] = useState("");
   type PartnerOption = { id: string; name: string; role: string; email: string | null };
@@ -191,24 +194,20 @@ export function VendaDiretaRoboModule() {
     void loadCadastros();
   }, [loadCadastros]);
 
-  function applyCadastro(id: string) {
-    setExistingId(id);
-    if (!id) return;
-    const row = cadastros.find((x) => x.lead_id === id);
-    if (!row) return;
-    setError("");
+  function fillFromCadastroRow(row: CadastroShortcut) {
     setName(row.name || "");
     setEmail(row.email || "");
     setPhone(row.phone || "");
     const pt = row.person_type || "PF";
     setPersonType(pt);
     setDocument(formatDocumentDigits(row.document, pt));
-    setZipcode(row.address?.zipcode || "");
-    setStreet(row.address?.street || "");
-    setNumber(row.address?.number || "");
-    setNeighborhood(row.address?.neighborhood || "");
-    setCity(row.address?.city || "");
-    setUf(row.address?.uf || "");
+    const addr = row.address || {};
+    setZipcode(addr.zipcode || "");
+    setStreet(addr.street || "");
+    setNumber(addr.number || "");
+    setNeighborhood(addr.neighborhood || "");
+    setCity(addr.city || "");
+    setUf(addr.uf || "");
     if (row.target_amount) setTargetAmount(String(row.target_amount));
     if (row.target_entrada) setTargetEntrada(String(row.target_entrada));
     if (row.monthly_income) setIncome(String(row.monthly_income));
@@ -217,6 +216,20 @@ export function VendaDiretaRoboModule() {
     if (row.category) setCategory(row.category);
     if (row.has_credit_restriction != null) setDirty(!!row.has_credit_restriction);
     if (row.asset_is_zero_km != null) setZeroKm(!!row.asset_is_zero_km);
+  }
+
+  async function applyCadastro(id: string) {
+    setExistingId(id);
+    if (!id) return;
+    setError("");
+    try {
+      const detail = await api<CadastroShortcut>(`/marketplace/cadastros/${id}`);
+      fillFromCadastroRow(detail);
+    } catch {
+      const row = cadastros.find((x) => x.lead_id === id);
+      if (row) fillFromCadastroRow(row);
+      else setError("Não foi possível carregar o cadastro selecionado.");
+    }
   }
 
   async function onCepBlur() {
@@ -351,6 +364,7 @@ export function VendaDiretaRoboModule() {
       setConfirmed(data);
       setNotice(data.message);
       setStep(3);
+      router.push(`/modules/cadastros?open=${encodeURIComponent(data.lead_id)}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Falha ao confirmar cota");
     } finally {
@@ -391,9 +405,8 @@ export function VendaDiretaRoboModule() {
       <section className="panel operational-panel">
         <div className="notice">
           <WalletCards />
-          Mesmo motor do Marketplace Esteira 2. Cadastre cotas em{" "}
-          <Link href="/modules/inventory">Inventário</Link>. Após confirmar, finalize em{" "}
-          <Link href="/modules/proposals">Propostas</Link>.
+          Após escolher a cota, você será direcionado a <b>Cadastros</b> para emitir boleto, contrato e concluir o
+          cadastro do cliente no escritório virtual.
         </div>
 
         <div className="marketplace-tabs" style={{ marginBottom: "1rem" }}>
@@ -421,7 +434,12 @@ export function VendaDiretaRoboModule() {
             <div className="marketplace-form-row">
               <label className="marketplace-field marketplace-field-wide">
                 Cadastro existente (atalho)
-                <select value={existingId} onChange={(e) => applyCadastro(e.target.value)}>
+                <select
+                  value={existingId}
+                  onChange={(e) => {
+                    void applyCadastro(e.target.value);
+                  }}
+                >
                   <option value="">Novo cliente</option>
                   {cadastros.map((c) => (
                     <option key={c.lead_id} value={c.lead_id}>{c.label}</option>
@@ -597,11 +615,8 @@ export function VendaDiretaRoboModule() {
           <div>
             {roboVideoUrl ? (
               <div className="notice" style={{ marginBottom: "1rem" }}>
-                <p style={{ margin: "0 0 0.5rem" }}>
-                  Vídeo explicativo (mesmo do chat público — configure em Configurações gerais):
-                </p>
                 <a className="text-link" href={roboVideoUrl} target="_blank" rel="noreferrer">
-                  Abrir vídeo
+                  Assistir vídeo explicativo
                 </a>
               </div>
             ) : null}
@@ -613,11 +628,11 @@ export function VendaDiretaRoboModule() {
                 {b}
               </div>
             ))}
-            {creditMatches.length > 0 && <h3>Lane crédito</h3>}
+            {creditMatches.length > 0 && <h3>Opções por crédito</h3>}
             {creditMatches.map((m) => (
               <MatchCard key={`c-${m.quota_ids.join("-")}`} match={m} busy={busy} onConfirm={confirm} />
             ))}
-            {entradaMatches.length > 0 && <h3>Lane entrada</h3>}
+            {entradaMatches.length > 0 && <h3>Opções por entrada</h3>}
             {entradaMatches.map((m) => (
               <MatchCard key={`e-${m.quota_ids.join("-")}`} match={m} busy={busy} onConfirm={confirm} />
             ))}
@@ -643,19 +658,16 @@ export function VendaDiretaRoboModule() {
               {confirmed.quota_ids.length} cota(s) travada(s).
             </p>
             <p className="muted" style={{ marginTop: 8 }}>
-              Contrato disponível; ZapSign só após confirmação do pagamento da entrada.
+              O cliente pode acessar o escritório virtual em <Link href="/cadastro">Cadastro LETTER</Link> (mesmo
+              e-mail informado na venda) para acompanhar boleto e documentos.
             </p>
             <p style={{ marginTop: 12 }}>
-              {confirmed.cadastro_path ? (
-                <Link href={confirmed.cadastro_path}>Abrir cadastro Marketplace</Link>
-              ) : (
-                <Link href={`/modules/cadastros?lead_id=${encodeURIComponent(confirmed.lead_id)}`}>
-                  Abrir cadastro Marketplace
-                </Link>
-              )}
-              {" · "}
-              <Link href={`/modules/proposals?proposal_id=${encodeURIComponent(confirmed.proposal_id)}`}>
-                Propostas
+              <Link
+                className="marketplace-submit"
+                style={{ display: "inline-block", padding: "10px 16px", textDecoration: "none" }}
+                href={confirmed.cadastro_path || `/modules/cadastros?open=${encodeURIComponent(confirmed.lead_id)}`}
+              >
+                Abrir Cadastros — contrato e boleto
               </Link>
               {confirmed.contract_pdf_path ? (
                 <>
@@ -725,7 +737,7 @@ function MatchCard({
       ) : null}
       {match.quotas.map((q) => (
         <div className="marketplace-match-quota" key={q.quota_id}>
-          <MarketplaceQuotaFields quota={q} administratorFallback={match.administrator_name} />
+            <MarketplaceQuotaFields quota={q} />
         </div>
       ))}
       <button

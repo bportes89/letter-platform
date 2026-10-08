@@ -64,8 +64,9 @@ def site_contract_meta(terms: dict, snap: dict | None = None) -> dict:
                 "channel": "SITE_CHAT",
                 "provider": "SITE_CHAT_ACK",
             }
+    has_ack = bool(ack.get("accepted_at"))
     return {
-        "has_site_contract": bool(html and ack.get("accepted_at")),
+        "has_site_contract": bool(html.strip() and (has_ack or html)),
         "contract_ack": ack or None,
         "accepted_at": ack.get("accepted_at") if ack else None,
         "provider": ack.get("provider") if ack else None,
@@ -97,11 +98,11 @@ def _load_lead_contract_html(db: Session, user: User, lead_id: str) -> tuple[Lea
     if not html:
         html = str(snap.get("contract_html") or "").strip()
     ack = terms.get("contract_ack") if isinstance(terms.get("contract_ack"), dict) else {}
-    if not ack and snap.get("contract_accepted_at"):
+    if not ack.get("accepted_at") and snap.get("contract_accepted_at"):
         ack = {
             "accepted_at": snap.get("contract_accepted_at"),
-            "channel": "SITE_CHAT",
-            "provider": "SITE_CHAT_ACK",
+            "channel": terms.get("channel") or "MARKETPLACE",
+            "provider": "OFFICE_ACK",
         }
     return lead, html, ack, proposal
 
@@ -173,10 +174,17 @@ def regenerate_lead_contract_html(db: Session, user: User, lead_id: str) -> dict
 
 def resolve_contract_html(db: Session, user: User, lead_id: str) -> tuple[str, dict]:
     lead, html, ack, _proposal = _load_lead_contract_html(db, user, lead_id)
-    if not html:
-        raise HTTPException(status_code=404, detail="Contrato do chat ainda não aceito nesta compra.")
+    if not html.strip():
+        raise HTTPException(status_code=404, detail="Contrato ainda não foi gerado para esta compra.")
     if not ack.get("accepted_at"):
-        raise HTTPException(status_code=409, detail="Contrato ainda não foi aceito no chat.")
+        if user.role == Role.CLIENT:
+            raise HTTPException(status_code=409, detail="Contrato ainda não está disponível para download.")
+        ack = {
+            **ack,
+            "accepted_at": ack.get("accepted_at") or "—",
+            "provider": ack.get("provider") or "OFFICE_ACK",
+            "channel": ack.get("channel") or "PARTNER_OFFICE",
+        }
     return html, ack
 
 

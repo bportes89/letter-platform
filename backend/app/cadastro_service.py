@@ -197,7 +197,14 @@ def _write_lifecycle(proposal: Proposal, **fields) -> dict:
     return life
 
 
-MARKETPLACE_SNAPSHOT_KEYS = ("venda_direta_manual", "venda_direta_robo", "chat", "cadastro")
+MARKETPLACE_SNAPSHOT_KEYS = (
+    "venda_direta_manual",
+    "venda_direta_robo",
+    "chat",
+    "cadastro",
+    "marketplace_esteira_1",
+    "marketplace_esteira_2",
+)
 
 
 def marketplace_snapshot_key(detail: dict) -> str:
@@ -258,6 +265,10 @@ def lead_marketplace_shortcut_profile(lead: Lead) -> dict:
             if isinstance(block, dict) and block.get("email"):
                 email = block.get("email")
                 break
+    if not email:
+        cadastro_block = detail.get("cadastro")
+        if isinstance(cadastro_block, dict) and cadastro_block.get("email"):
+            email = cadastro_block.get("email")
 
     return {
         "document": document or None,

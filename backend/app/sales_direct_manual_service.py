@@ -137,11 +137,18 @@ def list_cotas_options(
         parc_n = pricing["remaining_installments"]
         parc_qty = f" · {parc_n} parcelas" if parc_n is not None else " · parcelas —"
         admin_name = admin.name if admin else "—"
-        label = (
-            f"{masked['group_code']} · {masked['quota_code']} · {admin_name} · "
-            f"crédito R$ {pricing['credit']} · entrada R$ {pricing['entrada_final']} · "
-            f"parc. R$ {pricing['installment']}{parc_qty}"
-        )
+        if user_sees_supplier_quota_identity(user):
+            label = (
+                f"{masked['group_code']} · {masked['quota_code']} · {admin_name} · "
+                f"crédito R$ {pricing['credit']} · entrada R$ {pricing['entrada_final']} · "
+                f"parc. R$ {pricing['installment']}{parc_qty}"
+            )
+        else:
+            label = (
+                f"{masked['group_code']} · {masked['quota_code']} · "
+                f"crédito R$ {pricing['credit']} · entrada R$ {pricing['entrada_final']} · "
+                f"parc. R$ {pricing['installment']}{parc_qty}"
+            )
         row = {
             "quota_id": q.id,
             "group_code": masked["group_code"],

@@ -294,7 +294,7 @@ def _emit_contract_and_boleto(
         "boleto": boleto_view,
         "boleto_created": boleto_created,
         "contract_available": bool(html),
-        "cadastro_path": f"/modules/cadastros?lead_id={lead.id}",
+        "cadastro_path": f"/modules/cadastros?open={lead.id}",
         "boleto_download_path": f"/marketplace/cadastros/{lead.id}/boleto/{token}" if token else None,
         "contract_pdf_path": f"/marketplace/cadastros/{lead.id}/contrato.pdf",
     }

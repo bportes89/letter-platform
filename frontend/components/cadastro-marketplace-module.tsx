@@ -82,6 +82,7 @@ const CADASTRO_LIST_PAGE = 200;
 
 type CadastroDetail = CadastroRow & {
   address: Record<string, string>;
+  terms?: Record<string, unknown>;
   purchase_readonly: Record<string, unknown>;
   snapshot: Record<string, unknown>;
   parties?: MarketplaceParties;
@@ -150,7 +151,9 @@ export function CadastroMarketplaceModule() {
   const canDeleteDocs = isInternalProductRole(myRole);
   const canEditContract = isInternalProductRole(myRole);
   const hasContractHtml = Boolean(
-    selected?.has_site_contract || (selected?.snapshot && (selected.snapshot as { contract_html?: string }).contract_html),
+    selected?.has_site_contract ||
+      (selected?.terms && (selected.terms as { contract_html?: string }).contract_html) ||
+      (selected?.snapshot && (selected.snapshot as { contract_html?: string }).contract_html),
   );
 
   useEffect(() => {
@@ -271,7 +274,7 @@ export function CadastroMarketplaceModule() {
   }
 
   async function openContractPdf() {
-    if (!selected?.has_site_contract) return;
+    if (!selected || !hasContractHtml) return;
     setBusy(true);
     setError("");
     try {
@@ -393,8 +396,8 @@ export function CadastroMarketplaceModule() {
           <h1>{partnerView ? "Minhas vendas" : "Cadastros — Marketplace"}</h1>
           <p>
             {partnerView
-              ? "Acompanhe suas vendas do chat e veja a comissão bloqueada da sua fatia na cadeia até a conclusão."
-              : "Onde mora a venda: chat (robô externo), Venda Direta Manual e Robô do painel. Novos = contrato/boleto emitidos, entrada em aberto; Em negociação = entrada paga; Incompleto = simulou e não finalizou; Concluído = transferência feita; Compras = mesma etapa Concluído (visão de compras)."}
+              ? "Acompanhe suas vendas, emita boleto e contrato e acompanhe a comissão até a conclusão."
+              : "Vendas do marketplace por etapa: novos (aguardando entrada), em negociação, incompletos, concluídos e compras."}
           </p>
         </div>
         <div className="operational-icon">
@@ -577,7 +580,7 @@ export function CadastroMarketplaceModule() {
                     {selected.entrada_value ? brl.format(Number(selected.entrada_value)) : "—"} · cotas{" "}
                     {(selected.quota_codes || []).join(", ") || "—"}
                   </p>
-                  {selected.proposal_id ? (
+                  {!partnerView && selected.proposal_id ? (
                     <p>
                       <Link href={`/modules/proposals?lead_id=${selected.lead_id}`}>
                         Proposta {selected.proposal_id.slice(0, 8)}…
@@ -607,23 +610,27 @@ export function CadastroMarketplaceModule() {
                 {selected.commission_release.reference ? ` · ${selected.commission_release.reference}` : ""}
               </div>
             ) : null}
-            {!partnerView && selected.lifecycle_editable && selected.situation === "AGUARDANDO_PAGAMENTO" ? (
+            {selected.situation === "AGUARDANDO_PAGAMENTO" && (partnerView || selected.lifecycle_editable) ? (
               <div className="notice">
-                Boleto entrada:{" "}
-                {selected.boleto?.codigo_solicitacao
-                  ? `${selected.boleto.provider || "—"} · ${selected.boleto.codigo_solicitacao}`
-                  : "ainda não emitido"}
+                Boleto da entrada
                 {selected.boleto?.amount ? ` · ${brl.format(Number(selected.boleto.amount))}` : ""}
-                <button type="button" className="table-action" style={{ marginLeft: "0.75rem" }} onClick={issueBoleto} disabled={busy}>
+                {!partnerView && selected.boleto?.codigo_solicitacao
+                  ? ` · ${selected.boleto.provider || "—"} · ${selected.boleto.codigo_solicitacao}`
+                  : null}
+                <button
+                  type="button"
+                  className="table-action"
+                  style={{ marginLeft: "0.75rem" }}
+                  onClick={() => void issueBoleto()}
+                  disabled={busy}
+                >
                   {selected.boleto?.download_token ? "Ver boleto" : "Emitir boleto"}
                 </button>
               </div>
             ) : null}
             <div className="notice">
-              Contrato do chat:{" "}
-              {selected.has_site_contract
-                ? `aceito ${selected.contract_ack?.accepted_at ? new Date(selected.contract_ack.accepted_at).toLocaleString("pt-BR") : ""} (${selected.contract_ack?.provider || "SITE_CHAT_ACK"})`
-                : "ainda não aceito"}
+              Contrato de intermediação:{" "}
+              {hasContractHtml ? "disponível para visualização e PDF" : "será gerado ao confirmar a venda"}
               <button
                 type="button"
                 className="table-action"
@@ -638,17 +645,14 @@ export function CadastroMarketplaceModule() {
                 className="table-action"
                 style={{ marginLeft: "0.5rem" }}
                 onClick={() => void openContractPdf()}
-                disabled={busy || !selected.has_site_contract}
+                disabled={busy || !hasContractHtml}
               >
                 PDF
               </button>
             </div>
             {canEditContract && (
               <details className="notice" style={{ marginTop: 10 }}>
-                <summary style={{ cursor: "pointer", fontWeight: 700 }}>Template global do contrato (placeholders programados)</summary>
-                <p className="muted" style={{ fontSize: 11, margin: "8px 0" }}>
-                  Use chaves como {"{nome}"}, {"{documento}"}, {"{valor_credito}"} — na venda viram campos travados (cinza).
-                </p>
+                <summary style={{ cursor: "pointer", fontWeight: 700 }}>Template global do contrato</summary>
                 <textarea
                   value={templateDraft}
                   onChange={(e) => setTemplateDraft(e.target.value)}
@@ -829,6 +833,7 @@ export function CadastroMarketplaceModule() {
                     }
                   />
 
+                  {!partnerView ? (
                   <CadastroPartyBlock
                     title="Fornecedor"
                     readOnlySummary={
@@ -840,7 +845,7 @@ export function CadastroMarketplaceModule() {
                       </p>
                     }
                   >
-                    {!partnerView && selected.lifecycle_editable ? (
+                    {selected.lifecycle_editable ? (
                       <div className="marketplace-form-row">
                         <label className="marketplace-field marketplace-field-compact">
                           Fornecedor confirmou transferência
@@ -862,6 +867,7 @@ export function CadastroMarketplaceModule() {
                       </div>
                     ) : null}
                   </CadastroPartyBlock>
+                  ) : null}
 
                   <CadastroPartyBlock
                     title="Fundo"

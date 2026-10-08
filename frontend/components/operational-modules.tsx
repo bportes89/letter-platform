@@ -481,8 +481,8 @@ export function MarketplaceModule() {
       </article>
     );
   }
-  return <OperationalLayout title="Marketplace — Cartas contempladas" subtitle="Esteira 2 (robô): 1 opção na banda de 10% para crédito e 1 para entrada, rollover 7 dias e markup do fornecedor. Regras Bacen via approval_rules sincronizadas." icon={<WalletCards/>}>
-    <div className="notice"><Clock3/>Admin cadastra cotas (fornecedor + prazo restante) em <b>Inventário</b>. Sync Bacen em <b>Administradoras</b> alimenta approval_rules usadas no matching. Finalize a venda em <b>Propostas</b>.</div>
+  return <OperationalLayout title="Marketplace — Cartas contempladas" subtitle="Escolha ou combine cartas contempladas e finalize a venda em Cadastros." icon={<WalletCards/>}>
+    <div className="notice"><Clock3/>Após travar a cota, complete o cadastro do cliente em <b>Cadastros</b> (contrato, boleto e escritório virtual).</div>
     <div className="marketplace-tabs">
       <button type="button" className={`marketplace-tab${tab==="esteira1"?" active":""}`} onClick={()=>setTab("esteira1")}>Esteira 1 — Escolha do parceiro</button>
       <button type="button" className={`marketplace-tab${tab==="esteira2"?" active":""}`} onClick={()=>{setTab("esteira2");setError("")}}>Esteira 2 — Robô Nina</button>

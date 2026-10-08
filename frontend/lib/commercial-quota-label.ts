@@ -26,11 +26,13 @@ export function commercialQuotaDisplay(c: CommercialQuotaLabelInput): string {
   if (c.label && !supplierLeak(c.label)) return c.label;
   const gc = c.group_code || "";
   const qc = c.quota_code || "";
+  const showAdmin = Boolean(c.administrator_name) && gc !== "Letter";
+  const adminBit = showAdmin ? ` · ${c.administrator_name}` : "";
   if (gc && qc && !supplierLeak(`${gc} ${qc}`)) {
     const parc = c.remaining_installments != null ? ` · ${c.remaining_installments} parcelas` : "";
-    return `${gc} · ${qc} · ${c.administrator_name ?? "Adm."} · crédito ${brl.format(Number(c.credit_value))} · entrada ${brl.format(Number(c.entrada_final))} · parc. ${brl.format(Number(c.installment_value || 0))}${parc}`;
+    return `${gc} · ${qc}${adminBit} · crédito ${brl.format(Number(c.credit_value))} · entrada ${brl.format(Number(c.entrada_final))} · parc. ${brl.format(Number(c.installment_value || 0))}${parc}`;
   }
   const ref = c.quota_id.replace(/-/g, "").slice(-6).toUpperCase();
   const parc = c.remaining_installments != null ? ` · ${c.remaining_installments} parcelas` : "";
-  return `Letter · Ref ${ref} · ${c.administrator_name ?? "Adm."} · crédito ${brl.format(Number(c.credit_value))} · entrada ${brl.format(Number(c.entrada_final))} · parc. ${brl.format(Number(c.installment_value || 0))}${parc}`;
+  return `Letter · Ref ${ref}${adminBit} · crédito ${brl.format(Number(c.credit_value))} · entrada ${brl.format(Number(c.entrada_final))} · parc. ${brl.format(Number(c.installment_value || 0))}${parc}`;
 }
