@@ -918,6 +918,13 @@ def create_sale_from_flash(
     }
 
 
+def _partner_display_name(db: Session | None, partner_user_id: str | None) -> str | None:
+    if not db or not partner_user_id:
+        return None
+    partner = db.get(User, partner_user_id)
+    return partner.name if partner else None
+
+
 def solicitation_view(
     item: FlashSolicitation,
     docs: list[FlashSolicitationDocument] | None = None,
@@ -949,6 +956,7 @@ def solicitation_view(
         "status_label": STATUS_LABELS.get(item.status, item.status),
         "status_notes": item.status_notes,
         "partner_user_id": item.partner_user_id,
+        "partner_name": _partner_display_name(db, item.partner_user_id),
         "contact_name": item.contact_name,
         "contact_email": item.contact_email,
         "contact_phone": item.contact_phone,

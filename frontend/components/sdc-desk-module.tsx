@@ -23,6 +23,11 @@ import { CurrencyInput } from "@/components/currency-input";
 import { DESK_SIMULATION_NOTICE } from "@/lib/desk-simulation-notice";
 import { commercialQuotaDisplay } from "@/lib/commercial-quota-label";
 import { formatDocumentDigits } from "@/lib/br-validation";
+import { DeskPipelineSummaryBar } from "@/components/desk-pipeline-summary";
+
+function isDeskNetworkOversight(role: string | undefined): boolean {
+  return role === "MANAGER" || role === "MASTER_FRANCHISEE" || isInternalProductRole(role);
+}
 
 type RequiredDoc = { code: string; label: string; uploaded?: boolean; required?: boolean };
 
@@ -47,6 +52,8 @@ type SdcSolicitation = {
   asset_category_label?: string;
   operation_type?: string;
   operation_type_label?: string;
+  partner_user_id?: string | null;
+  partner_name?: string | null;
   awaiting_pendency_upload?: boolean;
   full_required_docs?: RequiredDoc[];
   contact_name: string;
@@ -489,6 +496,8 @@ export function SdcDeskModule() {
   const [saleQuotaId, setSaleQuotaId] = useState("");
   const [docType, setDocType] = useState("RG_CPF");
   const [statusFilter, setStatusFilter] = useState("ALL");
+  const [partnerFilter, setPartnerFilter] = useState("ALL");
+  const [downline, setDownline] = useState<{ user_id: string; name: string }[]>([]);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(true);
@@ -554,14 +563,44 @@ export function SdcDeskModule() {
       .catch(() => setChecklistCatalog([]));
   }, [user?.role]);
 
+  useEffect(() => {
+    if (!user || !isDeskNetworkOversight(user.role)) {
+      setDownline([]);
+      return;
+    }
+    api<{ user_id: string; name: string }[]>("/network/me/downline?tree_type=SALES")
+      .then(setDownline)
+      .catch(() => setDownline([]));
+  }, [user?.role]);
+
   function mergeSolicitation(updated: SdcSolicitation) {
     setItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
   }
 
-  const filtered = useMemo(
-    () => (statusFilter === "ALL" ? items : items.filter((i) => i.status === statusFilter)),
-    [items, statusFilter],
+  const partnerOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const d of downline) map.set(d.user_id, d.name);
+    for (const i of items) {
+      if (i.partner_user_id) {
+        map.set(i.partner_user_id, i.partner_name || i.partner_user_id);
+      }
+    }
+    return [...map.entries()]
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+  }, [items, downline]);
+
+  const pipelineItems = useMemo(
+    () => items.map((i) => ({ status: i.status, amount: Number(i.credit_estimated) || 0 })),
+    [items],
   );
+
+  const filtered = useMemo(() => {
+    let rows = items;
+    if (statusFilter !== "ALL") rows = rows.filter((i) => i.status === statusFilter);
+    if (partnerFilter !== "ALL") rows = rows.filter((i) => i.partner_user_id === partnerFilter);
+    return rows;
+  }, [items, statusFilter, partnerFilter]);
   const selected = useMemo(() => items.find((i) => i.id === selectedId) ?? null, [items, selectedId]);
   const approvedForSale = useMemo(() => items.filter((i) => i.can_create_sale), [items]);
   const sdcDocTypeOptions = useMemo(
@@ -1219,6 +1258,29 @@ export function SdcDeskModule() {
       </div>
 
       <section className="panel operational-panel">
+        <DeskPipelineSummaryBar
+          title="SDC — solicitações na esteira"
+          items={pipelineItems}
+          statusOptions={STATUS_OPTIONS}
+          statusFilter={statusFilter}
+          onStatusFilterChange={(v) => {
+            setStatusFilter(v);
+            if (v !== "ALL") setTab("lista");
+          }}
+          partnerFilter={partnerFilter}
+          onPartnerFilterChange={setPartnerFilter}
+          partnerOptions={partnerOptions}
+          showPartnerFilter={isDeskNetworkOversight(user?.role)}
+          networkHint={
+            user?.role === "MANAGER"
+              ? "Gestores veem os cadastros dos parceiros da própria rede (downline). Filtre por status ou parceiro — igual ao painel legado de operações."
+              : user?.role === "MASTER_FRANCHISEE" || isInternal
+                ? "Visão consolidada de todas as solicitações SDC da organização."
+                : user?.role === "PARTNER"
+                  ? "Acompanhe o andamento das suas solicitações SDC por status."
+                  : undefined
+          }
+        />
         <div className="marketplace-tabs" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
           <button type="button" className={`marketplace-tab${tab === "nova" ? " active" : ""}`} onClick={() => setTab("nova")}>
             1. Nova solicitação
@@ -1237,15 +1299,6 @@ export function SdcDeskModule() {
           </button>
           {tab === "lista" && (
             <>
-              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11, fontWeight: 700, color: "#52605a" }}>
-                Status
-                <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid var(--line)" }}>
-                  <option value="ALL">Todos</option>
-                  {STATUS_OPTIONS.map((s) => (
-                    <option key={s.value} value={s.value}>{s.label}</option>
-                  ))}
-                </select>
-              </label>
               <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11, fontWeight: 700, color: "#52605a" }}>
                 Tipo doc
                 <select value={docType} onChange={(e) => setDocType(e.target.value)} style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid var(--line)" }}>
@@ -1871,6 +1924,7 @@ export function SdcDeskModule() {
               <thead>
                 <tr>
                   <th>Cliente</th>
+                  {isDeskNetworkOversight(user?.role) && <th>Parceiro</th>}
                   <th>Bem</th>
                   <th>Crédito est.</th>
                   <th>Status</th>
@@ -1892,6 +1946,9 @@ export function SdcDeskModule() {
                         leadId={item.lead_id}
                       />
                     </td>
+                    {isDeskNetworkOversight(user?.role) && (
+                      <td style={{ fontSize: 11 }}>{item.partner_name || "—"}</td>
+                    )}
                     <td>
                       {item.asset_type_label}
                       <div className="muted" style={{ fontSize: 11 }}>{brl.format(Number(item.asset_value))}</div>

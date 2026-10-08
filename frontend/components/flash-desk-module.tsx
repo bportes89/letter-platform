@@ -15,6 +15,11 @@ import { PartnerSociosFields, SocioPartner, sociosPayload } from "@/components/p
 import { validateSocioMaritalRows } from "@/lib/marital-status";
 import { lookupCep, lookupMunicipalityPopulation } from "@/lib/cep-lookup";
 import { DESK_SIMULATION_NOTICE } from "@/lib/desk-simulation-notice";
+import { DeskPipelineSummaryBar } from "@/components/desk-pipeline-summary";
+
+function isDeskNetworkOversight(role: string | undefined): boolean {
+  return role === "MANAGER" || role === "MASTER_FRANCHISEE" || isInternalProductRole(role);
+}
 import { clearFlashHandoff, loadFlashHandoff } from "@/lib/desk-flash-handoff";
 
 type RequiredDoc = { code: string; label: string; uploaded?: boolean; required?: boolean };
@@ -35,6 +40,8 @@ type FlashSolicitation = {
   id: string;
   status: string;
   status_label: string;
+  partner_user_id?: string | null;
+  partner_name?: string | null;
   contact_name: string;
   contact_email: string;
   contact_phone: string;
@@ -440,6 +447,8 @@ export function FlashDeskModule() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [docType, setDocType] = useState("MATRICULA_ENOTARIADO");
   const [statusFilter, setStatusFilter] = useState("ALL");
+  const [partnerFilter, setPartnerFilter] = useState("ALL");
+  const [downline, setDownline] = useState<{ user_id: string; name: string }[]>([]);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(true);
@@ -747,10 +756,40 @@ export function FlashDeskModule() {
     setNotice("Dados importados da mesa SDC — revise e calcule a viabilidade Flash Capital.");
   }, []);
 
-  const filtered = useMemo(
-    () => (statusFilter === "ALL" ? items : items.filter((i) => i.status === statusFilter)),
-    [items, statusFilter],
+  useEffect(() => {
+    if (!user || !isDeskNetworkOversight(user.role)) {
+      setDownline([]);
+      return;
+    }
+    api<{ user_id: string; name: string }[]>("/network/me/downline?tree_type=SALES")
+      .then(setDownline)
+      .catch(() => setDownline([]));
+  }, [user?.role]);
+
+  const partnerOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const d of downline) map.set(d.user_id, d.name);
+    for (const i of items) {
+      if (i.partner_user_id) {
+        map.set(i.partner_user_id, i.partner_name || i.partner_user_id);
+      }
+    }
+    return [...map.entries()]
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+  }, [items, downline]);
+
+  const pipelineItems = useMemo(
+    () => items.map((i) => ({ status: i.status, amount: Number(i.principal) || Number(i.asset_value) || 0 })),
+    [items],
   );
+
+  const filtered = useMemo(() => {
+    let rows = items;
+    if (statusFilter !== "ALL") rows = rows.filter((i) => i.status === statusFilter);
+    if (partnerFilter !== "ALL") rows = rows.filter((i) => i.partner_user_id === partnerFilter);
+    return rows;
+  }, [items, statusFilter, partnerFilter]);
   const selected = useMemo(() => items.find((i) => i.id === selectedId) ?? null, [items, selectedId]);
   const approvedForSale = useMemo(() => items.filter((i) => i.can_create_sale), [items]);
 
@@ -1101,6 +1140,29 @@ export function FlashDeskModule() {
       </div>
 
       <section className="panel operational-panel">
+        <DeskPipelineSummaryBar
+          title="Flash Capital — solicitações na esteira"
+          items={pipelineItems}
+          statusOptions={STATUS_OPTIONS}
+          statusFilter={statusFilter}
+          onStatusFilterChange={(v) => {
+            setStatusFilter(v);
+            if (v !== "ALL") setTab("lista");
+          }}
+          partnerFilter={partnerFilter}
+          onPartnerFilterChange={setPartnerFilter}
+          partnerOptions={partnerOptions}
+          showPartnerFilter={isDeskNetworkOversight(user?.role)}
+          networkHint={
+            user?.role === "MANAGER"
+              ? "Gestores acompanham os cadastros Flash dos parceiros da rede. Filtre por status ou parceiro — mesmo modelo do painel legado."
+              : user?.role === "MASTER_FRANCHISEE" || isInternal
+                ? "Visão consolidada de todas as solicitações Flash Capital."
+                : user?.role === "PARTNER"
+                  ? "Acompanhe o andamento das suas solicitações por status."
+                  : undefined
+          }
+        />
         <div className="marketplace-tabs" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
           <button type="button" className={`marketplace-tab${tab === "nova" ? " active" : ""}`} onClick={() => setTab("nova")}>
             1. Nova solicitação
@@ -1119,13 +1181,6 @@ export function FlashDeskModule() {
           </button>
           {tab === "lista" && (
             <>
-              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11, fontWeight: 700, color: "#52605a" }}>
-                Status
-                <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid var(--line)" }}>
-                  <option value="ALL">Todos</option>
-                  {STATUS_OPTIONS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-                </select>
-              </label>
               <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11, fontWeight: 700, color: "#52605a" }}>
                 Tipo lastro
                 <select value={docType} onChange={(e) => setDocType(e.target.value)} style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid var(--line)" }}>
@@ -1674,6 +1729,7 @@ export function FlashDeskModule() {
               <thead>
                 <tr>
                   <th>Cliente</th>
+                  {isDeskNetworkOversight(user?.role) && <th>Parceiro</th>}
                   <th>Bem</th>
                   <th>Principal</th>
                   <th>Líquido</th>
@@ -1699,6 +1755,9 @@ export function FlashDeskModule() {
                           leadId={item.lead_id}
                         />
                       </td>
+                      {isDeskNetworkOversight(user?.role) && (
+                        <td style={{ fontSize: 11 }}>{item.partner_name || "—"}</td>
+                      )}
                       <td>
                         {item.asset_category}
                         <div className="muted" style={{ fontSize: 11 }}>{brl.format(Number(item.asset_value))}</div>
