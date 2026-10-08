@@ -2681,6 +2681,10 @@ class SupplierInventoryQuotaAuditView(BaseModel):
     filter: str
     summary: SupplierInventoryQuotaSummary
     quotas: list[QuotaView] = Field(default_factory=list)
+    sync_mode: str = "NONE"
+    last_sync_at: datetime | None = None
+    last_sync_status: str | None = None
+    sync_hint: str | None = None
 
 
 class SupplierPortalTokenResponse(BaseModel):

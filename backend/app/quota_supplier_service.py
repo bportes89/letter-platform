@@ -644,6 +644,47 @@ SUPPLIER_SYNC_ACTIVE_STATUSES = frozenset({"AVAILABLE", "PENDING_REVIEW"})
 SUPPLIER_SYNC_PROTECTED_STATUSES = frozenset({"RESERVED", "SOLD"})
 
 
+def _sync_group_prefix(source_key: str) -> str:
+    return f"SYNC-{normalize_supplier_key(source_key)}"[:60]
+
+
+def _supplier_inventory_quota_match(source_key: str):
+    """Cotas do fornecedor: supplier_source normalizado ou grupo SYNC-{source_key}."""
+    from sqlalchemy import func, or_
+
+    key = normalize_supplier_key(source_key)
+    prefix = _sync_group_prefix(source_key)
+    normalized_col = func.upper(func.replace(func.coalesce(Quota.supplier_source, ""), "-", "_"))
+    return or_(
+        Quota.supplier_source == key,
+        normalized_col == key,
+        Quota.group_code == prefix,
+        Quota.group_code.like(f"{prefix}-%"),
+    )
+
+
+def _sync_detail_message(raw: str | None) -> str | None:
+    try:
+        detail = json.loads(raw or "{}")
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(detail, dict):
+        return None
+    if detail.get("error"):
+        return str(detail["error"])
+    fetched = detail.get("fetched")
+    created = detail.get("created")
+    updated = detail.get("updated")
+    if fetched is not None:
+        parts = [f"{fetched} linha(s) na origem"]
+        if created:
+            parts.append(f"+{created} novas")
+        if updated:
+            parts.append(f"~{updated} atualizadas")
+        return " · ".join(parts)
+    return None
+
+
 def supplier_inventory_quota_audit(
     db: Session,
     user: User,
@@ -662,7 +703,7 @@ def supplier_inventory_quota_audit(
             select(Quota)
             .where(
                 Quota.organization_id == user.organization_id,
-                Quota.supplier_source == key,
+                _supplier_inventory_quota_match(supplier.source_key),
             )
             .order_by(Quota.credit_value.desc(), Quota.created_at.desc())
         )
@@ -695,6 +736,19 @@ def supplier_inventory_quota_audit(
         payload["entrada_final"] = pricing_for_quota(row)["entrada_final"]
         quotas.append(payload)
 
+    sync_message = _sync_detail_message(supplier.last_sync_detail_json)
+    if not rows and (supplier.sync_mode or "NONE") in {"JSON", "SCRAPE"}:
+        if supplier.last_sync_status == "ERROR":
+            hint = sync_message or "Última sincronização falhou — use Sincronizar e confira URL/tabela."
+        elif not supplier.last_sync_at:
+            hint = "Ainda não sincronizado — clique em Sincronizar neste fornecedor."
+        elif sync_message and "0 linha" in sync_message:
+            hint = "Sync concluído sem linhas na página — revise id da tabela HTML e layout SCRAPE."
+        else:
+            hint = sync_message or "Nenhuma cota no inventário para este source_key — rode Sincronizar."
+    else:
+        hint = sync_message
+
     return {
         "supplier_id": supplier.id,
         "source_key": supplier.source_key,
@@ -708,4 +762,8 @@ def supplier_inventory_quota_audit(
             "total_count": len(rows),
         },
         "quotas": quotas,
+        "sync_mode": supplier.sync_mode or "NONE",
+        "last_sync_at": supplier.last_sync_at,
+        "last_sync_status": supplier.last_sync_status,
+        "sync_hint": hint,
     }

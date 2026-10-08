@@ -151,6 +151,28 @@ def _sum_parcelas(parcelas_txt: str) -> tuple[int, Decimal]:
     return total_qty, total_value
 
 
+def discover_tablepress_id(html: str, *, category: str = "REAL_ESTATE") -> str | None:
+    """Quando o table_id cadastrado não existe na página, tenta localizar TablePress automaticamente."""
+    if not (html or "").strip():
+        return None
+    soup = BeautifulSoup(html, "html.parser")
+    candidates: list[str] = []
+    for tag in soup.find_all("table"):
+        tid = (tag.get("id") or "").strip()
+        if tid and "tablepress" in tid.lower():
+            candidates.append(tid)
+    if not candidates:
+        return None
+    vehicle = str(category or "").upper() == "VEHICLE"
+    for tid in candidates:
+        low = tid.lower()
+        if vehicle and any(token in low for token in ("veic", "auto", "carro", "moto")):
+            return tid
+        if not vehicle and any(token in low for token in ("imov", "imovel", "imoveis", "imob")):
+            return tid
+    return candidates[0]
+
+
 def _table_rows(html: str, table_id: str) -> list[dict[str, Any]]:
     if not (html or "").strip():
         return []
@@ -285,8 +307,29 @@ def fetch_scrape_payload(supplier: QuotaSupplier) -> list[dict]:
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail=f"Falha ao consultar página do fornecedor: {exc}") from exc
 
+    table_id = str(config["table_id"] or "").strip()
+    raw_rows = _table_rows(html, table_id)
+    if not raw_rows:
+        discovered = discover_tablepress_id(html, category=config["category"])
+        if discovered and discovered != table_id:
+            table_id = discovered
+            raw_rows = _table_rows(html, table_id)
+            stored = parse_scrape_config(supplier.scrape_config_json)
+            stored["table_id"] = discovered
+            supplier.scrape_config_json = json.dumps(stored, ensure_ascii=False)
+    if not raw_rows:
+        discovered = discover_tablepress_id(html, category=config["category"])
+        hint = f" Tabela sugerida: {discovered}." if discovered else " Nenhuma tabela TablePress detectada."
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                f"Tabela HTML id={config['table_id']!r} não encontrada ou sem linhas utilizáveis na página.{hint} "
+                "Confira URL, id da tabela e layout SCRAPE no cadastro do fornecedor."
+            ),
+        )
+
     rows: list[dict] = []
-    for row in _table_rows(html, config["table_id"]):
+    for row in raw_rows:
         cells = row.get("cells") or []
         if not isinstance(cells, list) or not _row_available(row, layout):
             continue

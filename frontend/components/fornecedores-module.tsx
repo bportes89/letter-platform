@@ -33,6 +33,10 @@ type SupplierInventoryAudit = {
     nina_scan_status?: string | null;
     installment_due_date?: string | null;
   }>;
+  sync_mode?: string;
+  last_sync_at?: string | null;
+  last_sync_status?: string | null;
+  sync_hint?: string | null;
 };
 
 type QuotaSupplier = {
@@ -261,6 +265,9 @@ export function FornecedoresModule() {
         );
       }
       await load();
+      if (inventorySupplierId === item.id) {
+        await loadInventoryAudit();
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Falha no sync");
     } finally {
@@ -679,14 +686,28 @@ export function FornecedoresModule() {
                 <b>Reservadas</b> e <b>vendidas</b> ficam protegidas — o sistema não sobrescreve nem reimporta.
               </p>
             </div>
-            <button
-              type="button"
-              className="table-action"
-              disabled={!inventorySupplierId || busy}
-              onClick={() => void loadInventoryAudit()}
-            >
-              <RefreshCw /> Atualizar lista
-            </button>
+            <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+              <button
+                type="button"
+                className="table-action"
+                disabled={!inventorySupplierId || busy}
+                onClick={() => void loadInventoryAudit()}
+              >
+                <RefreshCw /> Atualizar lista
+              </button>
+              {inventorySupplier &&
+                (inventorySupplier.sync_mode || "NONE") !== "NONE" &&
+                (inventorySupplier.api_url || "").trim() && (
+                  <button
+                    type="button"
+                    className="table-action"
+                    disabled={busy}
+                    onClick={() => void syncOne(inventorySupplier)}
+                  >
+                    <RefreshCw /> Sincronizar estoque
+                  </button>
+                )}
+            </div>
           </div>
           <div className="marketplace-form-row" style={{ marginBottom: "0.75rem" }}>
             <label className="marketplace-field marketplace-field-wide">
@@ -724,6 +745,26 @@ export function FornecedoresModule() {
                   <strong>{inventoryAudit.summary.inactive_count}</strong>
                 </article>
               </div>
+              {inventoryAudit.sync_hint ? (
+                <div
+                  className="notice"
+                  style={{
+                    marginBottom: "0.75rem",
+                    fontSize: 11,
+                    borderColor: inventoryAudit.summary.total_count === 0 ? "#f59e0b" : undefined,
+                  }}
+                >
+                  {inventoryAudit.last_sync_status ? (
+                    <small style={{ display: "block", marginBottom: 4 }}>
+                      Último sync: {inventoryAudit.last_sync_status}
+                      {inventoryAudit.last_sync_at
+                        ? ` · ${new Date(inventoryAudit.last_sync_at).toLocaleString("pt-BR")}`
+                        : ""}
+                    </small>
+                  ) : null}
+                  {inventoryAudit.sync_hint}
+                </div>
+              ) : null}
               <div className="marketplace-tabs" style={{ marginBottom: "0.75rem" }}>
                 {(
                   [

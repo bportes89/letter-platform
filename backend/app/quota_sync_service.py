@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Administrator, Organization, Quota, QuotaSupplier, Role, User
 from app.quota_scrape_service import SCRAPE_HTTP_HEADERS
-from app.quota_supplier_service import get_supplier, normalize_supplier_key
+from app.quota_supplier_service import _supplier_inventory_quota_match, get_supplier, normalize_supplier_key
 from app.services import money
 
 SYNC_JSON = "JSON"
@@ -340,7 +340,7 @@ def _sync_one(db: Session, *, organization_id: str, supplier: QuotaSupplier, act
         db.scalars(
             select(Quota).where(
                 Quota.organization_id == organization_id,
-                Quota.supplier_source == source_key,
+                _supplier_inventory_quota_match(supplier.source_key),
                 Quota.sync_origin == sync_origin,
             )
         )

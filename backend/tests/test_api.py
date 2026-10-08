@@ -6922,6 +6922,15 @@ def test_marketplace_supplier_scrape_sync_tablepress(client, auth_headers, monke
     assert synced[0]["credit_value"] in {"200000.00", "200000.0"}
     assert synced[0]["installment_due_date"] == "2026-09-15"
 
+    audit = client.get(
+        f"/api/v1/marketplace/suppliers/{supplier_id}/inventory-quotas?filter=active",
+        headers=auth_headers,
+    )
+    assert audit.status_code == 200, audit.text
+    audit_body = audit.json()
+    assert audit_body["summary"]["active_count"] == 1
+    assert len(audit_body["quotas"]) == 1
+
     html_round2 = """
     <table id="tablepress-tab-imoveis"><tbody>
       <tr>
