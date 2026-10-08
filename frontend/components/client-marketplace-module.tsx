@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckCircle2, ShoppingBag } from "lucide-react";
+import { CheckCircle2, RefreshCw, ShoppingBag } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { api, API_URL, apiForm, downloadApi } from "@/lib/api";
 
@@ -16,6 +16,8 @@ type CompraRow = {
   entrada_value: string | null;
   source: string;
   quota_codes: string[];
+  source_label?: string | null;
+  partner_name?: string | null;
   supplier_transfer_confirmed?: boolean;
   can_conclude?: boolean;
 };
@@ -60,9 +62,15 @@ export function ClientMarketplaceModule() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
+  const [listLoading, setListLoading] = useState(true);
 
   const load = useCallback(async () => {
-    setRows(await api<CompraRow[]>("/marketplace/me/compras"));
+    setListLoading(true);
+    try {
+      setRows(await api<CompraRow[]>("/marketplace/me/compras"));
+    } finally {
+      setListLoading(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -204,8 +212,11 @@ export function ClientMarketplaceModule() {
       <div className="page-heading">
         <div>
           <span className="eyebrow dark">ESCRITÓRIO</span>
-          <h1>Minhas compras — Marketplace</h1>
-          <p>Acompanhe boleto da entrada, envie documentos e finalize a venda após a transferência da cota.</p>
+          <h1>Extrato de compras</h1>
+          <p>
+            Todas as suas cartas contempladas na LETTER — site, chat ou escritório de qualquer parceiro. Clique em uma
+            linha para ver boleto, contrato e documentos.
+          </p>
         </div>
         <div className="operational-icon">
           <ShoppingBag />
@@ -221,23 +232,47 @@ export function ClientMarketplaceModule() {
 
       <div className="panel-grid two">
         <section className="panel">
-          <h2>Suas compras</h2>
-          {rows.length === 0 ? (
-            <p className="muted">Nenhuma compra Marketplace vinculada à sua conta ainda.</p>
+          <h2>Extrato</h2>
+          {listLoading ? (
+            <p className="muted" style={{ fontSize: 12 }}>
+              <RefreshCw className="spin" size={14} style={{ marginRight: 6, verticalAlign: "middle" }} />
+              Carregando suas compras…
+            </p>
+          ) : rows.length === 0 ? (
+            <p className="muted">Nenhuma compra vinculada à sua conta ainda (CPF/e-mail do cadastro).</p>
           ) : (
-            <ul className="list-plain">
-              {rows.map((row) => (
-                <li key={row.lead_id}>
-                  <button type="button" className="list-row-btn" onClick={() => void openDetail(row.lead_id)}>
-                    <strong>{row.quota_codes?.join(", ") || "Cota"}</strong>
-                    <span>
-                      {money(row.credit_value)} · entrada {money(row.entrada_value)}
-                    </span>
-                    <em>{row.situation_label}</em>
-                  </button>
-                </li>
-              ))}
-            </ul>
+            <table className="data-table" style={{ fontSize: 13 }}>
+              <thead>
+                <tr>
+                  <th>Data</th>
+                  <th>Canal</th>
+                  <th>Parceiro</th>
+                  <th>Cota</th>
+                  <th>Crédito</th>
+                  <th>Situação</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row) => (
+                  <tr
+                    key={row.lead_id}
+                    style={{ cursor: "pointer" }}
+                    onClick={() => void openDetail(row.lead_id)}
+                  >
+                    <td>
+                      {row.created_at
+                        ? new Date(row.created_at).toLocaleDateString("pt-BR")
+                        : "—"}
+                    </td>
+                    <td>{row.source_label || row.source || "—"}</td>
+                    <td>{row.partner_name || "LETTER / direto"}</td>
+                    <td>{row.quota_codes?.join(", ") || "—"}</td>
+                    <td>{money(row.credit_value)}</td>
+                    <td>{row.situation_label}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           )}
         </section>
 
@@ -246,7 +281,14 @@ export function ClientMarketplaceModule() {
             <p className="muted">Selecione uma compra para ver boleto, documentos e finalização.</p>
           ) : (
             <>
-              <h2>Detalhe</h2>
+              <h2>Detalhe da compra</h2>
+              <p className="muted" style={{ fontSize: 12 }}>
+                {selected.source_label || selected.source}
+                {selected.partner_name ? ` · Parceiro: ${selected.partner_name}` : ""}
+                {selected.created_at
+                  ? ` · ${new Date(selected.created_at).toLocaleString("pt-BR")}`
+                  : ""}
+              </p>
               <p>
                 Situação: <strong>{selected.situation_label}</strong>
                 {selected.supplier_transfer_confirmed ? " · Fornecedor confirmou transferência" : ""}

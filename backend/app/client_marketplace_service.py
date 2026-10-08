@@ -34,6 +34,116 @@ DOC_KINDS = frozenset(
 )
 
 
+def _digits(value: str | None) -> str:
+    return "".join(ch for ch in (value or "") if ch.isdigit())
+
+
+def _lead_identity_emails(lead: Lead) -> set[str]:
+    from app.cadastro_service import lead_marketplace_shortcut_profile
+
+    emails: set[str] = set()
+    chat = _chat_email(lead)
+    if chat:
+        emails.add(chat)
+    profile = lead_marketplace_shortcut_profile(lead)
+    raw = (profile.get("email") or "").strip().lower()
+    if raw:
+        emails.add(raw)
+    return emails
+
+
+def _lead_identity_documents(lead: Lead) -> set[str]:
+    from app.cadastro_service import lead_marketplace_shortcut_profile
+
+    docs: set[str] = set()
+    for raw in (lead.document, lead_marketplace_shortcut_profile(lead).get("document")):
+        d = _digits(str(raw or ""))
+        if len(d) >= 11:
+            docs.add(d)
+    return docs
+
+
+def lead_identity_matches_client(lead: Lead, user: User) -> bool:
+    """Mesmo cliente (CPF/CNPJ ou e-mail) em compras de parceiros diferentes."""
+    user_doc = _digits(user.document)
+    user_email = (user.email or "").strip().lower()
+    if user_doc and user_doc in _lead_identity_documents(lead):
+        return True
+    if user_email and user_email in _lead_identity_emails(lead):
+        return True
+    return False
+
+
+def claim_lead_for_client_if_identity_match(db: Session, user: User, lead: Lead) -> bool:
+    if user.role != Role.CLIENT:
+        return False
+    if lead.client_user_id and lead.client_user_id != user.id:
+        return False
+    if lead.client_user_id == user.id or lead.owner_id == user.id:
+        return True
+    if not lead_identity_matches_client(lead, user):
+        return False
+    lead.client_user_id = user.id
+    if user.document and not lead.document:
+        lead.document = _digits(user.document)
+    _bind_proposal(db, lead, user)
+    db.flush()
+    return True
+
+
+def bind_client_identity_leads(db: Session, user: User) -> int:
+    """Vincula compras Marketplace ao CLIENT pelo CPF/CNPJ ou e-mail (vários parceiros)."""
+    if user.role != Role.CLIENT:
+        return 0
+    user_doc = _digits(user.document)
+    user_email = (user.email or "").strip().lower()
+    if not user_doc and not user_email:
+        return 0
+
+    bound = 0
+    proposals = list(
+        db.scalars(
+            select(Proposal)
+            .where(
+                Proposal.organization_id == user.organization_id,
+                Proposal.product == "MARKETPLACE",
+                Proposal.client_user_id == user.id,
+            )
+            .order_by(Proposal.created_at.desc())
+            .limit(200)
+        )
+    )
+    for proposal in proposals:
+        lead = db.get(Lead, proposal.lead_id)
+        if lead and not lead.client_user_id:
+            lead.client_user_id = user.id
+            bound += 1
+
+    candidates = list(
+        db.scalars(
+            select(Lead)
+            .join(Proposal, Proposal.lead_id == Lead.id)
+            .where(
+                Lead.organization_id == user.organization_id,
+                Lead.client_user_id.is_(None),
+                Proposal.product == "MARKETPLACE",
+            )
+            .order_by(Lead.created_at.desc())
+            .limit(400)
+        )
+    )
+    seen: set[str] = set()
+    for lead in candidates:
+        if lead.id in seen:
+            continue
+        seen.add(lead.id)
+        if claim_lead_for_client_if_identity_match(db, user, lead):
+            bound += 1
+    if bound:
+        db.flush()
+    return bound
+
+
 def _chat_email(lead: Lead) -> str:
     try:
         detail = json.loads(lead.scr_detail_json or "{}")
@@ -117,8 +227,8 @@ def bind_site_chat_lead(db: Session, user: User, chat_lead_id: str | None = None
 def list_my_compras(db: Session, user: User) -> list[dict]:
     if user.role != Role.CLIENT:
         raise HTTPException(status_code=403, detail="Somente clientes.")
-    # tenta auto-vincular por e-mail antes de listar
     bind_site_chat_lead(db, user, None)
+    bind_client_identity_leads(db, user)
     return list_cadastros(db, user, pipeline="ALL")
 
 

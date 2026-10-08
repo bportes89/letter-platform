@@ -37,6 +37,8 @@ MARKETPLACE_SOURCES = frozenset(
         "CADASTRO",
         "CLIENT_SIGNUP",
         "MARKETPLACE",
+        "MARKETPLACE_ESTEIRA_1",
+        "MARKETPLACE_ESTEIRA_2",
         "SITE",
     }
 )
@@ -118,6 +120,8 @@ SOURCE_LABELS = {
     "CADASTRO": "Cadastro",
     "CLIENT_SIGNUP": "Cadastro cliente",
     "MARKETPLACE": "Marketplace",
+    "MARKETPLACE_ESTEIRA_1": "Marketplace — Esteira 1",
+    "MARKETPLACE_ESTEIRA_2": "Marketplace — Esteira 2",
     "SITE": "Site",
 }
 

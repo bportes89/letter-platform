@@ -190,9 +190,29 @@ def get_lead_for_user(db: Session, user: User, lead_id: str) -> Lead:
     if not lead:
         raise HTTPException(status_code=404, detail="Lead não encontrado")
     if user.role == Role.CLIENT:
-        if lead.client_user_id != user.id and lead.owner_id != user.id:
-            raise HTTPException(status_code=404, detail="Lead não encontrado")
-        return lead
+        if lead.client_user_id == user.id or lead.owner_id == user.id:
+            return lead
+        from app.client_marketplace_service import claim_lead_for_client_if_identity_match
+
+        if claim_lead_for_client_if_identity_match(db, user, lead):
+            return lead
+        proposal = db.scalar(
+            select(Proposal)
+            .where(
+                Proposal.lead_id == lead.id,
+                Proposal.organization_id == user.organization_id,
+                Proposal.product == "MARKETPLACE",
+                Proposal.client_user_id == user.id,
+            )
+            .order_by(Proposal.created_at.desc())
+            .limit(1)
+        )
+        if proposal:
+            if not lead.client_user_id:
+                lead.client_user_id = user.id
+                db.flush()
+            return lead
+        raise HTTPException(status_code=404, detail="Lead não encontrado")
     if not lead_visible_to_user(db, user, lead):
         raise HTTPException(status_code=404, detail="Lead não encontrado")
     return lead

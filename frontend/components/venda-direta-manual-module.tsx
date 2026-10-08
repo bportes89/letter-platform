@@ -524,14 +524,20 @@ export function VendaDiretaManualModule() {
               Mostrar cotas incompletas (admin)
             </label>
             <div className="marketplace-field marketplace-field-wide quota-pick-list">
-              <b>Cotas (multi-seleção){filteredCotas.length ? ` — ${filteredCotas.length} opção(ões)` : ""}</b>
-              <div className="quota-pick-scroll">
-                {cotasLoading ? (
-                  <small className="muted">
-                    <RefreshCw className="spin" style={{ marginRight: 6, verticalAlign: "middle" }} />
-                    Carregando cotas…
-                  </small>
-                ) : filteredCotas.length === 0 ? (
+              <b>
+                Cotas (multi-seleção)
+                {!cotasLoading && filteredCotas.length ? ` — ${filteredCotas.length} opção(ões)` : ""}
+              </b>
+              {cotasLoading ? (
+                <p className="muted" style={{ fontSize: 11, margin: "6px 0 4px" }}>
+                  <RefreshCw className="spin" size={12} style={{ marginRight: 5, verticalAlign: "middle" }} />
+                  Carregando estoque de cotas…
+                </p>
+              ) : null}
+              <div className="quota-pick-scroll" style={{ opacity: cotasLoading ? 0.55 : 1 }}>
+                {cotasLoading && cotas.length === 0 ? (
+                  <small className="muted">Aguarde, consultando cotas disponíveis…</small>
+                ) : !cotasLoading && filteredCotas.length === 0 ? (
                   <small className="muted">
                     Nenhuma cota neste filtro. Ajuste crédito, entrada, administradora ou a categoria.
                   </small>

@@ -5603,6 +5603,52 @@ def test_marketplace_client_office_bind_boleto_finalize(client, auth_headers):
     assert any(d["id"] == doc_id for d in docs.json())
 
 
+def test_marketplace_client_extrato_partner_sale_by_document(client, auth_headers):
+    """Cliente vê compra feita por parceiro quando o CPF do cadastro coincide."""
+    client_login = client.post(
+        "/api/v1/auth/login",
+        json={"email": "cliente@letter.com.br", "password": "Letter@123"},
+    )
+    assert client_login.status_code == 200
+    client_headers = {"Authorization": f"Bearer {client_login.json()['access_token']}"}
+
+    quota = next(q for q in client.get("/api/v1/quotas", headers=auth_headers).json() if q["status"] == "AVAILABLE")
+    profile = {
+        "monthly_income": "50000",
+        "monthly_commitment": "0",
+        "asset_value": "900000",
+        "asset_year": 2020,
+        "has_credit_restriction": False,
+        "asset_is_zero_km": False,
+    }
+    lock = client.post(
+        "/api/v1/marketplace/esteira-1/lock",
+        headers=auth_headers,
+        json={"quota_ids": [quota["id"]], "esteira": "SELF_SELECT", **profile},
+    )
+    assert lock.status_code == 200, lock.text
+    lead_id = lock.json()["lead_id"]
+
+    patched = client.patch(
+        f"/api/v1/marketplace/cadastros/{lead_id}",
+        headers=auth_headers,
+        json={"document": "66666666666", "name": "Cliente Demonstração", "phone": "11999998888"},
+    )
+    assert patched.status_code == 200, patched.text
+
+    compras = client.get("/api/v1/marketplace/me/compras", headers=client_headers)
+    assert compras.status_code == 200
+    rows = compras.json()
+    assert any(r["lead_id"] == lead_id for r in rows)
+    row = next(r for r in rows if r["lead_id"] == lead_id)
+    assert row.get("partner_name")
+    assert row.get("source_label")
+
+    detail = client.get(f"/api/v1/marketplace/me/compras/{lead_id}", headers=client_headers)
+    assert detail.status_code == 200
+    assert detail.json()["lead_id"] == lead_id
+
+
 def test_ensure_marketplace_cms_email_templates(client, auth_headers):
     first = client.post("/api/v1/cms/texts/ensure-marketplace-emails", headers=auth_headers)
     assert first.status_code == 200, first.text

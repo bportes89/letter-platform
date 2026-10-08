@@ -3416,7 +3416,9 @@ def marketplace_me_compras(user: User = Depends(get_current_user), db: Session =
 def marketplace_me_compra_detail(lead_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     from app.client_marketplace_service import get_my_compra
 
-    return get_my_compra(db, user, lead_id)
+    detail = get_my_compra(db, user, lead_id)
+    db.commit()
+    return detail
 
 
 @router.post("/marketplace/me/bind-chat-lead", response_model=MarketplaceBindChatLeadResponse)

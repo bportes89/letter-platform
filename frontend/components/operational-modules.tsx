@@ -531,11 +531,18 @@ export function MarketplaceModule() {
         <div className="marketplace-field marketplace-field-wide quota-pick-list">
           <b>
             Cartas disponíveis (marque uma ou mais — junção só na mesma administradora)
-            {e1SelectableCatalog.length ? ` · ${e1SelectableCatalog.length} liberada(s)` : ""}
-            {e1Catalog.length > e1SelectableCatalog.length ? ` · ${e1Catalog.length - e1SelectableCatalog.length} aguardando aprovação` : ""}
+            {!catalogLoading && e1SelectableCatalog.length ? ` · ${e1SelectableCatalog.length} liberada(s)` : ""}
+            {!catalogLoading && e1Catalog.length > e1SelectableCatalog.length
+              ? ` · ${e1Catalog.length - e1SelectableCatalog.length} aguardando aprovação`
+              : ""}
           </b>
-          <div className="quota-pick-scroll" style={{ maxHeight: 240 }}>
-            {catalogLoading ? <small className="muted">Carregando cartas…</small> : null}
+          {catalogLoading ? (
+            <p className="muted" style={{ fontSize: 11, margin: "6px 0 4px" }}>
+              <RefreshCw className="spin" size={12} style={{ marginRight: 5, verticalAlign: "middle" }} />
+              Carregando estoque de cartas…
+            </p>
+          ) : null}
+          <div className="quota-pick-scroll" style={{ maxHeight: 240, opacity: catalogLoading ? 0.55 : 1 }}>
             {!catalogLoading && e1Catalog.length === 0 ? (
               <small className="muted">
                 {catalog.length === 0
@@ -547,6 +554,8 @@ export function MarketplaceModule() {
                   <> {e1PendingInCatalog.length} cota(s) aguardam aprovação no Inventário antes de liberar para venda.</>
                 ) : null}
               </small>
+            ) : catalogLoading && catalog.length === 0 ? (
+              <small className="muted">Aguarde, consultando cotas disponíveis…</small>
             ) : (
               e1Catalog.map((c) => {
                 const selectable = (c.status ?? "AVAILABLE") === "AVAILABLE";
