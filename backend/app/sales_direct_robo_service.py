@@ -286,6 +286,8 @@ def _emit_contract_and_boleto(
         boleto_created = bool(issued.get("created"))
     except HTTPException:
         boleto_view = None
+    except Exception:
+        boleto_view = None
 
     from app.inter_boleto_service import boleto_public_token
 
