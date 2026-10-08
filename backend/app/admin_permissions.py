@@ -47,7 +47,12 @@ PERMISSION_GROUPS: list[PermissionGroupDef] = [
             {"key": "marketplace.venda_direta", "label": "Venda Direta", "modules": ["venda-direta-manual"], "scopes": ["leads:write", "proposals:write"]},
             {"key": "marketplace.venda_direta_robo", "label": "Venda Direta (Robô)", "modules": ["venda-direta-robo"], "scopes": ["leads:write", "proposals:write"]},
             {"key": "marketplace.fornecedores", "label": "Fornecedores", "modules": ["fornecedores"], "scopes": ["inventory:write"]},
-            {"key": "marketplace.categorias_cotas", "label": "Categorias de cotas", "modules": ["quota-categories"], "scopes": ["inventory:write"]},
+            {
+                "key": "marketplace.categorias_cotas",
+                "label": "Categorias de cotas",
+                "modules": ["quota-categories", "quota-subcategories"],
+                "scopes": ["inventory:write"],
+            },
             {"key": "marketplace.inventario", "label": "Inventário de cotas", "modules": ["inventory"], "scopes": ["inventory:write"]},
             {"key": "marketplace.vender_cota", "label": "Vender minha cota / compliance", "modules": ["vender-cota"], "scopes": ["inventory:write"]},
         ],

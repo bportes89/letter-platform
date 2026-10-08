@@ -112,7 +112,8 @@ export default function ModulePage() {
   if (routeKey === "fornecedores") return <FornecedoresModule />;
   if (routeKey === "partner-saques") return <PartnerWithdrawalsAdminModule />;
   if (routeKey === "marketplace-extrato") return <MarketplaceExtratoModule />;
-  if (routeKey === "quota-categories") return <QuotaCategoriesModule />;
+  if (routeKey === "quota-categories") return <QuotaCategoriesModule defaultTab="parents" />;
+  if (routeKey === "quota-subcategories") return <QuotaCategoriesModule defaultTab="children" />;
   if (routeKey === "cms-texts") return <CmsTextsModule />;
   if (routeKey === "org-settings") return <OrgSettingsModule />;
   if (routeKey === "chat-faq") return <MarketplaceChatFaqModule />;

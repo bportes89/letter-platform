@@ -45,6 +45,7 @@ export const PRODUCT_NAV: ProductNavItem[] = [
       { key: "partner-saques", name: "Saques parceiros", internalOnly: true },
       { key: "marketplace-extrato", name: "Extratos marketplace", internalOnly: true },
       { key: "quota-categories", name: "Categorias de cotas", internalOnly: true },
+      { key: "quota-subcategories", name: "Subcategorias de cotas", internalOnly: true },
       { key: "chat-faq", name: "FAQ do chat", internalOnly: true },
       { key: "cms-texts", name: "Textos e e-mails", internalOnly: true },
       { key: "org-settings", name: "Configurações gerais", internalOnly: true },

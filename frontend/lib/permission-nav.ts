@@ -18,6 +18,8 @@ const MODULE_ALIASES: Record<string, string[]> = {
   auctions: ["leilao", "auctions"],
   payments: ["payments", "bank-control"],
   "bank-control": ["bank-control", "payments"],
+  "quota-categories": ["quota-categories", "quota-subcategories"],
+  "quota-subcategories": ["quota-subcategories", "quota-categories"],
 };
 
 function usesCustomModules(user: User | null | undefined): boolean {
