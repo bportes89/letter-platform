@@ -10,6 +10,7 @@ import { SdcQuitConProjectionTable } from "@/components/sdc-quitcon-card";
 import { CurrencyInput, CurrencyFormField } from "@/components/currency-input";
 import { MarketplaceQuotaFields } from "@/components/marketplace-quota-fields";
 import { subcategoriesForAssetClass } from "@/lib/quota-subcategories";
+import { saveFlashHandoff } from "@/lib/desk-flash-handoff";
 
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
@@ -634,6 +635,7 @@ export function MarketplaceModule() {
 const PROPOSALS_SIM_PRODUCT = "FLASH_CREDIT";
 
 export function ProposalsModule() {
+  const router = useRouter();
   const [items, setItems] = useState<Proposal[]>([]);
   const [leads, setLeads] = useState<Lead[]>([]);
   const [contracts, setContracts] = useState<Contract[]>([]);
@@ -854,6 +856,30 @@ export function ProposalsModule() {
     }
   }
 
+  function preencherPropostaFlash(p: Proposal) {
+    const lead = leads.find((l) => l.id === p.lead_id);
+    saveFlashHandoff({
+      source: "PROPOSAL_SIMULATOR",
+      saved_at: new Date().toISOString(),
+      proposal_id: p.id,
+      lead_id: p.lead_id,
+      contact_name: lead?.name ?? p.lead_name ?? "",
+      contact_email: "",
+      contact_phone: lead?.phone ?? "",
+      document: "",
+      person_type: "PJ",
+      requested_amount: String(p.requested_amount),
+      asset_value: assetValue,
+      term_months: term,
+      address: "",
+      occupation: "",
+      income_value: "",
+      properties: [],
+      partners_json: [],
+    });
+    router.push("/modules/flash-capital");
+  }
+
   async function contract(p: Proposal) {
     setActiveProposalId(p.id);
     const calcs = await api<{ id: string }[]>(`/proposals/${p.id}/calculations`);
@@ -899,8 +925,8 @@ export function ProposalsModule() {
             <br />
             {isCommercial ? (
               <>
-                <b>Passo 3</b> — Use o resumo da memória para apresentar ao cliente. Contrato e operação completa ficam com a
-                matriz.
+                <b>Passo 3</b> — Use o resumo da memória para apresentar ao cliente. Para avançar a operação, use{" "}
+                <b>Preencher proposta</b> na linha calculada (abre a mesa Flash Capital com os dados da simulação).
                 <br />
                 <b>Marketplace</b> — use{" "}
                 <Link href="/modules/venda-direta-manual">Venda Direta Manual</Link> ou{" "}
@@ -1038,7 +1064,28 @@ export function ProposalsModule() {
           {notice}
         </div>
       )}
-      {lastCalculation && <CalculationResult calculation={lastCalculation} hidePlatformFee />}
+      {lastCalculation && (
+        <>
+          <CalculationResult calculation={lastCalculation} hidePlatformFee />
+          {isCommercial && activeProposalId && calculatedProposalIds.has(activeProposalId) && (
+            <div style={{ padding: "0 18px 18px" }}>
+              <button
+                type="button"
+                className="primary-button"
+                onClick={() => {
+                  const p = flashProposals.find((x) => x.id === activeProposalId);
+                  if (p) preencherPropostaFlash(p);
+                }}
+              >
+                Preencher proposta — Flash Capital
+              </button>
+              <p className="muted" style={{ fontSize: 11, marginTop: 8 }}>
+                Abre o cadastro operacional na mesa Flash Capital para continuar documentação e esteira com a matriz.
+              </p>
+            </div>
+          )}
+        </>
+      )}
       <div ref={proposalsTableRef}>
         <DataTable headers={["Produto", "Valor", "Canal", "Comissão", "Parceiro", "Status", "Workflow"]}>
           {flashProposals.map((p) => {
@@ -1084,6 +1131,17 @@ export function ProposalsModule() {
                   >
                     Calcular memória
                   </button>
+                  {isCommercial && (
+                    <button
+                      type="button"
+                      className="table-action"
+                      disabled={!hasMemory}
+                      title={!hasMemory ? "Calcule a memória nesta linha antes" : "Continuar na mesa Flash Capital"}
+                      onClick={() => preencherPropostaFlash(p)}
+                    >
+                      Preencher proposta
+                    </button>
+                  )}
                   {!isCommercial && (
                     <button
                       type="button"
@@ -1106,6 +1164,15 @@ export function ProposalsModule() {
 }
 
 const CALC_HIDDEN_PLATFORM_FEE_KEYS = new Set(["platform_fee", "structuring_fee"]);
+
+/** Métricas internas (pool/spread) não exibidas no Simulador Flash Capital. */
+const CALC_HIDDEN_SIMULATOR_METRICS_KEYS = new Set([
+  "platform_spread_rate_percent",
+  "pool_investor_tax_status",
+  "investor_rate_percent",
+  "pool_investor_rate_percent",
+  "pool_investor_tier_label",
+]);
 
 function CalculationResult({
   calculation,
@@ -1142,12 +1209,55 @@ function CalculationResult({
     investor_rate_percent: "Rentabilidade investidor (% a.m.)",
     platform_spread_rate_percent: "Spread plataforma (% a.m.)",
   };
-  const entries = Object.entries(calculation.output).filter(
-    ([key, value]) =>
-      labels[key] &&
-      value !== null &&
-      !(hidePlatformFee && CALC_HIDDEN_PLATFORM_FEE_KEYS.has(key)),
-  );const notes=[calculation.output.partner_commission_basis_note,calculation.output.interest_basis_note,calculation.output.pool_investor_tax_note].filter(x=>typeof x==="string");const quitconContext=calculation.formula_version.startsWith("sdc-")&&calculation.quitcon_sdc?{proposalId:calculation.proposal_id,calculationMemoryId:calculation.id,mesesRestantes:Number(calculation.output.duration_months??calculation.input.duration_months??0)||undefined}:undefined;return <div className="calculation-result"><div><span className="eyebrow dark">MEMÓRIA VERSIONADA</span><b>{calculation.formula_version}</b></div>{notes.map((note,i)=><small key={i}>{String(note)}</small>)}<div>{entries.map(([key,value])=><article key={key}><small>{labels[key]}</small><strong>{key.includes("percent")||key==="pool_investor_rate_percent"?`${value}%`:key==="pool_investor_tax_status"?"Livre de imposto (sem retenção)":key.includes("tier")?String(value):brl.format(Number(value))}</strong></article>)}</div>{calculation.quitcon_sdc&&<SdcQuitConProjectionTable data={calculation.quitcon_sdc} context={quitconContext}/>}</div>}
+  const entries = Object.entries(calculation.output).filter(([key, value]) => {
+    if (!labels[key] || value === null) return false;
+    if (hidePlatformFee && CALC_HIDDEN_PLATFORM_FEE_KEYS.has(key)) return false;
+    if (hidePlatformFee && CALC_HIDDEN_SIMULATOR_METRICS_KEYS.has(key)) return false;
+    return true;
+  });
+  const notes = [
+    calculation.output.partner_commission_basis_note,
+    calculation.output.interest_basis_note,
+    hidePlatformFee ? null : calculation.output.pool_investor_tax_note,
+  ].filter((x): x is string => typeof x === "string");
+  const quitconContext =
+    calculation.formula_version.startsWith("sdc-") && calculation.quitcon_sdc
+      ? {
+          proposalId: calculation.proposal_id,
+          calculationMemoryId: calculation.id,
+          mesesRestantes:
+            Number(calculation.output.duration_months ?? calculation.input.duration_months ?? 0) || undefined,
+        }
+      : undefined;
+  return (
+    <div className="calculation-result">
+      <div>
+        <span className="eyebrow dark">MEMÓRIA VERSIONADA</span>
+        <b>{calculation.formula_version}</b>
+      </div>
+      {notes.map((note, i) => (
+        <small key={i}>{note}</small>
+      ))}
+      <div>
+        {entries.map(([key, value]) => (
+          <article key={key}>
+            <small>{labels[key]}</small>
+            <strong>
+              {key.includes("percent")
+                ? `${value}%`
+                : key.includes("tier")
+                  ? String(value)
+                  : brl.format(Number(value))}
+            </strong>
+          </article>
+        ))}
+      </div>
+      {calculation.quitcon_sdc && (
+        <SdcQuitConProjectionTable data={calculation.quitcon_sdc} context={quitconContext} />
+      )}
+    </div>
+  );
+}
 
 function OperationalLayout({title,subtitle,icon,children}:{title:string;subtitle:string;icon:React.ReactNode;children:React.ReactNode}){return <><div className="page-heading"><div><span className="eyebrow dark">OPERAÇÃO ATIVA</span><h1>{title}</h1><p>{subtitle}</p></div><div className="operational-icon">{icon}</div></div><section className="panel operational-panel">{children}</section></>}
 function DataTable({headers,children}:{headers:string[];children:React.ReactNode}){return <div className="table-wrap"><table className="data-table"><thead><tr>{headers.map(h=><th key={h}>{h}</th>)}</tr></thead><tbody>{children}</tbody></table></div>}

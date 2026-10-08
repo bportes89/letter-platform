@@ -1,10 +1,14 @@
-/** Repasse de dados SDC → Flash Capital (sessionStorage). */
+/** Repasse de dados SDC ou Simulador → Flash Capital (sessionStorage). */
 
 export const FLASH_HANDOFF_STORAGE_KEY = "letter.desk.flash_handoff.v1";
 
 export type DeskFlashHandoff = {
-  source: "SDC_DESK";
+  source: "SDC_DESK" | "PROPOSAL_SIMULATOR";
   saved_at: string;
+  /** Proposta criada no Simulador Flash Capital (módulo proposals). */
+  proposal_id?: string;
+  lead_id?: string;
+  term_months?: number;
   contact_name: string;
   contact_email: string;
   contact_phone: string;
@@ -14,6 +18,7 @@ export type DeskFlashHandoff = {
   occupation: string;
   income_value: string;
   requested_amount: string;
+  asset_value?: string;
   properties: Array<{
     street: string;
     number: string;
@@ -51,7 +56,7 @@ export function loadFlashHandoff(): DeskFlashHandoff | null {
   if (!raw) return null;
   try {
     const data = JSON.parse(raw) as DeskFlashHandoff;
-    if (data?.source !== "SDC_DESK") return null;
+    if (data?.source !== "SDC_DESK" && data?.source !== "PROPOSAL_SIMULATOR") return null;
     return data;
   } catch {
     return null;

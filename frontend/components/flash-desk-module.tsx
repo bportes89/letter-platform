@@ -670,6 +670,27 @@ export function FlashDeskModule() {
     if (!handoff) return;
     clearFlashHandoff();
     setTab("nova");
+    if (handoff.source === "PROPOSAL_SIMULATOR") {
+      setForm((prev) => ({
+        ...prev,
+        contact_name: handoff.contact_name || prev.contact_name,
+        contact_email: handoff.contact_email || prev.contact_email,
+        contact_phone: handoff.contact_phone || prev.contact_phone,
+        requested_amount: handoff.requested_amount || prev.requested_amount,
+        asset_value: handoff.asset_value || prev.asset_value,
+        term_months: handoff.term_months ? String(handoff.term_months) : prev.term_months,
+        person_type: handoff.person_type || prev.person_type,
+      }));
+      if (handoff.lead_id) {
+        setExistingCadastroId(handoff.lead_id);
+      }
+      setNotice(
+        handoff.proposal_id
+          ? `Simulação importada (proposta ${handoff.proposal_id.slice(0, 8)}…) — revise os dados e calcule a viabilidade.`
+          : "Simulação importada do Simulador Flash Capital — revise os dados e calcule a viabilidade.",
+      );
+      return;
+    }
     setForm((prev) => ({
       ...prev,
       contact_name: handoff.contact_name || prev.contact_name,
