@@ -106,6 +106,7 @@ from app.schemas import (
     PartnerQualificationFranchiseAppraisalView, PartnerQualificationAppraisalApplyResult,
     PartnerQualificationAppraisalHistoryView,
     OrgSettingsView, OrgSettingsPatch, OrgSettingsImportResult, PublicSiteOrgInfoView, PublicSpeLedgerView,
+    FundOperationFlowStepPatch,
     SupplierInventoryQuotaAuditView,
     SupplierPortalTokenResponse, SupplierPortalMeView, SupplierPortalTransferItem,
     SupplierPortalAdministratorOption, SupplierPortalQuotaItem,
@@ -4657,6 +4658,57 @@ def flash_desk_get(solicitation_id: str, user: User = Depends(get_current_user),
 
     item = get_solicitation(db, user, solicitation_id)
     return solicitation_view(item, list_documents(db, item.id), db)
+
+
+@router.get("/funding/fund-office/operations")
+def fund_office_operations_list(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.fund_operation_flow_service import list_fund_office_operations
+
+    return list_fund_office_operations(db, user)
+
+
+@router.get("/funding/fund-office/operations/{solicitation_id}")
+def fund_office_operation_get(
+    solicitation_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.flash_desk_service import list_documents, solicitation_view
+    from app.fund_operation_flow_service import get_fund_office_operation
+
+    item = get_fund_office_operation(db, user, solicitation_id)
+    return solicitation_view(item, list_documents(db, item.id), db)
+
+
+@router.patch("/flash/desk/solicitations/{solicitation_id}/fund-operation-flow")
+def flash_desk_fund_operation_flow_patch(
+    solicitation_id: str,
+    payload: FundOperationFlowStepPatch,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from app.flash_desk_service import get_solicitation
+    from app.fund_operation_flow_service import (
+        assert_fund_office_access,
+        get_fund_office_operation,
+        update_fund_operation_step,
+    )
+    from app.models import Role
+
+    if user.role == Role.INSTITUTIONAL_FUND:
+        item = get_fund_office_operation(db, user, solicitation_id)
+    else:
+        assert_fund_office_access(user)
+        item = get_solicitation(db, user, solicitation_id)
+    flow = update_fund_operation_step(
+        item,
+        step_code=payload.step_code,
+        status=payload.status,
+        advance_next=payload.advance_next,
+    )
+    audit(db, user, "flash_desk.fund_operation_flow", "flash_solicitation", item.id, {"step": payload.step_code})
+    db.commit()
+    return {"fund_operation_flow": flow}
 
 
 @router.patch("/flash/desk/solicitations/{solicitation_id}/property-inspection")

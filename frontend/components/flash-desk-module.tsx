@@ -16,6 +16,7 @@ import { validateSocioMaritalRows } from "@/lib/marital-status";
 import { lookupCep, lookupMunicipalityPopulation } from "@/lib/cep-lookup";
 import { DESK_SIMULATION_NOTICE } from "@/lib/desk-simulation-notice";
 import { DeskPipelineSummaryBar } from "@/components/desk-pipeline-summary";
+import { FundOperationFlow, FundOperationFlowPanel } from "@/components/fund-operation-flow-panel";
 
 function isDeskNetworkOversight(role: string | undefined): boolean {
   return role === "MANAGER" || role === "MASTER_FRANCHISEE" || isInternalProductRole(role);
@@ -69,6 +70,7 @@ type FlashSolicitation = {
   can_submit_documents?: boolean;
   properties_json?: Array<{ matricula?: string; zone?: string; lot_type?: string }>;
   property_inspections_json?: unknown[];
+  fund_operation_flow?: FundOperationFlow | null;
 };
 
 type EvalResult = {
@@ -1062,6 +1064,26 @@ export function FlashDeskModule() {
     }
   }
 
+  async function completeFundFlowStep(item: FlashSolicitation, stepCode: string) {
+    setError("");
+    setBusy(true);
+    try {
+      const res = await api<{ fund_operation_flow: FundOperationFlow }>(
+        `/flash/desk/solicitations/${item.id}/fund-operation-flow`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ step_code: stepCode, status: "COMPLETED", advance_next: true }),
+        },
+      );
+      mergeSolicitation({ ...item, fund_operation_flow: res.fund_operation_flow });
+      setNotice("Etapa da operação atualizada.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Falha ao atualizar fluxo do fundo");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function deleteDoc(item: FlashSolicitation, docId: string) {
     setError("");
     setBusy(true);
@@ -1813,6 +1835,15 @@ export function FlashDeskModule() {
                   label={selected.source_channel_label}
                   leadId={selected.lead_id}
                 />
+                {selected.capital_source === "INSTITUTIONAL" ? (
+                  <FundOperationFlowPanel
+                    subtitle={selected.contact_name}
+                    flow={selected.fund_operation_flow}
+                    canEdit={letterOps}
+                    busy={busy}
+                    onMarkCompleted={(code) => void completeFundFlowStep(selected, code)}
+                  />
+                ) : null}
                 {selected.properties_json?.length ? (
                   <DeskPropertyInspectionPanel
                     desk="flash"

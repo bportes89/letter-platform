@@ -525,6 +525,10 @@ def store_solicitation(db: Session, user: User, payload: dict) -> FlashSolicitat
     )
     db.add(item)
     db.flush()
+    if str(result.get("capital_source") or "").upper() == "INSTITUTIONAL":
+        from app.fund_operation_flow_service import ensure_fund_operation_flow
+
+        ensure_fund_operation_flow(item)
     return item
 
 
@@ -1010,7 +1014,14 @@ def solicitation_view(
         else False,
         **evaluation_meta(item.evaluation_json),
         **_client_tapaf_path_fields(item),
+        "fund_operation_flow": _fund_operation_flow_field(item),
     }
+
+
+def _fund_operation_flow_field(item: FlashSolicitation) -> dict | None:
+    from app.fund_operation_flow_service import fund_operation_flow_view
+
+    return fund_operation_flow_view(item)
 
 
 def _client_tapaf_path_fields(item: FlashSolicitation) -> dict:

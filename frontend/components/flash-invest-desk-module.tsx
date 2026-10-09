@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckCircle2, Landmark, RefreshCw, WalletCards } from "lucide-react";
+import { CheckCircle2, ClipboardList, Landmark, RefreshCw, WalletCards } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   api,
@@ -12,8 +12,36 @@ import {
 } from "@/lib/api";
 import { isInternalProductRole } from "@/lib/product-nav";
 import { FundingModule } from "@/components/network-funding-modules";
+import { FundOperationFlow, FundOperationFlowPanel } from "@/components/fund-operation-flow-panel";
 
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
+
+type FundOfficeOperationRow = {
+  id: string;
+  contact_name: string;
+  document: string | null;
+  status: string;
+  principal: string;
+  asset_value: string;
+  created_at: string | null;
+  current_step_code: string | null;
+  current_step_title: string | null;
+  current_step_status: string | null;
+};
+
+type FundOfficeOperationDetail = {
+  id: string;
+  contact_name: string;
+  document: string | null;
+  status: string;
+  status_label: string;
+  principal: string;
+  asset_value: string;
+  term_months: number;
+  interest_rate_monthly: string;
+  net_payout: string;
+  fund_operation_flow?: FundOperationFlow | null;
+};
 
 type CheckoutResult = {
   reservation: InvestmentReservation;
@@ -22,7 +50,7 @@ type CheckoutResult = {
 };
 
 export function FlashInvestDeskModule() {
-  const [tab, setTab] = useState<"oportunidades" | "aportes" | "mutuo">("oportunidades");
+  const [tab, setTab] = useState<"oportunidades" | "aportes" | "mutuo" | "cadastros">("oportunidades");
   const [user, setUser] = useState<User | null>(null);
   const [opps, setOpps] = useState<FundingOpportunity[]>([]);
   const [reservations, setReservations] = useState<InvestmentReservation[]>([]);
@@ -36,9 +64,13 @@ export function FlashInvestDeskModule() {
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [fundOps, setFundOps] = useState<FundOfficeOperationRow[]>([]);
+  const [selectedFundOpId, setSelectedFundOpId] = useState<string | null>(null);
+  const [fundOpDetail, setFundOpDetail] = useState<FundOfficeOperationDetail | null>(null);
 
   const isInternal = isInternalProductRole(user?.role);
   const isInvestor = user?.role === "RETAIL_INVESTOR" || user?.role === "INSTITUTIONAL_FUND";
+  const isFundOffice = user?.role === "INSTITUTIONAL_FUND";
 
   const load = useCallback(async () => {
     const me = await api<User>("/auth/me");
@@ -198,6 +230,57 @@ export function FlashInvestDeskModule() {
     }
   }
 
+  const loadFundOfficeOps = useCallback(async () => {
+    const rows = await api<FundOfficeOperationRow[]>("/funding/fund-office/operations");
+    setFundOps(rows);
+    if (selectedFundOpId && !rows.some((r) => r.id === selectedFundOpId)) {
+      setSelectedFundOpId(null);
+      setFundOpDetail(null);
+    }
+  }, [selectedFundOpId]);
+
+  async function openFundOfficeOp(id: string) {
+    setError("");
+    setBusy(true);
+    try {
+      const detail = await api<FundOfficeOperationDetail>(`/funding/fund-office/operations/${id}`);
+      setSelectedFundOpId(id);
+      setFundOpDetail(detail);
+      setTab("cadastros");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Falha ao abrir cadastro");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function completeFundFlowStep(stepCode: string) {
+    if (!fundOpDetail) return;
+    setError("");
+    setBusy(true);
+    try {
+      const res = await api<{ fund_operation_flow: FundOperationFlow }>(
+        `/flash/desk/solicitations/${fundOpDetail.id}/fund-operation-flow`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ step_code: stepCode, status: "COMPLETED", advance_next: true }),
+        },
+      );
+      setFundOpDetail({ ...fundOpDetail, fund_operation_flow: res.fund_operation_flow });
+      setNotice("Etapa concluída — próximo passo em andamento.");
+      await loadFundOfficeOps();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Falha ao atualizar etapa");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!isFundOffice) return;
+    loadFundOfficeOps().catch((e) => setError(e instanceof Error ? e.message : "Falha ao listar operações"));
+  }, [isFundOffice, loadFundOfficeOps]);
+
   async function requestRedeem(id: string) {
     setBusy(true);
     try {
@@ -246,7 +329,10 @@ export function FlashInvestDeskModule() {
             APIs: /funding/opportunities · /funding/reservations · /funding/positions
           </small>
         </div>
-        <div className="marketplace-tabs" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
+        <div
+          className="marketplace-tabs"
+          style={{ gridTemplateColumns: isFundOffice ? "1fr 1fr 1fr 1.2fr" : "1fr 1fr 1fr" }}
+        >
           <button type="button" className={`marketplace-tab${tab === "oportunidades" ? " active" : ""}`} onClick={() => setTab("oportunidades")}>
             Oportunidades
           </button>
@@ -256,6 +342,18 @@ export function FlashInvestDeskModule() {
           <button type="button" className={`marketplace-tab${tab === "mutuo" ? " active" : ""}`} onClick={() => setTab("mutuo")}>
             Mútuo
           </button>
+          {isFundOffice ? (
+            <button
+              type="button"
+              className={`marketplace-tab${tab === "cadastros" ? " active" : ""}`}
+              onClick={() => {
+                setTab("cadastros");
+                void loadFundOfficeOps().catch((e) => setError(e instanceof Error ? e.message : "Falha ao listar"));
+              }}
+            >
+              Cadastros / operações
+            </button>
+          ) : null}
         </div>
 
         <div style={{ padding: "14px 18px", display: "flex", gap: 10 }}>
@@ -429,6 +527,72 @@ export function FlashInvestDeskModule() {
             <p className="muted" style={{ fontSize: 12 }}>
               Cron: <code>POST /api/v1/system/cron/flash-invest-mutuo-interest</code> lança juros de todos ACTIVE (idempotente por mês).
             </p>
+          </div>
+        )}
+
+        {tab === "cadastros" && isFundOffice && (
+          <div style={{ padding: "0 18px 18px" }}>
+            <div className="notice" style={{ marginBottom: 12, display: "flex", gap: 8, alignItems: "center" }}>
+              <ClipboardList size={18} />
+              <span>
+                Acompanhamento das propostas Flash com capital <b>institucional</b>. O fluxo inicia em <b>Term Sheet</b> (sem etapa Carta Paulo Letter).
+              </span>
+            </div>
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Cliente</th>
+                  <th>Principal</th>
+                  <th>Status Flash</th>
+                  <th>Etapa atual</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {fundOps.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="muted">Nenhuma operação institucional cadastrada.</td>
+                  </tr>
+                ) : (
+                  fundOps.map((row) => (
+                    <tr key={row.id} style={{ background: selectedFundOpId === row.id ? "#f8fafc" : undefined }}>
+                      <td>
+                        <b>{row.contact_name}</b>
+                        {row.document ? <div className="muted" style={{ fontSize: 11 }}>{row.document}</div> : null}
+                      </td>
+                      <td>{brl.format(Number(row.principal))}</td>
+                      <td>{row.status}</td>
+                      <td>
+                        {row.current_step_title || "—"}
+                        <div className="muted" style={{ fontSize: 10 }}>{row.current_step_status}</div>
+                      </td>
+                      <td>
+                        <button type="button" className="table-action" disabled={busy} onClick={() => void openFundOfficeOp(row.id)}>
+                          Abrir cadastro
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+            {fundOpDetail ? (
+              <div style={{ marginTop: 16 }}>
+                <div className="notice" style={{ marginBottom: 10 }}>
+                  <b>{fundOpDetail.contact_name}</b>
+                  <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                    {fundOpDetail.status_label} · {brl.format(Number(fundOpDetail.principal))} · {fundOpDetail.term_months}m @{" "}
+                    {fundOpDetail.interest_rate_monthly}%
+                  </div>
+                </div>
+                <FundOperationFlowPanel
+                  flow={fundOpDetail.fund_operation_flow}
+                  canEdit
+                  busy={busy}
+                  onMarkCompleted={(code) => void completeFundFlowStep(code)}
+                />
+              </div>
+            ) : null}
           </div>
         )}
       </section>

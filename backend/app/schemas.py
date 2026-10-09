@@ -2646,6 +2646,12 @@ class PublicSpeLedgerView(BaseModel):
     audit_hash: str
 
 
+class FundOperationFlowStepPatch(BaseModel):
+    step_code: str = Field(min_length=2, max_length=40)
+    status: str = Field(min_length=4, max_length=20)
+    advance_next: bool = True
+
+
 class QuotaSupplierView(BaseModel):
     id: str
     active: bool
