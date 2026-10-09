@@ -10,6 +10,7 @@ import { AuctionSection } from "@/components/public-site/gated-vitrine-section";
 import { PublicSimulatorSection, SiteNav } from "@/components/public-site/simulator-section";
 import { SiteFooter } from "@/components/public-site/site-footer";
 import { LegalManualsPublicSection } from "@/components/public-site/legal-manuals-section";
+import { SpeLedgerCard } from "@/components/public-site/spe-ledger-card";
 
 export default function PublicHomePage() {
   useEffect(() => {
@@ -45,35 +46,7 @@ export default function PublicHomePage() {
               </div>
             </div>
 
-            <div className="ledger-card">
-              <div className="ledger-head">
-                <span>LETTER_SPE_LEDGER</span>
-                <span className="live">
-                  <i /> SISTEMA ONLINE
-                </span>
-              </div>
-              <div className="ledger-main">
-                <span>Pipeline corporativo bruto</span>
-                <strong>R$ 297 mi</strong>
-                <small>em ativos sob análise estruturada</small>
-              </div>
-              <div className="ledger-stats">
-                <div>
-                  <span>Crivo estimado</span>
-                  <strong>60,00%</strong>
-                  <small>capacidade elegível</small>
-                </div>
-                <div>
-                  <span>LTV máximo</span>
-                  <strong className="blue">40,00%</strong>
-                  <small>mitigação de risco</small>
-                </div>
-              </div>
-              <div className="ledger-foot">
-                <span>◆ AUDIT TRAIL ATIVO</span>
-                <span>HASH 8F2…9A1…C04</span>
-              </div>
-            </div>
+            <SpeLedgerCard />
           </div>
 
           <div className="trust-row">

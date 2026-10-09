@@ -2635,6 +2635,17 @@ class PublicSiteOrgInfoView(BaseModel):
     values: dict[str, str]
 
 
+class PublicSpeLedgerView(BaseModel):
+    pipeline_total_brl: str
+    pipeline_display: str
+    sdc_pipeline_brl: str
+    flash_pipeline_brl: str
+    operation_count: int
+    estimated_crivo_percent: str
+    max_ltv_percent: str
+    audit_hash: str
+
+
 class QuotaSupplierView(BaseModel):
     id: str
     active: bool

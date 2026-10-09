@@ -105,7 +105,7 @@ from app.schemas import (
     PartnerQualificationImportResult, PartnerQualificationAppraisalRequest,
     PartnerQualificationFranchiseAppraisalView, PartnerQualificationAppraisalApplyResult,
     PartnerQualificationAppraisalHistoryView,
-    OrgSettingsView, OrgSettingsPatch, OrgSettingsImportResult, PublicSiteOrgInfoView,
+    OrgSettingsView, OrgSettingsPatch, OrgSettingsImportResult, PublicSiteOrgInfoView, PublicSpeLedgerView,
     SupplierInventoryQuotaAuditView,
     SupplierPortalTokenResponse, SupplierPortalMeView, SupplierPortalTransferItem,
     SupplierPortalAdministratorOption, SupplierPortalQuotaItem,
@@ -2223,6 +2223,14 @@ def public_site_org_info(db: Session = Depends(get_db)):
     from app.vender_cota_service import default_organization_id
 
     return {"values": public_site_info(db, default_organization_id(db))}
+
+
+@router.get("/public/site/spe-ledger", response_model=PublicSpeLedgerView)
+def public_site_spe_ledger(db: Session = Depends(get_db)):
+    from app.public_site_service import headquarters_org, public_spe_ledger
+
+    org = headquarters_org(db)
+    return public_spe_ledger(db, org.id)
 
 
 @router.get("/sdc/partner-qualification-tiers", response_model=list[PartnerQualificationTierView])

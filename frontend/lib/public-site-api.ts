@@ -53,6 +53,21 @@ export type PublicQuotaItem = {
   status: string;
 };
 
+export type PublicSpeLedger = {
+  pipeline_total_brl: string;
+  pipeline_display: string;
+  sdc_pipeline_brl: string;
+  flash_pipeline_brl: string;
+  operation_count: number;
+  estimated_crivo_percent: string;
+  max_ltv_percent: string;
+  audit_hash: string;
+};
+
+export function fetchPublicSpeLedger() {
+  return publicFetch<PublicSpeLedger>("/public/site/spe-ledger");
+}
+
 export async function fetchPublicQuotas(): Promise<PublicQuotaItem[]> {
   return publicFetch<PublicQuotaItem[]>("/public/site/quotas");
 }

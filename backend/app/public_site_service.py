@@ -480,3 +480,70 @@ def simulate_sdc_public(
         "execution": "SIMULATION_ONLY",
         "nina_match": nina_match,
     }
+
+
+# Card LETTER_SPE_LEDGER (home pública) — espelha totais das mesas SDC + Flash Capital.
+PUBLIC_LEDGER_CRIVO_PERCENT = Decimal("30")
+PUBLIC_LEDGER_MAX_LTV_PERCENT = Decimal("40")
+_DESK_PIPELINE_TERMINAL_STATUSES = frozenset({"REJECTED", "CANCELLED"})
+
+
+def _flash_pipeline_amount(row) -> Decimal:
+    principal = Decimal(str(row.principal or 0))
+    if principal > 0:
+        return principal
+    return Decimal(str(row.asset_value or 0))
+
+
+def format_public_pipeline_display(amount: Decimal) -> str:
+    """Compacto para o hero (ex.: R$ 297 mi)."""
+    value = money(amount)
+    if value >= Decimal("1000000"):
+        millions = value / Decimal("1000000")
+        if millions >= Decimal("100"):
+            label = f"{int(millions):,}".replace(",", ".")
+        elif millions >= Decimal("10"):
+            label = f"{millions:.0f}"
+        else:
+            raw = f"{millions:.2f}".rstrip("0").rstrip(".")
+            label = raw.replace(".", ",")
+        return f"R$ {label} mi"
+    formatted = f"{value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    return f"R$ {formatted}"
+
+
+def public_spe_ledger(db: Session, organization_id: str) -> dict:
+    from app.models import FlashSolicitation, SdcSolicitation
+
+    sdc_rows = list(
+        db.scalars(
+            select(SdcSolicitation).where(
+                SdcSolicitation.organization_id == organization_id,
+                SdcSolicitation.status.not_in(tuple(_DESK_PIPELINE_TERMINAL_STATUSES)),
+            )
+        )
+    )
+    flash_rows = list(
+        db.scalars(
+            select(FlashSolicitation).where(
+                FlashSolicitation.organization_id == organization_id,
+                FlashSolicitation.status.not_in(tuple(_DESK_PIPELINE_TERMINAL_STATUSES)),
+            )
+        )
+    )
+    sdc_total = money(sum((Decimal(str(r.credit_estimated or 0)) for r in sdc_rows), Decimal("0")))
+    flash_total = money(sum((_flash_pipeline_amount(r) for r in flash_rows), Decimal("0")))
+    pipeline_total = money(sdc_total + flash_total)
+    operation_count = len(sdc_rows) + len(flash_rows)
+    digest = hashlib.sha256(f"{pipeline_total}:{operation_count}:{organization_id}".encode()).hexdigest().upper()
+    audit_hash = f"{digest[:3]}…{digest[8:11]}…{digest[-3:]}"
+    return {
+        "pipeline_total_brl": str(pipeline_total),
+        "pipeline_display": format_public_pipeline_display(pipeline_total),
+        "sdc_pipeline_brl": str(sdc_total),
+        "flash_pipeline_brl": str(flash_total),
+        "operation_count": operation_count,
+        "estimated_crivo_percent": str(PUBLIC_LEDGER_CRIVO_PERCENT),
+        "max_ltv_percent": str(PUBLIC_LEDGER_MAX_LTV_PERCENT),
+        "audit_hash": audit_hash,
+    }
