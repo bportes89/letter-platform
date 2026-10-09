@@ -74,9 +74,9 @@ def _gestao_label_for_role(role: str | Role | None) -> str | None:
     return _GESTAO_ROLE_LABEL.get(parsed, str(role))
 
 
-def _marketplace_parties(row: dict, snap: dict, terms: dict, life: dict) -> dict:
+def _marketplace_parties(row: dict, snap: dict, terms: dict, life: dict, *, user: User | None = None) -> dict:
     release = life.get("commission_release") if isinstance(life.get("commission_release"), dict) else {}
-    return {
+    out = {
         "cliente": {
             "nome": row.get("name"),
             "documento": row.get("document"),
@@ -106,6 +106,15 @@ def _marketplace_parties(row: dict, snap: dict, terms: dict, life: dict) -> dict
             "referencia": release.get("reference"),
         },
     }
+    if user is not None:
+        from app.marketplace_partner_view import can_view_fund_investor_routing, is_marketplace_partner_commercial
+
+        if is_marketplace_partner_commercial(user):
+            return {"cliente": out["cliente"], "parceiro": out["parceiro"]}
+        if not can_view_fund_investor_routing(user):
+            out.pop("fundo", None)
+            out.pop("investidor", None)
+    return out
 
 SALE_SITUATIONS = frozenset({SIT_AGUARDANDO, SIT_PAGO, SIT_CONCLUIDO, SIT_CANCELADO, SIT_CANCELADO_FALTA})
 
@@ -154,6 +163,28 @@ COMM_RELEASED = "RELEASED"
 COMM_RELEASED_STUB = "RELEASED_STUB"  # legado pré-liberação real
 COMM_SKIPPED = "SKIPPED"
 COMM_RELEASED_ANY = frozenset({COMM_RELEASED, COMM_RELEASED_STUB})
+
+PLACEHOLDER_CLIENT_NAME = "Cliente — completar cadastro"
+DEFAULT_PLACEHOLDER_PHONE = "11999999999"
+
+
+def marketplace_client_registration_complete(lead: Lead, profile: dict | None = None) -> bool:
+    """Parceiro deve preencher cadastro antes de boleto (Esteira 1/2)."""
+    profile = profile or lead_marketplace_shortcut_profile(lead)
+    name = (lead.name or "").strip()
+    if not name or name == PLACEHOLDER_CLIENT_NAME or name.lower().startswith("cliente — completar"):
+        return False
+    doc = profile.get("document") or lead.document or ""
+    digits = "".join(ch for ch in str(doc) if ch.isdigit())
+    if len(digits) < 11:
+        return False
+    email = (profile.get("email") or "").strip()
+    if not email or "@" not in email:
+        return False
+    phone = (lead.phone or "").strip()
+    if not phone or phone == DEFAULT_PLACEHOLDER_PHONE:
+        return False
+    return True
 
 
 def _parse_json(raw: str | None) -> dict:
@@ -311,6 +342,10 @@ def _classify(lead: Lead, proposal: Proposal | None, contract: Contract | None, 
             stored = SIT_CANCELADO
         if stored == "EM_NEGOCIACAO":
             stored = SIT_PAGO
+        if stored == SIT_AGUARDANDO and not marketplace_client_registration_complete(
+            lead, lead_marketplace_shortcut_profile(lead)
+        ):
+            return PIPELINE_INCOMPLETO, SIT_INCOMPLETO
         bucket = _pipeline_for_situation(stored)
         return bucket, stored
 
@@ -318,15 +353,28 @@ def _classify(lead: Lead, proposal: Proposal | None, contract: Contract | None, 
         return PIPELINE_CONCLUIDO, SIT_CONCLUIDO
     if life.get("paid_at"):
         return PIPELINE_NEGOCIACAO, SIT_PAGO
+    profile = lead_marketplace_shortcut_profile(lead)
+    client_ready = marketplace_client_registration_complete(lead, profile)
+    stored_sit = str(life.get("situation") or "").strip().upper()
+    if stored_sit == SIT_INCOMPLETO or (proposal and not client_ready):
+        if proposal and (
+            any(q.status == "RESERVED" for q in quotas)
+            or proposal.status in {"APPROVED", "UNDER_REVIEW", "SUBMITTED"}
+        ):
+            return PIPELINE_INCOMPLETO, SIT_INCOMPLETO
     if proposal and (
         contract
         or any(q.status == "RESERVED" for q in quotas)
         or proposal.status in {"APPROVED", "UNDER_REVIEW", "SUBMITTED"}
         or (isinstance(terms.get("boleto"), dict) and terms.get("boleto", {}).get("codigo_solicitacao"))
     ):
-        return PIPELINE_NOVOS, SIT_AGUARDANDO
+        if client_ready:
+            return PIPELINE_NOVOS, SIT_AGUARDANDO
+        return PIPELINE_INCOMPLETO, SIT_INCOMPLETO
     if proposal and proposal.product == "MARKETPLACE":
-        return PIPELINE_NOVOS, SIT_AGUARDANDO
+        if client_ready:
+            return PIPELINE_NOVOS, SIT_AGUARDANDO
+        return PIPELINE_INCOMPLETO, SIT_INCOMPLETO
     if lead.product_interest == "MARKETPLACE" or lead.source in MARKETPLACE_SOURCES:
         return PIPELINE_INCOMPLETO, SIT_INCOMPLETO
     return PIPELINE_INCOMPLETO, SIT_INCOMPLETO
@@ -603,6 +651,8 @@ def _cadastro_row_for_lead(
     )
     if not entrada and snap.get("pricing"):
         entrada = (snap.get("pricing") or {}).get("entrada_final")
+    from app.marketplace_partner_view import partner_quota_display_codes, user_sees_supplier_quota_identity
+
     suppliers = sorted(
         {
             str(q.supplier_source)
@@ -615,6 +665,10 @@ def _cadastro_row_for_lead(
             if isinstance(row, dict) and row.get("supplier_source")
         }
     )
+    quota_codes = [f"{q.group_code}/{q.quota_code}" for q in linked_quotas]
+    if not user_sees_supplier_quota_identity(user):
+        quota_codes = partner_quota_display_codes(linked_quotas)
+        suppliers = []
     email = profile.get("email") or snap.get("email") or terms.get("client_email")
     my_chain_commission = partner_chain_commission_slice(
         terms,
@@ -650,8 +704,8 @@ def _cadastro_row_for_lead(
         "contract_id": contract.id if contract else None,
         "contract_status": contract.status if contract else None,
         "quota_ids": quota_ids,
-        "quota_codes": [f"{q.group_code}/{q.quota_code}" for q in linked_quotas],
-        "supplier_sources": suppliers,
+        "quota_codes": quota_codes,
+        "supplier_sources": suppliers if user_sees_supplier_quota_identity(user) else [],
         "person_type": profile.get("person_type") or snap.get("person_type") or terms.get("person_type"),
         "supplier_transfer_confirmed": bool(life.get("supplier_transfer_confirmed")),
         "commission_release_status": life.get("commission_release_status"),
@@ -758,6 +812,21 @@ def get_cadastro_detail(db: Session, user: User, lead_id: str) -> dict:
         situation=life.get("situation") or row.get("situation"),
         commission_release_status=life.get("commission_release_status"),
     )
+    from app.marketplace_partner_view import is_marketplace_partner_commercial
+
+    zapsign_block = zapsign_view_from_terms(terms)
+    if is_marketplace_partner_commercial(user):
+        zapsign_block = None
+    purchase_readonly = {
+        "credit_value": row.get("credit_value"),
+        "entrada_value": row.get("entrada_value"),
+        "quota_codes": row.get("quota_codes"),
+        "supplier_sources": row.get("supplier_sources"),
+        "channel": terms.get("channel") or lead.source,
+    }
+    if is_marketplace_partner_commercial(user):
+        purchase_readonly["supplier_sources"] = []
+
     return {
         **row,
         "document": profile.get("document") or row.get("document"),
@@ -771,13 +840,7 @@ def get_cadastro_detail(db: Session, user: User, lead_id: str) -> dict:
         "terms": sanitize_marketplace_terms_for_user(terms, user),
         "my_chain_commission": my_chain_commission or row.get("my_chain_commission"),
         "address": profile.get("address") or snap.get("address") or {},
-        "purchase_readonly": {
-            "credit_value": row.get("credit_value"),
-            "entrada_value": row.get("entrada_value"),
-            "quota_codes": row.get("quota_codes"),
-            "supplier_sources": row.get("supplier_sources"),
-            "channel": terms.get("channel") or lead.source,
-        },
+        "purchase_readonly": purchase_readonly,
         "supplier_transfer_confirmed": bool(life.get("supplier_transfer_confirmed")),
         "commission_release_status": life.get("commission_release_status"),
         "paid_at": life.get("paid_at"),
@@ -794,8 +857,14 @@ def get_cadastro_detail(db: Session, user: User, lead_id: str) -> dict:
         "boleto": boleto,
         "has_site_contract": contract_meta["has_site_contract"],
         "contract_ack": contract_meta["contract_ack"],
-        "zapsign": zapsign_view_from_terms(terms),
-        "parties": _marketplace_parties(row, snap, terms, life),
+        "zapsign": zapsign_block,
+        "parties": _marketplace_parties(row, snap, terms, life, user=user),
+        "client_registration_complete": marketplace_client_registration_complete(lead, profile),
+        "can_emit_boleto": (
+            marketplace_client_registration_complete(lead, profile)
+            and situation == SIT_AGUARDANDO
+            and situation not in {SIT_CANCELADO, SIT_CANCELADO_FALTA}
+        ),
     }
 
 
@@ -818,6 +887,8 @@ def update_cadastro(
     situation: str | None = None,
     force_admin_conclude: bool = False,
     supplier_transfer_confirmed: bool | None = None,
+    fund_name: str | None = None,
+    investor_name: str | None = None,
 ) -> dict:
     lead = get_lead_for_user(db, user, lead_id)
     if user.role == Role.CLIENT:
@@ -873,6 +944,26 @@ def update_cadastro(
     )
     if proposal:
         terms = seed_marketplace_lifecycle(_parse_json(proposal.terms_json))
+        if fund_name is not None or investor_name is not None:
+            if user.role not in {Role.PLATFORM_ADMIN, Role.INTERNAL_STAFF}:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Direcionamento fundo/investidor é restrito à operação LETTER.",
+                )
+            if fund_name is not None:
+                terms["fund_name"] = fund_name.strip() or None
+            if investor_name is not None:
+                terms["investor_name"] = investor_name.strip() or None
+        profile_after = lead_marketplace_shortcut_profile(lead)
+        if marketplace_client_registration_complete(lead, profile_after):
+            life = _lifecycle(terms)
+            if life.get("situation") == SIT_INCOMPLETO:
+                _write_lifecycle(proposal, situation=SIT_AGUARDANDO)
+                terms = seed_marketplace_lifecycle(_parse_json(proposal.terms_json))
+            from app.marketplace_contract_docs_service import ensure_marketplace_office_contract_draft
+
+            ensure_marketplace_office_contract_draft(db, lead, proposal)
+            terms = seed_marketplace_lifecycle(_parse_json(proposal.terms_json))
         proposal.terms_json = json.dumps(terms, ensure_ascii=False)
         if supplier_transfer_confirmed is not None:
             now = datetime.now(UTC).isoformat() if supplier_transfer_confirmed else None

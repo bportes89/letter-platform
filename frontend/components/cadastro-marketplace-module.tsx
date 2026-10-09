@@ -87,6 +87,8 @@ type CadastroDetail = CadastroRow & {
   snapshot: Record<string, unknown>;
   parties?: MarketplaceParties;
   can_conclude?: boolean;
+  client_registration_complete?: boolean;
+  can_emit_boleto?: boolean;
   commission_release?: {
     reference?: string;
     supplier_total?: string;
@@ -150,6 +152,7 @@ export function CadastroMarketplaceModule() {
   const canManageDocs = myRole !== "CLIENT";
   const canDeleteDocs = isInternalProductRole(myRole);
   const canEditContract = isInternalProductRole(myRole);
+  const canAdminFundRouting = myRole === "PLATFORM_ADMIN" || myRole === "INTERNAL_STAFF";
   const hasContractHtml = Boolean(
     selected?.has_site_contract ||
       (selected?.terms && (selected.terms as { contract_html?: string }).contract_html) ||
@@ -370,6 +373,8 @@ export function CadastroMarketplaceModule() {
           situation: selected.lifecycle_editable ? String(fd.get("situation") || selected.situation) : undefined,
           supplier_transfer_confirmed: selected.lifecycle_editable ? fd.get("supplier_transfer_confirmed") === "1" : undefined,
           force_admin_conclude: selected.lifecycle_editable ? fd.get("force_admin_conclude") === "1" : false,
+          fund_name: canAdminFundRouting ? String(fd.get("fund_name") || "") || null : undefined,
+          investor_name: canAdminFundRouting ? String(fd.get("investor_name") || "") || null : undefined,
         }),
       });
       setSelected(updated);
@@ -610,9 +615,108 @@ export function CadastroMarketplaceModule() {
                 {selected.commission_release.reference ? ` · ${selected.commission_release.reference}` : ""}
               </div>
             ) : null}
-            {selected.situation === "AGUARDANDO_PAGAMENTO" && (partnerView || selected.lifecycle_editable) ? (
+            {!selected.client_registration_complete ? (
+              <div className="notice" style={{ borderColor: "#2563eb" }}>
+                <b>1. Dados do cliente</b> — preencha nome, documento, telefone e e-mail abaixo e clique em{" "}
+                <b>Salvar cadastro</b>. Depois disso o boleto e o contrato ficam disponíveis (assinatura digital só após o
+                pagamento da entrada).
+              </div>
+            ) : null}
+            {(() => {
+              const p = selected.parties;
+              return (
+                <CadastroPartyBlock
+                  title="Cliente"
+                  readOnlySummary={
+                    <p>Tipo pessoa: {partyText(p?.cliente?.tipo_pessoa ?? selected.snapshot?.person_type)}</p>
+                  }
+                >
+                  <div className="marketplace-form-row">
+                    <label className="marketplace-field marketplace-field-wide">
+                      Puxar cadastro existente (base do parceiro)
+                      <select
+                        defaultValue=""
+                        onChange={(e) => {
+                          const id = e.target.value;
+                          if (id) void applyCadastroShortcut(id);
+                          e.target.value = "";
+                        }}
+                      >
+                        <option value="">Selecione um cadastro anterior…</option>
+                        {cadastroShortcuts
+                          .filter((c) => c.lead_id !== selected.lead_id)
+                          .map((c) => (
+                            <option key={c.lead_id} value={c.lead_id}>
+                              {c.label || c.name}
+                            </option>
+                          ))}
+                      </select>
+                    </label>
+                    <label className="marketplace-field">
+                      Nome
+                      <input name="name" defaultValue={selected.name} required />
+                    </label>
+                    <label className="marketplace-field">
+                      Telefone
+                      <input name="phone" defaultValue={selected.phone} required />
+                    </label>
+                    <label className="marketplace-field">
+                      Documento
+                      <input name="document" defaultValue={selected.document || ""} />
+                    </label>
+                    <label className="marketplace-field">
+                      E-mail
+                      <input name="email" type="email" defaultValue={selected.email || ""} />
+                    </label>
+                    {!partnerView ? (
+                      <label className="marketplace-field marketplace-field-compact">
+                        Status lead
+                        <select name="lead_status" defaultValue={selected.lead_status}>
+                          {["NEW", "CONTACTED", "QUALIFIED", "PROPOSAL", "CONVERTED", "CANCELLED"].map((s) => (
+                            <option key={s} value={s}>
+                              {s}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : null}
+                    <label className="marketplace-field marketplace-field-compact">
+                      CEP
+                      <input name="zipcode" defaultValue={selected.address?.zipcode || ""} />
+                    </label>
+                    <label className="marketplace-field">
+                      Rua
+                      <input name="street" defaultValue={selected.address?.street || ""} />
+                    </label>
+                    <label className="marketplace-field marketplace-field-compact">
+                      Número
+                      <input name="number" defaultValue={selected.address?.number || ""} />
+                    </label>
+                    <label className="marketplace-field">
+                      Bairro
+                      <input name="neighborhood" defaultValue={selected.address?.neighborhood || ""} />
+                    </label>
+                    <label className="marketplace-field">
+                      Cidade
+                      <input name="city" defaultValue={selected.address?.city || ""} />
+                    </label>
+                    <label className="marketplace-field marketplace-field-compact">
+                      UF
+                      <input name="uf" defaultValue={selected.address?.uf || ""} maxLength={2} />
+                    </label>
+                  </div>
+                </CadastroPartyBlock>
+              );
+            })()}
+            {canManageDocs ? (
+              <button type="submit" className="marketplace-submit" disabled={busy} style={{ marginBottom: 12 }}>
+                <RefreshCw />
+                {busy ? "Salvando…" : "Salvar cadastro"}
+              </button>
+            ) : null}
+            {selected.can_emit_boleto && (partnerView || selected.lifecycle_editable) ? (
               <div className="notice">
-                Boleto da entrada
+                <b>2. Boleto da entrada</b>
                 {selected.boleto?.amount ? ` · ${brl.format(Number(selected.boleto.amount))}` : ""}
                 {!partnerView && selected.boleto?.codigo_solicitacao
                   ? ` · ${selected.boleto.provider || "—"} · ${selected.boleto.codigo_solicitacao}`
@@ -629,8 +733,12 @@ export function CadastroMarketplaceModule() {
               </div>
             ) : null}
             <div className="notice">
-              Contrato de intermediação:{" "}
-              {hasContractHtml ? "disponível para visualização e PDF" : "será gerado ao confirmar a venda"}
+              <b>Contrato de intermediação</b>:{" "}
+              {hasContractHtml
+                ? "disponível para visualização e PDF (assinatura via ZapSign após pagamento da entrada)"
+                : selected.client_registration_complete
+                  ? "gerando… salve novamente se não abrir"
+                  : "disponível após salvar os dados do cliente"}
               <button
                 type="button"
                 className="table-action"
@@ -738,90 +846,6 @@ export function CadastroMarketplaceModule() {
               return (
                 <>
                   <CadastroPartyBlock
-                    title="Cliente"
-                    readOnlySummary={
-                      <p>
-                        Tipo pessoa: {partyText(p?.cliente?.tipo_pessoa ?? selected.snapshot?.person_type)}
-                      </p>
-                    }
-                  >
-                    <div className="marketplace-form-row">
-                      <label className="marketplace-field marketplace-field-wide">
-                        Puxar cadastro existente (base do parceiro)
-                        <select
-                          defaultValue=""
-                          onChange={(e) => {
-                            const id = e.target.value;
-                            if (id) void applyCadastroShortcut(id);
-                            e.target.value = "";
-                          }}
-                        >
-                          <option value="">Selecione um cadastro anterior…</option>
-                          {cadastroShortcuts
-                            .filter((c) => c.lead_id !== selected.lead_id)
-                            .map((c) => (
-                              <option key={c.lead_id} value={c.lead_id}>
-                                {c.label || c.name}
-                              </option>
-                            ))}
-                        </select>
-                      </label>
-                      <label className="marketplace-field">
-                        Nome
-                        <input name="name" defaultValue={selected.name} required />
-                      </label>
-                      <label className="marketplace-field">
-                        Telefone
-                        <input name="phone" defaultValue={selected.phone} required />
-                      </label>
-                      <label className="marketplace-field">
-                        Documento
-                        <input name="document" defaultValue={selected.document || ""} />
-                      </label>
-                      <label className="marketplace-field">
-                        E-mail
-                        <input name="email" type="email" defaultValue={selected.email || ""} />
-                      </label>
-                      {!partnerView ? (
-                        <label className="marketplace-field marketplace-field-compact">
-                          Status lead
-                          <select name="lead_status" defaultValue={selected.lead_status}>
-                            {["NEW", "CONTACTED", "QUALIFIED", "PROPOSAL", "CONVERTED", "CANCELLED"].map((s) => (
-                              <option key={s} value={s}>
-                                {s}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      ) : null}
-                      <label className="marketplace-field marketplace-field-compact">
-                        CEP
-                        <input name="zipcode" defaultValue={selected.address?.zipcode || ""} />
-                      </label>
-                      <label className="marketplace-field">
-                        Rua
-                        <input name="street" defaultValue={selected.address?.street || ""} />
-                      </label>
-                      <label className="marketplace-field marketplace-field-compact">
-                        Número
-                        <input name="number" defaultValue={selected.address?.number || ""} />
-                      </label>
-                      <label className="marketplace-field">
-                        Bairro
-                        <input name="neighborhood" defaultValue={selected.address?.neighborhood || ""} />
-                      </label>
-                      <label className="marketplace-field">
-                        Cidade
-                        <input name="city" defaultValue={selected.address?.city || ""} />
-                      </label>
-                      <label className="marketplace-field marketplace-field-compact">
-                        UF
-                        <input name="uf" defaultValue={selected.address?.uf || ""} maxLength={2} />
-                      </label>
-                    </div>
-                  </CadastroPartyBlock>
-
-                  <CadastroPartyBlock
                     title="Parceiro"
                     readOnlySummary={
                       <p>
@@ -869,30 +893,39 @@ export function CadastroMarketplaceModule() {
                   </CadastroPartyBlock>
                   ) : null}
 
-                  <CadastroPartyBlock
-                    title="Fundo"
-                    readOnlySummary={
-                      <p>
-                        {partyText(p?.fundo?.observacao) !== "—"
-                          ? partyText(p?.fundo?.observacao)
-                          : "Vinculado à entrada / escrow quando a operação usar fundo (Flash Invest)."}
-                        {p?.fundo?.comissao_plataforma
-                          ? ` · plataforma ${brl.format(Number(p.fundo.comissao_plataforma))}`
-                          : ""}
+                  {canAdminFundRouting ? (
+                    <CadastroPartyBlock title="Direcionamento fundo / investidor (operação LETTER)">
+                      <div className="marketplace-form-row">
+                        <label className="marketplace-field marketplace-field-wide">
+                          Fundo / escrow
+                          <input
+                            name="fund_name"
+                            defaultValue={String(
+                              (selected.terms as { fund_name?: string })?.fund_name ||
+                                partyText(p?.fundo?.observacao) ||
+                                "",
+                            ).replace(/^—$/, "")}
+                            placeholder="Ex.: Flash Invest — fundo institucional"
+                          />
+                        </label>
+                        <label className="marketplace-field marketplace-field-wide">
+                          Investidor retail (se houver)
+                          <input
+                            name="investor_name"
+                            defaultValue={String(
+                              (selected.terms as { investor_name?: string })?.investor_name ||
+                                partyText(p?.investidor?.observacao) ||
+                                "",
+                            ).replace(/^—$/, "")}
+                            placeholder="Nome ou referência interna"
+                          />
+                        </label>
+                      </div>
+                      <p className="muted" style={{ fontSize: 11, margin: "8px 0 0" }}>
+                        Use <b>Salvar cadastro</b> para gravar. Parceiros não veem estes campos.
                       </p>
-                    }
-                  />
-
-                  <CadastroPartyBlock
-                    title="Investidor"
-                    readOnlySummary={
-                      <p>
-                        {partyText(p?.investidor?.observacao) !== "—"
-                          ? partyText(p?.investidor?.observacao)
-                          : "Sem investidor retail vinculado a este cadastro Marketplace."}
-                      </p>
-                    }
-                  />
+                    </CadastroPartyBlock>
+                  ) : null}
 
                   <CadastroPartyBlock
                     title="Franqueado"
@@ -925,12 +958,6 @@ export function CadastroMarketplaceModule() {
                 </>
               );
             })()}
-            {!partnerView ? (
-              <button type="submit" className="marketplace-submit" disabled={busy}>
-                <RefreshCw />
-                {busy ? "Salvando…" : "Salvar cadastro"}
-              </button>
-            ) : null}
             <button type="button" className="table-action" style={{ marginLeft: "0.75rem" }} onClick={closeDetail}>
               Fechar
             </button>

@@ -254,11 +254,24 @@ def issue_marketplace_boleto(
     if not proposal:
         raise HTTPException(status_code=404, detail="Proposta Marketplace não encontrada para este cadastro")
 
+    from app.cadastro_service import (
+        SIT_INCOMPLETO,
+        lead_marketplace_shortcut_profile,
+        marketplace_client_registration_complete,
+    )
+
     terms = seed_marketplace_lifecycle(_parse_json(proposal.terms_json))
     life = terms.get("lifecycle") if isinstance(terms.get("lifecycle"), dict) else {}
     situation = str(life.get("situation") or SIT_AGUARDANDO).upper()
     if situation in {SIT_CANCELADO, SIT_CANCELADO_FALTA, "CANCELADA"}:
         raise HTTPException(status_code=409, detail="Não é possível emitir boleto para venda cancelada")
+    if situation == SIT_INCOMPLETO or not marketplace_client_registration_complete(
+        lead, lead_marketplace_shortcut_profile(lead)
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="Preencha e salve os dados do cliente antes de emitir o boleto da entrada.",
+        )
 
     existing = terms.get("boleto") if isinstance(terms.get("boleto"), dict) else None
     if existing and existing.get("codigo_solicitacao") and not force_new:

@@ -157,6 +157,36 @@ def save_lead_contract_html(db: Session, user: User, lead_id: str, html: str) ->
     return contract_document_view(db, user, lead_id)
 
 
+def ensure_marketplace_office_contract_draft(db: Session, lead: Lead, proposal: Proposal) -> bool:
+    """Gera HTML do contrato para visualização/PDF; assinatura ZapSign só após entrada paga."""
+    from datetime import UTC, datetime
+
+    terms = seed_marketplace_lifecycle(_parse_json(proposal.terms_json))
+    if str(terms.get("contract_html") or "").strip():
+        return False
+    detail = _parse_json(lead.scr_detail_json)
+    from app.cadastro_service import marketplace_snapshot_key
+
+    snap_key = marketplace_snapshot_key(detail)
+    snap = detail.get(snap_key) if isinstance(detail.get(snap_key), dict) else {}
+    if not isinstance(snap, dict):
+        snap = {}
+    html = render_marketplace_contract_html(db, proposal.organization_id, lead, snap)
+    terms["contract_html"] = html
+    terms["contract_ack"] = {
+        "accepted_at": datetime.now(UTC).isoformat(),
+        "channel": "PARTNER_OFFICE",
+        "provider": "OFFICE_DRAFT",
+        "signature_deferred_until": "ENTRADA_PAID",
+    }
+    from app.product_contract_flow_service import mark_marketplace_contract_at_purchase
+
+    mark_marketplace_contract_at_purchase(terms)
+    proposal.terms_json = json.dumps(terms, ensure_ascii=False)
+    db.flush()
+    return True
+
+
 def regenerate_lead_contract_html(db: Session, user: User, lead_id: str) -> dict:
     if user.role not in INTERNAL_CONTRACT_EDIT_ROLES:
         raise HTTPException(status_code=403, detail="Somente operação LETTER pode regerar o contrato.")

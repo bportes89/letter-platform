@@ -56,6 +56,25 @@ def mask_marketplace_match_item(item: dict, *, strip_verbose: bool = False) -> d
     return out
 
 
+def partner_quota_display_codes(quotas: list) -> list[str]:
+    """Referência comercial sem grupo SYNC-{fornecedor}."""
+    out: list[str] = []
+    for quota in quotas:
+        qid = str(getattr(quota, "id", None) or (quota.get("quota_id") if isinstance(quota, dict) else "") or "")
+        if not qid:
+            continue
+        out.append(f"Letter/Ref {partner_quota_ref(qid)}")
+    return out
+
+
+def is_marketplace_partner_commercial(user: User) -> bool:
+    return user.role in {Role.PARTNER, Role.QUOTA_SELLER}
+
+
+def can_view_fund_investor_routing(user: User) -> bool:
+    return user.role in {Role.PLATFORM_ADMIN, Role.INTERNAL_STAFF}
+
+
 def mask_esteira_result(result: dict, user: User) -> dict:
     """Consulta Marketplace (Esteiras / venda direta): nunca expor sync/fornecedor na UI."""
     del user  # mascaramento comercial é obrigatório para todos os perfis

@@ -3085,6 +3085,8 @@ class CadastroDetailView(CadastroListItem):
     purchase_readonly: dict = Field(default_factory=dict)
     parties: dict = Field(default_factory=dict)
     can_conclude: bool = False
+    client_registration_complete: bool = False
+    can_emit_boleto: bool = False
     commission_release: dict | None = None
     boleto: dict | None = None
     has_site_contract: bool = False
@@ -3195,6 +3197,8 @@ class CadastroUpdateRequest(BaseModel):
     situation: str | None = Field(default=None, max_length=40)
     force_admin_conclude: bool = False
     supplier_transfer_confirmed: bool | None = None
+    fund_name: str | None = Field(default=None, max_length=180)
+    investor_name: str | None = Field(default=None, max_length=180)
 
 
 class VenderCotaCalculateRequest(BaseModel):

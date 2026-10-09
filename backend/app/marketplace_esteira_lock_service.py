@@ -9,7 +9,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.cadastro_service import seed_marketplace_lifecycle
+from app.cadastro_service import SIT_INCOMPLETO, seed_marketplace_lifecycle
 from app.commission_attribution import apply_proposal_attribution
 from app.marketplace_service import esteira1_partner_select, esteira1_partner_select_combo, pricing_for_combo, pricing_for_quota
 from app.models import Lead, Proposal, Quota, User
@@ -20,6 +20,14 @@ SOURCE_ESTEIRA_1 = "MARKETPLACE_ESTEIRA_1"
 SOURCE_ESTEIRA_2 = "MARKETPLACE_ESTEIRA_2"
 PRODUCT = "MARKETPLACE"
 RESERVE_TTL_MINUTES = 60
+
+
+def _terms_after_esteira_lock(payload: dict) -> dict:
+    terms = seed_marketplace_lifecycle(payload)
+    life = terms.get("lifecycle") if isinstance(terms.get("lifecycle"), dict) else {}
+    life["situation"] = SIT_INCOMPLETO
+    terms["lifecycle"] = life
+    return terms
 
 
 def _assert_eligible_esteira1(
@@ -141,7 +149,7 @@ def lock_quotas_with_proposal(
         requested_amount=total_credit,
         status="SUBMITTED",
         terms_json=json.dumps(
-            seed_marketplace_lifecycle(
+            _terms_after_esteira_lock(
                 {
                     "channel": channel,
                     "match_lane": match_lane,
