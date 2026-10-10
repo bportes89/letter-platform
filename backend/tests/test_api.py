@@ -988,9 +988,6 @@ def test_venda_direta_robo_search_and_confirm(client, auth_headers):
     options = body.get("credit_matches") or body.get("matches") or []
     assert options, "robô deveria retornar opções no inventário seed"
     chosen = options[0]
-    for qid in chosen["quota_ids"]:
-        scan = client.post(f"/api/v1/quotas/{qid}/nina-scan", headers=auth_headers)
-        assert scan.status_code == 200, scan.text
 
     confirm = client.post(
         "/api/v1/marketplace/venda-direta-robo/confirm",
@@ -1003,12 +1000,13 @@ def test_venda_direta_robo_search_and_confirm(client, auth_headers):
     assert done["reservation_ids"]
     assert set(done["quota_ids"]) == set(chosen["quota_ids"])
     assert done.get("contract_available") is True
-    assert done.get("boleto", {}).get("codigo_solicitacao")
     assert done.get("contract_pdf_path")
+    assert done.get("cadastro_path")
 
     cadastro = client.get(f"/api/v1/marketplace/cadastros/{body['lead_id']}", headers=auth_headers)
     assert cadastro.status_code == 200
-    assert cadastro.json().get("contract_ack")
+    assert cadastro.json().get("has_site_contract") is True
+    assert cadastro.json().get("can_emit_boleto") is True
 
     leads = client.get("/api/v1/leads", headers=auth_headers).json()
     lead = next(l for l in leads if l["id"] == body["lead_id"])

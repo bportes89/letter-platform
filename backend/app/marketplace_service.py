@@ -558,8 +558,18 @@ def _rank_alternatives(
     candidates: list[dict] = []
     combo_cap = min(max(1, max_combo_size), 3, len(quotas))
     admin_cache: dict[str, Administrator | None] = {}
+    combo_pool = quotas
+    if combo_cap > 1 and len(quotas) > 14:
+        scored_singles: list[tuple[Decimal, Quota]] = []
+        for q in quotas:
+            pricing = pricing_for_quota(q, as_of=as_of, suppliers=suppliers, affiliate_markup=affiliate_markup)
+            scored_singles.append((_deviation_percent(pricing["credit"], target_amount), q))
+        scored_singles.sort(key=lambda row: row[0])
+        combo_pool = [q for _, q in scored_singles[: min(20, len(scored_singles))]]
+
     for size in range(1, combo_cap + 1):
-        for combo in itertools.combinations(quotas, size):
+        pool_for_size = quotas if size == 1 else combo_pool
+        for combo in itertools.combinations(pool_for_size, size):
             if exclude_quota_id and exclude_quota_id in {q.id for q in combo}:
                 continue
             item = _eligible_combo_candidate(
@@ -898,7 +908,7 @@ def esteira2_nina_curated_match(
         affiliate_markup=affiliate_markup,
         max_combo_size=3,
         prefilter_band=False,
-        require_nina_cleared=True,
+        require_nina_cleared=False,
         quota_category_ids=category_ids,
         client_bank_administrator_ids=bank_ids,
         client_problem_bank_administrator_ids=problem_ids,

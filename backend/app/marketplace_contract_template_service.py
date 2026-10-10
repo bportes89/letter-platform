@@ -53,28 +53,34 @@ LOCKED_FIELD_LABELS = {
     "empresa_chave_pix": "Chave PIX",
 }
 
-DEFAULT_MARKETPLACE_CONTRACT_TEMPLATE = """
-<p><strong>LETTER BANK LTDA</strong> — CNPJ 41.163.819/0001-57<br/>
-Representada por Sr. Paulo Stutz Netto Souza — foro em Nanuque/MG</p>
-<p><strong>Termo de intermediação de cota contemplada</strong></p>
-<p><strong>Contratante:</strong> {nome}<br/>
-<strong>Documento:</strong> {documento}<br/>
-<strong>{profissao_label}:</strong> {profissao}<br/>
-<strong>{renda_label}:</strong> {renda}<br/>
-<strong>Comprovação de renda:</strong> {comprovacao_renda}<br/>
-<strong>Endereço:</strong> {endereco}<br/>
-<strong>E-mail:</strong> {email} · <strong>WhatsApp:</strong> {whatsapp}</p>
+def _default_marketplace_contract_template() -> str:
+    from app.company_profile_service import company_profile
+
+    party = company_profile()["contract_party_block"]
+    return f"""
+<p>{party}</p>
+<p><strong>Contrato de intermediação — cartas contempladas</strong></p>
+<p><strong>Contratante:</strong> {{nome}}<br/>
+<strong>Documento:</strong> {{documento}}<br/>
+<strong>{{profissao_label}}:</strong> {{profissao}}<br/>
+<strong>{{renda_label}}:</strong> {{renda}}<br/>
+<strong>Comprovação de renda:</strong> {{comprovacao_renda}}<br/>
+<strong>Endereço:</strong> {{endereco}}<br/>
+<strong>E-mail:</strong> {{email}} · <strong>WhatsApp:</strong> {{whatsapp}}</p>
 <p><strong>Objeto:</strong> intermediação de cota(s) contemplada(s).<br/>
-Administradora(s): {administradora}<br/>
-Crédito: {valor_credito} · Entrada: {valor_entrada}<br/>
-Parcelas: {parcelas}<br/>
-Reserva das cotas: {reserva_minutos} minutos a partir da escolha.</p>
-<p>PIX de referência LETTER: <strong>{empresa_chave_pix}</strong></p>
+Administradora(s): {{administradora}}<br/>
+Crédito: {{valor_credito}} · Entrada: {{valor_entrada}}<br/>
+Parcelas: {{parcelas}}<br/>
+Reserva das cotas: {{reserva_minutos}} minutos a partir da escolha.</p>
+<p>PIX de referência: <strong>{{empresa_chave_pix}}</strong></p>
 <p>Ao aceitar, o contratante confirma ciência das condições de intermediação.
-A assinatura digital completa (ZapSign) pode ser enviada após a criação da conta LETTER.</p>
-<p>{cidade}, {data_extenso}.</p>
-<p>{empresa_dados}</p>
+A assinatura digital (ZapSign) será enviada após a confirmação do pagamento da entrada.</p>
+<p>{{cidade}}, {{data_extenso}}.</p>
+<p>{{empresa_dados}}</p>
 """.strip()
+
+
+DEFAULT_MARKETPLACE_CONTRACT_TEMPLATE = _default_marketplace_contract_template()
 
 
 def template_storage_key(organization_id: str) -> str:
@@ -157,10 +163,11 @@ def build_contract_variables(lead: Lead, snap: dict) -> dict[str, str]:
         "janeiro fevereiro março abril maio junho julho agosto setembro outubro novembro dezembro"
     ).split()
     data_extenso = f"{today.day} de {meses[today.month - 1]} de {today.year}"
-    empresa_dados = (
-        "<b>LETTER BANK LTDA</b>, PESSOA JURÍDICA DE DIREITO PRIVADO, INSCRITA NO CNPJ N° "
-        "41.163.819/0001-57, REPRESENTADA POR SEU SÓCIO ADMINISTRADOR, <b>SR. PAULO STUTZ NETTO SOUZA</b>."
-    )
+    from app.company_profile_service import company_profile
+
+    profile = company_profile()
+    empresa_dados = profile["contract_party_block"]
+    pix_key = profile.get("email") or "COMERCIAL@LETTER.APP.BR"
     documento = f"CNPJ N° {doc}" if person == "PJ" and doc else (f"CPF N° {doc}" if doc else "—")
     return {
         "nome": nome,
@@ -178,7 +185,7 @@ def build_contract_variables(lead: Lead, snap: dict) -> dict[str, str]:
         "valor_entrada": _brl(entrada or 0),
         "parcelas": parcelas_txt,
         "reserva_minutos": str(RESERVE_TTL),
-        "empresa_chave_pix": "COMERCIAL@LETTER.APP.BR DO BANCO INTER",
+        "empresa_chave_pix": pix_key,
         "empresa_dados": empresa_dados,
         "cidade": str(address.get("city") or "Brasil"),
         "data_extenso": data_extenso,

@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.commission_attribution import apply_proposal_attribution
 from app.marketplace_service import esteira2_nina_curated_match, pricing_for_combo, pricing_for_quota
-from app.cadastro_service import seed_marketplace_lifecycle
+from app.cadastro_service import SIT_AGUARDANDO, seed_marketplace_lifecycle, _write_lifecycle
 from app.models import Administrator, Lead, Proposal, Quota, Role, User
 from app.quota_supplier_service import suppliers_index
 from app.services import money, reserve_quota
@@ -438,24 +438,31 @@ def confirm_cota(
         reservations.append(reservation)
     db.flush()
 
-    lead.status = "PROPOSAL"
-    db.flush()
+    from app.quota_inventory_service import run_nina_quota_scan
 
+    for quota in quotas:
+        if quota.nina_scan_status != "CLEARED":
+            run_nina_quota_scan(db, user, quota)
+
+    lead.status = "PROPOSAL"
+    _write_lifecycle(proposal, situation=SIT_AGUARDANDO)
     contract_snap = _contract_snap_from_purchase(
         db, lead, proposal, snapshot, quotas, affiliate_markup=affiliate_markup
     )
-    docs = _emit_contract_and_boleto(db, user, lead, proposal, contract_snap)
+    detail = _parse_terms(lead.scr_detail_json)
+    block = detail.get("venda_direta_robo") if isinstance(detail.get("venda_direta_robo"), dict) else {}
+    detail["venda_direta_robo"] = {**block, **contract_snap}
+    lead.scr_detail_json = json.dumps(detail, ensure_ascii=False)
+    from app.marketplace_contract_docs_service import ensure_marketplace_office_contract_draft
+
+    ensure_marketplace_office_contract_draft(db, lead, proposal)
+    db.flush()
 
     msg_parts = [
         f"Venda gravada. Cotas travadas por {RESERVE_TTL_MINUTES} min.",
-        "Contrato de intermediação disponível para o cliente.",
+        "Abra Cadastros para visualizar o contrato (PDF) e emitir o boleto da entrada.",
+        "Assinatura digital (ZapSign) após pagamento da entrada.",
     ]
-    if docs.get("boleto"):
-        msg_parts.append(
-            "Boleto da entrada emitido. A assinatura digital (ZapSign) será enviada após a confirmação do pagamento."
-        )
-    else:
-        msg_parts.append("Emita o boleto da entrada em Cadastros Marketplace se necessário.")
 
     return {
         "lead_id": lead.id,
@@ -465,5 +472,10 @@ def confirm_cota(
         "requested_amount": str(money(total_credit)),
         "entrada_final": str(money(total_entrada)),
         "message": " ".join(msg_parts),
-        **docs,
+        "boleto": None,
+        "boleto_created": False,
+        "contract_available": True,
+        "cadastro_path": f"/modules/cadastros?open={lead.id}",
+        "boleto_download_path": None,
+        "contract_pdf_path": f"/marketplace/cadastros/{lead.id}/contrato.pdf",
     }

@@ -119,9 +119,15 @@ export function MarketplaceContractEditor({ leadId, open, onClose, onSaved, onOp
           <button type="button" className="table-action" onClick={onClose}>Fechar</button>
         </div>
         {error && <div className="error" style={{ margin: "10px 18px 0" }}>{error}</div>}
-        <p className="muted" style={{ fontSize: 11, margin: "10px 18px 0", lineHeight: 1.45 }}>
-          Edite cláusulas e textos livres. Os campos em cinza são preenchidos pelo sistema (nome, valores, documento) — não altere.
-        </p>
+        {doc?.can_edit ? (
+          <p className="muted" style={{ fontSize: 11, margin: "10px 18px 0", lineHeight: 1.45 }}>
+            Edite cláusulas e textos livres. Os campos em cinza são preenchidos pelo sistema (nome, valores, documento) — não altere.
+          </p>
+        ) : (
+          <p className="muted" style={{ fontSize: 11, margin: "10px 18px 0", lineHeight: 1.45 }}>
+            Visualização somente leitura. Use PDF para compartilhar com o cliente.
+          </p>
+        )}
         <div style={{ flex: 1, overflow: "auto", padding: "0 18px 12px" }}>
           <div
             ref={editorRef}

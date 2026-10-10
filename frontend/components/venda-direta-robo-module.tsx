@@ -348,11 +348,6 @@ export function VendaDiretaRoboModule() {
     setError("");
     setBusy(true);
     try {
-      for (const q of match.quotas) {
-        if (q.nina_scan_status !== "CLEARED") {
-          await api(`/quotas/${q.quota_id}/nina-scan`, { method: "POST" });
-        }
-      }
       const data = await api<ConfirmResult>("/marketplace/venda-direta-robo/confirm", {
         method: "POST",
         body: JSON.stringify({
@@ -737,7 +732,7 @@ function MatchCard({
       ) : null}
       {match.quotas.map((q) => (
         <div className="marketplace-match-quota" key={q.quota_id}>
-            <MarketplaceQuotaFields quota={q} />
+            <MarketplaceQuotaFields quota={q} showAdministrator={false} />
         </div>
       ))}
       <button

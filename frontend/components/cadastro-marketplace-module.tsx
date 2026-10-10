@@ -739,24 +739,38 @@ export function CadastroMarketplaceModule() {
                 : selected.client_registration_complete
                   ? "gerando… salve novamente se não abrir"
                   : "disponível após salvar os dados do cliente"}
-              <button
-                type="button"
-                className="table-action"
-                style={{ marginLeft: "0.75rem" }}
-                onClick={() => setContractEditorOpen(true)}
-                disabled={busy || !hasContractHtml}
-              >
-                Abrir contrato
-              </button>
-              <button
-                type="button"
-                className="table-action"
-                style={{ marginLeft: "0.5rem" }}
-                onClick={() => void openContractPdf()}
-                disabled={busy || !hasContractHtml}
-              >
-                PDF
-              </button>
+              {canEditContract ? (
+                <button
+                  type="button"
+                  className="table-action"
+                  style={{ marginLeft: "0.75rem" }}
+                  onClick={() => setContractEditorOpen(true)}
+                  disabled={busy || !hasContractHtml}
+                >
+                  Abrir contrato (operação)
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="table-action"
+                  style={{ marginLeft: "0.75rem" }}
+                  onClick={() => void openContractPdf()}
+                  disabled={busy || !hasContractHtml}
+                >
+                  Ver contrato (PDF)
+                </button>
+              )}
+              {canEditContract ? (
+                <button
+                  type="button"
+                  className="table-action"
+                  style={{ marginLeft: "0.5rem" }}
+                  onClick={() => void openContractPdf()}
+                  disabled={busy || !hasContractHtml}
+                >
+                  PDF
+                </button>
+              ) : null}
             </div>
             {canEditContract && (
               <details className="notice" style={{ marginTop: 10 }}>

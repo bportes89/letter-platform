@@ -76,8 +76,6 @@ def site_contract_meta(terms: dict, snap: dict | None = None) -> dict:
 INTERNAL_CONTRACT_EDIT_ROLES = frozenset({
     Role.PLATFORM_ADMIN,
     Role.INTERNAL_STAFF,
-    Role.MASTER_FRANCHISEE,
-    Role.MANAGER,
 })
 
 
